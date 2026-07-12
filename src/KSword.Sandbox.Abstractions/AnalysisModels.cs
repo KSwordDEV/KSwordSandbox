@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace KSword.Sandbox.Abstractions;
 
 /// <summary>
@@ -135,6 +137,9 @@ public sealed record BehaviorFinding
 
     public required string Title { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TitleZh { get; init; }
+
     public string Severity { get; init; } = "info";
 
     public string Confidence { get; init; } = "medium";
@@ -144,6 +149,9 @@ public sealed record BehaviorFinding
     public string? MitreTechniqueName { get; init; }
 
     public string Summary { get; init; } = string.Empty;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SummaryZh { get; init; }
 
     public List<string> Tags { get; init; } = [];
 

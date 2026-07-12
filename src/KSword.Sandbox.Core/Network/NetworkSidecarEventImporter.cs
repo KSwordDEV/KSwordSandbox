@@ -506,6 +506,9 @@ public sealed class NetworkSidecarEventImporter
             ["sidecarParserCoverageOnly"] = "true",
             ["parserCoverageStatus"] = "no-protocol-events",
             ["parserCoverageReason"] = coverage.CoverageReason,
+            ["readinessState"] = "parser_coverage_only",
+            ["readinessBoundary"] = "sidecar-parser-coverage-nonbehavior",
+            ["coverageReadiness"] = "no-protocol-events-normalized",
             ["importSource"] = "sidecar-jsonl",
             ["parser"] = "sidecar-jsonl",
             ["parserInputKind"] = "network-sidecar",
@@ -544,6 +547,7 @@ public sealed class NetworkSidecarEventImporter
             ["noisePolicy"] = "nonbehavior-evidence-quality",
             ["collectorNoiseScope"] = "nonbehavior-evidence-quality",
             ["sampleBehaviorBoundary"] = "nonbehavior-separated",
+            ["zhMessage"] = "Sidecar 已读取，但未归一化出 DNS/HTTP/TLS/flow 行。",
             ["zhHint"] = "Sidecar 已被有界读取，但未归一化出 DNS/HTTP/TLS/flow 行；这只是解析覆盖状态，不证明样本没有网络行为。"
         };
 

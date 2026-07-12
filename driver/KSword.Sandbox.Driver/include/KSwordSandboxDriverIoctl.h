@@ -300,6 +300,22 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
  * flags from DriverEntry.  The typed categories are reserved now so later
  * process, image, file, registry, and network producers can join the same
  * READ_EVENTS contract without renumbering.
+ *
+ * Defensive JSONL coverage taxonomy used by R0Collector:
+ *   DriverLoad -> driver.load startup/readiness heartbeat.
+ *   Process    -> process.lifecycle create/exit metadata only; process handle
+ *                 access and token privilege changes require explicit draft
+ *                 payloads or ETW/audit fallback and must not be inferred.
+ *   Image      -> image.load metadata with bounded image path prefix.
+ *   File       -> file.activity metadata with bounded file path prefix; file
+ *                 content bytes and hashes are artifact/guest evidence.
+ *   Registry   -> registry.activity metadata with bounded key/value prefixes;
+ *                 value data bytes are not in the v1 payload.
+ *   Network    -> network.metadata WFP/ALE endpoint metadata only; raw packets
+ *                 and DNS/HTTP/TLS payload details are PCAP/sidecar evidence.
+ * Queue/loss/backpressure coverage is not a separate event type; it is exposed
+ * through GET_STATUS, READ_EVENTS reply counters, per-record LostEvents/
+ * BackpressureEvents, producer masks, high-watermark, and sequence gaps.
  */
 typedef enum _KSWORD_SANDBOX_EVENT_TYPE {
     KswSandboxEventTypeNone = 0,

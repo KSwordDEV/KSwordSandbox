@@ -200,7 +200,7 @@ public sealed class HtmlReportRenderer
     {
         var html = RenderEnglishCore(report, artifacts);
         return language == HtmlReportLanguage.ChineseSimplified
-            ? LocalizeChineseHtml(html)
+            ? LocalizeChineseHtml(html, report)
             : html;
     }
 
@@ -7480,12 +7480,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     /// report chrome strings and language metadata; the method returns the
     /// localized document while leaving normalized telemetry values intact.
     /// </summary>
-    private static string LocalizeChineseHtml(string html)
+    private static string LocalizeChineseHtml(string html, AnalysisReport report)
     {
         var protectedFragments = new List<string>();
         html = ProtectChineseRawEvidenceFragments(html, protectedFragments);
 
         foreach (var (english, chinese) in ChineseHtmlTranslations
+            .Concat(GetReportFindingHtmlTranslations(report))
             .Concat(ChineseRuleHtmlTranslations)
             .OrderByDescending(pair => pair.English.Length))
         {
@@ -7495,6 +7496,22 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html = ChineseVisibleEventCountRegex.Replace(html, " 个事件");
         html = RestoreChineseRawEvidenceFragments(html, protectedFragments);
         return html;
+    }
+
+    private static IEnumerable<(string English, string Chinese)> GetReportFindingHtmlTranslations(AnalysisReport report)
+    {
+        foreach (var finding in report.Findings)
+        {
+            if (!string.IsNullOrWhiteSpace(finding.TitleZh))
+            {
+                yield return (E(finding.Title), E(finding.TitleZh));
+            }
+
+            if (!string.IsNullOrWhiteSpace(finding.SummaryZh))
+            {
+                yield return (E(finding.Summary), E(finding.SummaryZh));
+            }
+        }
     }
 
     private static string ProtectChineseRawEvidenceFragments(string html, List<string> protectedFragments)

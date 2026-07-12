@@ -307,6 +307,8 @@ public sealed class PcapArtifactEventImporter
         var flows = new Dictionary<string, FlowSummary>(StringComparer.OrdinalIgnoreCase);
         var protocols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var ipFamilies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var transportProtocolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var ipFamilyCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var protocolHealthCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var protocolEvents = 0;
         var parsedPackets = 0;
@@ -321,8 +323,11 @@ public sealed class PcapArtifactEventImporter
             }
 
             parsedPackets++;
-            protocols.Add(decoded.TransportProtocol.ToLowerInvariant());
+            var transportProtocol = decoded.TransportProtocol.ToLowerInvariant();
+            protocols.Add(transportProtocol);
             ipFamilies.Add(decoded.IpFamily);
+            IncrementCount(transportProtocolCounts, transportProtocol);
+            IncrementCount(ipFamilyCounts, decoded.IpFamily);
             var key = decoded.FlowKey;
             if (!flows.TryGetValue(key, out var flow))
             {
@@ -371,6 +376,8 @@ public sealed class PcapArtifactEventImporter
             })
             .ToList();
         var allGeneratedEvents = events.Concat(flowEvents).ToList();
+        var canonicalBehaviorEvents = allGeneratedEvents.Where(IsBehaviorCounted).ToList();
+        var rawCompatibilityEvents = allGeneratedEvents.Where(IsRawPcapCompatibility).ToList();
         var summaryData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["schema"] = NetworkTelemetrySchema.SchemaVersion,
@@ -394,12 +401,35 @@ public sealed class PcapArtifactEventImporter
             ["parsedPacketCount"] = parsedPackets.ToString(CultureInfo.InvariantCulture),
             ["flowCount"] = flows.Count.ToString(CultureInfo.InvariantCulture),
             ["flowEventCount"] = flowEvents.Count.ToString(CultureInfo.InvariantCulture),
-            ["canonicalBehaviorEventCount"] = allGeneratedEvents.Count(IsBehaviorCounted).ToString(CultureInfo.InvariantCulture),
-            ["rawPcapCompatibilityEventCount"] = allGeneratedEvents.Count(IsRawPcapCompatibility).ToString(CultureInfo.InvariantCulture),
-            ["compatibilityEventCount"] = allGeneratedEvents.Count(IsRawPcapCompatibility).ToString(CultureInfo.InvariantCulture),
+            ["dnsEventCount"] = CountProtocolFamily(allGeneratedEvents, "dns").ToString(CultureInfo.InvariantCulture),
+            ["httpEventCount"] = CountProtocolFamily(allGeneratedEvents, "http").ToString(CultureInfo.InvariantCulture),
+            ["tlsEventCount"] = CountProtocolFamily(allGeneratedEvents, "tls").ToString(CultureInfo.InvariantCulture),
+            ["connectionEventCount"] = CountProtocolFamily(allGeneratedEvents, "flow").ToString(CultureInfo.InvariantCulture),
+            ["canonicalDnsEventCount"] = CountProtocolFamily(canonicalBehaviorEvents, "dns").ToString(CultureInfo.InvariantCulture),
+            ["canonicalHttpEventCount"] = CountProtocolFamily(canonicalBehaviorEvents, "http").ToString(CultureInfo.InvariantCulture),
+            ["canonicalTlsEventCount"] = CountProtocolFamily(canonicalBehaviorEvents, "tls").ToString(CultureInfo.InvariantCulture),
+            ["canonicalFlowEventCount"] = CountProtocolFamily(canonicalBehaviorEvents, "flow").ToString(CultureInfo.InvariantCulture),
+            ["rawPcapDnsCompatibilityEventCount"] = CountProtocolFamily(rawCompatibilityEvents, "dns").ToString(CultureInfo.InvariantCulture),
+            ["rawPcapHttpCompatibilityEventCount"] = CountProtocolFamily(rawCompatibilityEvents, "http").ToString(CultureInfo.InvariantCulture),
+            ["rawPcapTlsCompatibilityEventCount"] = CountProtocolFamily(rawCompatibilityEvents, "tls").ToString(CultureInfo.InvariantCulture),
+            ["rawPcapFlowCompatibilityEventCount"] = CountProtocolFamily(rawCompatibilityEvents, "flow").ToString(CultureInfo.InvariantCulture),
+            ["canonicalBehaviorEventCount"] = canonicalBehaviorEvents.Count.ToString(CultureInfo.InvariantCulture),
+            ["rawPcapCompatibilityEventCount"] = rawCompatibilityEvents.Count.ToString(CultureInfo.InvariantCulture),
+            ["compatibilityEventCount"] = rawCompatibilityEvents.Count.ToString(CultureInfo.InvariantCulture),
             ["duplicatePolicy"] = "normalized-events-canonical; raw-pcap-rows-compatibility-nonbehavior",
+            ["protocolFamilyCounterScope"] = "behavior-counted-canonical-events",
+            ["protocolFamilyCounters"] = ProtocolFamilyCounters(canonicalBehaviorEvents),
+            ["canonicalProtocolFamilyCounters"] = ProtocolFamilyCounters(canonicalBehaviorEvents),
+            ["rawPcapCompatibilityProtocolFamilyCounterScope"] = "raw-pcap-compatibility-nonbehavior-rows",
+            ["rawPcapCompatibilityProtocolFamilyCounters"] = ProtocolFamilyCounters(rawCompatibilityEvents),
             ["protocolHealthSummaryScope"] = "behavior-counted-canonical-protocol-events",
             ["byteCount"] = bytes.ToString(CultureInfo.InvariantCulture),
+            ["tcpPacketCount"] = CountOrZero(transportProtocolCounts, "tcp").ToString(CultureInfo.InvariantCulture),
+            ["udpPacketCount"] = CountOrZero(transportProtocolCounts, "udp").ToString(CultureInfo.InvariantCulture),
+            ["ipv4PacketCount"] = CountOrZero(ipFamilyCounts, "ipv4").ToString(CultureInfo.InvariantCulture),
+            ["ipv6PacketCount"] = CountOrZero(ipFamilyCounts, "ipv6").ToString(CultureInfo.InvariantCulture),
+            ["transportProtocolSummary"] = FormatCountSummary(transportProtocolCounts),
+            ["ipFamilySummary"] = FormatCountSummary(ipFamilyCounts),
             ["protocol"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
             ["protocols"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
             ["protocolHealthSummary"] = string.Join(",", protocolHealthCounts.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}:{pair.Value.ToString(CultureInfo.InvariantCulture)}")),
@@ -1927,6 +1957,63 @@ public sealed class PcapArtifactEventImporter
     {
         return evt.Data.TryGetValue("rawPcapCompatibilityRow", out var value) &&
             string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void IncrementCount(Dictionary<string, int> counts, string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        counts[key] = counts.TryGetValue(key, out var count) ? count + 1 : 1;
+    }
+
+    private static int CountOrZero(IReadOnlyDictionary<string, int> counts, string key)
+    {
+        return counts.TryGetValue(key, out var count) ? count : 0;
+    }
+
+    private static string FormatCountSummary(IReadOnlyDictionary<string, int> counts)
+    {
+        return string.Join(
+            ",",
+            counts
+                .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(pair => $"{pair.Key}:{pair.Value.ToString(CultureInfo.InvariantCulture)}"));
+    }
+
+    private static string ProtocolFamilyCounters(IReadOnlyCollection<SandboxEvent> events)
+    {
+        return string.Join(
+            ",",
+            $"dns:{CountProtocolFamily(events, "dns").ToString(CultureInfo.InvariantCulture)}",
+            $"http:{CountProtocolFamily(events, "http").ToString(CultureInfo.InvariantCulture)}",
+            $"tls:{CountProtocolFamily(events, "tls").ToString(CultureInfo.InvariantCulture)}",
+            $"flow:{CountProtocolFamily(events, "flow").ToString(CultureInfo.InvariantCulture)}");
+    }
+
+    private static int CountProtocolFamily(IReadOnlyCollection<SandboxEvent> events, string family)
+    {
+        return events.Count(evt => family.ToLowerInvariant() switch
+        {
+            "dns" => IsEventType(evt, "dns.query") || IsEventType(evt, "pcap.dns") || IsEventKind(evt, "dns"),
+            "http" => IsEventType(evt, "http.request") || IsEventType(evt, "pcap.http") || IsEventKind(evt, "http"),
+            "tls" => IsEventType(evt, "tls.connection") || IsEventType(evt, "pcap.tls") || IsEventKind(evt, "tls"),
+            "flow" => IsEventType(evt, "network.flow") || IsEventType(evt, "pcap.flow") || IsEventKind(evt, "connection"),
+            _ => false
+        });
+    }
+
+    private static bool IsEventType(SandboxEvent evt, string eventType)
+    {
+        return string.Equals(evt.EventType, eventType, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsEventKind(SandboxEvent evt, string eventKind)
+    {
+        return evt.Data.TryGetValue("eventKind", out var value) &&
+            string.Equals(value, eventKind, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string StatusFamily(string? statusCode)

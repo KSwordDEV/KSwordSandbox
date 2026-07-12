@@ -908,7 +908,7 @@ function Get-PackageRequiredEvidenceFields {
         provenance = @('gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.shortCommit', 'gitMetadata.dirtyStatus', 'gitMetadata.statusCount', 'generatedAtUtc', 'packageKind', 'version')
         sourceHandoff = @('gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.dirtyStatus', 'fileInventory[].path', 'fileInventory[].sizeBytes', 'fileInventory[].sha256', 'safetyContract', 'sourceRuntimeSafetyMetadata', 'executionBoundaries')
         runtimeHandoff = @('runtimePublishRoot', 'operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed', 'operatorDiagnostics.runtimePublishSummary.missingCount=0', 'operatorDiagnostics.runtimePublishSummary.incompleteCount=0', 'operatorDiagnostics.runtimePublishSummary.forbiddenFileCount=0', 'operatorDiagnostics.runtimeCompletenessDiagnostics.entries', 'archivePath', 'archiveSha256')
-        installModeHandoff = @('installModeContract.schema', 'installModeContract.modes[].id', 'installModeContract.readinessPackageNonMutation', 'installContractGaps', 'installContractGapNextActionsZh')
+        installModeHandoff = @('installModeContract.schema', 'installModeContract.operatorModeMatrix.modes[].entrypoint', 'installModeContract.modes[].id', 'installModeContract.readinessPackageNonMutation', 'installContractGaps', 'installContractGapNextActionsZh')
         freshLiveClaim = @('gitMetadata.commit', 'gitMetadata.branch', 'gitMetadata.dirtyStatus', 'job id', 'runtime root', 'generatedAtUtc/local time', 'report.json path', 'report.zh.html path', 'report.en.html path')
         fallbackWhenMissingFreshLiveJobZh = '没有实验室 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
     }
@@ -925,6 +925,149 @@ function Get-InstallModeRequiredIds {
     )
 }
 
+function Get-InstallEntrypointRequiredValues {
+    return @('UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')
+}
+
+function Get-CanonicalOperatorModeRequiredIds {
+    return @(
+        'use-configured-environment',
+        'rollback-restore-snapshot',
+        'fresh-create-new-computer'
+    )
+}
+
+function Get-CanonicalOperatorModeMatrix {
+    return @(
+        [ordered]@{
+            modeId = 'use-configured-environment'
+            entrypoint = 'UseConfiguredEnvironment'
+            titleZh = '使用已配置环境'
+            defaultCommand = '.\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly'
+            packageReadinessMutation = 'none'
+            nextActionsZh = @('下一步：先跑 Status/CheckEnvironment；若 RecommendedActions 为空，再启动 WebUI 或 PlanOnly。')
+        },
+        [ordered]@{
+            modeId = 'rollback-restore-snapshot'
+            entrypoint = 'RestoreCleanCheckpoint'
+            titleZh = '回退/恢复已有干净快照'
+            defaultCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly'
+            mutatingCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm'
+            packageReadinessMutation = 'forbidden; package/readiness only records metadata and diagnostics'
+            nextActionsZh = @('下一步：readiness/package 不恢复快照；只有隔离 lab 操作者显式 -AllowVmMutation -Confirm/-Force 才能恢复已有 checkpoint。')
+        },
+        [ordered]@{
+            modeId = 'fresh-create-new-computer'
+            entrypoint = 'CreateOrPreparePath'
+            titleZh = '全新创建/新电脑准备'
+            defaultCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
+            packageReadinessMutation = 'none; installer may write local config/secret only when operator runs it directly'
+            nextActionsZh = @('下一步：首机先确认 Hyper-V/BIOS/SLAT/管理员 shell，手工创建/导入 VM 和 clean checkpoint，再写本机 config/secret/payload。')
+        }
+    )
+}
+
+function Compare-StringSet {
+    param(
+        [string[]]$Actual = @(),
+        [string[]]$Expected = @()
+    )
+
+    $actualValues = @($Actual | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ } | Select-Object -Unique)
+    $expectedValues = @($Expected | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ } | Select-Object -Unique)
+
+    return [pscustomobject][ordered]@{
+        matches = (@($actualValues | Sort-Object) -join "`n") -eq (@($expectedValues | Sort-Object) -join "`n")
+        missing = @($expectedValues | Where-Object { $actualValues -notcontains $_ })
+        extra = @($actualValues | Where-Object { $expectedValues -notcontains $_ })
+        actual = @($actualValues)
+        expected = @($expectedValues)
+    }
+}
+
+function Normalize-ContractCommand {
+    param([AllowNull()][string]$Command)
+
+    if ([string]::IsNullOrWhiteSpace($Command)) {
+        return ''
+    }
+
+    return ([string]$Command).Trim().Replace('/', '\')
+}
+
+function Get-OperatorModeMatrixContractIssues {
+    param(
+        [AllowNull()][object]$OperatorModeMatrix,
+        [string]$Context = 'package manifest'
+    )
+
+    $issues = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $OperatorModeMatrix) {
+        [void]$issues.Add("releaseContract.installModeContract.operatorModeMatrix is missing from $Context.")
+        return @($issues.ToArray())
+    }
+
+    $operatorModes = @(Get-ObjectPropertyValue -InputObject $OperatorModeMatrix -Name 'modes' -DefaultValue @())
+    $operatorModeIds = @($operatorModes |
+        ForEach-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'modeId' -DefaultValue '') } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $modeComparison = Compare-StringSet -Actual $operatorModeIds -Expected @(Get-CanonicalOperatorModeRequiredIds)
+    foreach ($missingModeId in @($modeComparison.missing)) {
+        [void]$issues.Add("operatorModeMatrix missing canonical mode '$missingModeId' in $Context.")
+    }
+    foreach ($extraModeId in @($modeComparison.extra)) {
+        [void]$issues.Add("operatorModeMatrix has unexpected mode '$extraModeId' in $Context.")
+    }
+
+    foreach ($canonical in @(Get-CanonicalOperatorModeMatrix)) {
+        $modeId = [string]$canonical.modeId
+        $matchingModes = @($operatorModes | Where-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'modeId' -DefaultValue '') -eq $modeId })
+        if ($matchingModes.Count -eq 0) {
+            continue
+        }
+
+        if ($matchingModes.Count -gt 1) {
+            [void]$issues.Add("operatorModeMatrix contains duplicate mode '$modeId' in $Context.")
+        }
+
+        $mode = $matchingModes[0]
+        $entrypoint = [string](Get-ObjectPropertyValue -InputObject $mode -Name 'entrypoint' -DefaultValue '')
+        if ($entrypoint -cne [string]$canonical.entrypoint) {
+            [void]$issues.Add("operatorModeMatrix mode '$modeId' entrypoint '$entrypoint' must match '$($canonical.entrypoint)' in $Context.")
+        }
+
+        $defaultCommand = Normalize-ContractCommand -Command ([string](Get-ObjectPropertyValue -InputObject $mode -Name 'defaultCommand' -DefaultValue ''))
+        $expectedDefaultCommand = Normalize-ContractCommand -Command ([string]$canonical.defaultCommand)
+        if ($defaultCommand -ine $expectedDefaultCommand) {
+            [void]$issues.Add("operatorModeMatrix mode '$modeId' defaultCommand '$defaultCommand' must match '$expectedDefaultCommand' in $Context.")
+        }
+
+        $mutatingCommand = Normalize-ContractCommand -Command ([string](Get-ObjectPropertyValue -InputObject $mode -Name 'mutatingCommand' -DefaultValue ''))
+        $expectedMutatingCommand = Normalize-ContractCommand -Command ([string](Get-ObjectPropertyValue -InputObject ([pscustomobject]$canonical) -Name 'mutatingCommand' -DefaultValue ''))
+        if ([string]::IsNullOrWhiteSpace($expectedMutatingCommand)) {
+            if (-not [string]::IsNullOrWhiteSpace($mutatingCommand)) {
+                [void]$issues.Add("operatorModeMatrix mode '$modeId' must not advertise a mutatingCommand in $Context.")
+            }
+        }
+        elseif ($mutatingCommand -ine $expectedMutatingCommand) {
+            [void]$issues.Add("operatorModeMatrix mode '$modeId' mutatingCommand '$mutatingCommand' must match '$expectedMutatingCommand' in $Context.")
+        }
+
+        if ($modeId -eq 'rollback-restore-snapshot') {
+            if ($mutatingCommand -notmatch '(?i)-AllowVmMutation' -or $mutatingCommand -notmatch '(?i)-(Confirm|Force)') {
+                [void]$issues.Add("operatorModeMatrix restore mode mutatingCommand must include -AllowVmMutation plus -Confirm or -Force in $Context.")
+            }
+
+            $packageReadinessMutation = [string](Get-ObjectPropertyValue -InputObject $mode -Name 'packageReadinessMutation' -DefaultValue '')
+            if ($packageReadinessMutation -notmatch '(?i)forbidden') {
+                [void]$issues.Add("operatorModeMatrix restore mode must mark package/readiness mutation as forbidden in $Context.")
+            }
+        }
+    }
+
+    return @($issues.ToArray())
+}
+
 function Get-InstallContractGapNextActionsZh {
     param([string[]]$Gaps = @())
 
@@ -936,6 +1079,7 @@ function Get-InstallContractGapNextActionsZh {
     [void]$actions.Add("检测到 install contract 缺口：$(@($Gaps) -join '；')。")
     [void]$actions.Add('下一步：只修改 package/readiness/packaging manifest 的机器可读 contract；不要在 release/package 阶段运行 install、smoke、Hyper-V live、签名或 VM mutation。')
     [void]$actions.Add("下一步：在 packaging/*.manifest.json 的 releaseContract.installModeContract.modeIds 中补齐：$((Get-InstallModeRequiredIds) -join ', ')。")
+    [void]$actions.Add("下一步：确认 releaseContract.installModeContract.operatorModeMatrix.modes 与安装器三入口一致：$((Get-InstallEntrypointRequiredValues) -join ', ')；RestoreCleanCheckpoint 的 mutatingCommand 必须含 -AllowVmMutation 和 -Confirm/-Force。")
     [void]$actions.Add('下一步：重新生成 package-manifest.generated.json，并确认 installModeContract、installContractGaps、installContractGapNextActionsZh 和 executionBoundaries 同时存在。')
     return @($actions.ToArray())
 }
@@ -974,6 +1118,11 @@ function Get-InstallModeContractSnapshot {
                         [void]$gaps.Add("releaseContract.installModeContract.modeIds missing '$modeId'.")
                     }
                 }
+
+                $operatorModeMatrix = Get-ObjectPropertyValue -InputObject $installModeContract -Name 'operatorModeMatrix' -DefaultValue $null
+                foreach ($matrixIssue in @(Get-OperatorModeMatrixContractIssues -OperatorModeMatrix $operatorModeMatrix -Context 'package manifest')) {
+                    [void]$gaps.Add($matrixIssue)
+                }
             }
 
             foreach ($flagName in @('noVmMutationByPackageScript', 'noSmokeByPackageOrReadiness', 'noHyperVLiveByPackageOrReadiness', 'noDriverSigningByPackageScript', 'noCSignToolInvocationByPackageOrReadiness')) {
@@ -995,6 +1144,11 @@ function Get-InstallModeContractSnapshot {
         manifestContractPresent = $manifestContractPresent
         requiredModeIds = @($requiredModeIds)
         manifestModeIds = @($manifestModeIds)
+        requiredEntrypoints = @(Get-InstallEntrypointRequiredValues)
+        operatorModeMatrix = [ordered]@{
+            schema = 'ksword.release.operator-mode-matrix.v1'
+            modes = @(Get-CanonicalOperatorModeMatrix)
+        }
         gapDetected = $gapDetected
         gaps = @($gapArray)
         gapNextActionsZh = @(Get-InstallContractGapNextActionsZh -Gaps $gapArray)
@@ -1864,6 +2018,7 @@ function Write-GeneratedPackageManifest {
                 gaps = @($script:operatorDiagnostics.installContractGaps)
                 nextActionsZh = @($script:operatorDiagnostics.installContractGapNextActionsZh)
                 modeIds = @($script:operatorDiagnostics.installModeContract.modes | ForEach-Object { $_.id })
+                operatorModeEntrypoints = @($script:operatorDiagnostics.installModeContract.operatorModeMatrix.modes | ForEach-Object { $_.entrypoint })
                 packageReadinessExecutesInstallerModes = $false
             }
             sourcePackage = [ordered]@{

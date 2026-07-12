@@ -8,6 +8,25 @@
 
 namespace KSword::Sandbox::R0Collector {
 
+inline constexpr const char* kR0TelemetryCoverageCategoriesAudited =
+    "driver.load|process.lifecycle|image.load|file.activity|registry.activity|"
+    "network.metadata|queue.loss.backpressure";
+
+inline constexpr const char* kR0TelemetryCoverageFieldSet =
+    "r0CoverageTaxonomyVersion|r0CoverageCategoriesAudited|"
+    "r0CoverageCategory|r0CoverageState|r0CoverageEvidenceSource|"
+    "r0CoverageProducerMaskScope|r0CoverageProducerMask|"
+    "r0CoverageProducerMaskHex|r0CoverageProducerMaskNames|"
+    "r0CoverageAvailableCategories|r0CoverageKnownGaps|"
+    "r0CoverageGapAcknowledged|r0CoverageInterpretation|"
+    "r0ReadinessContribution|zhR0CoverageHint";
+
+inline constexpr const char* kR0TelemetryCoverageInterpretation =
+    "defensive-coverage-evidence-not-verdict";
+
+inline constexpr const char* kR0TelemetryQueueCoverageCategory =
+    "queue.loss.backpressure";
+
 // Input: DriverState value returned by GET_HEALTH or POLL.
 // Processing: Maps the public ABI enum to stable text while preserving unknown
 // values for forward-compatible collectors.
@@ -1542,6 +1561,285 @@ std::string ImageLoadFamily(const std::wstring& imagePath, const bool systemMode
 // Return: family.operation when operation is known, otherwise family.unknown.
 std::string ActivityKind(const std::string& family, const std::string& operationName) {
     return family + "." + (operationName.empty() ? "unknown" : operationName);
+}
+
+// Input: Pipe-delimited field accumulator and one stable label.
+// Processing: Appends the label without duplicates checks because callers pass
+// each coverage lane once in deterministic order.
+// Return: No return value; accumulator is mutated.
+void AppendPipeToken(std::string& value, const char* token) {
+    if (token == nullptr || token[0] == '\0') {
+        return;
+    }
+
+    if (!value.empty()) {
+        value += "|";
+    }
+
+    value += token;
+}
+
+// Input: Producer mask and whether the row also proves queue diagnostics.
+// Processing: Converts runtime/capability producer bits into the defensive R0
+// telemetry coverage taxonomy used by JSONL readiness/report rows.  The list is
+// intentionally coarse and names observation categories, not verdicts.
+// Return: Pipe-delimited category names, or "none".
+std::string R0CoverageCategoriesFromProducerMask(const ULONG producerMask, const bool includeQueueDiagnostics) {
+    std::string categories;
+
+    if ((producerMask & KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER) != 0) {
+        AppendPipeToken(categories, "driver.load");
+    }
+    if ((producerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS) != 0) {
+        AppendPipeToken(categories, "process.lifecycle");
+    }
+    if ((producerMask & KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE) != 0) {
+        AppendPipeToken(categories, "image.load");
+    }
+    if ((producerMask & KSWORD_SANDBOX_PRODUCER_FLAG_FILE) != 0) {
+        AppendPipeToken(categories, "file.activity");
+    }
+    if ((producerMask & KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY) != 0) {
+        AppendPipeToken(categories, "registry.activity");
+    }
+    if ((producerMask & KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK) != 0) {
+        AppendPipeToken(categories, "network.metadata");
+    }
+    if (includeQueueDiagnostics) {
+        AppendPipeToken(categories, kR0TelemetryQueueCoverageCategory);
+    }
+
+    return categories.empty() ? "none" : categories;
+}
+
+// Input: Availability booleans for optional/draft or non-R0 telemetry lanes.
+// Processing: Names known gaps that reports must disclose instead of inferring
+// from nearby lifecycle, endpoint, or queue evidence.
+// Return: Pipe-delimited gap names, or "none".
+std::string R0CoverageKnownGaps(
+    const bool processHandleAccessTelemetryAvailable,
+    const bool tokenPrivilegeTelemetryAvailable,
+    const bool networkPayloadTelemetryAvailable) {
+    std::string gaps;
+
+    if (!processHandleAccessTelemetryAvailable) {
+        AppendPipeToken(gaps, "process.handleAccess");
+    }
+    if (!tokenPrivilegeTelemetryAvailable) {
+        AppendPipeToken(gaps, "token.privilegeAdjustment");
+    }
+    if (!networkPayloadTelemetryAvailable) {
+        AppendPipeToken(gaps, "network.rawPacketPayload");
+        AppendPipeToken(gaps, "network.dnsHttpTlsPayload");
+    }
+
+    AppendPipeToken(gaps, "bounded.pathPrefixes");
+    AppendPipeToken(gaps, "bounded.processCommandLinePrefix");
+    AppendPipeToken(gaps, "registry.valueDataBytes");
+    AppendPipeToken(gaps, "file.contentBytesAndHash");
+
+    return gaps.empty() ? "none" : gaps;
+}
+
+// Input: Public event type plus optional payload bytes.
+// Processing: Maps one drained driver row to a report-ready coverage category.
+// Return: Stable category string.
+std::string R0DriverEventCoverageCategory(
+    const ULONG eventType,
+    const unsigned char* payload,
+    const size_t payloadBytes) {
+    if (IsProcessHandleAccessPayload(eventType, payload, payloadBytes)) {
+        return "process.handle_access.draft";
+    }
+
+    switch (eventType) {
+    case KswSandboxEventTypeDriverLoad:
+        return "driver.load";
+    case KswSandboxEventTypeProcess:
+        return "process.lifecycle";
+    case KswSandboxEventTypeImage:
+        return "image.load";
+    case KswSandboxEventTypeFile:
+        return "file.activity";
+    case KswSandboxEventTypeRegistry:
+        return "registry.activity";
+    case KswSandboxEventTypeNetwork:
+        return "network.metadata";
+    case KswSandboxEventTypeReserved:
+        return "driver.compat.reserved";
+    case KswSandboxEventTypeNone:
+        return "driver.event.none";
+    default:
+        return "driver.event.unknown";
+    }
+}
+
+// Input: Public event type plus optional payload bytes.
+// Processing: Names whether the row represents direct defensive telemetry,
+// metadata-only telemetry, draft telemetry, or forward-compatible fallback.
+// Return: Stable state string.
+std::string R0DriverEventCoverageState(
+    const ULONG eventType,
+    const unsigned char* payload,
+    const size_t payloadBytes) {
+    if (IsProcessHandleAccessPayload(eventType, payload, payloadBytes)) {
+        return "covered-draft";
+    }
+
+    switch (eventType) {
+    case KswSandboxEventTypeDriverLoad:
+    case KswSandboxEventTypeProcess:
+    case KswSandboxEventTypeImage:
+    case KswSandboxEventTypeFile:
+    case KswSandboxEventTypeRegistry:
+        return "covered";
+    case KswSandboxEventTypeNetwork:
+        return "covered-metadata-only";
+    case KswSandboxEventTypeReserved:
+    case KswSandboxEventTypeNone:
+        return "diagnostic-only";
+    default:
+        return "unknown-forward-compatible";
+    }
+}
+
+// Input: One drained driver event category.
+// Processing: Names row-local known gaps.  The gaps are intentionally defensive
+// coverage limits, not behavioral conclusions.
+// Return: Pipe-delimited gap names, or "none".
+std::string R0DriverEventKnownGaps(
+    const ULONG eventType,
+    const unsigned char* payload,
+    const size_t payloadBytes) {
+    if (IsProcessHandleAccessPayload(eventType, payload, payloadBytes)) {
+        return "token.privilegeAdjustment|token.objectHandles|draft.payload";
+    }
+
+    switch (eventType) {
+    case KswSandboxEventTypeDriverLoad:
+        return "none";
+    case KswSandboxEventTypeProcess:
+        return "process.handleAccess|token.privilegeAdjustment|bounded.processImagePath|bounded.processCommandLinePrefix";
+    case KswSandboxEventTypeImage:
+        return "bounded.imagePath|image.hashSignatureMetadata|image.contentBytes";
+    case KswSandboxEventTypeFile:
+        return "bounded.filePath|file.contentBytesAndHash|userModeStack";
+    case KswSandboxEventTypeRegistry:
+        return "bounded.registryKeyValue|registry.valueDataBytes|userModeStack";
+    case KswSandboxEventTypeNetwork:
+        return "network.rawPacketPayload|network.dnsHttpTlsPayload|pcap.sidecarCorrelationRequired";
+    case KswSandboxEventTypeReserved:
+    case KswSandboxEventTypeNone:
+        return "typed.payload.not-applicable";
+    default:
+        return "unknown.futurePayload";
+    }
+}
+
+// Input: One drained driver event category.
+// Processing: Produces concise Chinese operator guidance for coverage/gaps while
+// keeping all machine-readable fields in English.
+// Return: UTF-16 hint.
+std::wstring R0DriverEventCoverageZhHint(
+    const ULONG eventType,
+    const unsigned char* payload,
+    const size_t payloadBytes) {
+    if (IsProcessHandleAccessPayload(eventType, payload, payloadBytes)) {
+        return L"该行来自显式 process-handle access 草案 payload；仍需披露 token privilege 等未覆盖缺口。";
+    }
+
+    switch (eventType) {
+    case KswSandboxEventTypeDriverLoad:
+        return L"该行证明 driver startup heartbeat 已进入 JSONL；它是采集链路就绪证据，不是样本行为。";
+    case KswSandboxEventTypeProcess:
+        return L"该行覆盖进程创建/退出生命周期；不要从它推断句柄权限或 token privilege 调整。";
+    case KswSandboxEventTypeImage:
+        return L"该行覆盖镜像/模块加载元数据；路径是有界前缀，hash/signature/content 需由其他证据补齐。";
+    case KswSandboxEventTypeFile:
+        return L"该行覆盖文件操作元数据；文件内容、hash 和完整路径仍需由 artifact/dropped-file 路径补齐。";
+    case KswSandboxEventTypeRegistry:
+        return L"该行覆盖注册表操作元数据；value data bytes 不在 R0 JSONL v1 payload 中。";
+    case KswSandboxEventTypeNetwork:
+        return L"该行只覆盖 WFP/ALE 端点元数据；DNS/HTTP/TLS payload 与 raw packet 需由 PCAP/sidecar 补齐。";
+    case KswSandboxEventTypeReserved:
+    case KswSandboxEventTypeNone:
+        return L"该行是兼容或诊断事件，主要用于采集链路排障。";
+    default:
+        return L"未知未来 driver event type；保留 payloadHex 和 ABI 字段供兼容诊断。";
+    }
+}
+
+// Input: JSON builder and one drained driver event.
+// Processing: Adds additive coverage/readiness fields without changing driver
+// behavior or typed payload parsing.
+// Return: No return value; builder is mutated.
+void AddR0DriverEventCoverageFields(
+    JsonDataObjectBuilder& data,
+    const ULONG eventType,
+    const unsigned char* payload,
+    const size_t payloadBytes) {
+    const std::string knownGaps = R0DriverEventKnownGaps(eventType, payload, payloadBytes);
+
+    data.AddUnsigned("r0CoverageTaxonomyVersion", 1);
+    data.AddUtf8("r0CoverageCategoriesAudited", kR0TelemetryCoverageCategoriesAudited);
+    data.AddUtf8("r0CoverageFieldSet", kR0TelemetryCoverageFieldSet);
+    data.AddUtf8("r0CoverageCategory", R0DriverEventCoverageCategory(eventType, payload, payloadBytes));
+    data.AddUtf8("r0CoverageState", R0DriverEventCoverageState(eventType, payload, payloadBytes));
+    data.AddUtf8("r0CoverageEvidenceSource", "drained-driver-event-row");
+    data.AddUtf8("r0CoverageProducerMaskScope", "not-applicable-driver-event-row");
+    data.AddUnsigned("r0CoverageProducerMask", 0);
+    data.AddUtf8("r0CoverageProducerMaskHex", HexUnsignedLongLong(0, 8));
+    data.AddUtf8("r0CoverageProducerMaskNames", ProducerMaskNames(0));
+    data.AddUtf8("r0CoverageAvailableCategories", R0DriverEventCoverageCategory(eventType, payload, payloadBytes));
+    data.AddUtf8("r0CoverageKnownGaps", knownGaps);
+    data.AddBool("r0CoverageGapAcknowledged", knownGaps != "none");
+    data.AddUtf8("r0CoverageInterpretation", kR0TelemetryCoverageInterpretation);
+    data.AddUtf8("r0ReadinessContribution", "event-row-confirms-parser-and-producer-output");
+    data.AddWide("zhR0CoverageHint", R0DriverEventCoverageZhHint(eventType, payload, payloadBytes));
+}
+
+// Input: JSON builder plus row-level producer/queue coverage evidence.
+// Processing: Adds common readiness fields for control-plane rows such as
+// capabilities, status, poll, and read-events batch summaries.
+// Return: No return value; builder is mutated.
+void AddR0ReadinessCoverageFields(
+    JsonDataObjectBuilder& data,
+    const std::string& evidenceSource,
+    const std::string& producerMaskScope,
+    const ULONG producerMask,
+    const bool includeQueueDiagnostics,
+    const bool processHandleAccessTelemetryAvailable = false,
+    const bool tokenPrivilegeTelemetryAvailable = false,
+    const bool networkPayloadTelemetryAvailable = false) {
+    const std::string availableCategories =
+        R0CoverageCategoriesFromProducerMask(producerMask, includeQueueDiagnostics);
+    const std::string knownGaps = R0CoverageKnownGaps(
+        processHandleAccessTelemetryAvailable,
+        tokenPrivilegeTelemetryAvailable,
+        networkPayloadTelemetryAvailable);
+
+    data.AddUnsigned("r0CoverageTaxonomyVersion", 1);
+    data.AddUtf8("r0CoverageCategoriesAudited", kR0TelemetryCoverageCategoriesAudited);
+    data.AddUtf8("r0CoverageFieldSet", kR0TelemetryCoverageFieldSet);
+    data.AddUtf8("r0CoverageCategory", includeQueueDiagnostics ? kR0TelemetryQueueCoverageCategory : "producer.coverage");
+    data.AddUtf8("r0CoverageState", availableCategories == "none" ? "not-reported" : "reported");
+    data.AddUtf8("r0CoverageEvidenceSource", evidenceSource);
+    data.AddUtf8("r0CoverageProducerMaskScope", producerMaskScope);
+    data.AddUnsigned("r0CoverageProducerMask", producerMask);
+    data.AddUtf8("r0CoverageProducerMaskHex", HexUnsignedLongLong(producerMask, 8));
+    data.AddUtf8("r0CoverageProducerMaskNames", ProducerMaskNames(producerMask));
+    data.AddUtf8("r0CoverageAvailableCategories", availableCategories);
+    data.AddUtf8("r0CoverageKnownGaps", knownGaps);
+    data.AddBool("r0CoverageGapAcknowledged", knownGaps != "none");
+    data.AddUtf8("r0CoverageInterpretation", kR0TelemetryCoverageInterpretation);
+    data.AddUtf8(
+        "r0ReadinessContribution",
+        includeQueueDiagnostics
+            ? "control-plane-row-proves-queue-loss-backpressure-diagnostics"
+            : "control-plane-row-proves-producer-capability-or-runtime-state");
+    data.AddWide(
+        "zhR0CoverageHint",
+        L"该 control-plane 行用于说明 R0 覆盖面、producer 状态和已知缺口；它不是样本行为 verdict。");
 }
 
 // Input: Public driver event type.
@@ -3867,6 +4165,15 @@ std::string BuildHealthData(const KSWORD_SANDBOX_HEALTH_REPLY& reply, const DWOR
         producerMasksAvailable && (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK) != 0,
         (healthActiveEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0,
         false);
+    AddR0ReadinessCoverageFields(
+        data,
+        "live-get-health-producer-masks",
+        producerMasksAvailable ? "health-active-enabled-producer-mask" : "legacy-health-no-producer-mask",
+        healthActiveEnabledProducerMask,
+        true,
+        (healthActiveEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0,
+        false,
+        false);
     data.AddUnsigned("activeProducerMask", producerMasksAvailable ? reply.ActiveProducerMask : 0);
     data.AddUtf8("activeProducerMaskHex", HexUnsignedLongLong(producerMasksAvailable ? reply.ActiveProducerMask : 0, 8));
     data.AddUtf8("activeProducerMaskNames", ProducerMaskNames(producerMasksAvailable ? reply.ActiveProducerMask : 0));
@@ -4080,6 +4387,15 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
             (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK) != 0,
         processHandleAccessTelemetryAvailable,
         tokenPrivilegeTelemetryAvailable);
+    AddR0ReadinessCoverageFields(
+        data,
+        "live-get-capabilities-supported-producer-mask",
+        "capabilities-supported-producer-mask",
+        reply.SupportedProducerMask,
+        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_QUEUE_STATUS_COUNTERS) != 0,
+        processHandleAccessTelemetryAvailable,
+        tokenPrivilegeTelemetryAvailable,
+        false);
     data.AddUnsigned("supportedProducerMask", reply.SupportedProducerMask);
     data.AddUtf8("supportedProducerMaskHex", HexUnsignedLongLong(reply.SupportedProducerMask, 8));
     data.AddUtf8("supportedProducerMaskNames", ProducerMaskNames(reply.SupportedProducerMask));
@@ -4210,6 +4526,15 @@ std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWOR
         (activeEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK) != 0,
         (activeEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0,
         false);
+    AddR0ReadinessCoverageFields(
+        data,
+        "live-get-status-active-effective-producer-mask",
+        "status-active-effective-producer-mask",
+        activeEnabledProducerMask,
+        true,
+        (activeEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0,
+        false,
+        false);
     data.AddUnsigned("totalEventsEnqueued", reply.TotalEventsEnqueued);
     data.AddUnsigned("totalEventsDropped", reply.TotalEventsDropped);
     data.AddUnsigned("lostCount", reply.TotalEventsDropped);
@@ -4309,6 +4634,20 @@ std::string BuildNetworkStatusData(const KSWORD_SANDBOX_NETWORK_STATUS_REPLY& re
     data.AddBool("backpressureObserved", reply.QueueFailureCount != 0);
     data.AddUtf8("backpressureReason", reply.QueueFailureCount != 0 ? "network-queue-failure" : "none");
     data.AddUnsigned("highWatermark", 0);
+    AddR0ReadinessCoverageFields(
+        data,
+        "live-get-network-status",
+        "network-status-active-layer-mask",
+        active ? KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK : 0,
+        false,
+        false,
+        false,
+        false);
+    data.AddUtf8("r0NetworkCoverageCategory", "network.metadata");
+    data.AddUtf8("r0NetworkCoverageState", active ? "covered-metadata-only" : "degraded-or-inactive");
+    data.AddUtf8(
+        "r0NetworkCoverageKnownGaps",
+        "network.rawPacketPayload|network.dnsHttpTlsPayload|pcap.sidecarCorrelationRequired");
 
     data.AddBool("networkStatusAvailable", true);
     data.AddBool("getNetworkStatusCapable", true);
@@ -4448,6 +4787,15 @@ std::string BuildSetProducerEnableMaskData(
         reply.EffectiveEnableMask,
         reply.EffectiveEnableMask,
         0);
+    AddR0ReadinessCoverageFields(
+        data,
+        "set-producer-enable-mask-effective-mask",
+        "producer-mask-effective-after-set",
+        reply.EffectiveEnableMask & reply.SupportedProducerMask,
+        false,
+        (reply.EffectiveEnableMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0,
+        false,
+        false);
     AddR0PrivilegeProcessAccessCoverageFields(data);
     return data.Build();
 }
@@ -4499,6 +4847,12 @@ std::string BuildPollData(const KSWORD_SANDBOX_POLL_REPLY& reply, const DWORD by
     data.AddUtf8("sequenceMeaning", "nextSequence");
     data.AddUtf8("sequencePolicy", "NextSequence is a queue snapshot/summary value; event rows carry concrete Sequence values");
     data.AddWide("zhSequencePolicy", L"NextSequence 是队列快照/摘要值；事件行才携带具体事件 Sequence。");
+    AddR0ReadinessCoverageFields(
+        data,
+        "live-poll-queue-snapshot",
+        "poll-queue-snapshot",
+        0,
+        true);
     return data.Build();
 }
 
@@ -4595,6 +4949,12 @@ std::string BuildReadEventsBatchData(
     data.AddUtf8(
         "lossDiagnostic",
         lost ? "driver-drop-counter" : (sequenceGapObserved ? "sequence-gap-estimate" : "none"));
+    AddR0ReadinessCoverageFields(
+        data,
+        "live-read-events-batch-summary",
+        "read-events-batch-queue-loss-backpressure",
+        0,
+        true);
     data.AddUnsigned("eligibleEvents", counters.eligibleEvents);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
@@ -4699,6 +5059,7 @@ std::string BuildDriverEventData(
     AddDriverNoiseClassificationFields(data, attribution);
     AddTypedReportCompatibilityData(header, payload, payloadBytes, &data);
     AddDriverPayloadVersionEvidence(header, payload, payloadBytes, &data);
+    AddR0DriverEventCoverageFields(data, header.Type, payload, payloadBytes);
     data.AddUtf8("collectorNoisePolicy", attribution.collectorNoisePolicy);
     data.AddBool("stress", false);
     data.AddSigned("stressOrdinal", -1);

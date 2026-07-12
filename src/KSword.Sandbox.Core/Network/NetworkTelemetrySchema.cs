@@ -161,7 +161,8 @@ public static class NetworkTelemetrySchema
     {
         var materialized = importedEvents.ToList();
         var canonicalBehaviorEvents = materialized.Where(IsBehaviorCountedEvent).ToList();
-        var rawPcapCompatibilityEventCount = CountByDataValue(materialized, "rawPcapCompatibilityRow", "true");
+        var rawPcapCompatibilityEvents = materialized.Where(IsRawPcapCompatibilityEvent).ToList();
+        var rawPcapCompatibilityEventCount = rawPcapCompatibilityEvents.Count;
         var protocols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var evt in materialized)
         {
@@ -190,14 +191,27 @@ public static class NetworkTelemetrySchema
             ["nonbehaviorEventCount"] = CountByDataValue(materialized, "nonbehavior", "true").ToString(CultureInfo.InvariantCulture),
             ["behaviorCountedEventCount"] = CountByDataValue(materialized, "behaviorCounted", "true").ToString(CultureInfo.InvariantCulture),
             ["canonicalBehaviorEventCount"] = canonicalBehaviorEvents.Count.ToString(CultureInfo.InvariantCulture),
+            ["canonicalDnsEventCount"] = CountProtocolFamily(canonicalBehaviorEvents, "dns").ToString(CultureInfo.InvariantCulture),
+            ["canonicalHttpEventCount"] = CountProtocolFamily(canonicalBehaviorEvents, "http").ToString(CultureInfo.InvariantCulture),
+            ["canonicalTlsEventCount"] = CountProtocolFamily(canonicalBehaviorEvents, "tls").ToString(CultureInfo.InvariantCulture),
+            ["canonicalFlowEventCount"] = CountProtocolFamily(canonicalBehaviorEvents, "flow").ToString(CultureInfo.InvariantCulture),
             ["compatibilityEventCount"] = rawPcapCompatibilityEventCount.ToString(CultureInfo.InvariantCulture),
             ["rawPcapCompatibilityEventCount"] = rawPcapCompatibilityEventCount.ToString(CultureInfo.InvariantCulture),
+            ["rawPcapDnsCompatibilityEventCount"] = CountProtocolFamily(rawPcapCompatibilityEvents, "dns").ToString(CultureInfo.InvariantCulture),
+            ["rawPcapHttpCompatibilityEventCount"] = CountProtocolFamily(rawPcapCompatibilityEvents, "http").ToString(CultureInfo.InvariantCulture),
+            ["rawPcapTlsCompatibilityEventCount"] = CountProtocolFamily(rawPcapCompatibilityEvents, "tls").ToString(CultureInfo.InvariantCulture),
+            ["rawPcapFlowCompatibilityEventCount"] = CountProtocolFamily(rawPcapCompatibilityEvents, "flow").ToString(CultureInfo.InvariantCulture),
             ["collectorSelfNoiseEventCount"] = CountByDataValue(materialized, "collectorSelfNoise", "true").ToString(CultureInfo.InvariantCulture),
             ["protocolHealthSummary"] = BuildDataValueSummary(canonicalBehaviorEvents, "protocolHealth"),
             ["collectionHealthSummary"] = BuildDataValueSummary(materialized, "collectionHealth"),
             ["protocolHealthWarningCount"] = CountByDataValue(canonicalBehaviorEvents, "protocolHealth", "warning").ToString(CultureInfo.InvariantCulture),
             ["protocolHealthDegradedCount"] = CountByDataValue(canonicalBehaviorEvents, "protocolHealth", "degraded").ToString(CultureInfo.InvariantCulture),
             ["protocolHealthOkCount"] = CountByDataValue(canonicalBehaviorEvents, "protocolHealth", "ok").ToString(CultureInfo.InvariantCulture),
+            ["protocolFamilyCounterScope"] = "behavior-counted-canonical-events",
+            ["protocolFamilyCounters"] = ProtocolFamilyCounters(canonicalBehaviorEvents),
+            ["canonicalProtocolFamilyCounters"] = ProtocolFamilyCounters(canonicalBehaviorEvents),
+            ["rawPcapCompatibilityProtocolFamilyCounterScope"] = "raw-pcap-compatibility-nonbehavior-rows",
+            ["rawPcapCompatibilityProtocolFamilyCounters"] = ProtocolFamilyCounters(rawPcapCompatibilityEvents),
             ["protocolHealthSummaryScope"] = "behavior-counted-canonical-events",
             ["collectionHealthSummaryScope"] = "all-imported-events",
             ["eventCountPolicy"] = "all-imported-events-including-nonbehavior-and-compatibility",
@@ -2646,6 +2660,40 @@ public static class NetworkTelemetrySchema
 
         return !evt.Data.TryGetValue("behaviorCounted", out var behaviorCounted) ||
             string.Equals(behaviorCounted, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRawPcapCompatibilityEvent(SandboxEvent evt)
+    {
+        return evt.Data.TryGetValue("rawPcapCompatibilityRow", out var value) &&
+            string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ProtocolFamilyCounters(IReadOnlyCollection<SandboxEvent> events)
+    {
+        return string.Join(
+            ",",
+            $"dns:{CountProtocolFamily(events, "dns").ToString(CultureInfo.InvariantCulture)}",
+            $"http:{CountProtocolFamily(events, "http").ToString(CultureInfo.InvariantCulture)}",
+            $"tls:{CountProtocolFamily(events, "tls").ToString(CultureInfo.InvariantCulture)}",
+            $"flow:{CountProtocolFamily(events, "flow").ToString(CultureInfo.InvariantCulture)}");
+    }
+
+    private static int CountProtocolFamily(IReadOnlyCollection<SandboxEvent> events, string family)
+    {
+        return events.Count(evt => family.ToLowerInvariant() switch
+        {
+            "dns" => IsEventType(evt, "dns.query") || IsEventType(evt, "pcap.dns") || IsEventKind(evt, "dns"),
+            "http" => IsEventType(evt, "http.request") || IsEventType(evt, "pcap.http") || IsEventKind(evt, "http"),
+            "tls" => IsEventType(evt, "tls.connection") || IsEventType(evt, "pcap.tls") || IsEventKind(evt, "tls"),
+            "flow" => IsEventType(evt, "network.flow") || IsEventType(evt, "pcap.flow") || IsEventKind(evt, "connection"),
+            _ => false
+        });
+    }
+
+    private static bool IsEventKind(SandboxEvent evt, string eventKind)
+    {
+        return evt.Data.TryGetValue("eventKind", out var value) &&
+            string.Equals(value, eventKind, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string InferCollectionHealth(IReadOnlyDictionary<string, string> data)

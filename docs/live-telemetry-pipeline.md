@@ -17,6 +17,13 @@ WebUI 动态监控页以原始事件为核心：任务运行时先展示 Guest A
 
 实时显示不是最终判定（verdict）。它只是运行中可见性通道，帮助操作者确认进程、文件、注册表、图像、R0 和网络事件是否正在回收。风险评分、MITRE 映射和最终结论仍属于报告再生成路径。
 
+ETW/Security readiness rows（例如 `etw_security.readiness.summary`、
+`etw_security.provider_manifest.readiness`、`etw_security.surface.readiness`
+和 `security_eventlog.*.summary/readiness`）属于采集健康信息，不是行为证据。
+Guest Agent 只做有界 provider manifest / Security log readiness 查询，不启动 live
+ETW 长 trace；这些行必须保持 `behaviorCounted=false`、`nonbehavior=true`、
+`sampleBehaviorCandidate=false`，并通过中文提示说明“就绪度/降级不代表样本行为”。
+
 ## 可见文案与术语约定 / Visible wording
 
 页面文案中文优先，英文只作为接口名、排障参照或 `data-en` 备选：

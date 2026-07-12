@@ -167,6 +167,27 @@ Driver-origin rows include additive attribution fields:
 和 `downloadExecuteCandidate` 需要与进程树、命令行、PCAP/HTTP/TLS、dropped files
 等证据组合判断。
 
+Driver/control-plane rows also include additive R0 coverage readiness fields:
+
+- `r0CoverageTaxonomyVersion`, `r0CoverageCategoriesAudited`, and
+  `r0CoverageFieldSet`.
+- `r0CoverageCategory`, `r0CoverageState`, `r0CoverageEvidenceSource`, and
+  `r0ReadinessContribution`.
+- `r0CoverageAvailableCategories`, `r0CoverageProducerMask*`, and
+  `r0CoverageKnownGaps` on health/capabilities/status/producer-mask/poll/read
+  diagnostic rows.
+
+Audited defensive categories are `driver.load`, `process.lifecycle`,
+`image.load`, `file.activity`, `registry.activity`, `network.metadata`, and
+`queue.loss.backpressure`. Known gaps are reported explicitly instead of being
+inferred from adjacent rows: process handle access, token privilege adjustment,
+network raw-packet/DNS/HTTP/TLS payloads, full paths/command lines, registry
+value data bytes, and file content/hash evidence require draft R0 payloads,
+ETW/audit, PCAP/sidecar, or guest artifact correlation.
+
+中文：`r0Coverage*` 字段只说明当前 JSONL 行能证明哪些防御 telemetry 覆盖面，以及哪些
+缺口需要 fallback；它们不是恶意/良性 verdict，也不表示 driver 阻断了行为。
+
 Queue, loss, sequence, and backpressure diagnostics are intentionally repeated
 with stable aliases across live rows:
 

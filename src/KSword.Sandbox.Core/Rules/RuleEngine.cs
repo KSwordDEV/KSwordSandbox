@@ -85,20 +85,26 @@ public sealed class RuleEngine
             }
 
             var summary = rule.Summary;
+            var summaryZh = rule.SummaryZh;
             if (matchedCount > evidence.Count)
             {
                 summary = string.IsNullOrWhiteSpace(summary)
                     ? $"Evidence shown: {evidence.Count} of {matchedCount} matching events."
                     : $"{summary} Evidence shown: {evidence.Count} of {matchedCount} matching events.";
+                summaryZh = string.IsNullOrWhiteSpace(summaryZh)
+                    ? $"已显示证据：{evidence.Count} / {matchedCount} 条匹配事件。"
+                    : $"{summaryZh} 已显示证据：{evidence.Count} / {matchedCount} 条匹配事件。";
             }
 
             findings.Add(new BehaviorFinding
             {
                 RuleId = rule.Id,
                 Title = rule.Title,
+                TitleZh = NullIfWhiteSpace(rule.TitleZh),
                 Severity = rule.Severity,
                 Confidence = rule.Confidence,
                 Summary = summary,
+                SummaryZh = NullIfWhiteSpace(summaryZh),
                 MitreTechniqueId = rule.MitreTechniqueId,
                 MitreTechniqueName = rule.MitreTechniqueName,
                 Tags = rule.Tags,
@@ -107,6 +113,11 @@ public sealed class RuleEngine
         }
 
         return findings;
+    }
+
+    private static string? NullIfWhiteSpace(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
     /// <summary>

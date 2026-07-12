@@ -30,7 +30,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     private static readonly TimeSpan AuditPolicyCommandTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan ProviderManifestCommandTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan QueryOverlap = TimeSpan.FromSeconds(2);
-    private static readonly int[] ProcessAccessEventIds = [4656, 4663];
+    private static readonly int[] ProcessAccessEventIds = [4656, 4663, 4690];
 
     private static readonly int[] TargetEventIds =
     [
@@ -41,6 +41,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         4674, // An operation was attempted on a privileged object.
         4688, // A new process has been created.
         4689, // A process has exited.
+        4690, // An attempt was made to duplicate a handle to an object; filtered to Process objects after parsing.
         4696, // A primary token was assigned to process.
         4697, // A service was installed in the system.
         4698, // A scheduled task was created.
@@ -99,7 +100,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     [
         new("0cce9211-69ae-11d9-bed3-505054503030", "Security System Extension", "安全系统扩展", "4697", "Service installation auditing; useful when service persistence is not visible in R0 callbacks."),
         new("0cce921b-69ae-11d9-bed3-505054503030", "Special Logon", "特殊登录", "4672", "Special privilege assignment at logon; helps explain later privilege/token context."),
-        new("0cce9223-69ae-11d9-bed3-505054503030", "Handle Manipulation", "句柄操作", "4656,4663", "Process/object handle requests and accesses; requires object auditing/SACL for many targets."),
+        new("0cce9223-69ae-11d9-bed3-505054503030", "Handle Manipulation", "句柄操作", "4656,4663,4690", "Process/object handle requests, accesses, and duplicate-handle attempts; requires object auditing/SACL for many targets."),
         new("0cce9228-69ae-11d9-bed3-505054503030", "Sensitive Privilege Use", "敏感权限使用", "4673,4674", "Privileged service/object operations; complements R0 process and registry callbacks."),
         new("0cce922b-69ae-11d9-bed3-505054503030", "Process Creation", "进程创建", "4688", "Process command line and token elevation context."),
         new("0cce922c-69ae-11d9-bed3-505054503030", "Process Termination", "进程终止", "4689", "Process exit context for short-lived children."),
@@ -113,9 +114,9 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         new(
             "process-handle-access",
             "Process handle/object access",
-            "4656,4663",
+            "4656,4663,4690",
             "Microsoft-Windows-Security-Auditing",
-            "Handle Manipulation success auditing plus a process object SACL are normally required; useful for PROCESS_VM_* and DUP_HANDLE gaps."),
+            "Handle Manipulation success auditing plus a process object SACL are normally required; useful for PROCESS_VM_*, DUP_HANDLE, and DuplicateHandle gaps."),
         new(
             "privilege-use",
             "Privilege use/logon privileges",
@@ -567,7 +568,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     /// <summary>
     /// Applies filters that are intentionally not encoded in the wevtutil XPath.
     /// Inputs are parsed Security events; processing keeps all target IDs except
-    /// 4656/4663, which are only emitted for Process object audit rows.
+    /// 4656/4663/4690, which are only emitted for Process object audit rows.
     /// </summary>
     private static bool IsTargetSecurityEvent(RawSecurityEvent rawEvent)
     {
@@ -776,7 +777,11 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         var objectName = FirstNonEmpty(
             Field(rawEvent.EventData, "ObjectName"),
             ExtractRenderedFieldValue(rawEvent.RenderedMessage, "Object Name"));
-        var handleId = Field(rawEvent.EventData, "HandleId");
+        var handleId = FirstNonEmpty(
+            Field(rawEvent.EventData, "HandleId"),
+            Field(rawEvent.EventData, "SourceHandleId"),
+            Field(rawEvent.EventData, "TargetHandleId"),
+            Field(rawEvent.EventData, "NewHandleId"));
         var accessMask = FirstNonEmpty(
             Field(rawEvent.EventData, "AccessMask"),
             Field(rawEvent.EventData, "DesiredAccess"),
@@ -800,6 +805,12 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         AddIfNotEmpty(data, "objectPath", objectName);
         AddIfNotEmpty(data, "targetObject", objectName);
         AddIfNotEmpty(data, "handleId", handleId);
+        AddIfNotEmpty(data, "sourceHandleId", Field(rawEvent.EventData, "SourceHandleId"));
+        AddIfNotEmpty(data, "targetHandleId", FirstNonEmpty(
+            Field(rawEvent.EventData, "TargetHandleId"),
+            Field(rawEvent.EventData, "NewHandleId")));
+        AddIfNotEmpty(data, "sourceProcessId", Field(rawEvent.EventData, "SourceProcessId"));
+        AddIfNotEmpty(data, "targetProcessId", Field(rawEvent.EventData, "TargetProcessId"));
         AddIfNotEmpty(data, "accessMask", accessMask);
         AddIfNotEmpty(data, "accesses", accesses);
 
@@ -817,7 +828,9 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
                 ? "windows-security-event-4656"
                 : rawEvent.EventId == 4663
                     ? "windows-security-event-4663"
-                    : "windows-security-auditing";
+                    : rawEvent.EventId == 4690
+                        ? "windows-security-event-4690"
+                        : "windows-security-auditing";
 
             if (rawEvent.EventId == 4656)
             {
@@ -826,6 +839,11 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             else if (rawEvent.EventId == 4663)
             {
                 data["operation"] = AppendOperation(data, "OpenProcess; process object accessed");
+            }
+            else if (rawEvent.EventId == 4690)
+            {
+                data["api"] = "DuplicateHandle";
+                data["operation"] = AppendOperation(data, "DuplicateHandle; process handle duplicated");
             }
         }
     }
@@ -943,7 +961,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     /// </summary>
     private static IEnumerable<int> CandidateProcessIds(RawSecurityEvent rawEvent)
     {
-        foreach (var name in new[] { "NewProcessId", "ProcessId", "TargetProcessId", "ClientProcessId" })
+        foreach (var name in new[] { "NewProcessId", "ProcessId", "SourceProcessId", "TargetProcessId", "ClientProcessId" })
         {
             var parsed = ParseProcessId(Field(rawEvent.EventData, name));
             if (parsed is not null)
@@ -958,6 +976,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         return ParseProcessId(FirstNonEmpty(
             Field(rawEvent.EventData, "NewProcessId"),
             Field(rawEvent.EventData, "ProcessId"),
+            Field(rawEvent.EventData, "SourceProcessId"),
             Field(rawEvent.EventData, "TargetProcessId"),
             Field(rawEvent.EventData, "ClientProcessId")));
     }
@@ -1201,7 +1220,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         evt.Data["kernelProcessProviderManifestSnippet"] = Truncate(kernelProcessProviderResult.StandardOutput, MaxProviderManifestSnippetLength);
         evt.Data["securityProviderCommand"] = $"{securityProviderResult.FileName} {securityProviderResult.Arguments}";
         evt.Data["kernelProcessProviderCommand"] = $"{kernelProcessProviderResult.FileName} {kernelProcessProviderResult.Arguments}";
-        evt.Data["surface.processHandleAccess"] = "Security 4656/4663; requires Handle Manipulation success auditing and target process SACL; emitted rows remain nonbehavior unless sample-correlated.";
+        evt.Data["surface.processHandleAccess"] = "Security 4656/4663/4690; requires Handle Manipulation success auditing and target process SACL; emitted rows remain nonbehavior unless sample-correlated.";
         evt.Data["surface.privilegeUse"] = "Security 4672/4673/4674; requires Special Logon/Sensitive Privilege Use success auditing; emitted rows remain nonbehavior unless sample-correlated.";
         evt.Data["surface.tokenAdjustment"] = "Security 4696/4703/4704/4705/4717/4718; requires Authorization Policy Change or related policy auditing; emitted rows remain nonbehavior unless sample-correlated.";
         evt.Data["surface.processCreateExit"] = "Security 4688/4689 and Kernel-Process ETW provider metadata; current implementation reads Security log only and records ETW provider readiness.";
@@ -1408,6 +1427,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             4674 => "security.privilege.object_operation",
             4688 => "security.process.created",
             4689 => "security.process.exited",
+            4690 => "security.process.handle_duplicated",
             4696 => "security.token.assigned",
             4697 => "security.service.installed",
             4698 => "security.scheduled_task.created",
@@ -1448,6 +1468,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             4674 => "privileged-object-operation-attempted",
             4688 => "process-created",
             4689 => "process-exited",
+            4690 => "process-handle-duplicated",
             4696 => "primary-token-assigned",
             4697 => "service-installed",
             4698 => "scheduled-task-created",
@@ -1486,6 +1507,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             4663 => "Windows 安全日志记录了进程对象访问事件，可作为 R0 进程访问权限观测的补充。",
             4688 => "Windows 安全日志记录了进程创建事件，可补充命令行、令牌提升类型等审计字段。",
             4689 => "Windows 安全日志记录了进程退出事件，可补充用户态/R0 进程生命周期证据。",
+            4690 => "Windows 安全日志记录了进程对象句柄复制事件，可补充 DuplicateHandle/跨进程句柄语义。",
             4703 => "Windows 安全日志记录了令牌权限调整事件，这是 R0 回调通常无法直接解释的权限行为。",
             4673 or 4674 => "Windows 安全日志记录了特权服务或特权对象访问事件。",
             4696 => "Windows 安全日志记录了主令牌分配到进程的事件。",

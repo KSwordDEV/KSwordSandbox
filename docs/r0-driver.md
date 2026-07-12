@@ -56,6 +56,28 @@ Typed payloads still carry source-specific details such as process image path, i
 如果未来 producer 选择 emit 这些记录，marker 已经可用，无需再次扩展 header。该 marker
 仍然只是采集归因 evidence label，不是安全 verdict 或访问控制结果。
 
+## Defensive telemetry coverage taxonomy
+
+R0Collector reports the current public driver ABI with this readiness taxonomy:
+
+- `driver.load`: DriverEntry startup heartbeat.
+- `process.lifecycle`: process create/exit metadata from process callbacks.
+- `image.load`: image/module load metadata from image-load callbacks.
+- `file.activity`: minifilter file operation metadata.
+- `registry.activity`: registry callback metadata.
+- `network.metadata`: WFP/ALE endpoint metadata; inspect-only, no L7 payload.
+- `queue.loss.backpressure`: GET_STATUS/READ_EVENTS counters, per-record
+  `LostEvents`/`BackpressureEvents`, high-watermark, producer masks, and
+  sequence-gap evidence.
+
+Known gaps are explicit by design: process lifecycle events do not cover
+process/thread handle requested/granted access unless the draft handle-access
+payload is advertised and emitted; token privilege adjustment is not in v1 R0;
+network DNS/HTTP/TLS/raw packet details are PCAP/sidecar or ETW evidence; file,
+image, process, and registry names are bounded prefixes; file content/hash and
+registry value-data bytes are not in the v1 driver payloads.  Reports should
+surface these as `r0CoverageKnownGaps`, not infer them from adjacent metadata.
+
 ## Event queue stress and backpressure status
 
 R0 queue 仍是固定大小、非阻塞 ring。Producers never wait for user mode；当 ring

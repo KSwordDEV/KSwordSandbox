@@ -313,6 +313,258 @@ function Get-ScriptParameterNames {
     return @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
 }
 
+function Get-InstallEntrypointRequiredValues {
+    return @('UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')
+}
+
+function Compare-StringSet {
+    param(
+        [string[]]$Actual = @(),
+        [string[]]$Expected = @()
+    )
+
+    $actualValues = @($Actual | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ } | Select-Object -Unique)
+    $expectedValues = @($Expected | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ } | Select-Object -Unique)
+
+    return [pscustomobject][ordered]@{
+        matches = (@($actualValues | Sort-Object) -join "`n") -eq (@($expectedValues | Sort-Object) -join "`n")
+        missing = @($expectedValues | Where-Object { $actualValues -notcontains $_ })
+        extra   = @($actualValues | Where-Object { $expectedValues -notcontains $_ })
+        actual  = @($actualValues)
+        expected = @($expectedValues)
+    }
+}
+
+function Get-PowerShellAst {
+    param([Parameter(Mandatory)][string]$RelativePath)
+
+    $path = Join-Path $RepositoryRoot $RelativePath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]@{
+            Ast = $null
+            ParseErrors = @([pscustomobject]@{ Message = 'missing'; Extent = '' })
+            Path = $path
+            RelativePath = $RelativePath
+        }
+    }
+
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$parseErrors)
+    return [pscustomobject]@{
+        Ast = $ast
+        ParseErrors = @($parseErrors)
+        Path = $path
+        RelativePath = $RelativePath
+    }
+}
+
+function Get-ValidateSetValuesFromParameterAst {
+    param([Parameter(Mandatory)][System.Management.Automation.Language.ParameterAst]$ParameterAst)
+
+    foreach ($attribute in @($ParameterAst.Attributes)) {
+        if ($attribute -isnot [System.Management.Automation.Language.AttributeAst]) {
+            continue
+        }
+
+        $typeName = [string]$attribute.TypeName.FullName
+        if ($typeName -notmatch '(?i)(^|\.|Automation\.)ValidateSet(Attribute)?$') {
+            continue
+        }
+
+        return @($attribute.PositionalArguments | ForEach-Object {
+                try {
+                    [string]$_.SafeGetValue()
+                }
+                catch {
+                    [string]$_.Extent.Text.Trim("'`"")
+                }
+            })
+    }
+
+    return @()
+}
+
+function Get-ParameterAstsByName {
+    param(
+        [Parameter(Mandatory)][System.Management.Automation.Language.Ast]$Ast,
+        [Parameter(Mandatory)][string[]]$Names
+    )
+
+    return @($Ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.ParameterAst] -and
+                $Names -contains [string]$node.Name.VariablePath.UserPath
+            }, $true))
+}
+
+function Get-FunctionDefinitionAst {
+    param(
+        [Parameter(Mandatory)][System.Management.Automation.Language.Ast]$Ast,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    return @($Ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                [string]$node.Name -eq $Name
+            }, $true) | Select-Object -First 1)
+}
+
+function Get-CommandAsts {
+    param([Parameter(Mandatory)][System.Management.Automation.Language.Ast]$Ast)
+
+    return @($Ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.CommandAst]
+            }, $true))
+}
+
+function Get-CommandAstLeafName {
+    param([Parameter(Mandatory)][System.Management.Automation.Language.CommandAst]$CommandAst)
+
+    $commandName = [string]$CommandAst.GetCommandName()
+    if ([string]::IsNullOrWhiteSpace($commandName)) {
+        return ''
+    }
+
+    return Split-Path -Leaf $commandName
+}
+
+function Get-ContainingFunctionName {
+    param([Parameter(Mandatory)][System.Management.Automation.Language.Ast]$Node)
+
+    $parent = $Node.Parent
+    while ($null -ne $parent) {
+        if ($parent -is [System.Management.Automation.Language.FunctionDefinitionAst]) {
+            return [string]$parent.Name
+        }
+
+        $parent = $parent.Parent
+    }
+
+    return '<script>'
+}
+
+function Test-ScriptCmdletBindingSupportsShouldProcess {
+    param([Parameter(Mandatory)][System.Management.Automation.Language.Ast]$Ast)
+
+    if ($null -eq $Ast.ParamBlock) {
+        return $false
+    }
+
+    foreach ($attribute in @($Ast.ParamBlock.Attributes)) {
+        if ($attribute -isnot [System.Management.Automation.Language.AttributeAst]) {
+            continue
+        }
+
+        $typeName = [string]$attribute.TypeName.FullName
+        if ($typeName -notmatch '(?i)(^|\.|Automation\.)CmdletBinding(Attribute)?$') {
+            continue
+        }
+
+        foreach ($namedArgument in @($attribute.NamedArguments)) {
+            if ([string]$namedArgument.ArgumentName -ne 'SupportsShouldProcess') {
+                continue
+            }
+
+            try {
+                return [bool]$namedArgument.Argument.SafeGetValue()
+            }
+            catch {
+                return ($namedArgument.Argument.Extent.Text -match '(?i)\$true|true')
+            }
+        }
+    }
+
+    return $false
+}
+
+function Normalize-ContractCommand {
+    param([AllowNull()][string]$Command)
+
+    if ([string]::IsNullOrWhiteSpace($Command)) {
+        return ''
+    }
+
+    return ([string]$Command).Trim().Replace('/', '\')
+}
+
+function Get-OperatorModeMatrixContractIssues {
+    param(
+        [AllowNull()][object]$OperatorModeMatrix,
+        [Parameter(Mandatory)][string]$Context
+    )
+
+    $issues = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $OperatorModeMatrix) {
+        [void]$issues.Add("operatorModeMatrix is missing: $Context")
+        return @($issues.ToArray())
+    }
+
+    $operatorModes = @(Get-ObjectPropertyValue -InputObject $OperatorModeMatrix -Name 'modes' -DefaultValue @())
+    $operatorModeIds = @($operatorModes |
+        ForEach-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'modeId' -DefaultValue '') } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+    $expectedOperatorModeIds = @(Get-CanonicalOperatorModeRequiredIds)
+    $modeIdComparison = Compare-StringSet -Actual $operatorModeIds -Expected $expectedOperatorModeIds
+    foreach ($missingModeId in @($modeIdComparison.missing)) {
+        [void]$issues.Add("operatorModeMatrix missing canonical mode '$missingModeId': $Context")
+    }
+    foreach ($extraModeId in @($modeIdComparison.extra)) {
+        [void]$issues.Add("operatorModeMatrix has unexpected mode '$extraModeId': $Context")
+    }
+
+    foreach ($canonical in @(Get-CanonicalOperatorModeMatrix)) {
+        $modeId = [string]$canonical.modeId
+        $matchingModes = @($operatorModes | Where-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'modeId' -DefaultValue '') -eq $modeId })
+        if ($matchingModes.Count -eq 0) {
+            continue
+        }
+
+        if ($matchingModes.Count -gt 1) {
+            [void]$issues.Add("operatorModeMatrix contains duplicate mode '$modeId': $Context")
+        }
+
+        $mode = $matchingModes[0]
+        $entrypoint = [string](Get-ObjectPropertyValue -InputObject $mode -Name 'entrypoint' -DefaultValue '')
+        if ($entrypoint -cne [string]$canonical.entrypoint) {
+            [void]$issues.Add("operatorModeMatrix mode '$modeId' entrypoint '$entrypoint' must match '$($canonical.entrypoint)': $Context")
+        }
+
+        $defaultCommand = Normalize-ContractCommand -Command ([string](Get-ObjectPropertyValue -InputObject $mode -Name 'defaultCommand' -DefaultValue ''))
+        $expectedDefaultCommand = Normalize-ContractCommand -Command ([string]$canonical.defaultCommand)
+        if ($defaultCommand -ine $expectedDefaultCommand) {
+            [void]$issues.Add("operatorModeMatrix mode '$modeId' defaultCommand '$defaultCommand' must match '$expectedDefaultCommand': $Context")
+        }
+
+        $mutatingCommand = Normalize-ContractCommand -Command ([string](Get-ObjectPropertyValue -InputObject $mode -Name 'mutatingCommand' -DefaultValue ''))
+        $expectedMutatingCommand = Normalize-ContractCommand -Command ([string](Get-ObjectPropertyValue -InputObject ([pscustomobject]$canonical) -Name 'mutatingCommand' -DefaultValue ''))
+        if ([string]::IsNullOrWhiteSpace($expectedMutatingCommand)) {
+            if (-not [string]::IsNullOrWhiteSpace($mutatingCommand)) {
+                [void]$issues.Add("operatorModeMatrix mode '$modeId' must not advertise a mutatingCommand: $Context")
+            }
+        }
+        elseif ($mutatingCommand -ine $expectedMutatingCommand) {
+            [void]$issues.Add("operatorModeMatrix mode '$modeId' mutatingCommand '$mutatingCommand' must match '$expectedMutatingCommand': $Context")
+        }
+
+        if ($modeId -eq 'rollback-restore-snapshot') {
+            if ($mutatingCommand -notmatch '(?i)-AllowVmMutation' -or $mutatingCommand -notmatch '(?i)-(Confirm|Force)') {
+                [void]$issues.Add("operatorModeMatrix restore mode mutatingCommand must include -AllowVmMutation plus -Confirm or -Force: $Context")
+            }
+
+            $packageReadinessMutation = [string](Get-ObjectPropertyValue -InputObject $mode -Name 'packageReadinessMutation' -DefaultValue '')
+            if ($packageReadinessMutation -notmatch '(?i)forbidden') {
+                [void]$issues.Add("operatorModeMatrix restore mode must mark package/readiness mutation as forbidden: $Context")
+            }
+        }
+    }
+
+    return @($issues.ToArray())
+}
+
 function Test-ScriptWrapperParameterSurface {
     $contracts = @(
         [pscustomobject]@{
@@ -383,6 +635,323 @@ function Test-ScriptWrapperParameterSurface {
         -Details @{ issues = @($issues.ToArray()) }
 }
 
+function Test-InstallerEntrypointStaticContract {
+    $issues = New-Object System.Collections.Generic.List[object]
+    $requiredEntrypoints = @(Get-InstallEntrypointRequiredValues)
+    $rootParse = Get-PowerShellAst -RelativePath 'install.ps1'
+    $wrapperParse = Get-PowerShellAst -RelativePath 'scripts\install.ps1'
+
+    foreach ($parseResult in @($rootParse, $wrapperParse)) {
+        foreach ($parseError in @($parseResult.ParseErrors)) {
+            [void]$issues.Add([pscustomobject]@{
+                    path = $parseResult.RelativePath
+                    check = 'parse'
+                    message = $parseError.Message
+                    line = if ($null -ne $parseError.Extent) { $parseError.Extent.StartLineNumber } else { 0 }
+                })
+        }
+    }
+
+    if ($null -ne $rootParse.Ast -and $null -ne $wrapperParse.Ast) {
+        foreach ($entry in @(
+                [pscustomobject]@{ Relative = 'install.ps1'; Ast = $rootParse.Ast },
+                [pscustomobject]@{ Relative = 'scripts\install.ps1'; Ast = $wrapperParse.Ast }
+            )) {
+            if (-not (Test-ScriptCmdletBindingSupportsShouldProcess -Ast $entry.Ast)) {
+                [void]$issues.Add([pscustomobject]@{
+                        path = $entry.Relative
+                        check = 'supports-should-process'
+                        message = 'script-level CmdletBinding must keep SupportsShouldProcess = true'
+                        line = 1
+                    })
+            }
+
+            $scriptEntrypointParameter = @($entry.Ast.ParamBlock.Parameters | Where-Object { [string]$_.Name.VariablePath.UserPath -eq 'InstallEntrypoint' } | Select-Object -First 1)
+            if ($scriptEntrypointParameter.Count -eq 0) {
+                [void]$issues.Add([pscustomobject]@{
+                        path = $entry.Relative
+                        check = 'script-install-entrypoint-param'
+                        message = 'script param block must expose -InstallEntrypoint'
+                        line = 1
+                    })
+            }
+
+            foreach ($parameterAst in @(Get-ParameterAstsByName -Ast $entry.Ast -Names @('InstallEntrypoint', 'SelectedEntrypoint'))) {
+                $validateSetValues = @(Get-ValidateSetValuesFromParameterAst -ParameterAst $parameterAst)
+                $comparison = Compare-StringSet -Actual $validateSetValues -Expected $requiredEntrypoints
+                if (-not [bool]$comparison.matches) {
+                    [void]$issues.Add([pscustomobject]@{
+                            path = $entry.Relative
+                            check = 'entrypoint-validateset'
+                            parameter = [string]$parameterAst.Name.VariablePath.UserPath
+                            line = $parameterAst.Extent.StartLineNumber
+                            message = "ValidateSet must exactly be: $($requiredEntrypoints -join ', ')"
+                            missing = @($comparison.missing)
+                            extra = @($comparison.extra)
+                            actual = @($comparison.actual)
+                        })
+                }
+            }
+        }
+
+        $requiredRootFunctions = @(
+            'Invoke-UseConfiguredEnvironmentEntrypoint',
+            'Invoke-RestoreCleanCheckpointEntrypoint',
+            'Invoke-CreateOrPreparePathEntrypoint',
+            'Assert-InstallEntrypointContract',
+            'Invoke-InstallEntrypoint',
+            'Get-InstallOperatorModeMatrix'
+        )
+
+        foreach ($functionName in $requiredRootFunctions) {
+            if ($null -eq (Get-FunctionDefinitionAst -Ast $rootParse.Ast -Name $functionName)) {
+                [void]$issues.Add([pscustomobject]@{
+                        path = 'install.ps1'
+                        check = 'required-root-function'
+                        message = "Missing required installer function: $functionName"
+                        line = 0
+                    })
+            }
+        }
+
+        $invokeEntrypointFunction = Get-FunctionDefinitionAst -Ast $rootParse.Ast -Name 'Invoke-InstallEntrypoint'
+        if ($null -ne $invokeEntrypointFunction) {
+            $invokeText = $invokeEntrypointFunction.Extent.Text
+            $entrypointFunctionMap = [ordered]@{
+                UseConfiguredEnvironment = 'Invoke-UseConfiguredEnvironmentEntrypoint'
+                RestoreCleanCheckpoint = 'Invoke-RestoreCleanCheckpointEntrypoint'
+                CreateOrPreparePath = 'Invoke-CreateOrPreparePathEntrypoint'
+            }
+
+            foreach ($entrypointName in $entrypointFunctionMap.Keys) {
+                $targetFunction = $entrypointFunctionMap[$entrypointName]
+                if ($invokeText -notmatch [regex]::Escape("'$entrypointName'") -or $invokeText -notmatch [regex]::Escape($targetFunction)) {
+                    [void]$issues.Add([pscustomobject]@{
+                            path = 'install.ps1'
+                            check = 'entrypoint-switch-dispatch'
+                            message = "Invoke-InstallEntrypoint must dispatch '$entrypointName' to $targetFunction"
+                            line = $invokeEntrypointFunction.Extent.StartLineNumber
+                        })
+                }
+            }
+        }
+
+        $assertEntrypointFunction = Get-FunctionDefinitionAst -Ast $rootParse.Ast -Name 'Assert-InstallEntrypointContract'
+        if ($null -ne $assertEntrypointFunction) {
+            $assertText = $assertEntrypointFunction.Extent.Text
+            foreach ($marker in @('modeActionSwitches', 'UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')) {
+                if ($assertText.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                    [void]$issues.Add([pscustomobject]@{
+                            path = 'install.ps1'
+                            check = 'entrypoint-switch-closure'
+                            message = "Assert-InstallEntrypointContract is missing marker '$marker'"
+                            line = $assertEntrypointFunction.Extent.StartLineNumber
+                        })
+                }
+            }
+
+            if ($assertText -notmatch "'UseConfiguredEnvironment'\s*\{[^\}]*AllowVmMutation") {
+                [void]$issues.Add([pscustomobject]@{
+                        path = 'install.ps1'
+                        check = 'entrypoint-switch-closure'
+                        message = 'UseConfiguredEnvironment must reject -AllowVmMutation to keep read-only semantics closed.'
+                        line = $assertEntrypointFunction.Extent.StartLineNumber
+                    })
+            }
+            if ($assertText -match "'RestoreCleanCheckpoint'\s*\{[^\}]*AllowVmMutation") {
+                [void]$issues.Add([pscustomobject]@{
+                        path = 'install.ps1'
+                        check = 'entrypoint-switch-closure'
+                        message = 'RestoreCleanCheckpoint must allow -AllowVmMutation so the later explicit restore gate can inspect it.'
+                        line = $assertEntrypointFunction.Extent.StartLineNumber
+                    })
+            }
+            if ($assertText -notmatch "'CreateOrPreparePath'\s*\{[^\}]*AllowVmMutation") {
+                [void]$issues.Add([pscustomobject]@{
+                        path = 'install.ps1'
+                        check = 'entrypoint-switch-closure'
+                        message = 'CreateOrPreparePath must reject -AllowVmMutation because it is local prepare only.'
+                        line = $assertEntrypointFunction.Extent.StartLineNumber
+                    })
+            }
+        }
+
+        $restoreFunction = Get-FunctionDefinitionAst -Ast $rootParse.Ast -Name 'Invoke-RestoreCleanCheckpointEntrypoint'
+        if ($null -ne $restoreFunction) {
+            $restoreFunctionText = $restoreFunction.Extent.Text
+            foreach ($marker in @('$AllowVmMutation', 'ShouldProcess', 'Confirm', '$Force', 'Test-IsAdministrator')) {
+                if ($restoreFunctionText.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                    [void]$issues.Add([pscustomobject]@{
+                            path = 'install.ps1'
+                            check = 'restore-gate'
+                            message = "RestoreCleanCheckpoint implementation is missing required gate marker '$marker'"
+                            line = $restoreFunction.Extent.StartLineNumber
+                        })
+                }
+            }
+
+            $restoreCommands = @(Get-CommandAsts -Ast $restoreFunction | Where-Object { (Get-CommandAstLeafName -CommandAst $_) -ieq 'Restore-VMSnapshot' })
+            if ($restoreCommands.Count -ne 1) {
+                [void]$issues.Add([pscustomobject]@{
+                        path = 'install.ps1'
+                        check = 'restore-command-count'
+                        message = "RestoreCleanCheckpoint must contain exactly one Restore-VMSnapshot command; found $($restoreCommands.Count)."
+                        line = $restoreFunction.Extent.StartLineNumber
+                    })
+            }
+            else {
+                $restoreLine = $restoreCommands[0].Extent.StartLineNumber
+                $allowVmMutationLines = @($restoreFunction.FindAll({
+                            param($node)
+                            $node -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                            [string]$node.VariablePath.UserPath -eq 'AllowVmMutation'
+                        }, $true) | ForEach-Object { $_.Extent.StartLineNumber })
+                $shouldProcessLines = @($restoreFunction.FindAll({
+                            param($node)
+                            $node -isnot [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                            $node.Extent.Text -match 'ShouldProcess'
+                        }, $true) | ForEach-Object { $_.Extent.StartLineNumber })
+
+                if ($allowVmMutationLines.Count -eq 0 -or [int]($allowVmMutationLines | Measure-Object -Minimum).Minimum -ge $restoreLine) {
+                    [void]$issues.Add([pscustomobject]@{
+                            path = 'install.ps1'
+                            check = 'restore-gate-order'
+                            message = 'Restore-VMSnapshot must be preceded by an AllowVmMutation gate.'
+                            line = $restoreLine
+                        })
+                }
+                if ($shouldProcessLines.Count -eq 0 -or [int]($shouldProcessLines | Measure-Object -Minimum).Minimum -ge $restoreLine) {
+                    [void]$issues.Add([pscustomobject]@{
+                            path = 'install.ps1'
+                            check = 'restore-gate-order'
+                            message = 'Restore-VMSnapshot must be preceded by a ShouldProcess gate.'
+                            line = $restoreLine
+                        })
+                }
+            }
+        }
+
+        foreach ($commandAst in @(Get-CommandAsts -Ast $rootParse.Ast | Where-Object { (Get-CommandAstLeafName -CommandAst $_) -ieq 'Restore-VMSnapshot' })) {
+            $functionName = Get-ContainingFunctionName -Node $commandAst
+            if ($functionName -ne 'Invoke-RestoreCleanCheckpointEntrypoint') {
+                [void]$issues.Add([pscustomobject]@{
+                        path = 'install.ps1'
+                        check = 'restore-command-location'
+                        message = "Restore-VMSnapshot must stay inside Invoke-RestoreCleanCheckpointEntrypoint, found in $functionName."
+                        line = $commandAst.Extent.StartLineNumber
+                    })
+            }
+        }
+
+        foreach ($commandAst in @(Get-CommandAsts -Ast $wrapperParse.Ast | Where-Object { (Get-CommandAstLeafName -CommandAst $_) -ieq 'Restore-VMSnapshot' })) {
+            [void]$issues.Add([pscustomobject]@{
+                    path = 'scripts\install.ps1'
+                    check = 'wrapper-no-direct-restore'
+                    message = 'scripts/install.ps1 must forward restore requests to root install.ps1 and must not call Restore-VMSnapshot directly.'
+                    line = $commandAst.Extent.StartLineNumber
+                })
+        }
+
+        $operatorMatrixFunction = Get-FunctionDefinitionAst -Ast $rootParse.Ast -Name 'Get-InstallOperatorModeMatrix'
+        if ($null -ne $operatorMatrixFunction) {
+            $operatorMatrixText = $operatorMatrixFunction.Extent.Text
+            foreach ($canonical in @(Get-CanonicalOperatorModeMatrix)) {
+                foreach ($marker in @([string]$canonical.modeId, [string]$canonical.entrypoint, [string]$canonical.defaultCommand)) {
+                    if ($operatorMatrixText.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                        [void]$issues.Add([pscustomobject]@{
+                                path = 'install.ps1'
+                                check = 'implementation-operator-mode-matrix'
+                                message = "Get-InstallOperatorModeMatrix is missing canonical marker '$marker'."
+                                line = $operatorMatrixFunction.Extent.StartLineNumber
+                            })
+                    }
+                }
+            }
+
+            foreach ($marker in @('MutatingCommand = $restoreCommand', 'RestoresCheckpoint = $true', 'CreatesLocalConfig = $true', 'CreatesVm = $false')) {
+                if ($operatorMatrixText.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                    [void]$issues.Add([pscustomobject]@{
+                            path = 'install.ps1'
+                            check = 'implementation-operator-mode-matrix'
+                            message = "Get-InstallOperatorModeMatrix is missing semantic marker '$marker'."
+                            line = $operatorMatrixFunction.Extent.StartLineNumber
+                        })
+                }
+            }
+        }
+
+        $wrapperForwardFunction = Get-FunctionDefinitionAst -Ast $wrapperParse.Ast -Name 'New-RootInstallerParameterTable'
+        if ($null -eq $wrapperForwardFunction) {
+            [void]$issues.Add([pscustomobject]@{
+                    path = 'scripts\install.ps1'
+                    check = 'wrapper-forwarding'
+                    message = 'Missing New-RootInstallerParameterTable forwarding helper.'
+                    line = 0
+                })
+        }
+        else {
+            $forwardText = $wrapperForwardFunction.Extent.Text
+            foreach ($marker in @('$script:InitialWrapperBoundParameters.Keys', '$parameters[$key]', 'DriverWrapperParameterNames', 'PreparePayload')) {
+                if ($forwardText.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                    [void]$issues.Add([pscustomobject]@{
+                            path = 'scripts\install.ps1'
+                            check = 'wrapper-forwarding'
+                            message = "New-RootInstallerParameterTable is missing forwarding marker '$marker'."
+                            line = $wrapperForwardFunction.Extent.StartLineNumber
+                        })
+                }
+            }
+
+            foreach ($forbiddenDrop in @('InstallEntrypoint', 'AllowVmMutation', 'PlanOnly', 'Force', 'PrepareGuestPayload')) {
+                $explicitDropPattern = '(?i)\$key\s+-eq\s+[''"]' + [regex]::Escape($forbiddenDrop) + '[''"]'
+                $continueDropPattern = '(?i)' + [regex]::Escape($forbiddenDrop) + '.*continue'
+                if ($forwardText -match $explicitDropPattern -or $forwardText -match $continueDropPattern) {
+                    [void]$issues.Add([pscustomobject]@{
+                            path = 'scripts\install.ps1'
+                            check = 'wrapper-forwarding'
+                            message = "Wrapper forwarding must not drop -$forbiddenDrop."
+                            line = $wrapperForwardFunction.Extent.StartLineNumber
+                        })
+                }
+            }
+        }
+
+        $wrapperRaw = Get-Content -LiteralPath $wrapperParse.Path -Raw
+        foreach ($marker in @(
+                "PSBoundParameters.ContainsKey('InstallEntrypoint')",
+                "Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Interactive')",
+                "InstallEntrypoint = 'CreateOrPreparePath'",
+                'PrepareGuestPayload = $true'
+            )) {
+            if ($wrapperRaw.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                [void]$issues.Add([pscustomobject]@{
+                        path = 'scripts\install.ps1'
+                        check = 'wrapper-forwarding'
+                        message = "scripts/install.ps1 is missing wrapper forwarding marker '$marker'."
+                        line = 0
+                    })
+            }
+        }
+    }
+
+    if ($issues.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'installer-entrypoint-static-contract' `
+            -Title 'Installer entrypoint static contract / 安装三入口静态契约' `
+            -Status Passed `
+            -Message 'InstallEntrypoint ValidateSet, wrapper forwarding, root dispatch, RestoreCleanCheckpoint gates, and implementation operator-mode markers are statically consistent.'
+        return
+    }
+
+    Add-ReleaseCheckResult `
+        -Id 'installer-entrypoint-static-contract' `
+        -Title 'Installer entrypoint static contract / 安装三入口静态契约' `
+        -Status Failed `
+        -Message "Installer entrypoint static contract found $($issues.Count) issue(s)." `
+        -Remediation @('Keep UseConfiguredEnvironment, RestoreCleanCheckpoint, and CreateOrPreparePath closed across root/wrapper ValidateSet values, wrapper forwarding, root dispatch, RestoreCleanCheckpoint AllowVmMutation+ShouldProcess gates, and manifest operatorModeMatrix metadata.') `
+        -Details @{ issues = @($issues.ToArray()); requiredEntrypoints = @($requiredEntrypoints) }
+}
+
 function Test-PackageManifests {
     $manifestPaths = @(
         'packaging/source-package.manifest.json',
@@ -430,29 +999,21 @@ function Test-PackageManifests {
                 }
                 else {
                     $operatorModeMatrix = Get-ObjectPropertyValue -InputObject $installModeContract -Name 'operatorModeMatrix' -DefaultValue $null
-                    if ($null -eq $operatorModeMatrix) {
-                        [void]$issues.Add("releaseContract.installModeContract.operatorModeMatrix is missing: $relative")
+                    foreach ($matrixIssue in @(Get-OperatorModeMatrixContractIssues -OperatorModeMatrix $operatorModeMatrix -Context $relative)) {
+                        [void]$issues.Add($matrixIssue)
                     }
-                    else {
-                        $operatorModes = @(Get-ObjectPropertyValue -InputObject $operatorModeMatrix -Name 'modes' -DefaultValue @())
-                        $operatorModeIds = @($operatorModes | ForEach-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'modeId' -DefaultValue '') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-                        foreach ($requiredOperatorModeId in @(Get-CanonicalOperatorModeRequiredIds)) {
-                            if ($operatorModeIds -notcontains $requiredOperatorModeId) {
-                                [void]$issues.Add("operatorModeMatrix missing canonical mode '$requiredOperatorModeId': $relative")
+
+                    $operatorModes = if ($null -eq $operatorModeMatrix) { @() } else { @(Get-ObjectPropertyValue -InputObject $operatorModeMatrix -Name 'modes' -DefaultValue @()) }
+                    foreach ($requiredEntrypoint in @(Get-InstallEntrypointRequiredValues)) {
+                        $entrypointFound = $false
+                        foreach ($operatorMode in $operatorModes) {
+                            if ([string](Get-ObjectPropertyValue -InputObject $operatorMode -Name 'entrypoint' -DefaultValue '') -eq $requiredEntrypoint) {
+                                $entrypointFound = $true
+                                break
                             }
                         }
-
-                        foreach ($requiredEntrypoint in @('UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')) {
-                            $entrypointFound = $false
-                            foreach ($operatorMode in $operatorModes) {
-                                if ([string](Get-ObjectPropertyValue -InputObject $operatorMode -Name 'entrypoint' -DefaultValue '') -eq $requiredEntrypoint) {
-                                    $entrypointFound = $true
-                                    break
-                                }
-                            }
-                            if (-not $entrypointFound) {
-                                [void]$issues.Add("operatorModeMatrix missing entrypoint '$requiredEntrypoint': $relative")
-                            }
+                        if (-not $entrypointFound) {
+                            [void]$issues.Add("operatorModeMatrix missing entrypoint '$requiredEntrypoint': $relative")
                         }
                     }
                 }
@@ -1568,7 +2129,7 @@ function Get-ReleaseRequiredEvidenceFields {
         provenance = @('gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.shortCommit', 'gitMetadata.dirtyStatus', 'gitMetadata.statusCount', 'generatedAtUtc', 'repositoryRoot')
         sourceHandoff = @('release-readiness.json.failedCount=0', 'gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.dirtyStatus', 'sourceRuntimeSafetyMetadata', 'executionBoundaries', 'results[].id/status')
         runtimeHandoff = @('RuntimePublishRoot', 'RequireCompleteRuntimePackage=true', 'gapAudit.runtimePublishRootCompleteness.handoffVerified=true', 'summary.missingCount=0', 'summary.incompleteCount=0', 'summary.forbiddenFileCount=0', 'entries[].sourcePath')
-        installModeHandoff = @('installModeContract.schema', 'installModeContract.modes[].id', 'installModeContract.readinessPackageNonMutation', 'installContractGaps', 'installContractGapNextActionsZh', 'results[install-mode-contract].status')
+        installModeHandoff = @('installModeContract.schema', 'installModeContract.operatorModeMatrix.modes[].entrypoint', 'installModeContract.modes[].id', 'installModeContract.readinessPackageNonMutation', 'installContractGaps', 'installContractGapNextActionsZh', 'results[install-mode-contract].status', 'results[installer-entrypoint-static-contract].status')
         freshLiveClaim = @('gitMetadata.commit', 'gitMetadata.branch', 'gitMetadata.dirtyStatus', 'job id', 'runtime root', 'generatedAtUtc/local time', 'report.json path', 'report.zh.html path', 'report.en.html path')
         fallbackWhenMissingFreshLiveJobZh = '没有实验室 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
     }
@@ -1646,6 +2207,7 @@ function Get-InstallModeContractSnapshot {
     $gaps = New-Object System.Collections.Generic.List[string]
     $manifestContractsPresent = New-Object System.Collections.Generic.List[string]
     $manifestModeIds = New-Object System.Collections.Generic.List[string]
+    $manifestOperatorModeMatrices = New-Object System.Collections.Generic.List[object]
 
     foreach ($relative in @('packaging/source-package.manifest.json', 'packaging/runtime-package.manifest.json')) {
         $path = Join-Path $RepositoryRoot $relative
@@ -1670,6 +2232,20 @@ function Get-InstallModeContractSnapshot {
                 [void]$manifestContractsPresent.Add($relative)
                 foreach ($modeId in @((Get-ObjectPropertyValue -InputObject $installModeContract -Name 'modeIds' -DefaultValue @()) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
                     [void]$manifestModeIds.Add([string]$modeId)
+                }
+
+                $operatorModeMatrix = Get-ObjectPropertyValue -InputObject $installModeContract -Name 'operatorModeMatrix' -DefaultValue $null
+                foreach ($matrixIssue in @(Get-OperatorModeMatrixContractIssues -OperatorModeMatrix $operatorModeMatrix -Context $relative)) {
+                    [void]$gaps.Add($matrixIssue)
+                }
+
+                if ($null -ne $operatorModeMatrix) {
+                    [void]$manifestOperatorModeMatrices.Add([pscustomobject][ordered]@{
+                            manifest = $relative
+                            modeIds = @((Get-ObjectPropertyValue -InputObject $operatorModeMatrix -Name 'modes' -DefaultValue @()) |
+                                ForEach-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'modeId' -DefaultValue '') } |
+                                Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                        })
                 }
             }
 
@@ -1739,6 +2315,12 @@ function Get-InstallModeContractSnapshot {
         manifestContractsPresent = @($manifestContractsPresent.ToArray())
         requiredModeIds = @($requiredModeIds)
         manifestModeIds = @($uniqueManifestModeIds)
+        requiredEntrypoints = @(Get-InstallEntrypointRequiredValues)
+        operatorModeMatrix = [ordered]@{
+            schema = 'ksword.release.operator-mode-matrix.v1'
+            modes = @(Get-CanonicalOperatorModeMatrix)
+        }
+        manifestOperatorModeMatrices = @($manifestOperatorModeMatrices.ToArray())
         gapDetected = $gapDetected
         gaps = @($gapArray)
         gapNextActionsZh = @(Get-InstallContractGapNextActionsZh -Gaps $gapArray)
@@ -2062,6 +2644,7 @@ function Get-ReleaseGapAuditSnapshot {
             nextActionsZh = @($installModeContract.gapNextActionsZh)
             requiredModeIds = @($installModeContract.requiredModeIds)
             modeIds = @($installModeContract.modes | ForEach-Object { $_.id })
+            operatorModeEntrypoints = @($installModeContract.operatorModeMatrix.modes | ForEach-Object { $_.entrypoint })
             readinessPackageNonMutation = $installModeContract.readinessPackageNonMutation
             remediationZh = 'install mode contract 必须覆盖已有环境、checkpoint/snapshot 边界、首次/新机器流程、首机前置条件、兼容性边界，以及 package/readiness 明确不变更。'
         }
@@ -2196,6 +2779,7 @@ Test-PackageManifests
 Test-RuntimePublishCompleteness
 Test-PowerShellScriptSyntax
 Test-ScriptWrapperParameterSurface
+Test-InstallerEntrypointStaticContract
 Test-CSignToolNotInReleasePath
 Test-NoGuiSigningFallback
 Test-ReadinessNoVmMutationCommands
@@ -2314,6 +2898,14 @@ $summary = [pscustomobject][ordered]@{
     componentProgress     = Get-ReleaseComponentProgressSnapshot -ExitCode $exitCode
     gapAudit              = Get-ReleaseGapAuditSnapshot -ExitCode $exitCode
     sourceRuntimeSafetyMetadata = [ordered]@{
+        installModeContract = [ordered]@{
+            gapDetected = [bool]$installModeContractSummary.gapDetected
+            gaps = @($installModeContractSummary.gaps)
+            nextActionsZh = @($installModeContractSummary.gapNextActionsZh)
+            modeIds = @($installModeContractSummary.modes | ForEach-Object { $_.id })
+            operatorModeEntrypoints = @($installModeContractSummary.operatorModeMatrix.modes | ForEach-Object { $_.entrypoint })
+            packageReadinessExecutesInstallerModes = $false
+        }
         sourcePackage = [ordered]@{
             dryRunEnabledByDefault = -not [bool]$SkipSourcePackageDryRun
             sourceOnly = $true

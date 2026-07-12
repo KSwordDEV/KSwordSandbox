@@ -40,11 +40,15 @@ public sealed record BehaviorRule
 
     public required string Title { get; init; }
 
+    public string? TitleZh { get; init; }
+
     public string Severity { get; init; } = "info";
 
     public string Confidence { get; init; } = "medium";
 
     public string Summary { get; init; } = string.Empty;
+
+    public string? SummaryZh { get; init; }
 
     public string? MitreTechniqueId { get; init; }
 

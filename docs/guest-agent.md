@@ -111,12 +111,12 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `security.privilege.special_logon`, `security.privilege.token_adjusted`, and
   related `security.*` audit rows from a best-effort Windows Security Event Log
   supplement (`source=windowsEventLog`). The agent queries targeted
-  Microsoft-Windows-Security-Auditing IDs including 4656/4663 process-object
+  Microsoft-Windows-Security-Auditing IDs including 4656/4663/4690 process-object
   access fallback rows, 4672, 4688, 4689, and 4703, plus nearby token,
   privileged-service, service-install, scheduled-task, account/group,
   user-right, and audit-policy events. `wevtutil qe Security` is bounded with
   `/rd:true`, RenderedXml output, a per-read `/c` cap, and a short timeout;
-  4656/4663 are XPath-filtered to `ObjectType=Process` to avoid broad object
+  4656/4663/4690 are post-parse filtered to `ObjectType=Process` to avoid broad object
   access noise. Security log access or audit policy may be unavailable in
   locked-down guests; those cases become non-fatal
   `security_eventlog.skipped` / `security_eventlog.query_failed` /
@@ -132,6 +132,18 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `targetProcess*`, `object*`, `accesses`, `requestedAccess`, `desiredAccess`,
   and `operation` aliases when available. All rows include `zhMessage` and
   `zhHint`.
+- `etw_security.readiness.summary`,
+  `etw_security.provider_manifest.readiness`, and
+  `etw_security.surface.readiness` for targeted ETW/Security coverage
+  diagnostics. The probe only runs bounded provider-manifest queries
+  (`wevtutil gp`) and explicitly sets `etwLiveCaptureEnabled=false` /
+  `etwSessionStarted=false`; it does not start a live ETW trace, mutate the VM,
+  or execute the sample. These rows map R0 gaps for token/privilege,
+  process-access/handle duplication, process lifecycle, thread lifecycle, and
+  module image load/unload to Security Event IDs and Kernel-Process/TI provider
+  readiness. They are collection-health metadata with
+  `behaviorCounted=false`, `nonbehavior=true`, `sampleBehaviorCandidate=false`,
+  plus Chinese `zhMessage` / `zhHint`.
 - `environment.detail` for additional runtime and guest context, including
   .NET framework description, runtime identifier, elevation estimate,
   interactive-session flag, time-zone metadata, temp/user profile paths, and

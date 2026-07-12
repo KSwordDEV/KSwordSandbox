@@ -319,6 +319,7 @@ internal static class AgentProgram
             [
                 new ProcessTreeProbe(),
                 new SecurityEventLogProbe(),
+                new EtwSecurityReadinessProbe(),
                 new FileDiffProbe(),
                 new TcpConnectionDiffProbe(),
                 new PacketCaptureProbe(),

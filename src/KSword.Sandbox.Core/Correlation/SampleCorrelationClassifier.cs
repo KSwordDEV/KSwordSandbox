@@ -32,6 +32,8 @@ public static class SampleCorrelationClassifier
         "system",
         "idle",
         "registry",
+        "secure system",
+        "memory compression",
         "smss",
         "csrss",
         "wininit",
@@ -60,7 +62,8 @@ public static class SampleCorrelationClassifier
         "startmenuexperiencehost",
         "textinputhost",
         "shellexperiencehost",
-        "applicationframehost"
+        "applicationframehost",
+        "sppsvc"
     ];
 
     private static readonly string[] KnownWindowsServiceNames =
@@ -251,19 +254,18 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Environment("driver-row-belongs-to-kernel-or-core-system-process", "processName");
         }
 
-        if (processFacts is not null && IsKnownSystemProcess(processFacts) && targetsSystemOnly)
+        if (processFacts is not null && IsKnownSystemProcess(processFacts))
         {
-            return CorrelationDisposition.Environment("driver-row-joined-known-system-process-and-system-target", "processId");
+            return CorrelationDisposition.Environment(
+                targetsSystemOnly
+                    ? "driver-row-joined-known-system-process-and-system-target"
+                    : "driver-row-joined-known-system-process-without-prior-sample-taint",
+                "processId");
         }
 
         if (isHighSignalMutation && targetsUserWritableOrPersistence)
         {
             return CorrelationDisposition.Probable("driver-mutation-targets-user-writable-or-persistence-location-without-sample-pid", "path");
-        }
-
-        if (processFacts is not null && IsKnownSystemProcess(processFacts))
-        {
-            return CorrelationDisposition.Environment("driver-row-joined-known-system-process-without-prior-sample-taint", "processId");
         }
 
         if (isHighSignalMutation && !targetsSystemOnly && !IsPathTruncated(data))

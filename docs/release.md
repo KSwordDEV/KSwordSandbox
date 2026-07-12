@@ -529,6 +529,11 @@ that directory when the source project is not present.
 - `requiredEvidenceFields`: 机器可读列出 source handoff、runtime handoff 和 fresh live
   claim 必填字段；fresh live claim 必须有 commit/branch/dirty status、`job id`、
   runtime root、时间和报告路径。
+- `installModeContract.operatorModeMatrix`: 必须与 `install.ps1` 的三入口实现保持一致：
+  `UseConfiguredEnvironment` 只诊断、`RestoreCleanCheckpoint` 的真实恢复必须显式
+  `-AllowVmMutation` 且经过 `ShouldProcess` / `-Confirm` 或 `-Force`、`CreateOrPreparePath`
+  只做本机目录/config/secret/payload 准备。`Test-ReleaseReadiness.ps1` 只用 AST/JSON
+  静态检查该 contract，不运行安装入口或 VM mutation。
 - `componentProgress.components[].id`: `runtime-publish-root`, `package-safety-contract`,
   `release-smoke-scenarios`, `fresh-live-guardrail`, `self-noise-guard-readiness`,
   `operator-remediation-zh`。

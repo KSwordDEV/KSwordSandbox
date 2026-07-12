@@ -4,8 +4,10 @@
     {
       "id": "host-submission",
       "title": "Sample accepted for sandbox planning",
+      "titleZh": "样本已接受用于沙箱规划",
       "severity": "info",
       "summary": "The host accepted a local sample path and created a planning artifact.",
+      "summaryZh": "主机接受本地样本路径并创建规划证据。",
       "eventTypes": [
         "submission.accepted"
       ],
@@ -17,8 +19,10 @@
     {
       "id": "runbook-created",
       "title": "Hyper-V runbook generated",
+      "titleZh": "已生成 Hyper-V 运行手册",
       "severity": "info",
       "summary": "The host generated a reproducible Hyper-V execution plan for review.",
+      "summaryZh": "主机生成可复现的 Hyper-V 执行计划供复核。",
       "eventTypes": [
         "hyperv.runbook.created"
       ],
@@ -192,8 +196,10 @@
     {
       "id": "process-new",
       "title": "New process observed after launch",
+      "titleZh": "启动后观察到新进程",
       "severity": "low",
       "summary": "The guest agent observed a non-baseline process after sample execution started. Sandbox plumbing helpers are excluded so the finding stays focused on sample-visible process activity.",
+      "summaryZh": "来宾 Agent 在样本执行开始后观察到非基线进程。沙箱管道辅助进程已排除，使命中聚焦于样本可见的进程活动。",
       "eventTypes": [
         "process.new"
       ],
@@ -269,8 +275,10 @@
     {
       "id": "file-drop",
       "title": "Dropped or modified file",
+      "titleZh": "文件落地或修改",
       "severity": "low",
       "summary": "The guest agent observed a file creation or modification during execution.",
+      "summaryZh": "来宾 Agent 在执行期间观察到文件创建或修改。",
       "eventTypes": [
         "file.created",
         "file.modified"
@@ -295,8 +303,10 @@
     {
       "id": "file-deleted",
       "title": "File deletion observed",
+      "titleZh": "观察到文件删除",
       "severity": "low",
       "summary": "The guest agent or driver event stream reported a file deletion during execution.",
+      "summaryZh": "来宾 Agent 或驱动事件流在执行期间报告了文件删除。",
       "mitreTechniqueId": "T1070.004",
       "mitreTechniqueName": "File Deletion",
       "eventTypes": [
@@ -392,8 +402,10 @@
     {
       "id": "process-timeout-long-sleep",
       "title": "Sample still running at timeout",
+      "titleZh": "样本在超时时仍在运行",
       "severity": "info",
       "summary": "The sample process was still running when the configured analysis window ended. This is common for GUI applications such as Notepad and is reported as execution-state metadata, not malicious behavior by itself.",
+      "summaryZh": "配置的分析窗口结束时样本进程仍在运行。这对记事本等 GUI 应用较常见，报告为执行状态元数据，本身不是恶意行为。",
       "eventTypes": [
         "process.timeout"
       ],
@@ -896,11 +908,11 @@
     {
       "id": "static-pe-tls-callbacks",
       "title": "TLS directory or callback pointer present",
-      "titleZh": "存在 TLS 目录或回调指针",
+      "titleZh": "存在 PE TLS 目录或回调指针",
       "severity": "medium",
       "confidence": "low",
       "summary": "Static analysis found a PE TLS directory or callback pointer, which can execute code before the main entry point and is useful to triage for packing or evasion.",
-      "summaryZh": "静态分析发现“存在 TLS 目录或回调指针”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现 PE TLS 目录或回调指针；该结构可在主入口点前执行代码，常用于打包、初始化或规避分诊。",
       "mitreTechniqueId": "T1027",
       "mitreTechniqueName": "Obfuscated Files or Information",
       "eventTypes": [
@@ -2052,11 +2064,11 @@
     {
       "id": "static-script-command-string",
       "title": "Embedded script or interpreter command string",
-      "titleZh": "Embedded script或interpreter 命令 字符串",
+      "titleZh": "内嵌脚本或解释器命令字符串",
       "severity": "medium",
       "confidence": "low",
       "summary": "Static analysis extracted strings referencing scripting interpreters or common command execution utilities.",
-      "summaryZh": "静态分析发现“Embedded script或interpreter 命令 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态字符串中出现脚本解释器或常见命令执行工具；这是静态分诊线索，不代表运行期已执行命令。",
       "mitreTechniqueId": "T1059",
       "mitreTechniqueName": "Command and Scripting Interpreter",
       "eventTypes": [
@@ -2127,11 +2139,11 @@
     {
       "id": "static-lolbin-string",
       "title": "Living-off-the-land binary string",
-      "titleZh": "Living-off-the-land binary 字符串",
+      "titleZh": "LOLBin/系统自带工具字符串",
       "severity": "medium",
       "confidence": "low",
       "summary": "Static analysis extracted strings referencing signed Windows utilities often used for proxy execution or download helpers.",
-      "summaryZh": "静态分析发现“Living-off-the-land binary 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态字符串中引用常被滥用的 Windows 签名工具或系统自带程序；需结合命令行、落地文件和网络证据判断是否实际滥用。",
       "mitreTechniqueId": "T1218",
       "mitreTechniqueName": "System Binary Proxy Execution",
       "eventTypes": [
@@ -4653,8 +4665,10 @@
     {
       "id": "lsass-memory-dump-command",
       "title": "LSASS memory dump command",
+      "titleZh": "LSASS 内存转储命令",
       "severity": "critical",
       "summary": "A process command line referenced LSASS dump tooling, MiniDump paths, or common dump utilities used for credential theft triage.",
+      "summaryZh": "进程命令行引用 LSASS 转储工具、MiniDump 路径或常见转储工具，用于凭据窃取分诊。",
       "eventTypes": [
         "process.start"
       ],
@@ -4777,8 +4791,10 @@
     {
       "id": "credential-dumping-tool-command",
       "title": "Credential dumping tool command",
+      "titleZh": "凭据转储工具命令",
       "severity": "critical",
       "summary": "A process command line referenced credential dumping tool names or command tokens such as sekurlsa, lsadump, DCSync, Kerberoast, or browser/vault dump modes.",
+      "summaryZh": "进程命令行引用 sekurlsa、lsadump、DCSync、Kerberoast 或浏览器/Vault dump 模式等凭据转储工具名或命令标记。",
       "eventTypes": [
         "process.start"
       ],
@@ -6144,8 +6160,10 @@
     {
       "id": "screenshot-captured-artifact",
       "title": "Screenshot artifact captured",
+      "titleZh": "已捕获截图证据文件",
       "severity": "info",
       "summary": "The guest screenshot probe captured a desktop image artifact with dimensions or artifact path metadata for behavior review.",
+      "summaryZh": "来宾截图探针捕获了桌面图像证据，并带有尺寸或证据路径元数据供行为复核。",
       "eventTypes": [
         "screenshot.captured"
       ],
@@ -6187,8 +6205,10 @@
     {
       "id": "memory-dump-captured-artifact",
       "title": "Memory dump artifact captured",
+      "titleZh": "已捕获内存转储证据文件",
       "severity": "info",
       "summary": "The opt-in guest memory dump probe captured a minidump artifact for the launched sample process.",
+      "summaryZh": "按需启用的来宾内存转储探针为启动的样本进程捕获了 minidump 证据。",
       "eventTypes": [
         "memory_dump.captured"
       ],
@@ -6234,8 +6254,10 @@
     {
       "id": "dropped-file-artifact-copied",
       "title": "Dropped file artifact copied",
+      "titleZh": "已复制落地文件证据",
       "severity": "info",
       "summary": "The guest artifact collector copied a newly-created sample working-directory file into artifacts/dropped-files for post-run analysis.",
+      "summaryZh": "来宾证据采集器将新建的样本工作目录文件复制到 artifacts/dropped-files，供运行后分析。",
       "eventTypes": [
         "artifact.dropped_file.copied"
       ],
@@ -6314,8 +6336,10 @@
     {
       "id": "artifact-manifest-written",
       "title": "Guest artifact manifest written",
+      "titleZh": "已写入来宾证据清单",
       "severity": "info",
       "summary": "The guest artifact writer produced a manifest that can correlate screenshots, dropped files, memory dumps, and other artifacts with normalized events.",
+      "summaryZh": "来宾证据写入器生成了清单，可将截图、落地文件、内存转储和其他证据与规范化事件关联起来。",
       "eventTypes": [
         "artifact.manifest.written"
       ],
@@ -6334,8 +6358,10 @@
     {
       "id": "process-tree-observed",
       "title": "Process tree node observed",
+      "titleZh": "观察到进程树节点",
       "severity": "low",
       "summary": "The process-tree probe emitted a node with parent, root, depth, child-count, or lineage metadata, enabling full descendant review beyond single process-start rows.",
+      "summaryZh": "进程树探针输出带有父进程、根、深度、子进程数或谱系元数据的节点，可超越单个 process-start 行审阅完整后代。",
       "eventTypes": [
         "process.tree"
       ],
@@ -6399,9 +6425,11 @@
     {
       "id": "process-tree-child-count-observed",
       "title": "Process tree child-count metadata observed",
+      "titleZh": "观察到进程树子进程计数元数据",
       "severity": "info",
       "confidence": "low",
       "summary": "A process-tree node carried child-count metadata for triage of unusually broad sample lineage fan-out.",
+      "summaryZh": "进程树节点携带 child-count 元数据，用于分诊异常宽的样本谱系扇出。",
       "eventTypes": [
         "process.tree"
       ],
@@ -6703,8 +6731,10 @@
     {
       "id": "system-diff-truncated",
       "title": "System diff event volume truncated",
+      "titleZh": "系统差异事件量已截断",
       "severity": "info",
       "summary": "The process-tree/system-change probe reached a per-kind diff cap and emitted a truncation marker so analysts know additional service, task, or startup changes existed.",
+      "summaryZh": "进程树/系统变更探针达到每类 diff 上限并发出截断标记，让分析员知道还存在更多服务、任务或启动项变更。",
       "eventTypes": [
         "service.diff_truncated",
         "scheduled_task.diff_truncated",
@@ -9107,8 +9137,10 @@
     {
       "id": "packet-capture-artifact-indexed",
       "title": "Packet capture artifact indexed",
+      "titleZh": "已索引网络抓包证据文件",
       "severity": "info",
       "summary": "A manifest, host artifact, or PCAP import event recorded a packet-capture artifact path, hash, MIME type, or byte size for report linkage.",
+      "summaryZh": "清单、主机证据或 PCAP 导入事件记录了抓包证据路径、哈希、MIME 类型或字节大小，用于报告关联。",
       "eventTypes": [
         "artifact.packet_capture.indexed",
         "pcap.artifact.indexed",
@@ -9490,9 +9522,11 @@
     {
       "id": "lsass-dump-file-created",
       "title": "LSASS dump file created",
+      "titleZh": "已创建 LSASS 转储文件",
       "severity": "critical",
       "confidence": "high",
       "summary": "A file creation or artifact copy used an LSASS-oriented dump filename, complementing process-access and command-line LSASS dumping evidence.",
+      "summaryZh": "文件创建或证据复制使用了面向 LSASS 的转储文件名，可补充进程访问和命令行 LSASS 转储证据。",
       "mitreTechniqueId": "T1003.001",
       "mitreTechniqueName": "LSASS Memory",
       "eventTypes": [
@@ -26692,11 +26726,11 @@
     {
       "id": "static-granular-injection-capability",
       "title": "Granular static process-injection capability",
-      "titleZh": "结构化静态进程注入能力",
+      "titleZh": "静态进程注入能力线索",
       "severity": "medium",
       "confidence": "low",
       "summary": "Granular static rows flagged process-injection API clusters or capability fields. This is import/string triage, not observed injection.",
-      "summaryZh": "结构化静态行标记进程注入 API 集群或能力字段；这是导入/字符串分诊，不代表已观察到注入。",
+      "summaryZh": "结构化静态行标记进程注入相关 API 集群或能力字段；这是导入/字符串分诊，不代表已观察到注入行为。",
       "mitreTechniqueId": "T1055",
       "mitreTechniqueName": "Process Injection",
       "eventTypes": [

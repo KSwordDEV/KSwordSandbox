@@ -42,6 +42,11 @@ release UX 约定 / release UX contract：
 
 - `.\install.ps1` 和 `.\scripts\install.ps1` 的入口选择菜单只帮助操作者选择语义路径；
   菜单选择“恢复 checkpoint”默认仍只是计划/诊断，不会真实还原 VM。
+- 这三种入口是固定 contract：`UseConfiguredEnvironment`、`RestoreCleanCheckpoint`、
+  `CreateOrPreparePath`。`scripts\Test-ReleaseReadiness.ps1` 会静态解析根安装器和
+  `scripts\` 包装器，检查 `ValidateSet` 是否完整、wrapper 是否转发这些参数、
+  `RestoreCleanCheckpoint` 是否同时受 `-AllowVmMutation` 和 `ShouldProcess`
+  保护，以及 manifest 的 `operatorModeMatrix` 是否与实现一致；这些检查不执行安装模式。
 - `UseConfiguredEnvironment` 是只读状态确认：读取已安装的本机配置、secret presence、
   VM/checkpoint profile 和 payload 状态，不写本机状态。
 - `RestoreCleanCheckpoint` 是 rollback 语义：默认 `-PlanOnly`/safe diagnostics；

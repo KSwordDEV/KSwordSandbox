@@ -57,6 +57,9 @@ Bounded PCAP parser：
 - Per artifact flow output cap: `parserMaxFlowEvents=256`
 - Coverage flags: `parserPacketLimitHit`, `parserProtocolEventLimitHit`,
   `parserFlowEventLimitHit`
+- Coverage counters on `pcap.summary`: `tcpPacketCount`, `udpPacketCount`,
+  `ipv4PacketCount`, `ipv6PacketCount`, `transportProtocolSummary`,
+  `ipFamilySummary`
 
 Bounded sidecar parser：
 
@@ -78,7 +81,25 @@ Rows carrying parser metadata also carry `parserMetadataBounded=true` and
 深层 JSON 或字段/行数超限），导入器会输出一条 nonbehavior `network.health`
 parser coverage row，带 `parserCoverageOnly=true`、`parserLinesRead`、
 `parserLineLimitHit`、`parserDepthLimitHit`、`parserFieldLimitHit`、
-`behaviorCounted=false` 和 `sampleBehaviorCandidate=false`。
+`readinessState=parser_coverage_only`、`behaviorCounted=false` 和
+`sampleBehaviorCandidate=false`。该 row 的中文 `zhMessage` / `zhHint`
+会明确提示“已读取但没有归一化协议行”，这是 readiness/coverage 状态，不是样本行为。
+
+## Coverage/readiness/nonbehavior quick map
+
+Parser/import readiness rows should stay outside behavior scoring：
+
+- `network.health` with `parserCoverageOnly=true`: sidecar was bounded-read, but no
+  DNS/HTTP/TLS/flow row was normalized. It may be caused by unknown log format,
+  depth/field/line limits, or sidecar content that is only health/readiness.
+- `network.sidecar.parse_error` / `pcap.parse_error`: parser diagnostic rows.
+  They explain malformed/truncated input and should not be converted into
+  maliciousness or benignness.
+- `network.import.summary` / `pcap.summary`: import accounting and readiness.
+  Use their counters to understand coverage; use canonical protocol rows for
+  sample behavior.
+- 中文提示原则：`zhMessage` 是操作者摘要；`zhHint` 是 triage 提示。若提示中出现
+  “解析覆盖状态”、“采集能力”或“readiness”，含义都是证据质量边界，而非样本网络行为。
 
 ## Guest 抓包诊断与导入证据 / Guest capture diagnostics vs imported evidence
 
@@ -157,6 +178,12 @@ Duplicate policy：
 - `network.import.summary.eventCount` 仍是全部 imported rows；行为计数应使用
   `canonicalBehaviorEventCount` / `behaviorCountedEventCount`。`compatibilityEventCount`
   / `rawPcapCompatibilityEventCount` 说明 raw PCAP 兼容行数量。
+- 协议族计数分两层：`protocolFamilyCounters` /
+  `canonicalProtocolFamilyCounters` 的 scope 是
+  `protocolFamilyCounterScope=behavior-counted-canonical-events`；`rawPcapCompatibilityProtocolFamilyCounters`
+  的 scope 是 `raw-pcap-compatibility-nonbehavior-rows`。历史 `dnsEventCount` /
+  `httpEventCount` / `tlsEventCount` / `flowEventCount` 可能包含 compatibility rows，
+  不应用于样本行为去重计数。
 
 ## 共享字段 Schema / Shared field schema
 
@@ -346,6 +373,9 @@ Sidecar rows 使用两层 artifact identity，避免把 sidecar 本身和 parent
   parent metadata 优先；导入器记录 `sidecarPcapLinkConflict=manifest-vs-adjacent`、
   `sidecarPcapLinkConflictPolicy=keep-existing-parent-metadata` 和 inferred path 字段，
   供人工复核。
+- Sidecar parent PCAP provenance 是 evidence traceability，不是 behavior。`linked=false`
+  或 `sidecarPcapLinkSource=none` 只表示没有安全、唯一的 parent capture 关联；不要因此推断
+  “无 PCAP 行为”或“无网络行为”。
 - `sidecarLineNumber`、`sidecarFormat`、`originalEventType`、sidecar hash/path、
   parser limit fields 都是 provenance/coverage metadata，不是样本行为。
 
@@ -417,8 +447,16 @@ Summary aggregation：
 - `parseErrorCount`
 - `canonicalBehaviorEventCount`, `compatibilityEventCount`,
   `rawPcapCompatibilityEventCount`
+- `canonicalDnsEventCount`, `canonicalHttpEventCount`, `canonicalTlsEventCount`,
+  `canonicalFlowEventCount`
+- `rawPcapDnsCompatibilityEventCount`, `rawPcapHttpCompatibilityEventCount`,
+  `rawPcapTlsCompatibilityEventCount`, `rawPcapFlowCompatibilityEventCount`
 - `behaviorCountedEventCount`, `nonbehaviorEventCount`,
   `collectorSelfNoiseEventCount`
+- `protocolFamilyCounters`, `canonicalProtocolFamilyCounters`,
+  `rawPcapCompatibilityProtocolFamilyCounters`
+- PCAP summary 的 `tcpPacketCount`, `udpPacketCount`, `ipv4PacketCount`,
+  `ipv6PacketCount`, `transportProtocolSummary`, `ipFamilySummary`
 - `protocolHealthSummary`, `collectionHealthSummary`,
   `protocolHealthOkCount`, `protocolHealthWarningCount`,
   `protocolHealthDegradedCount`
