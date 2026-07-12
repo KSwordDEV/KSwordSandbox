@@ -668,7 +668,7 @@ function New-GuestSecretCheck {
             -Message "凭据诊断：未在 Process/User/Machine 环境中找到 guest password secret '$SecretName'；值未打印。下一步：在运行 Live 的同一个管理员 PowerShell 中设置该环境变量，或运行安装向导保存/重置密码。" `
             -Details @{ secretName = $SecretName; isSet = $false; scope = ''; scopesChecked = @('Process', 'User', 'Machine'); valuePrinted = $false; sameProcessRequiredForLive = $true } `
             -Remediation @(
-                ".\install.ps1 -Mode Install -PromptPassword",
+                ".\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword",
                 ".\install.ps1 -Mode Change -ResetPassword -PromptPassword",
                 "如果环境变量已设置但仍失败，请在同一个 elevated PowerShell 中运行 `[Environment]::GetEnvironmentVariable('$SecretName','Process') -ne `$null` 确认 runner 进程可见；不要打印真实密码值。",
                 "If the host secret and actual VM account are out of sync, use .\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force from an elevated shell."
@@ -1003,9 +1003,9 @@ function New-PowerShellDirectCheck {
             -Name 'PowerShell Direct readiness' `
             -Status 'Warning' `
             -RequiredForLive $true `
-            -Message "PowerShell Direct 诊断：已跳过只读 probe，因为未设置 guest password secret '$SecretName'；不会启动 VM，也不会打印 secret 值。下一步：运行 .\install.ps1 -Mode Install -PromptPassword 或在当前进程设置环境变量。" `
+            -Message "PowerShell Direct 诊断：已跳过只读 probe，因为未设置 guest password secret '$SecretName'；不会启动 VM，也不会打印 secret 值。下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword 或在当前进程设置环境变量。" `
             -Details @{ vmName = $VmName; userName = $UserName; checked = $false; reason = 'missingCredentialSecret'; secretName = $SecretName; scopesChecked = @('Process', 'User', 'Machine'); readOnly = $true; valuePrinted = $false } `
-            -Remediation @("Set the guest password secret with .\install.ps1 -Mode Install -PromptPassword or use .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only read-only probe.")
+            -Remediation @("Set the guest password secret with .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword or use .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only read-only probe.")
     }
 
     try {

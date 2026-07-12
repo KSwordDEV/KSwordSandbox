@@ -25,8 +25,10 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     private const int MaxFieldValueLength = 2048;
     private const int MaxRenderedMessageLength = 1024;
     private const int MaxAuditPolicySnippetLength = 4096;
+    private const int MaxProviderManifestSnippetLength = 2048;
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan AuditPolicyCommandTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan ProviderManifestCommandTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan QueryOverlap = TimeSpan.FromSeconds(2);
     private static readonly int[] ProcessAccessEventIds = [4656, 4663];
 
@@ -106,6 +108,34 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         new("0cce9227-69ae-11d9-bed3-505054503030", "Other Object Access Events", "其它对象访问事件", "4698,4699,4700,4701,4702", "Scheduled-task changes and other object-access events.")
     ];
 
+    private static readonly FallbackSurfaceExpectation[] FallbackSurfaceExpectations =
+    [
+        new(
+            "process-handle-access",
+            "Process handle/object access",
+            "4656,4663",
+            "Microsoft-Windows-Security-Auditing",
+            "Handle Manipulation success auditing plus a process object SACL are normally required; useful for PROCESS_VM_* and DUP_HANDLE gaps."),
+        new(
+            "privilege-use",
+            "Privilege use/logon privileges",
+            "4672,4673,4674",
+            "Microsoft-Windows-Security-Auditing",
+            "Special Logon and Sensitive Privilege Use success auditing explain Se*Privilege context not decoded by R0 callbacks."),
+        new(
+            "token-adjustment",
+            "Token assignment/right adjustment",
+            "4696,4703,4704,4705,4717,4718",
+            "Microsoft-Windows-Security-Auditing",
+            "Authorization Policy Change and related Security events provide low-rate token/right mutation context."),
+        new(
+            "process-create-exit",
+            "Process create/exit",
+            "4688,4689; Kernel-Process start/stop",
+            "Microsoft-Windows-Security-Auditing; Microsoft-Windows-Kernel-Process",
+            "Security events add command line/token elevation when audit policy is enabled; Kernel-Process ETW provider presence is an alternate live-capture surface."),
+    ];
+
     private static readonly Regex PrivilegeNameRegex = new(
         @"\bSe[A-Za-z0-9]+Privilege\b",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -149,7 +179,8 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             return
             [
                 CreateStartedEvent(phase, context),
-                await CreateAuditPolicySummaryEventAsync(phase, context, cancellationToken).ConfigureAwait(false)
+                await CreateAuditPolicySummaryEventAsync(phase, context, cancellationToken).ConfigureAwait(false),
+                await CreateFallbackSurfaceReadinessEventAsync(phase, context, cancellationToken).ConfigureAwait(false)
             ];
         }
 
@@ -273,6 +304,28 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         };
 
         return BoundedProcessRunner.RunAsync(auditpolPath, arguments, AuditPolicyCommandTimeout, cancellationToken);
+    }
+
+    /// <summary>
+    /// Queries ETW provider metadata without starting a live trace session.
+    /// Inputs are a provider name and cancellation token; processing uses
+    /// wevtutil provider manifest inspection; the method returns command
+    /// metadata for non-behavior readiness events.
+    /// </summary>
+    private static Task<BoundedCommandResult> QueryProviderManifestAsync(
+        string providerName,
+        CancellationToken cancellationToken)
+    {
+        var wevtutilPath = ResolveWevtutilPath();
+        var arguments = new[]
+        {
+            "gp",
+            providerName,
+            "/ge:true",
+            "/gm:false"
+        };
+
+        return BoundedProcessRunner.RunAsync(wevtutilPath, arguments, ProviderManifestCommandTimeout, cancellationToken);
     }
 
     /// <summary>
@@ -1116,6 +1169,63 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         return evt;
     }
 
+    /// <summary>
+    /// Creates a non-behavior readiness row describing Security/ETW fallback
+    /// surfaces for known R0 semantic gaps. Inputs are phase/context; processing
+    /// performs only bounded provider-manifest probes and does not start any
+    /// live ETW session; the method returns one coverage-health event.
+    /// </summary>
+    private static async Task<SandboxEvent> CreateFallbackSurfaceReadinessEventAsync(
+        ProbePhase phase,
+        GuestProbeContext context,
+        CancellationToken cancellationToken)
+    {
+        var securityProviderResult = await QueryProviderManifestAsync(ProviderName, cancellationToken).ConfigureAwait(false);
+        var kernelProcessProviderResult = await QueryProviderManifestAsync("Microsoft-Windows-Kernel-Process", cancellationToken).ConfigureAwait(false);
+
+        var evt = CreateCollectionDiagnosticEvent("security_eventlog.fallback_surface.readiness", phase, context, "fallbackSurfaceReadiness");
+        evt.Data["collectorMode"] = "security-etw-readiness-query";
+        evt.Data["r0CoverageGap"] = "Readiness map for process handle access, privilege use, token adjustment, and process create/exit semantics not always represented by R0 callback JSONL.";
+        evt.Data["fallbackSurfaceCount"] = FallbackSurfaceExpectations.Length.ToString(CultureInfo.InvariantCulture);
+        evt.Data["fallbackSurfaceKeys"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => item.SurfaceKey));
+        evt.Data["fallbackSurfaceNames"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => item.SurfaceName));
+        evt.Data["fallbackSecurityEventIds"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => item.SecurityEventIds));
+        evt.Data["fallbackProviders"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => item.ProviderSurface));
+        evt.Data["fallbackSurfaceNotes"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => $"{item.SurfaceName}: {item.ReadinessNote}"));
+        evt.Data["etwLiveCaptureEnabled"] = "false";
+        evt.Data["etwLiveCaptureReason"] = "readiness-only probe; no trace session is started";
+        evt.Data["manifestQueryTimeoutMilliseconds"] = ProviderManifestCommandTimeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture);
+        evt.Data["securityProviderManifestStatus"] = ProviderManifestStatus(securityProviderResult);
+        evt.Data["kernelProcessProviderManifestStatus"] = ProviderManifestStatus(kernelProcessProviderResult);
+        evt.Data["securityProviderManifestSnippet"] = Truncate(securityProviderResult.StandardOutput, MaxProviderManifestSnippetLength);
+        evt.Data["kernelProcessProviderManifestSnippet"] = Truncate(kernelProcessProviderResult.StandardOutput, MaxProviderManifestSnippetLength);
+        evt.Data["securityProviderCommand"] = $"{securityProviderResult.FileName} {securityProviderResult.Arguments}";
+        evt.Data["kernelProcessProviderCommand"] = $"{kernelProcessProviderResult.FileName} {kernelProcessProviderResult.Arguments}";
+        evt.Data["surface.processHandleAccess"] = "Security 4656/4663; requires Handle Manipulation success auditing and target process SACL; emitted rows remain nonbehavior unless sample-correlated.";
+        evt.Data["surface.privilegeUse"] = "Security 4672/4673/4674; requires Special Logon/Sensitive Privilege Use success auditing; emitted rows remain nonbehavior unless sample-correlated.";
+        evt.Data["surface.tokenAdjustment"] = "Security 4696/4703/4704/4705/4717/4718; requires Authorization Policy Change or related policy auditing; emitted rows remain nonbehavior unless sample-correlated.";
+        evt.Data["surface.processCreateExit"] = "Security 4688/4689 and Kernel-Process ETW provider metadata; current implementation reads Security log only and records ETW provider readiness.";
+        evt.Data["sampleBehaviorCandidateReason"] = "readiness-only-fallback-surface-map";
+        evt.Data["zhMessage"] = "已记录 Security/ETW 补充面就绪度，用于说明 R0 未完全覆盖的进程句柄、权限、令牌和进程生命周期语义可由哪些低风险通道补足。";
+
+        AddCommandResultSummary(evt.Data, "securityProvider", securityProviderResult);
+        AddCommandResultSummary(evt.Data, "kernelProcessProvider", kernelProcessProviderResult);
+
+        if (!securityProviderResult.Succeeded || !kernelProcessProviderResult.Succeeded)
+        {
+            evt.Data["captureState"] = "partial";
+            evt.Data["status"] = "partial";
+            evt.Data["reason"] = "fallbackSurfacePartiallyUnavailable";
+            evt.Data["zhHint"] = "一个或多个 ETW/EventLog provider manifest 查询失败；这只影响就绪度说明，不会启动 ETW 抓取，也不代表样本行为。Security 事件是否真正出现仍取决于日志权限、审核策略和样本强关联。";
+        }
+        else
+        {
+            evt.Data["zhHint"] = "Provider manifest 可查询仅说明补充面存在；实时 ETW 抓取未启用，Security 事件仍只有在强样本关联时才 behaviorCounted=true。";
+        }
+
+        return evt;
+    }
+
     private static SandboxEvent CreateSkippedEvent(
         ProbePhase phase,
         GuestProbeContext context,
@@ -1243,6 +1353,48 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         AddIfNotEmpty(data, "message", result.Message);
         AddIfNotEmpty(data, "stderr", Truncate(result.StandardError, 2048));
         AddIfNotEmpty(data, "stdout", Truncate(result.StandardOutput, 2048));
+    }
+
+    private static void AddCommandResultSummary(Dictionary<string, string> data, string prefix, BoundedCommandResult result)
+    {
+        data[$"{prefix}.exitCode"] = result.ExitCode?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        data[$"{prefix}.timedOut"] = result.TimedOut.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        data[$"{prefix}.succeeded"] = result.Succeeded.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        data[$"{prefix}.timeoutMilliseconds"] = result.Timeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture);
+        AddIfNotEmpty(data, $"{prefix}.exceptionType", result.ExceptionType);
+        AddIfNotEmpty(data, $"{prefix}.message", result.Message);
+        AddIfNotEmpty(data, $"{prefix}.stderr", Truncate(result.StandardError, 1024));
+    }
+
+    private static string ProviderManifestStatus(BoundedCommandResult result)
+    {
+        if (result.Succeeded)
+        {
+            return "manifestQueryable";
+        }
+
+        if (result.TimedOut)
+        {
+            return "manifestQueryTimedOut";
+        }
+
+        if (!string.IsNullOrWhiteSpace(result.ExceptionType))
+        {
+            return "manifestCollectorLaunchFailed";
+        }
+
+        var text = $"{result.StandardError}\n{result.StandardOutput}\n{result.Message}";
+        if (ContainsAny(text, "not found", "could not find", "cannot find", "找不到指定"))
+        {
+            return "manifestProviderMissing";
+        }
+
+        if (ContainsAny(text, "Access is denied", "拒绝访问", "0x5"))
+        {
+            return "manifestAccessDenied";
+        }
+
+        return "manifestQueryFailed";
     }
 
     private static string NormalizedEventType(int eventId)
@@ -1783,6 +1935,13 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         string ZhName,
         string SecurityEventIds,
         string Rationale);
+
+    private readonly record struct FallbackSurfaceExpectation(
+        string SurfaceKey,
+        string SurfaceName,
+        string SecurityEventIds,
+        string ProviderSurface,
+        string ReadinessNote);
 
     private readonly record struct AuditPolicyRow(
         string Subcategory,

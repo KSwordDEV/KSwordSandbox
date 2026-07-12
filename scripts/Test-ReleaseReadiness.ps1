@@ -1755,22 +1755,22 @@ function Get-InstallModeContractSnapshot {
             [ordered]@{
                 id = 'restore-checkpoint-snapshot'
                 titleZh = '还原 checkpoint/snapshot 边界'
-                primaryCommands = @('.\scripts\install.ps1 -Mode CheckEnvironment', '.\scripts\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force', '.\scripts\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live')
+                primaryCommands = @('.\scripts\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly', '.\scripts\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf', '.\scripts\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm')
                 evidenceFields = @('InstallStatus.CheckpointExists', 'InstallStatus.CheckpointGuidance', 'VmProfile.ExpectedCheckpointName')
                 readinessExecutesCommand = $false
                 packageExecutesCommand = $false
                 mayRestoreCheckpointOnlyWhenExplicit = $true
-                nextActionsZh = @('下一步：缺 checkpoint 时先创建或选择 clean checkpoint；只有显式 lab/live 操作才可还原快照。')
+                nextActionsZh = @('下一步：先用 RestoreCleanCheckpoint -PlanOnly/-WhatIf 查看 rollback 计划；只有隔离 lab 操作者显式 -AllowVmMutation -Confirm/-Force 才可真实还原快照。')
             },
             [ordered]@{
                 id = 'fresh-create-flow'
                 titleZh = '首次/新机器本机配置流程'
-                primaryCommands = @('.\scripts\install.ps1 -Mode Install -PromptPassword', '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>', '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained')
+                primaryCommands = @('.\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword', '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>', '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained')
                 evidenceFields = @('InstallStatus.RuntimeRootExists', 'InstallStatus.LocalConfigExists', 'InstallStatus.SecretValuePrinted=false', 'InstallStatus.GuestPayloadReadyForLiveCopy')
                 createsLocalRuntimeFolders = $true
                 createsVm = $false
                 createsCheckpoint = $false
-                nextActionsZh = @('下一步：新机器先运行 Install -PromptPassword 创建本机目录/配置/secret；payload 和 RuntimeRoot 放仓库外。')
+                nextActionsZh = @('下一步：新机器先运行 CreateOrPreparePath -PromptPassword 创建本机目录/配置/secret；payload 和 RuntimeRoot 放仓库外。')
             },
             [ordered]@{
                 id = 'first-computer-prerequisites'

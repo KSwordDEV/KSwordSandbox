@@ -935,7 +935,7 @@ function Invoke-RestoreCleanCheckpointEntrypoint {
     }
 
     if (-not $AllowVmMutation) {
-        Write-InstallInfo '已拒绝真实 VM 变更：还原 checkpoint/snapshot 需要显式 -AllowVmMutation，并仍受 ShouldProcess/-Confirm 控制。 / VM mutation not allowed.'
+        Write-InstallInfo '默认安全计划：还原 checkpoint/snapshot 入口未加 -AllowVmMutation 时只显示计划和诊断；不会查询、启动、停止或还原 VM。 / Safe default: restore entrypoint is plan-only unless VM mutation is explicitly allowed.'
         Show-InstallEntrypointDiagnostics -SelectedEntrypoint 'RestoreCleanCheckpoint'
         return
     }
@@ -1045,9 +1045,9 @@ function Invoke-InstallEntrypoint {
 function Invoke-InstallEntrypointMenu {
     Write-Host ''
     Write-Host '安装入口选择 / Install entrypoint selection:'
-    Write-Host '  1) 使用已配置环境（只诊断，不修改 VM） / Use already configured environment'
-    Write-Host '  2) 还原已有干净 checkpoint/snapshot（默认只给计划；真实还原需 -AllowVmMutation） / Restore existing clean checkpoint'
-    Write-Host '  3) 创建/准备新的本机路径（目录/config，可选 payload；不创建 VM） / Create or prepare new local path'
+    Write-Host '  1) 使用已配置环境（只诊断，不写本机状态，不修改 VM） / Use already configured environment'
+    Write-Host '  2) 回退/恢复已有 clean checkpoint（菜单默认只给计划；真实还原需命令行 -AllowVmMutation -Confirm/-Force） / Plan rollback/restore existing clean checkpoint'
+    Write-Host '  3) 全新/新电脑本机准备（目录/config/secret，可选 payload；不创建 VM） / Fresh new-computer local preparation'
     $choice = Read-MenuChoice -Prompt '请选择 [1-3] / Choose [1-3]' -Allowed @('1', '2', '3')
     switch ($choice) {
         '1' { Invoke-InstallEntrypoint -SelectedEntrypoint 'UseConfiguredEnvironment' }
@@ -1724,7 +1724,7 @@ function Show-KSwordSandboxInstallStatus {
         [void]$recommendedActions.Add([string]$profileAction)
     }
     if (-not (Test-Path -LiteralPath $RuntimeRoot -PathType Container)) {
-        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Install，在 '$RuntimeRoot' 下创建运行目录。 / Run install to create runtime folders.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword，在 '$RuntimeRoot' 下创建运行目录。 / Run install to create runtime folders.")
     }
     if (-not (Test-Path -LiteralPath $localConfig -PathType Leaf)) {
         [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword 创建本机配置，或运行 .\install.ps1 -Mode Change -UpdateHyperVConfig 记录 VM/checkpoint 路径。")

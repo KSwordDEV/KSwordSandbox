@@ -55,7 +55,8 @@ internal static partial class ProgramMain
             {
                 "该命令仅读取现有 report.json、artifact-index/目录和 runbook-progress.json；不会启动、还原、停止或修改 VM。/ This command only reads existing report, artifact, and progress files; it does not start, restore, stop, or mutate a VM.",
                 "该命令不运行 smoke 测试，不代表 fresh Hyper-V/live evidence。/ This command does not run smoke tests and is not fresh Hyper-V/live evidence.",
-                "审阅重点：sampleBehaviorCandidateCount 应只包含样本/系统候选行为；nonbehavior/self-noise/VT/R0 健康行应进入排除统计。/ Review focus: sampleBehaviorCandidateCount should only contain sample/system behavior candidates; nonbehavior/self-noise/VT/R0 health rows should appear in excluded counts."
+                "审阅重点：sampleBehaviorCandidateCount 应只包含样本/系统候选行为；nonbehavior/self-noise/VT/R0 健康行应进入排除统计。/ Review focus: sampleBehaviorCandidateCount should only contain sample/system behavior candidates; nonbehavior/self-noise/VT/R0 health rows should appear in excluded counts.",
+                "sampleCorrelation=environment/unknown 代表证据已保留但不应升级为样本结论；confirmed/probable 才应进入主行为叙事。/ sampleCorrelation=environment/unknown means retained evidence that should not be promoted to sample conclusions; only confirmed/probable should enter the primary behavior story."
             },
             vmAction = "none",
             hyperVAction = "none",
@@ -81,6 +82,7 @@ internal static partial class ProgramMain
         Console.WriteLine($"样本行为候选 / Sample behavior candidates: {reportAudit.SampleBehaviorCandidateCount}");
         Console.WriteLine($"排除的 metadata/self-noise / Excluded metadata/self-noise: {reportAudit.ExcludedNonBehaviorCandidateCount}");
         Console.WriteLine($"behaviorCounted=false: {reportAudit.BehaviorCountedFalseCount} | nonbehavior=true: {reportAudit.NonBehaviorTrueCount} | sampleBehaviorCandidate=false: {reportAudit.SampleBehaviorCandidateFalseCount}");
+        Console.WriteLine($"sampleCorrelation: confirmed={reportAudit.SampleCorrelationConfirmedCount}, probable={reportAudit.SampleCorrelationProbableCount}, environment={reportAudit.SampleCorrelationEnvironmentCount}, unknown={reportAudit.SampleCorrelationUnknownCount}");
         Console.WriteLine($"Collector self-noise/noise: {reportAudit.CollectorSelfNoiseCount}/{reportAudit.CollectorNoiseCount} | VT quiet: {reportAudit.VirusTotalQuietStateCount} | R0 health/readiness: {reportAudit.R0HealthOrReadinessCount}");
         Console.WriteLine($"产物 / Artifacts: total={artifactAudit.TotalArtifacts}, downloadable={artifactAudit.DownloadableArtifacts}, rejected={artifactAudit.RejectedArtifacts}, dropped={artifactAudit.DroppedFiles}, screenshots={artifactAudit.Screenshots}, memory={artifactAudit.MemoryDumps}, pcap={artifactAudit.PacketCaptures}");
         Console.WriteLine($"Runbook progress: {(progressAudit.Exists ? "存在 / exists" : "缺失 / missing")} | state={FormatValueOrUnavailable(progressAudit.State)} | ageSeconds={FormatNullable(progressAudit.AgeSeconds)} | completed/failed/running={FormatNullable(progressAudit.CompletedSteps)}/{FormatNullable(progressAudit.FailedSteps)}/{FormatNullable(progressAudit.RunningSteps)}");
@@ -141,6 +143,14 @@ internal static partial class ProgramMain
             .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
             .Select(group => new AuditNameCount(group.Key, group.Count()))
             .ToList();
+        var sampleCorrelationCounts = events
+            .Select(evt => AuditFirstDataValue(evt, "sampleCorrelation", "sample_correlation"))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new AuditNameCount(group.Key, group.Count()))
+            .ToList();
 
         return new AuditReportSummary
         {
@@ -159,6 +169,11 @@ internal static partial class ProgramMain
             R0CollectorSourceCount = events.Count(evt => AuditTextEqualsAny(evt.Source, "r0collector") || evt.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase)),
             VirusTotalQuietStateCount = events.Count(IsAuditVirusTotalQuietState),
             R0HealthOrReadinessCount = events.Count(IsAuditR0HealthOrReadinessRow),
+            SampleCorrelationConfirmedCount = CountAuditDataEquals(events, "sampleCorrelation", "confirmed"),
+            SampleCorrelationProbableCount = CountAuditDataEquals(events, "sampleCorrelation", "probable"),
+            SampleCorrelationEnvironmentCount = CountAuditDataEquals(events, "sampleCorrelation", "environment"),
+            SampleCorrelationUnknownCount = CountAuditDataEquals(events, "sampleCorrelation", "unknown"),
+            SampleCorrelationCounts = sampleCorrelationCounts,
             TopEventTypes = topEventTypes,
             SourceCounts = sourceCounts
         };
@@ -292,6 +307,7 @@ internal static partial class ProgramMain
     {
         if (AuditDataBoolFalse(evt, "behaviorCounted", "behavior_counted", "countsAsBehavior", "countedAsBehavior") ||
             AuditDataBoolFalse(evt, "sampleBehaviorCandidate", "sample_behavior_candidate") ||
+            IsAuditWeakSampleCorrelation(evt) ||
             AuditDataBoolTrue(
                 evt,
                 "nonbehavior",
@@ -334,6 +350,20 @@ internal static partial class ProgramMain
 
         var eventKind = AuditFirstDataValue(evt, "eventKind", "eventRole", "evidenceRole", "classification");
         return AuditTextEqualsAny(eventKind, "nonbehavior", "non-behavior", "metadata", "diagnostic", "health", "status", "summary");
+    }
+
+    private static bool IsAuditWeakSampleCorrelation(SandboxEvent evt)
+    {
+        if (AuditDataBoolTrue(evt, "strongSampleCorrelation") ||
+            AuditTextEqualsAny(AuditFirstDataValue(evt, "sampleCorrelation", "sample_correlation"), "confirmed", "probable") ||
+            AuditTextEqualsAny(AuditFirstDataValue(evt, "sampleCorrelationStatus", "sample_correlation_status"), "correlated", "confirmed"))
+        {
+            return false;
+        }
+
+        return AuditTextEqualsAny(AuditFirstDataValue(evt, "sampleCorrelation", "sample_correlation"), "environment", "unknown", "uncorrelated") ||
+            AuditTextEqualsAny(AuditFirstDataValue(evt, "sampleCorrelationStatus", "sample_correlation_status"), "environment", "unknown", "uncorrelated", "session-related", "session-only") ||
+            AuditTextEqualsAny(AuditFirstDataValue(evt, "sampleCorrelationStrength", "sample_correlation_strength"), "none", "weak", "session-only", "unattributed");
     }
 
     private static bool IsAuditVirusTotalQuietState(SandboxEvent evt)
@@ -446,6 +476,11 @@ internal static partial class ProgramMain
             fragments.Any(fragment => text.Contains(fragment, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static int CountAuditDataEquals(IEnumerable<SandboxEvent> events, string key, string expected)
+    {
+        return events.Count(evt => AuditTextEqualsAny(AuditFirstDataValue(evt, key), expected));
+    }
+
     private sealed record AuditNameCount(string Name, int Count);
 
     private sealed record AuditRunbookStep(string Label, string State);
@@ -482,9 +517,19 @@ internal static partial class ProgramMain
 
         public int R0HealthOrReadinessCount { get; init; }
 
+        public int SampleCorrelationConfirmedCount { get; init; }
+
+        public int SampleCorrelationProbableCount { get; init; }
+
+        public int SampleCorrelationEnvironmentCount { get; init; }
+
+        public int SampleCorrelationUnknownCount { get; init; }
+
         public List<AuditNameCount> TopEventTypes { get; init; } = [];
 
         public List<AuditNameCount> SourceCounts { get; init; } = [];
+
+        public List<AuditNameCount> SampleCorrelationCounts { get; init; } = [];
     }
 
     private sealed class AuditArtifactSummary

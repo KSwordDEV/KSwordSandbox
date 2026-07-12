@@ -118,7 +118,7 @@
           "id": "fresh-create-flow",
           "titleZh": "首次/新机器本机配置流程",
           "operatorCommands": [
-            ".\\scripts\\install.ps1 -Mode Install -PromptPassword",
+            ".\\scripts\\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword",
             ".\\scripts\\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>",
             ".\\scripts\\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained"
           ],

@@ -183,6 +183,15 @@ quiet-state, and R0 self-noise exclusions. Memory-dump and screenshot artifact
 correlations are evidence metadata unless separate sample behavior proves
 credential dumping or screen capture.
 
+When a future rule consumes explicit `sampleCorrelation` or equivalent
+sample-behavior linkage fields, prefer positive correlation evidence over broad
+text matching and keep noise gates local to the rule. A high/medium scoring rule
+should require the sample-correlated row or execution chain it claims to detect,
+then suppress collector/host/enrichment rows with the existing `noise`,
+`selfNoise`, `collectorSelfNoise`, `collectorNoise`, `r0SelfNoise`,
+`behaviorCounted=false`, and `sampleBehaviorCandidate=false` guards where those
+fields are available.
+
 The built-in YARA-like matcher intentionally supports only the small subset
 used by `rules/static-notes.yar`: literal/regex strings, `ascii`, `wide`,
 `nocase`, `uint16(offset) == value`, `$id`, `any/all/N of (...)`, `of them`,

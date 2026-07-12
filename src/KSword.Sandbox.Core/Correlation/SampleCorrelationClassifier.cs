@@ -83,6 +83,17 @@ public static class SampleCorrelationClassifier
         "netprofm"
     ];
 
+    private static readonly string[] DefenderProcessNames =
+    [
+        "msmpeng",
+        "nissrv",
+        "securityhealthservice",
+        "mpcmdrun",
+        "smartscreen",
+        "sense",
+        "sgrmbroker"
+    ];
+
     private static readonly string[] UserWritablePathHints =
     [
         @"\users\",
@@ -92,6 +103,10 @@ public static class SampleCorrelationClassifier
         @"\desktop\",
         @"\programdata\",
         @"\public\",
+        @"\perflogs\",
+        @"\windows\temp\",
+        @"\windows\tasks\",
+        @"\windows\system32\tasks\",
         @"\kswordsandbox\incoming\",
         @"\kswordsandbox\out\",
         "%temp%",
@@ -109,7 +124,8 @@ public static class SampleCorrelationClassifier
         @"\windows\servicing\",
         @"\windows\systemresources\",
         @"\program files\windows defender\",
-        @"\programdata\microsoft\windows defender\"
+        @"\programdata\microsoft\windows defender\",
+        @"\programdata\microsoft\windows defender advanced threat protection\"
     ];
 
     /// <summary>
@@ -155,6 +171,16 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Environment("explicit-nonbehavior-or-collection-noise", "behaviorCounted/nonbehavior");
         }
 
+        if (IsCollectorOrAgentProcess(evt, data, context))
+        {
+            return CorrelationDisposition.Environment("row-belongs-to-sandbox-collector-or-agent", "processName");
+        }
+
+        if (!HasExistingStrongCorrelation(data) && IsKnownUntaintedServiceHostProcess(evt, data, context))
+        {
+            return CorrelationDisposition.Environment("process-row-belongs-to-untainted-windows-service-host", "processName");
+        }
+
         if (HasExistingStrongCorrelation(data))
         {
             return CorrelationDisposition.Confirmed("existing-strong-sample-correlation", "strongSampleCorrelation");
@@ -185,6 +211,11 @@ public static class SampleCorrelationClassifier
             return ClassifyServiceOrScheduledTaskEvidence(evt, data, context);
         }
 
+        if (IsProcessEvidence(evt))
+        {
+            return ClassifyProcessEvidence(evt, data, context);
+        }
+
         return CorrelationDisposition.Unchanged();
     }
 
@@ -206,10 +237,28 @@ public static class SampleCorrelationClassifier
             Value(data, "imagePath"),
             Value(data, "keyPath"),
             Value(data, "objectPath"));
+        var isHighSignalMutation = IsHighSignalMutation(evt, data);
+        var targetsUserWritableOrPersistence = LooksUserWritableOrPersistenceTarget(targetPath, context);
+        var targetsSystemOnly = LooksSystemOnlyPath(targetPath);
 
-        if (processFacts is not null && IsKnownSystemProcess(processFacts) && LooksSystemOnlyPath(targetPath))
+        if (processFacts is not null && IsDefenderOrSecurityProcess(processFacts))
+        {
+            return CorrelationDisposition.Environment("driver-row-belongs-to-defender-or-security-service", "processName");
+        }
+
+        if (processFacts is not null && IsKernelOrCoreSystemProcess(processFacts))
+        {
+            return CorrelationDisposition.Environment("driver-row-belongs-to-kernel-or-core-system-process", "processName");
+        }
+
+        if (processFacts is not null && IsKnownSystemProcess(processFacts) && targetsSystemOnly)
         {
             return CorrelationDisposition.Environment("driver-row-joined-known-system-process-and-system-target", "processId");
+        }
+
+        if (isHighSignalMutation && targetsUserWritableOrPersistence)
+        {
+            return CorrelationDisposition.Probable("driver-mutation-targets-user-writable-or-persistence-location-without-sample-pid", "path");
         }
 
         if (processFacts is not null && IsKnownSystemProcess(processFacts))
@@ -217,12 +266,7 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Environment("driver-row-joined-known-system-process-without-prior-sample-taint", "processId");
         }
 
-        if (IsHighSignalMutation(evt, data) && LooksUserWritableOrPersistenceTarget(targetPath))
-        {
-            return CorrelationDisposition.Probable("driver-mutation-targets-user-writable-or-persistence-location-without-sample-pid", "path");
-        }
-
-        if (IsHighSignalMutation(evt, data) && !LooksSystemOnlyPath(targetPath) && !IsPathTruncated(data))
+        if (isHighSignalMutation && !targetsSystemOnly && !IsPathTruncated(data))
         {
             return CorrelationDisposition.Probable("driver-mutation-has-non-system-target-but-no-lineage-join", "path");
         }
@@ -236,18 +280,26 @@ public static class SampleCorrelationClassifier
         CorrelationContext context)
     {
         var ownerPid = EventProcessId(evt, data);
-        if (ownerPid is null && IsListenerEvent(evt))
+        if (ownerPid is null && TryGetJoinedNetworkOwnerPid(data, context, out var joinedOwner))
         {
-            var endpointKey = EndpointKey(Value(data, "protocol"), FirstNonEmpty(Value(data, "local"), FormatLocalEndpoint(data)));
-            if (!string.IsNullOrWhiteSpace(endpointKey) && context.NetworkEndpointOwners.TryGetValue(endpointKey, out var joinedOwner))
-            {
-                ownerPid = joinedOwner;
-            }
+            ownerPid = joinedOwner;
         }
 
         if (ownerPid is not null && context.SampleProcessIds.Contains(ownerPid.Value))
         {
             return CorrelationDisposition.Confirmed("network-owner-pid-matched-sample-process-tree", "owningProcessId");
+        }
+
+        var ownerImageOrCommand = FirstNonEmpty(
+            Value(data, "ownerImagePath"),
+            Value(data, "owningProcessImagePath"),
+            Value(data, "processImagePath"),
+            Value(data, "imagePath"),
+            Value(data, "ownerCommandLine"),
+            Value(data, "commandLine"));
+        if (PathOrCommandMatchesSample(ownerImageOrCommand, context))
+        {
+            return CorrelationDisposition.Confirmed("network-owner-image-or-command-matched-submitted-sample", "owningProcessImagePath");
         }
 
         if (ownerPid is not null &&
@@ -283,7 +335,13 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Confirmed("service-or-task-target-points-to-submitted-sample", "imagePath/taskToRun");
         }
 
-        if (LooksUserWritableOrPersistenceTarget(target))
+        var actorPid = EventProcessId(evt, data);
+        if (actorPid is not null && context.SampleProcessIds.Contains(actorPid.Value))
+        {
+            return CorrelationDisposition.Confirmed("service-or-task-actor-pid-matched-sample-process-tree", "actorProcessId");
+        }
+
+        if (LooksUserWritableOrPersistenceTarget(target, context))
         {
             return CorrelationDisposition.Probable("service-or-task-target-points-to-user-writable-location", "imagePath/taskToRun");
         }
@@ -294,6 +352,35 @@ public static class SampleCorrelationClassifier
         }
 
         return CorrelationDisposition.Unknown("service-or-task-diff-has-no-sample-target-or-actor-correlation", "imagePath/taskToRun");
+    }
+
+    private static CorrelationDisposition ClassifyProcessEvidence(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context)
+    {
+        if (IsCollectorOrAgentProcess(evt, data, context))
+        {
+            return CorrelationDisposition.Environment("process-row-belongs-to-sandbox-collector-or-agent", "processName");
+        }
+
+        if (IsKnownUntaintedServiceHostProcess(evt, data, context))
+        {
+            return CorrelationDisposition.Environment("process-row-belongs-to-untainted-windows-service-host", "processName");
+        }
+
+        var processFacts = TryGetEventProcessFacts(evt, data, context);
+        if (processFacts is not null && IsKnownSystemProcess(processFacts))
+        {
+            return CorrelationDisposition.Environment("process-row-joined-known-system-process-without-sample-parentage", "processId");
+        }
+
+        if (TryGetRootProcessId(data, out var rootPid) && context.SampleProcessIds.Contains(rootPid))
+        {
+            return CorrelationDisposition.Unknown("process-row-has-root-process-id-only-without-parent-lineage-or-path-match", "rootProcessId");
+        }
+
+        return CorrelationDisposition.Unchanged();
     }
 
     private static SandboxEvent EnrichWithKnownProcess(
@@ -438,14 +525,71 @@ public static class SampleCorrelationClassifier
             }
 
             var pid = EventProcessId(evt, evt.Data);
-            var key = EndpointKey(Value(evt.Data, "protocol"), Value(evt.Data, "local"));
-            if (pid is not null && !string.IsNullOrWhiteSpace(key))
+            if (pid is null)
             {
-                map[key] = pid.Value;
+                continue;
             }
+
+            AddEndpointOwner(map, Value(evt.Data, "protocol"), Value(evt.Data, "local"), pid.Value);
+            AddEndpointOwner(map, Value(evt.Data, "protocol"), FormatLocalEndpoint(evt.Data), pid.Value);
+            AddEndpointOwner(map, Value(evt.Data, "transport"), Value(evt.Data, "localEndpoint"), pid.Value);
+            AddEndpointOwner(map, Value(evt.Data, "protocol"), Value(evt.Data, "localEndpoint"), pid.Value);
         }
 
         return map;
+    }
+
+    private static void AddEndpointOwner(IDictionary<string, int> map, string? protocol, string? local, int pid)
+    {
+        var key = EndpointKey(protocol, local);
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            map[key] = pid;
+        }
+    }
+
+    private static bool TryGetJoinedNetworkOwnerPid(
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context,
+        out int ownerPid)
+    {
+        foreach (var key in CandidateEndpointKeys(data))
+        {
+            if (context.NetworkEndpointOwners.TryGetValue(key, out ownerPid))
+            {
+                return true;
+            }
+        }
+
+        ownerPid = 0;
+        return false;
+    }
+
+    private static IEnumerable<string> CandidateEndpointKeys(IReadOnlyDictionary<string, string> data)
+    {
+        var protocols = new[]
+        {
+            Value(data, "protocol"),
+            Value(data, "transport")
+        };
+        var locals = new[]
+        {
+            Value(data, "local"),
+            Value(data, "localEndpoint"),
+            FormatLocalEndpoint(data)
+        };
+
+        foreach (var protocol in protocols)
+        {
+            foreach (var local in locals)
+            {
+                var key = EndpointKey(protocol, local);
+                if (!string.IsNullOrWhiteSpace(key))
+                {
+                    yield return key;
+                }
+            }
+        }
     }
 
     private static void ApplyDisposition(Dictionary<string, string> data, CorrelationDisposition disposition)
@@ -529,15 +673,22 @@ public static class SampleCorrelationClassifier
             return true;
         }
 
-        return IsProcessTreeActorEvent(evt) &&
-            (TryGetRootProcessId(data, out var rootPid) && context.SampleProcessIds.Contains(rootPid) ||
-             context.SampleProcessIds.Any(root => LineageContainsPid(Value(data, "treeLineage"), root)));
-    }
+        var parentPid = evt.ParentProcessId ??
+            ParsePid(Value(data, "parentProcessId")) ??
+            ParsePid(Value(data, "actorParentProcessId"));
+        if (parentPid is not null && context.SampleProcessIds.Contains(parentPid.Value))
+        {
+            return true;
+        }
 
-    private static bool IsProcessTreeActorEvent(SandboxEvent evt)
-    {
-        return evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("driver.process", StringComparison.OrdinalIgnoreCase);
+        if (context.SampleProcessIds.Any(root => LineageContainsPid(Value(data, "treeLineage"), root)))
+        {
+            return true;
+        }
+
+        return !IsProcessEvidence(evt) &&
+            TryGetRootProcessId(data, out var rootPid) &&
+            context.SampleProcessIds.Contains(rootPid);
     }
 
     private static bool AnyFieldMatchesSamplePath(
@@ -612,6 +763,12 @@ public static class SampleCorrelationClassifier
             evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsProcessEvidence(SandboxEvent evt)
+    {
+        return evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("driver.process", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsCollectorOrAgentProcess(
         SandboxEvent evt,
         IReadOnlyDictionary<string, string> data,
@@ -641,8 +798,23 @@ public static class SampleCorrelationClassifier
     {
         var processName = TrimExe(process.Name);
         return TextEqualsAny(processName, SystemProcessNames) ||
+            TextEqualsAny(processName, DefenderProcessNames) ||
             LooksSystemOnlyPath(process.ImagePath) ||
             LooksWindowsServiceHost(process);
+    }
+
+    private static bool IsDefenderOrSecurityProcess(ProcessFacts process)
+    {
+        var processName = TrimExe(process.Name);
+        return TextEqualsAny(processName, DefenderProcessNames) ||
+            ContainsAny(process.ImagePath, @"\program files\windows defender\", @"\programdata\microsoft\windows defender\") ||
+            ContainsAny(process.CommandLine, @"\program files\windows defender\", @"\programdata\microsoft\windows defender\");
+    }
+
+    private static bool IsKernelOrCoreSystemProcess(ProcessFacts process)
+    {
+        return process.ProcessId is 0 or 4 ||
+            TextEqualsAny(TrimExe(process.Name), "system", "idle", "registry", "smss", "csrss", "wininit", "services", "lsass", "lsaiso");
     }
 
     private static bool LooksWindowsServiceHost(ProcessFacts process)
@@ -650,6 +822,51 @@ public static class SampleCorrelationClassifier
         return TextEqualsAny(TrimExe(process.Name), "svchost") &&
             !string.IsNullOrWhiteSpace(process.CommandLine) &&
             process.CommandLine.Contains(@"\windows\system32\svchost.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsKnownUntaintedServiceHostProcess(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context)
+    {
+        if (!IsProcessEvidence(evt) || AnyFieldMatchesSamplePath(evt, data, context))
+        {
+            return false;
+        }
+
+        var processName = FirstNonEmpty(evt.ProcessName, Value(data, "processName"), Value(data, "actorProcessName"));
+        if (!TextEqualsAny(TrimExe(processName), "svchost"))
+        {
+            return false;
+        }
+
+        var imageOrPath = FirstNonEmpty(
+            evt.Path,
+            Value(data, "path"),
+            Value(data, "processImagePath"),
+            Value(data, "imagePath"),
+            Value(data, "actorProcessImagePath"));
+        var commandLine = FirstNonEmpty(evt.CommandLine, Value(data, "commandLine"), Value(data, "actorCommandLine"));
+        if (!LooksSystemOnlyPath(imageOrPath) &&
+            !ContainsAny(commandLine, @"\windows\system32\svchost.exe", "svchost.exe -k"))
+        {
+            return false;
+        }
+
+        var parentPid = evt.ParentProcessId ??
+            ParsePid(Value(data, "parentProcessId")) ??
+            ParsePid(Value(data, "actorParentProcessId"));
+        var parentIsServices = parentPid is not null &&
+            context.Processes.TryGetValue(parentPid.Value, out var parentFacts) &&
+            TextEqualsAny(TrimExe(parentFacts.Name), "services");
+        var parentName = FirstNonEmpty(Value(data, "parentProcessName"), Value(data, "actorParentProcessName"));
+        var serviceName = FirstNonEmpty(Value(data, "serviceName"), Value(data, "service"));
+        var commandLooksLikeServiceHost = ContainsAny(commandLine, " -k ", " -s ");
+
+        return parentIsServices ||
+            TextEqualsAny(TrimExe(parentName), "services") ||
+            TextEqualsAny(serviceName, KnownWindowsServiceNames) ||
+            commandLooksLikeServiceHost;
     }
 
     private static bool IsKnownWindowsServiceChange(IReadOnlyDictionary<string, string> data, string target)
@@ -680,7 +897,7 @@ public static class SampleCorrelationClassifier
              normalized.Contains(@"\program files\", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool LooksUserWritableOrPersistenceTarget(string? value)
+    private static bool LooksUserWritableOrPersistenceTarget(string? value, CorrelationContext? context = null)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -689,6 +906,9 @@ public static class SampleCorrelationClassifier
 
         var normalized = NormalizeSlashes(value).ToLowerInvariant();
         return UserWritablePathHints.Any(normalized.Contains) ||
+            (context is not null &&
+             !string.IsNullOrWhiteSpace(context.SampleDirectory) &&
+             normalized.Contains(NormalizeSlashes(context.SampleDirectory).ToLowerInvariant(), StringComparison.OrdinalIgnoreCase)) ||
             normalized.Contains(@"\currentversion\run", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains(@"\currentversion\runonce", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains(@"\taskcache\", StringComparison.OrdinalIgnoreCase) ||

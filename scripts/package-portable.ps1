@@ -1023,9 +1023,9 @@ function Get-InstallModeContractSnapshot {
                 titleZh = '还原 checkpoint/snapshot 边界'
                 operatorScenario = 'Checkpoint restore/refresh is a live VM operation and is never performed by package/readiness; it is reserved for explicit lab actions such as guest password reset or run.ps1 -Live.'
                 primaryCommands = @(
-                    '.\scripts\install.ps1 -Mode CheckEnvironment',
-                    '.\scripts\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force',
-                    '.\scripts\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live'
+                    '.\scripts\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly',
+                    '.\scripts\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf',
+                    '.\scripts\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm'
                 )
                 evidenceFields = @('InstallStatus.CheckpointExists', 'InstallStatus.CheckpointGuidance', 'VmProfile.ExpectedCheckpointName', 'ResetGuestPasswordCommand')
                 readinessPackageCanExecute = $false
@@ -1034,7 +1034,7 @@ function Get-InstallModeContractSnapshot {
                 skipFlags = @('-SkipCheckpointRestore', '-SkipCheckpointRefresh')
                 nextActionsZh = @(
                     '下一步：缺少 checkpoint 时先创建或选择 clean checkpoint，再用 -UpdateHyperVConfig 记录名称。',
-                    '下一步：只有确认要操作隔离 VM 时才运行 ResetGuestVmPassword 或 run.ps1 -Live；package/readiness 不会替你还原快照。'
+                    '下一步：先用 RestoreCleanCheckpoint -PlanOnly/-WhatIf 查看 rollback 计划；只有隔离 lab 操作者显式 -AllowVmMutation -Confirm/-Force 才可真实还原快照。'
                 )
             },
             [ordered]@{
@@ -1042,7 +1042,7 @@ function Get-InstallModeContractSnapshot {
                 titleZh = '首次/新机器本机配置流程'
                 operatorScenario = 'Fresh local setup creates runtime folders, local sandbox config, and optional secrets; it does not create a VM, checkpoint, runtime publish payload, or fresh live evidence.'
                 primaryCommands = @(
-                    '.\scripts\install.ps1 -Mode Install -PromptPassword',
+                    '.\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword',
                     '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>',
                     '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained'
                 )
@@ -1052,7 +1052,7 @@ function Get-InstallModeContractSnapshot {
                 createsCheckpoint = $false
                 buildsPayload = $false
                 nextActionsZh = @(
-                    '下一步：新机器先运行 .\scripts\install.ps1 -Mode Install -PromptPassword 创建本机目录、配置和 guest secret。',
+                    '下一步：新机器先运行 .\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword 创建本机目录、配置和 guest secret。',
                     '下一步：payload 输出必须放仓库外；准备完成后再用 CheckEnvironment 确认 freshness。'
                 )
             },
@@ -1447,7 +1447,7 @@ function Update-PackageOperatorDiagnostics {
             installCheckEnvironment = '.\scripts\install.ps1 -Mode CheckEnvironment'
             runCheckEnvironment = '.\scripts\run.ps1 -Mode CheckEnvironment'
             recordExistingEnvironment = '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>'
-            freshLocalInstall = '.\scripts\install.ps1 -Mode Install -PromptPassword'
+            freshLocalInstall = '.\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
             resetGuestPasswordExplicitVmMutation = '.\scripts\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force'
             prepareGuestPayload = '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained'
             configureVirusTotalKey = '.\scripts\install.ps1 -Mode ConfigureVTKey -PromptVTKey'

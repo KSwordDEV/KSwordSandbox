@@ -515,9 +515,9 @@ function Invoke-ScriptChangeMenu {
 function Invoke-ScriptInstallEntrypointMenu {
     Write-Host ''
     Write-Host '安装入口选择 / Install entrypoint selection:'
-    Write-Host '  1) 使用已配置环境（只诊断，不修改 VM） / Use already configured environment'
-    Write-Host '  2) 回退/恢复已有干净 checkpoint/snapshot（默认只给计划；真实还原需 -AllowVmMutation） / Roll back or restore existing clean checkpoint'
-    Write-Host '  3) 全新创建/新电脑准备（目录/config，可选 payload；不创建 VM） / Fresh create or new-computer local preparation'
+    Write-Host '  1) 使用已配置环境（只诊断，不写本机状态，不修改 VM） / Use already configured environment'
+    Write-Host '  2) 回退/恢复已有 clean checkpoint（菜单默认只给计划；真实还原需命令行 -AllowVmMutation -Confirm/-Force） / Plan rollback/restore existing clean checkpoint'
+    Write-Host '  3) 全新/新电脑本机准备（目录/config/secret，可选 payload；不创建 VM） / Fresh new-computer local preparation'
     $choice = Read-ScriptMenuChoice -Prompt '请选择 [1-3] / Choose [1-3]' -Allowed @('1', '2', '3')
     $selectedEntrypoint = switch ($choice) {
         '1' { 'UseConfiguredEnvironment' }

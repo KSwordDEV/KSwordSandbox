@@ -230,7 +230,7 @@ function Get-GuestCredential {
     }
 
     if ([string]::IsNullOrEmpty($password)) {
-        throw "错误：Guest password environment variable '$SecretName' 未在 Process/User/Machine 中设置；secret 值未打印。下一步：在启动 Live Hyper-V 的同一个管理员 PowerShell 中设置该变量，或运行 .\install.ps1 -Mode Install -PromptPassword；若使用生成密码，请确保 VM 内账号密码也同步。"
+        throw "错误：Guest password environment variable '$SecretName' 未在 Process/User/Machine 中设置；secret 值未打印。下一步：在启动 Live Hyper-V 的同一个管理员 PowerShell 中设置该变量，或运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword；若使用生成密码，请确保 VM 内账号密码也同步。"
     }
 
     Write-HyperVJobStep "凭据诊断：已从 $scope scope 读取 guest credential secret '$SecretName'，用户 '$UserName'；secret 值未打印。"

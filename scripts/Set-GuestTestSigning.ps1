@@ -41,7 +41,7 @@ function Get-GuestPasswordSecretValue {
         }
     }
 
-    throw "错误：未在 Process/User/Machine 环境中找到 guest password secret '$Name'。下一步：普通用户请运行 .\install.ps1 -Mode Install -PromptPassword；如果使用 -GeneratePassword，请确保 VM 内密码也同步。"
+    throw "错误：未在 Process/User/Machine 环境中找到 guest password secret '$Name'。下一步：普通用户请运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword；如果使用 -GeneratePassword，请确保 VM 内密码也同步。"
 }
 
 function New-GuestCredential {

@@ -225,7 +225,7 @@ function Get-GuestPasswordSecretValue {
         }
     }
 
-    throw "错误：未在 Process/User/Machine 环境中找到 guest password secret '$Name'。下一步：运行 .\install.ps1 -Mode Install -PromptPassword，或在当前管理员 PowerShell 中设置该变量；secret 值不要打印到日志。"
+    throw "错误：未在 Process/User/Machine 环境中找到 guest password secret '$Name'。下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword，或在当前管理员 PowerShell 中设置该变量；secret 值不要打印到日志。"
 }
 
 function New-GuestCredential {
