@@ -6755,7 +6755,8 @@
       "eventTypes": [
         "service.diff_truncated",
         "scheduled_task.diff_truncated",
-        "startup_item.diff_truncated"
+        "startup_item.diff_truncated",
+        "startup.diff_truncated"
       ],
       "dataKeys": [
         "totalCount",
@@ -6767,6 +6768,278 @@
         "collection",
         "system-diff",
         "truncated"
+      ]
+    },
+    {
+      "id": "startup-unified-autostart-created-or-modified",
+      "title": "Unified startup diff created or modified",
+      "titleZh": "统一启动项差异显示创建或修改",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "The before/after startup inventory observed a service, driver, task, Run key, WMI subscription, Winlogon/IFEO/LSA/AppInit/Winsock/shell-extension, or related autostart surface created or modified.",
+      "summaryZh": "分析前后启动项清单发现服务、驱动、计划任务、Run Key、WMI 订阅、Winlogon/IFEO/LSA/AppInit/Winsock/Shell 扩展等自启动面被创建或修改；请优先查看 startupSurface、target/value 和原始 diff 证据。",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "startup.created",
+        "startup.modified"
+      ],
+      "dataKeys": [
+        "startupSurface",
+        "startupCategory",
+        "target",
+        "value",
+        "location",
+        "serviceName",
+        "taskName"
+      ],
+      "evidenceFields": [
+        "data.startupSurface",
+        "data.startupCategory",
+        "data.target",
+        "data.value",
+        "data.location",
+        "data.serviceName",
+        "data.taskName"
+      ],
+      "tags": [
+        "persistence",
+        "startup",
+        "system-diff",
+        "baseline-diff"
+      ]
+    },
+    {
+      "id": "startup-wmi-permanent-event-subscription-diff",
+      "title": "Startup diff WMI permanent event subscription",
+      "titleZh": "启动项差异命中 WMI 永久事件订阅",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A startup diff row referenced WMI EventFilter, CommandLineEventConsumer, ActiveScriptEventConsumer, or FilterToConsumerBinding persistence.",
+      "summaryZh": "启动项 diff 行引用 WMI EventFilter、CommandLineEventConsumer、ActiveScriptEventConsumer 或 FilterToConsumerBinding 持久化；请检查 consumer 命令/脚本和绑定关系。",
+      "mitreTechniqueId": "T1546.003",
+      "mitreTechniqueName": "Windows Management Instrumentation Event Subscription",
+      "eventTypes": [
+        "startup.created",
+        "startup.modified"
+      ],
+      "dataContains": {
+        "startupSurface": [
+          "wmi"
+        ],
+        "location": [
+          "root\\subscription"
+        ]
+      },
+      "evidenceFields": [
+        "data.startupSurface",
+        "data.location",
+        "data.name",
+        "data.value",
+        "data.description"
+      ],
+      "tags": [
+        "persistence",
+        "startup",
+        "wmi",
+        "baseline-diff"
+      ]
+    },
+    {
+      "id": "startup-ifeo-silentprocess-diff",
+      "title": "Startup diff IFEO or SilentProcessExit persistence",
+      "titleZh": "启动项差异命中 IFEO 或 SilentProcessExit 持久化",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A startup diff row touched Image File Execution Options or SilentProcessExit autostart/debugger surfaces.",
+      "summaryZh": "启动项 diff 行触及 Image File Execution Options 或 SilentProcessExit 自启动/调试器持久化面；请检查 Debugger、VerifierDll、GlobalFlag 和 MonitorProcess。",
+      "mitreTechniqueId": "T1546.012",
+      "mitreTechniqueName": "Image File Execution Options Injection",
+      "eventTypes": [
+        "startup.created",
+        "startup.modified"
+      ],
+      "dataContains": {
+        "startupSurface": [
+          "ifeo",
+          "silent-process-exit"
+        ],
+        "location": [
+          "Image File Execution Options",
+          "SilentProcessExit"
+        ]
+      },
+      "evidenceFields": [
+        "data.startupSurface",
+        "data.location",
+        "data.name",
+        "data.value",
+        "data.previousValue"
+      ],
+      "tags": [
+        "persistence",
+        "startup",
+        "ifeo",
+        "baseline-diff"
+      ]
+    },
+    {
+      "id": "startup-advanced-registry-surface-diff",
+      "title": "Startup diff advanced registry persistence surface",
+      "titleZh": "启动项差异命中高级注册表持久化面",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A startup diff row referenced LSA, AppInit/AppCert, Winsock, shell extensions, print monitors, time providers, Netsh helpers, Active Setup, BootExecute, or Winlogon autostart surfaces.",
+      "summaryZh": "启动项 diff 行引用 LSA、AppInit/AppCert、Winsock、Shell 扩展、打印监视器、Time Provider、Netsh Helper、Active Setup、BootExecute 或 Winlogon 等高级自启动面。",
+      "mitreTechniqueId": "T1547",
+      "mitreTechniqueName": "Boot or Logon Autostart Execution",
+      "eventTypes": [
+        "startup.created",
+        "startup.modified"
+      ],
+      "dataContains": {
+        "startupSurface": [
+          "lsa",
+          "appinit",
+          "appcert",
+          "winsock",
+          "shell-extension",
+          "print-monitor",
+          "time-provider",
+          "netsh-helper",
+          "active-setup",
+          "bootexecute",
+          "winlogon"
+        ]
+      },
+      "evidenceFields": [
+        "data.startupSurface",
+        "data.location",
+        "data.name",
+        "data.value",
+        "data.target"
+      ],
+      "tags": [
+        "persistence",
+        "startup",
+        "registry",
+        "baseline-diff"
+      ]
+    },
+    {
+      "id": "startup-driver-service-diff",
+      "title": "Startup diff driver service",
+      "titleZh": "启动项差异命中驱动服务",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A startup diff row projected a created or modified kernel/file-system driver service or .sys ImagePath.",
+      "summaryZh": "启动项 diff 行显示内核/文件系统驱动服务或 .sys ImagePath 被创建或修改；这是高权限持久化或驱动加载准备证据。",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "startup.created",
+        "startup.modified"
+      ],
+      "allDataEquals": {
+        "startupCategory": [
+          "driver"
+        ]
+      },
+      "evidenceFields": [
+        "data.serviceName",
+        "data.imagePath",
+        "data.serviceType",
+        "data.startType",
+        "data.target"
+      ],
+      "tags": [
+        "persistence",
+        "driver",
+        "service",
+        "startup",
+        "baseline-diff"
+      ]
+    },
+    {
+      "id": "startup-user-writable-or-script-target",
+      "title": "Startup diff points to user-writable or script target",
+      "titleZh": "启动项差异指向用户可写或脚本目标",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A startup diff row points at Temp, AppData, Public, Downloads, ProgramData, or script/executable payload tokens.",
+      "summaryZh": "启动项 diff 行指向 Temp、AppData、Public、Downloads、ProgramData 或脚本/可执行载荷标记；这比单纯存在启动项更可疑。",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "startup.created",
+        "startup.modified"
+      ],
+      "dataContains": {
+        "target": [
+          "\\Temp\\",
+          "\\AppData\\",
+          "\\Users\\Public\\",
+          "\\Downloads\\",
+          "\\ProgramData\\",
+          ".ps1",
+          ".vbs",
+          ".js",
+          ".hta",
+          ".scr",
+          ".dll",
+          ".exe"
+        ],
+        "value": [
+          "\\Temp\\",
+          "\\AppData\\",
+          "\\Users\\Public\\",
+          "\\Downloads\\",
+          "\\ProgramData\\",
+          ".ps1",
+          ".vbs",
+          ".js",
+          ".hta",
+          ".scr",
+          ".dll",
+          ".exe"
+        ],
+        "imagePath": [
+          "\\Temp\\",
+          "\\AppData\\",
+          "\\Users\\Public\\",
+          "\\Downloads\\",
+          "\\ProgramData\\",
+          ".ps1",
+          ".vbs",
+          ".js",
+          ".hta",
+          ".scr"
+        ],
+        "taskToRun": [
+          "\\Temp\\",
+          "\\AppData\\",
+          "\\Users\\Public\\",
+          "\\Downloads\\",
+          "\\ProgramData\\",
+          ".ps1",
+          ".vbs",
+          ".js",
+          ".hta",
+          ".scr"
+        ]
+      },
+      "evidenceFields": [
+        "data.startupSurface",
+        "data.target",
+        "data.value",
+        "data.imagePath",
+        "data.taskToRun"
+      ],
+      "tags": [
+        "persistence",
+        "startup",
+        "user-writable",
+        "baseline-diff"
       ]
     },
     {

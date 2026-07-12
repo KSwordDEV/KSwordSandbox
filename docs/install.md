@@ -189,6 +189,11 @@ release UX 约定 / release UX contract：
 它不会为状态修改再启动第二个进程，因此安装器设置的 Process-scope 环境变量仍能被
 当前 PowerShell 会话后续命令看到。
 
+配置 Hyper-V 时，根入口和 `scripts\` 入口会优先尝试只读枚举本机 VM 和
+checkpoint/snapshot：先执行 `Get-VM`，选择 VM 后执行 `Get-VMSnapshot`，让操作者用
+编号选择并保存到本机配置。该交互不会启动、停止、还原、创建或修改 VM；没有 Hyper-V
+module、没有管理员权限或枚举失败时，会回退到手动输入 VM/checkpoint 名称。
+
 主菜单提供：
 
 - 安装 / 准备本机设置（Install / prepare local settings）

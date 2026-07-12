@@ -1332,8 +1332,88 @@ function Read-OptionalText {
     return $answer.Trim()
 }
 
+function Select-HyperVVmAndCheckpointInteractive {
+    Write-Host ''
+    Write-Host 'Hyper-V VM/快照选择 / Hyper-V VM/checkpoint selection'
+    Write-Host '中文提示：这里只执行只读 Get-VM/Get-VMSnapshot；不会启动、停止、还原或修改 VM。 / Read-only selection only.'
+
+    $getVmCommand = Get-Command Get-VM -ErrorAction SilentlyContinue
+    if ($null -eq $getVmCommand) {
+        Write-InstallInfo '未找到 Hyper-V PowerShell 模块；将回退到手动输入 VM/checkpoint。 / Hyper-V module unavailable; falling back to manual entry.'
+        return
+    }
+
+    $vms = @()
+    try {
+        $vms = @(Get-VM -ErrorAction Stop | Sort-Object -Property Name)
+    }
+    catch {
+        Write-InstallInfo "无法列出 Hyper-V VM；将回退到手动输入。详情：$($_.Exception.Message)"
+        return
+    }
+
+    if ($vms.Count -eq 0) {
+        Write-InstallInfo '未发现 Hyper-V VM；请手动输入现有黄金 VM 名称。 / No Hyper-V VMs found; please enter the existing golden VM name manually.'
+        return
+    }
+
+    Write-Host '可用 VM / Available VMs:'
+    for ($i = 0; $i -lt $vms.Count; $i++) {
+        $vm = $vms[$i]
+        Write-Host ("  {0}) {1}  状态/State={2}" -f ($i + 1), $vm.Name, $vm.State)
+    }
+    Write-Host '  0) 保留当前值/手动输入 / Keep current or enter manually'
+
+    $allowed = @('0') + @(1..$vms.Count | ForEach-Object { [string]$_ })
+    $choice = Read-MenuChoice -Prompt '请选择 VM [0-N] / Choose VM [0-N]' -Allowed $allowed
+    if ($choice -eq '0') {
+        return
+    }
+
+    $selectedVm = $vms[[int]$choice - 1]
+    $script:VmName = $selectedVm.Name
+    Write-InstallInfo "已选择 VM：$VmName / Selected VM."
+
+    $getSnapshotCommand = Get-Command Get-VMSnapshot -ErrorAction SilentlyContinue
+    if ($null -eq $getSnapshotCommand) {
+        Write-InstallInfo '未找到 Get-VMSnapshot；checkpoint 将手动输入。 / Get-VMSnapshot unavailable; checkpoint will be entered manually.'
+        return
+    }
+
+    $snapshots = @()
+    try {
+        $snapshots = @(Get-VMSnapshot -VMName $VmName -ErrorAction Stop | Sort-Object -Property CreationTime -Descending)
+    }
+    catch {
+        Write-InstallInfo "无法列出 VM '$VmName' 的 checkpoint/snapshot；将回退到手动输入。详情：$($_.Exception.Message)"
+        return
+    }
+
+    if ($snapshots.Count -eq 0) {
+        Write-InstallInfo "VM '$VmName' 没有可选 checkpoint/snapshot；请手动输入或先创建 clean checkpoint。"
+        return
+    }
+
+    Write-Host "VM '$VmName' 的 checkpoint/snapshot:"
+    for ($i = 0; $i -lt $snapshots.Count; $i++) {
+        $snapshot = $snapshots[$i]
+        Write-Host ("  {0}) {1}  创建/Create={2:u}" -f ($i + 1), $snapshot.Name, $snapshot.CreationTime)
+    }
+    Write-Host '  0) 保留当前值/手动输入 / Keep current or enter manually'
+
+    $checkpointAllowed = @('0') + @(1..$snapshots.Count | ForEach-Object { [string]$_ })
+    $checkpointChoice = Read-MenuChoice -Prompt '请选择 clean checkpoint [0-N] / Choose clean checkpoint [0-N]' -Allowed $checkpointAllowed
+    if ($checkpointChoice -eq '0') {
+        return
+    }
+
+    $script:CheckpointName = $snapshots[[int]$checkpointChoice - 1].Name
+    Write-InstallInfo "已选择 checkpoint：$CheckpointName / Selected checkpoint."
+}
+
 function Invoke-HyperVConfigPrompt {
     Write-InstallInfo '中文提示：配置只写入本机状态和本机 sandbox.local.json；不会把 VM 名称、密码或本机路径写入 git。'
+    Select-HyperVVmAndCheckpointInteractive
     $script:VmName = Read-OptionalText -Prompt 'Hyper-V 黄金 VM 名称 / Hyper-V golden VM name' -CurrentValue $VmName
     $script:CheckpointName = Read-OptionalText -Prompt '干净快照名称 / Clean checkpoint name' -CurrentValue $CheckpointName
     $script:GuestUserName = Read-OptionalText -Prompt '来宾用户名 / Guest username' -CurrentValue $GuestUserName

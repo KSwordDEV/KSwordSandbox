@@ -64,6 +64,11 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "serviceDll", "Service diff events must preserve service DLL metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "scheduled_task.created", "Process probe must emit scheduled task diff events.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "startup_item.created", "Process probe must emit startup item diff events.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "startup.created", "Process probe must emit unified startup diff events.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "wmi-permanent-event-subscription", "Startup diff must cover WMI permanent event subscription surfaces.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Image File Execution Options", "Startup diff must cover IFEO persistence surfaces.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "WinSock2", "Startup diff must cover Winsock provider persistence surfaces.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Shell Extensions", "Startup diff must cover shell extension persistence surfaces.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "IScreenshotCapture", "Screenshot interface must be present.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "ScreenshotProbeOptions", "Screenshot probe must expose configurable capture options.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "MaximumCaptureCount", "Screenshot count must be capped.");
@@ -261,6 +266,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(guestAgentDoc.Contains("serviceDll", StringComparison.Ordinal), "Guest agent doc must document service registry metadata.");
         SmokeAssert.True(guestAgentDoc.Contains("scheduled_task.created", StringComparison.Ordinal), "Guest agent doc must document scheduled task diffs.");
         SmokeAssert.True(guestAgentDoc.Contains("startup_item.created", StringComparison.Ordinal), "Guest agent doc must document startup item diffs.");
+        SmokeAssert.True(guestAgentDoc.Contains("startup.created", StringComparison.Ordinal), "Guest agent doc must document unified startup diffs.");
         SmokeAssert.True(guestAgentDoc.Contains("probe.timeout", StringComparison.Ordinal), "Guest agent doc must document probe timeouts.");
         SmokeAssert.True(guestAgentDoc.Contains("probe.summary", StringComparison.Ordinal), "Guest agent doc must document probe health summaries.");
         SmokeAssert.True(guestAgentDoc.Contains("probe.phase.summary", StringComparison.Ordinal), "Guest agent doc must document phase-level probe summaries.");

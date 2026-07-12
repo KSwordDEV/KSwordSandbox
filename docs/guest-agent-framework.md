@@ -83,7 +83,17 @@ throwing for expected launch/exit failures.
   `process.tree` for the launched sample process and visible descendants. It
   also emits `environment.detail`, service diffs, scheduled task diffs,
   startup item diffs, and dedicated `registry.run.*` Run/RunOnce diffs using
-  bounded `sc.exe`, `schtasks.exe`, registry, and Startup-folder collection.
+  bounded `sc.exe`, `schtasks.exe`, registry, WMI subscription, and
+  Startup-folder collection. Service/task/startup diffs are also projected into
+  unified `startup.created` / `startup.modified` / `startup.deleted` rows with
+  `startupSurface` and `startupCategory` fields so rules and reports can talk
+  about persistence facts instead of raw inventory sources. The unified startup
+  lane covers services, driver services, scheduled tasks, Run/RunOnce and
+  policy Run keys, Startup folders, WMI permanent event subscriptions,
+  Winlogon, IFEO/SilentProcessExit, LSA, AppInit/AppCert DLLs, Winsock, Shell
+  Extensions, Active Setup, BootExecute, Time Providers, print monitors, Netsh
+  helpers, browser helper objects, KnownDLLs, and logon-script environment
+  values.
 - `FileDiffProbe` compares file size and UTC last-write time below the sample
   working directory and emits `file.created`, `file.modified`, and
   `file.deleted` with relative-path metadata.

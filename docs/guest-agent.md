@@ -269,6 +269,21 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   available. Events include `hive`, `keyPath`, `keyName`, `view`, `valueName`,
   `value`, optional `expandedValue`, and `valueKind`. Registry access errors
   become `registry.run.capture_failed` diagnostics.
+- `startup.snapshot`, `startup.created`, `startup.modified`, and
+  `startup.deleted` for the unified before/after startup diff lane consumed by
+  rules and reports. These rows project service and driver changes,
+  scheduled-task changes, Run/RunOnce and policy Run keys, Startup folders, WMI
+  permanent subscriptions (`__EventFilter`, `CommandLineEventConsumer`,
+  `ActiveScriptEventConsumer`, `__FilterToConsumerBinding`), Winlogon, IFEO /
+  SilentProcessExit, LSA, AppInit/AppCert DLLs, Winsock provider catalog,
+  Shell Extensions, Active Setup, BootExecute, Time Providers, print monitors,
+  Netsh helpers, browser helper objects, KnownDLLs, and logon-script
+  environment values into a common schema. Important fields include
+  `startupSurface`, `startupCategory`, `startupSource`, `autostartKind`,
+  `target`, `value`, `location`, `serviceName`, `taskName`, and
+  `registryKeyPath`. Helper-command or registry/WMI failures are marked
+  `collectionHealth=true`, `behaviorCounted=false`, and never treated as sample
+  behavior.
 - `screenshot.captured` when `--screenshot` successfully writes a desktop BMP.
   The event path points at the BMP file and `Data` includes `phase`,
   `screenshotStage`, `screenshotIndex`, `screenshotCount`, `widthPixels`, and

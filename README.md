@@ -146,6 +146,10 @@ Restore-VMSnapshot -VMName '<existing VM>' -Name '<clean checkpoint>' -Confirm:$
 `install.ps1` 提供交互菜单：安装、修改、卸载、重置 Guest 密码、配置 Hyper-V、配置
 VirusTotal（VT）key、检查环境、启动 WebUI 和查看状态。无交互本地实验室安装可使用：
 
+配置 Hyper-V 时，交互菜单会只读列出本机 VM 和所选 VM 的 checkpoint/snapshot，支持用
+编号选择并保存本机配置；枚举失败时仍可手动输入。该步骤只调用 `Get-VM` /
+`Get-VMSnapshot`，不会启动、停止、还原或修改 VM。
+
 ```powershell
 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -GeneratePassword
 ```

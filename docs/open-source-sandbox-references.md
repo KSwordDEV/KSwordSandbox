@@ -60,8 +60,18 @@
 - Smoke 覆盖新增 `behavior.rules-open-source-reference`，只验证 JSON/规则/映射和合成事件，不跑 Hyper-V 或重 E2E。
 
 4. UI/用户体验
-   - 上传后立即进入 live monitor，展示真实 runbook step、VT hash-only 结果、raw event monitor、artifact downloads。
-   - 最终判断仍以 HTML 报告为准；live monitor 只做实时观察，不提前归类。
+  - 上传后立即进入 live monitor，展示真实 runbook step、VT hash-only 结果、raw event monitor、artifact downloads。
+  - 最终判断仍以 HTML 报告为准；live monitor 只做实时观察，不提前归类。
+
+## 2026-07-13 初审前快速研究输出（可执行改动清单）
+
+本轮浅克隆/源码包研究了 Cuckoo、Cuckoo Monitor、CAPEv2、cuckoo3、DRAKVUF、drakvuf-sandbox、Noriben、zer0m0n、Fibratus、Sysmon config、Velociraptor、Hayabusa。优先落地项如下：
+
+1. **startup before/after diff 统一化**：借鉴 Velociraptor Autoruns/WMI artifacts、Hayabusa EID 映射和 Sysmon 注册表面，把服务、驱动、计划任务、Run Key、Startup folder、WMI、Winlogon、IFEO、LSA、AppInit/AppCert、Winsock、Shell Extensions 等投影为 `startup.*`。
+2. **报告先讲行为事实**：借鉴 Cuckoo/CAPE summary 和 Fibratus rule output，报告新增 Startup / persistence diff 聚合卡，先展示 surface、created/modified/deleted、用户可写目标，再给 raw rows。
+3. **噪声边界前置**：借鉴 Cuckoo Monitor、Noriben、Sysmon config，采集失败/unsupported/helper timeout 明确 `collectionHealth=true`、`behaviorCounted=false`，避免诊断行进入样本行为。
+4. **规则消费聚合事件**：借鉴 cuckoo3 SignatureTracker、Hayabusa details/profile，规则新增 `startup-*` 系列消费 `startupSurface/startupCategory/target/value`，不再只依赖宽泛 registry path。
+5. **后续短名单**：Procmon CSV 导入、短窗口 sequence rule、network hosts/domains/http/tls 聚合、artifact hash 去重、process stable procid/lineage、MITRE 顶层聚合、API/flags 语义化仍保留为下一轮。
 
 ## 后续扩容清单
 

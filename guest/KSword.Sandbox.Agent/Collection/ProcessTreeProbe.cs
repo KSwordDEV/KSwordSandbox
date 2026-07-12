@@ -37,6 +37,9 @@ internal sealed class ProcessTreeProbe : IGuestProbe
     private const string RegistryRunCreatedEventType = "registry.run.created";
     private const string RegistryRunModifiedEventType = "registry.run.modified";
     private const string RegistryRunDeletedEventType = "registry.run.deleted";
+    private const string StartupCreatedEventType = "startup.created";
+    private const string StartupModifiedEventType = "startup.modified";
+    private const string StartupDeletedEventType = "startup.deleted";
     private readonly IProcessSnapshotProvider snapshotProvider;
     private readonly ISystemChangeSnapshotProvider systemChangeSnapshotProvider;
     private readonly HashSet<string> emittedNewProcessKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -1653,6 +1656,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         yield return CreateInventorySnapshotEvent("scheduled_task.snapshot", "scheduled_task", snapshot.ScheduledTasks.Count, phase);
         yield return CreateInventorySnapshotEvent("startup_item.snapshot", "startup_item", snapshot.StartupItems.Count, phase);
         yield return CreateInventorySnapshotEvent("registry.run.snapshot", "registry.run", snapshot.RegistryRunValues.Count, phase);
+        yield return CreateInventorySnapshotEvent("startup.snapshot", "startup", snapshot.Services.Count + snapshot.ScheduledTasks.Count + snapshot.StartupItems.Count, phase);
     }
 
     /// <summary>
@@ -1727,6 +1731,36 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             RegistryRunDeletedEventType,
             phase,
             CreateRegistryRunEvent);
+        AddStateDiffEvents(
+            events,
+            baseline.Services,
+            current.Services,
+            "startup",
+            StartupCreatedEventType,
+            StartupModifiedEventType,
+            StartupDeletedEventType,
+            phase,
+            CreateStartupServiceEvent);
+        AddStateDiffEvents(
+            events,
+            baseline.ScheduledTasks,
+            current.ScheduledTasks,
+            "startup",
+            StartupCreatedEventType,
+            StartupModifiedEventType,
+            StartupDeletedEventType,
+            phase,
+            CreateStartupScheduledTaskEvent);
+        AddStateDiffEvents(
+            events,
+            baseline.StartupItems,
+            current.StartupItems,
+            "startup",
+            StartupCreatedEventType,
+            StartupModifiedEventType,
+            StartupDeletedEventType,
+            phase,
+            CreateStartupItemProjectionEvent);
         return events;
     }
 
@@ -2015,6 +2049,280 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         }
 
         return evt;
+    }
+
+    /// <summary>
+    /// Projects a service inventory diff into the unified startup.* lane.
+    /// Inputs are service before/after snapshots and phase; processing keeps
+    /// service-specific fields while adding startup surface/category aliases;
+    /// the method returns a report-ready startup event.
+    /// </summary>
+    private static SandboxEvent CreateStartupServiceEvent(
+        string eventType,
+        string change,
+        ServiceStateSnapshot service,
+        ServiceStateSnapshot? previous,
+        ProbePhase phase)
+    {
+        var isDriver = IsDriverService(service);
+        var target = FirstNonEmpty(service.ImagePath, service.ServiceDll, service.RawSummary, service.ServiceName);
+        var evt = new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "guest",
+            ProcessId = service.ProcessId,
+            Path = target,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["change"] = change,
+                ["startupSurface"] = isDriver ? "driver-service" : "windows-service",
+                ["startupCategory"] = isDriver ? "driver" : "service",
+                ["startupSource"] = "service-inventory-diff",
+                ["autostartKind"] = "service",
+                ["serviceName"] = service.ServiceName,
+                ["name"] = service.ServiceName,
+                ["value"] = target,
+                ["target"] = target,
+                ["signature"] = service.Signature,
+                ["zhMessage"] = isDriver
+                    ? "启动项 diff 发现驱动服务被创建、修改或删除。"
+                    : "启动项 diff 发现 Windows 服务被创建、修改或删除。"
+            }
+        };
+
+        AddIfNotEmpty(evt.Data, "displayName", service.DisplayName);
+        AddIfNotEmpty(evt.Data, "state", service.State);
+        AddIfNotEmpty(evt.Data, "stateCode", service.StateCode);
+        AddIfNotEmpty(evt.Data, "imagePath", service.ImagePath);
+        AddIfNotEmpty(evt.Data, "serviceDll", service.ServiceDll);
+        AddIfNotEmpty(evt.Data, "startType", service.StartType);
+        AddIfNotEmpty(evt.Data, "serviceType", service.ServiceType);
+        AddIfNotEmpty(evt.Data, "objectName", service.ObjectName);
+        AddIfNotEmpty(evt.Data, "rawSummary", service.RawSummary);
+        if (service.ProcessId is not null)
+        {
+            evt.Data["serviceProcessId"] = service.ProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (previous is not null)
+        {
+            AddIfNotEmpty(evt.Data, "previousValue", FirstNonEmpty(previous.ImagePath, previous.ServiceDll, previous.RawSummary, previous.ServiceName));
+            AddIfNotEmpty(evt.Data, "previousImagePath", previous.ImagePath);
+            AddIfNotEmpty(evt.Data, "previousServiceDll", previous.ServiceDll);
+            AddIfNotEmpty(evt.Data, "previousStartType", previous.StartType);
+            AddIfNotEmpty(evt.Data, "previousServiceType", previous.ServiceType);
+        }
+
+        return evt;
+    }
+
+    /// <summary>
+    /// Projects a scheduled-task inventory diff into the unified startup.* lane.
+    /// </summary>
+    private static SandboxEvent CreateStartupScheduledTaskEvent(
+        string eventType,
+        string change,
+        ScheduledTaskStateSnapshot task,
+        ScheduledTaskStateSnapshot? previous,
+        ProbePhase phase)
+    {
+        var target = FirstNonEmpty(task.TaskToRun, task.RawSummary, task.TaskName);
+        var evt = new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "guest",
+            Path = task.TaskName,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["change"] = change,
+                ["startupSurface"] = "scheduled-task",
+                ["startupCategory"] = "scheduled-task",
+                ["startupSource"] = "scheduled-task-inventory-diff",
+                ["autostartKind"] = "scheduled-task",
+                ["taskName"] = task.TaskName,
+                ["name"] = task.TaskName,
+                ["value"] = target,
+                ["target"] = target,
+                ["signature"] = task.Signature,
+                ["zhMessage"] = "启动项 diff 发现计划任务被创建、修改或删除。"
+            }
+        };
+
+        AddIfNotEmpty(evt.Data, "status", task.Status);
+        AddIfNotEmpty(evt.Data, "taskToRun", task.TaskToRun);
+        AddIfNotEmpty(evt.Data, "nextRunTime", task.NextRunTime);
+        AddIfNotEmpty(evt.Data, "lastRunTime", task.LastRunTime);
+        AddIfNotEmpty(evt.Data, "author", task.Author);
+        AddIfNotEmpty(evt.Data, "rawSummary", task.RawSummary);
+        if (previous is not null)
+        {
+            AddIfNotEmpty(evt.Data, "previousValue", FirstNonEmpty(previous.TaskToRun, previous.RawSummary, previous.TaskName));
+            AddIfNotEmpty(evt.Data, "previousTaskToRun", previous.TaskToRun);
+            AddIfNotEmpty(evt.Data, "previousStatus", previous.Status);
+        }
+
+        return evt;
+    }
+
+    /// <summary>
+    /// Projects a registry/folder/WMI startup inventory diff into startup.*.
+    /// </summary>
+    private static SandboxEvent CreateStartupItemProjectionEvent(
+        string eventType,
+        string change,
+        StartupItemStateSnapshot item,
+        StartupItemStateSnapshot? previous,
+        ProbePhase phase)
+    {
+        var surface = InferStartupSurface(item);
+        var category = string.Equals(item.Kind, "folder", StringComparison.OrdinalIgnoreCase)
+            ? "startup-folder"
+            : (surface.StartsWith("wmi", StringComparison.OrdinalIgnoreCase) ? "wmi" : "registry");
+        var target = FirstNonEmpty(item.Value, item.Location, item.Name);
+        var evt = new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "guest",
+            Path = item.Location,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["change"] = change,
+                ["startupSurface"] = surface,
+                ["startupCategory"] = category,
+                ["startupSource"] = "startup-inventory-diff",
+                ["autostartKind"] = surface,
+                ["kind"] = item.Kind,
+                ["location"] = item.Location,
+                ["name"] = item.Name,
+                ["value"] = target,
+                ["target"] = target,
+                ["signature"] = item.Signature,
+                ["zhMessage"] = "启动项 diff 发现注册表、启动目录或 WMI 持久化面发生变化。"
+            }
+        };
+
+        AddIfNotEmpty(evt.Data, "valueKind", item.ValueKind);
+        AddIfNotEmpty(evt.Data, "registryKeyPath", item.RawKeyPath);
+        AddIfNotEmpty(evt.Data, "description", item.Description);
+        if (item.LastWriteUtc is not null)
+        {
+            evt.Data["lastWriteUtc"] = item.LastWriteUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        if (item.SizeBytes is not null)
+        {
+            evt.Data["sizeBytes"] = item.SizeBytes.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (previous is not null)
+        {
+            AddIfNotEmpty(evt.Data, "previousValue", previous.Value);
+            AddIfNotEmpty(evt.Data, "previousValueKind", previous.ValueKind);
+            AddIfNotEmpty(evt.Data, "previousRegistryKeyPath", previous.RawKeyPath);
+        }
+
+        return evt;
+    }
+
+    private static bool IsDriverService(ServiceStateSnapshot service)
+    {
+        var serviceType = service.ServiceType ?? string.Empty;
+        var imagePath = service.ImagePath ?? string.Empty;
+        return serviceType.Contains("kernel", StringComparison.OrdinalIgnoreCase) ||
+            serviceType.Contains("file_system", StringComparison.OrdinalIgnoreCase) ||
+            serviceType.Contains("driver", StringComparison.OrdinalIgnoreCase) ||
+            imagePath.EndsWith(".sys", StringComparison.OrdinalIgnoreCase) ||
+            imagePath.Contains(@"\drivers\", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string InferStartupSurface(StartupItemStateSnapshot item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Surface))
+        {
+            return item.Surface;
+        }
+
+        var haystack = $"{item.Kind}\n{item.Location}\n{item.Name}\n{item.ValueKind}";
+        if (haystack.Contains("RunOnce", StringComparison.OrdinalIgnoreCase))
+        {
+            return "autorun-runonce-key";
+        }
+
+        if (haystack.Contains(@"\Run", StringComparison.OrdinalIgnoreCase) ||
+            haystack.Contains("Run key", StringComparison.OrdinalIgnoreCase))
+        {
+            return "autorun-run-key";
+        }
+
+        if (haystack.Contains("Startup", StringComparison.OrdinalIgnoreCase))
+        {
+            return "startup-folder";
+        }
+
+        if (haystack.Contains("Winlogon", StringComparison.OrdinalIgnoreCase))
+        {
+            return "winlogon";
+        }
+
+        if (haystack.Contains("Image File Execution Options", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ifeo";
+        }
+
+        if (haystack.Contains("SilentProcessExit", StringComparison.OrdinalIgnoreCase))
+        {
+            return "silent-process-exit";
+        }
+
+        if (haystack.Contains("AppInit", StringComparison.OrdinalIgnoreCase))
+        {
+            return "appinit-dlls";
+        }
+
+        if (haystack.Contains("AppCert", StringComparison.OrdinalIgnoreCase))
+        {
+            return "appcert-dlls";
+        }
+
+        if (haystack.Contains(@"\Lsa", StringComparison.OrdinalIgnoreCase))
+        {
+            return "lsa-security-package";
+        }
+
+        if (haystack.Contains("Winsock", StringComparison.OrdinalIgnoreCase) ||
+            haystack.Contains("WinSock2", StringComparison.OrdinalIgnoreCase))
+        {
+            return "winsock-provider";
+        }
+
+        if (haystack.Contains("Shell Extensions", StringComparison.OrdinalIgnoreCase))
+        {
+            return "shell-extension";
+        }
+
+        if (haystack.Contains("WMI", StringComparison.OrdinalIgnoreCase) ||
+            haystack.Contains("root\\subscription", StringComparison.OrdinalIgnoreCase))
+        {
+            return "wmi-permanent-event-subscription";
+        }
+
+        return item.Kind;
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
     }
 
     /// <summary>
@@ -2441,6 +2749,7 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
 {
     private static readonly TimeSpan ServiceQueryTimeout = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan ScheduledTaskQueryTimeout = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan WmiSubscriptionQueryTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Captures all system-change inventories.
@@ -2453,7 +2762,7 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
         var services = await CaptureServicesAsync(diagnostics, cancellationToken).ConfigureAwait(false);
         var scheduledTasks = await CaptureScheduledTasksAsync(diagnostics, cancellationToken).ConfigureAwait(false);
         var registryRunValues = new Dictionary<string, RegistryRunValueSnapshot>(StringComparer.OrdinalIgnoreCase);
-        var startupItems = CaptureStartupItems(registryRunValues, diagnostics, cancellationToken);
+        var startupItems = await CaptureStartupItemsAsync(registryRunValues, diagnostics, cancellationToken).ConfigureAwait(false);
         return new SystemChangeSnapshot(services, scheduledTasks, startupItems, registryRunValues, diagnostics);
     }
 
@@ -2521,7 +2830,7 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
     /// Inputs are diagnostics and cancellation token; processing reads common
     /// Run/RunOnce keys and startup folders defensively; returns a dictionary.
     /// </summary>
-    private static Dictionary<string, StartupItemStateSnapshot> CaptureStartupItems(
+    private static async Task<Dictionary<string, StartupItemStateSnapshot>> CaptureStartupItemsAsync(
         Dictionary<string, RegistryRunValueSnapshot> registryRunValues,
         List<SandboxEvent> diagnostics,
         CancellationToken cancellationToken)
@@ -2537,6 +2846,7 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
         CaptureRegistryStartupItems(items, registryRunValues, diagnostics, cancellationToken);
         CaptureStartupFolderItems(items, diagnostics, Environment.SpecialFolder.Startup, "user-startup-folder", cancellationToken);
         CaptureStartupFolderItems(items, diagnostics, Environment.SpecialFolder.CommonStartup, "common-startup-folder", cancellationToken);
+        await CaptureWmiStartupItemsAsync(items, diagnostics, cancellationToken).ConfigureAwait(false);
         return items;
     }
 
@@ -2727,9 +3037,10 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
     }
 
     /// <summary>
-    /// Captures common Run/RunOnce registry startup entries.
+    /// Captures common and high-signal Windows autostart registry entries.
     /// Inputs are item dictionary, diagnostics, and cancellation token;
-    /// processing enumerates HKCU/HKLM 32/64-bit views defensively.
+    /// processing enumerates bounded HKCU/HKLM 32/64-bit views defensively and
+    /// also projects Run/RunOnce values into dedicated registry.run snapshots.
     /// </summary>
     [SupportedOSPlatform("windows")]
     private static void CaptureRegistryStartupItems(
@@ -2741,65 +3052,289 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
         var views = Environment.Is64BitOperatingSystem
             ? [RegistryView.Registry64, RegistryView.Registry32]
             : new[] { RegistryView.Default };
-        var keys = new[]
+        var locations = new[]
         {
-            (RegistryHive.CurrentUser, "HKCU", @"Software\Microsoft\Windows\CurrentVersion\Run", "Run"),
-            (RegistryHive.CurrentUser, "HKCU", @"Software\Microsoft\Windows\CurrentVersion\RunOnce", "RunOnce"),
-            (RegistryHive.LocalMachine, "HKLM", @"Software\Microsoft\Windows\CurrentVersion\Run", "Run"),
-            (RegistryHive.LocalMachine, "HKLM", @"Software\Microsoft\Windows\CurrentVersion\RunOnce", "RunOnce")
+            new RegistryStartupLocation(RegistryHive.CurrentUser, "HKCU", @"Software\Microsoft\Windows\CurrentVersion\Run", "autorun-run-key", 0, "Run", true),
+            new RegistryStartupLocation(RegistryHive.CurrentUser, "HKCU", @"Software\Microsoft\Windows\CurrentVersion\RunOnce", "autorun-runonce-key", 0, "RunOnce", true),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"Software\Microsoft\Windows\CurrentVersion\Run", "autorun-run-key", 0, "Run", true),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"Software\Microsoft\Windows\CurrentVersion\RunOnce", "autorun-runonce-key", 0, "RunOnce", true),
+            new RegistryStartupLocation(RegistryHive.CurrentUser, "HKCU", @"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run", "policy-explorer-run", 0, "ExplorerRun", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run", "policy-explorer-run", 0, "ExplorerRun", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", "winlogon", 1, "Winlogon", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options", "ifeo", 1, "IFEO", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\SilentProcessExit", "silent-process-exit", 1, "SilentProcessExit", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows", "appinit-dlls", 0, "AppInit", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SYSTEM\CurrentControlSet\Control\Session Manager\AppCertDLLs", "appcert-dlls", 0, "AppCert", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SYSTEM\CurrentControlSet\Control\Session Manager", "bootexecute", 0, "BootExecute", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SYSTEM\CurrentControlSet\Control\Lsa", "lsa-security-package", 0, "LSA", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SYSTEM\CurrentControlSet\Services\WinSock2\Parameters\Protocol_Catalog9", "winsock-provider", 2, "Winsock", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Approved", "shell-extension", 0, "ShellExtensions", false),
+            new RegistryStartupLocation(RegistryHive.CurrentUser, "HKCU", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Approved", "shell-extension", 0, "ShellExtensions", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SOFTWARE\Microsoft\Active Setup\Installed Components", "active-setup", 1, "ActiveSetup", false),
+            new RegistryStartupLocation(RegistryHive.CurrentUser, "HKCU", @"SOFTWARE\Microsoft\Active Setup\Installed Components", "active-setup", 1, "ActiveSetup", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders", "time-provider", 1, "TimeProvider", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SYSTEM\CurrentControlSet\Control\Print\Monitors", "print-monitor", 1, "PrintMonitor", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SOFTWARE\Microsoft\NetSh", "netsh-helper", 1, "NetshHelper", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs", "known-dlls", 0, "KnownDLLs", false),
+            new RegistryStartupLocation(RegistryHive.CurrentUser, "HKCU", @"Environment", "logon-script", 0, "UserEnvironment", false),
+            new RegistryStartupLocation(RegistryHive.LocalMachine, "HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Browser Helper Objects", "browser-helper-object", 1, "BHO", false),
+            new RegistryStartupLocation(RegistryHive.CurrentUser, "HKCU", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Browser Helper Objects", "browser-helper-object", 1, "BHO", false)
         };
 
         foreach (var view in views)
         {
-            foreach (var (hive, hiveLabel, subKeyPath, keyName) in keys)
+            foreach (var location in locations)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    using var baseKey = RegistryKey.OpenBaseKey(hive, view);
-                    using var key = baseKey.OpenSubKey(subKeyPath);
+                    using var baseKey = RegistryKey.OpenBaseKey(location.Hive, view);
+                    using var key = baseKey.OpenSubKey(location.SubKeyPath);
                     if (key is null)
                     {
                         continue;
                     }
 
-                    foreach (var valueName in key.GetValueNames())
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        var value = key.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
-                        var expandedValue = key.GetValue(valueName, null, RegistryValueOptions.None);
-                        var valueKind = SafeGetValueKind(key, valueName);
-                        var name = string.IsNullOrWhiteSpace(valueName) ? "(Default)" : valueName;
-                        var location = $"{hiveLabel}\\{subKeyPath} ({view})";
-                        var registryRunValue = new RegistryRunValueSnapshot(
-                            hiveLabel,
-                            subKeyPath,
-                            keyName,
-                            view.ToString(),
-                            name,
-                            FormatRegistryValue(value),
-                            FormatRegistryValue(expandedValue),
-                            valueKind);
-                        registryRunValues[registryRunValue.Key] = registryRunValue;
-
-                        var item = new StartupItemStateSnapshot(
-                            "registry",
-                            location,
-                            name,
-                            registryRunValue.Value,
-                            valueKind,
-                            LastWriteUtc: null,
-                            SizeBytes: null);
-                        items[item.Key] = item;
-                    }
+                    CaptureRegistryStartupKey(
+                        items,
+                        registryRunValues,
+                        diagnostics,
+                        location,
+                        view,
+                        key,
+                        location.SubKeyPath,
+                        depth: 0,
+                        cancellationToken);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or ArgumentException)
                 {
-                    diagnostics.Add(CreateExceptionEvent("registry.run.capture_failed", $"{hiveLabel}\\{subKeyPath} ({view})", ex));
-                    diagnostics.Add(CreateExceptionEvent("startup_item.capture_failed", $"{hiveLabel}\\{subKeyPath} ({view})", ex));
+                    var eventType = location.IsRunKey ? "registry.run.capture_failed" : "startup_item.capture_failed";
+                    diagnostics.Add(CreateExceptionEvent(eventType, $"{location.HiveLabel}\\{location.SubKeyPath} ({view})", ex));
+                    if (location.IsRunKey)
+                    {
+                        diagnostics.Add(CreateExceptionEvent("startup_item.capture_failed", $"{location.HiveLabel}\\{location.SubKeyPath} ({view})", ex));
+                    }
                 }
             }
         }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void CaptureRegistryStartupKey(
+        Dictionary<string, StartupItemStateSnapshot> items,
+        Dictionary<string, RegistryRunValueSnapshot> registryRunValues,
+        List<SandboxEvent> diagnostics,
+        RegistryStartupLocation location,
+        RegistryView view,
+        RegistryKey key,
+        string currentSubKeyPath,
+        int depth,
+        CancellationToken cancellationToken)
+    {
+        var locationLabel = $"{location.HiveLabel}\\{currentSubKeyPath} ({view})";
+        try
+        {
+            foreach (var valueName in key.GetValueNames())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var value = key.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                var expandedValue = key.GetValue(valueName, null, RegistryValueOptions.None);
+                var valueKind = SafeGetValueKind(key, valueName);
+                var name = string.IsNullOrWhiteSpace(valueName) ? "(Default)" : valueName;
+                var formattedValue = FormatRegistryValue(value);
+                var expandedFormattedValue = FormatRegistryValue(expandedValue);
+
+                if (location.IsRunKey && string.Equals(currentSubKeyPath, location.SubKeyPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    var registryRunValue = new RegistryRunValueSnapshot(
+                        location.HiveLabel,
+                        currentSubKeyPath,
+                        location.KeyName,
+                        view.ToString(),
+                        name,
+                        formattedValue,
+                        expandedFormattedValue,
+                        valueKind);
+                    registryRunValues[registryRunValue.Key] = registryRunValue;
+                }
+
+                var item = new StartupItemStateSnapshot(
+                    "registry",
+                    locationLabel,
+                    name,
+                    formattedValue,
+                    valueKind,
+                    LastWriteUtc: null,
+                    SizeBytes: null,
+                    Surface: location.Surface,
+                    RawKeyPath: $@"{location.HiveLabel}\{currentSubKeyPath}",
+                    Description: location.KeyName);
+                items[item.Key] = item;
+            }
+
+            if (depth >= location.MaxDepth)
+            {
+                return;
+            }
+
+            foreach (var childName in key.GetSubKeyNames().OrderBy(name => name, StringComparer.OrdinalIgnoreCase).Take(256))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                using var childKey = key.OpenSubKey(childName);
+                if (childKey is null)
+                {
+                    continue;
+                }
+
+                CaptureRegistryStartupKey(
+                    items,
+                    registryRunValues,
+                    diagnostics,
+                    location,
+                    view,
+                    childKey,
+                    $@"{currentSubKeyPath}\{childName}",
+                    depth + 1,
+                    cancellationToken);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or ArgumentException)
+        {
+            diagnostics.Add(CreateExceptionEvent("startup_item.capture_failed", locationLabel, ex));
+        }
+    }
+
+    /// <summary>
+    /// Captures WMI permanent event subscription inventory using a bounded
+    /// PowerShell/CIM helper. Inputs are the shared startup-item dictionary and
+    /// diagnostics; processing emits filter/consumer/binding entries or a
+    /// non-fatal diagnostic when WMI is unavailable; the method returns no
+    /// value.
+    /// </summary>
+    private static async Task CaptureWmiStartupItemsAsync(
+        Dictionary<string, StartupItemStateSnapshot> items,
+        List<SandboxEvent> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            diagnostics.Add(CreateUnsupportedEvent("startup_item.capture_skipped", "WMI permanent event subscriptions"));
+            return;
+        }
+
+        var script = @"
+$ErrorActionPreference = 'Stop'
+$script:items = @()
+function Add-Item($kind, $surface, $location, $name, $value, $description) {
+  if ([string]::IsNullOrWhiteSpace($name)) { $name = '(unnamed)' }
+  $script:items += [pscustomobject]@{
+    Kind = $kind
+    Surface = $surface
+    Location = $location
+    Name = $name
+    Value = $value
+    ValueKind = 'WMI'
+    Description = $description
+  }
+}
+Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -ErrorAction SilentlyContinue | ForEach-Object {
+  Add-Item 'wmi' 'wmi-event-filter' 'root\subscription:__EventFilter' $_.Name $_.Query 'WMI EventFilter query'
+}
+Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -ErrorAction SilentlyContinue | ForEach-Object {
+  Add-Item 'wmi' 'wmi-commandline-consumer' 'root\subscription:CommandLineEventConsumer' $_.Name $_.CommandLineTemplate 'WMI CommandLineEventConsumer'
+}
+Get-CimInstance -Namespace root\subscription -ClassName ActiveScriptEventConsumer -ErrorAction SilentlyContinue | ForEach-Object {
+  Add-Item 'wmi' 'wmi-activescript-consumer' 'root\subscription:ActiveScriptEventConsumer' $_.Name $_.ScriptText 'WMI ActiveScriptEventConsumer'
+}
+Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -ErrorAction SilentlyContinue | ForEach-Object {
+  Add-Item 'wmi' 'wmi-filter-consumer-binding' 'root\subscription:__FilterToConsumerBinding' ($_.Filter + ' -> ' + $_.Consumer) ($_.Filter + ' -> ' + $_.Consumer) 'WMI FilterToConsumerBinding'
+}
+$script:items | ConvertTo-Json -Compress -Depth 4
+";
+
+        var result = await BoundedProcessRunner.RunAsync(
+            ResolvePowerShellPath(),
+            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            WmiSubscriptionQueryTimeout,
+            cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            diagnostics.Add(CreateCommandFailureEvent("startup_item.wmi.capture_failed", result));
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(result.StandardOutput);
+            if (document.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var element in document.RootElement.EnumerateArray())
+                {
+                    AddWmiStartupItem(items, element);
+                }
+            }
+            else if (document.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                AddWmiStartupItem(items, document.RootElement);
+            }
+        }
+        catch (JsonException ex)
+        {
+            diagnostics.Add(CreateExceptionEvent("startup_item.wmi.parse_failed", "root\\subscription", ex));
+        }
+    }
+
+    private static void AddWmiStartupItem(Dictionary<string, StartupItemStateSnapshot> items, JsonElement element)
+    {
+        var kind = JsonProperty(element, "Kind") ?? "wmi";
+        var surface = JsonProperty(element, "Surface") ?? "wmi-permanent-event-subscription";
+        var location = JsonProperty(element, "Location") ?? "root\\subscription";
+        var name = JsonProperty(element, "Name") ?? "(unnamed)";
+        var value = JsonProperty(element, "Value");
+        var valueKind = JsonProperty(element, "ValueKind") ?? "WMI";
+        var description = JsonProperty(element, "Description");
+        var item = new StartupItemStateSnapshot(
+            kind,
+            location,
+            name,
+            value,
+            valueKind,
+            LastWriteUtc: null,
+            SizeBytes: null,
+            Surface: surface,
+            RawKeyPath: location,
+            Description: description);
+        items[item.Key] = item;
+    }
+
+    private static string? JsonProperty(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var property) || property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String ? property.GetString() : property.ToString();
+    }
+
+    private static string ResolvePowerShellPath()
+    {
+        var systemDirectory = Environment.SystemDirectory;
+        if (!string.IsNullOrWhiteSpace(systemDirectory))
+        {
+            var candidate = Path.Combine(systemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return "powershell.exe";
     }
 
     /// <summary>
@@ -2835,7 +3370,10 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
                         path,
                         label,
                         info.LastWriteTimeUtc,
-                        info.Length);
+                        info.Length,
+                        Surface: "startup-folder",
+                        RawKeyPath: folderPath,
+                        Description: label);
                     items[item.Key] = item;
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
@@ -3002,6 +3540,10 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
             {
                 ["source"] = source,
                 ["reason"] = "System inventory source is only available on Windows.",
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true",
+                ["sampleBehaviorCandidate"] = "false",
+                ["behaviorCounted"] = "false",
                 ["zhHint"] = "该系统清单来源仅在 Windows guest 中可用；在非 Windows 或受限环境中会跳过，不代表样本行为。"
             }
         };
@@ -3023,6 +3565,10 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
                 ["command"] = Truncate(string.IsNullOrWhiteSpace(result.Arguments) ? result.FileName : $"{result.FileName} {result.Arguments}", 1200),
                 ["commandFileName"] = result.FileName,
                 ["commandArguments"] = Truncate(result.Arguments, 1024),
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true",
+                ["sampleBehaviorCandidate"] = "false",
+                ["behaviorCounted"] = "false",
                 ["timedOut"] = result.TimedOut.ToString(CultureInfo.InvariantCulture),
                 ["commandTimedOut"] = result.TimedOut.ToString(CultureInfo.InvariantCulture),
                 ["timeoutMilliseconds"] = result.Timeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture)
@@ -3085,6 +3631,10 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
             {
                 ["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name,
                 ["message"] = exception.Message,
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true",
+                ["sampleBehaviorCandidate"] = "false",
+                ["behaviorCounted"] = "false",
                 ["zhMessage"] = "读取系统清单时发生异常；该诊断不会中断整体采集。",
                 ["zhHint"] = "请结合 eventType、path、exceptionType/message 判断是权限、注册表、服务或文件系统访问问题。"
             }
@@ -3259,7 +3809,10 @@ internal sealed record StartupItemStateSnapshot(
     string? Value,
     string? ValueKind,
     DateTime? LastWriteUtc,
-    long? SizeBytes) : ISystemStateItemSnapshot
+    long? SizeBytes,
+    string? Surface = null,
+    string? RawKeyPath = null,
+    string? Description = null) : ISystemStateItemSnapshot
 {
     public string Key => $"{Kind}:{Location}:{Name}";
 
@@ -3268,7 +3821,10 @@ internal sealed record StartupItemStateSnapshot(
         Value,
         ValueKind,
         LastWriteUtc?.Ticks.ToString(CultureInfo.InvariantCulture),
-        SizeBytes?.ToString(CultureInfo.InvariantCulture));
+        SizeBytes?.ToString(CultureInfo.InvariantCulture),
+        Surface,
+        RawKeyPath,
+        Description);
 }
 
 /// <summary>
@@ -3292,6 +3848,20 @@ internal sealed record RegistryRunValueSnapshot(
 
     public string Signature => string.Join("|", Value, ExpandedValue, ValueKind);
 }
+
+/// <summary>
+/// Describes one bounded autostart registry location to snapshot.
+/// Inputs are hive/path/surface metadata; processing uses these values to
+/// enumerate direct values and, for selected surfaces, one or two child levels.
+/// </summary>
+internal sealed record RegistryStartupLocation(
+    RegistryHive Hive,
+    string HiveLabel,
+    string SubKeyPath,
+    string Surface,
+    int MaxDepth,
+    string KeyName,
+    bool IsRunKey);
 
 /// <summary>
 /// Stores all system-change snapshots captured for one phase.

@@ -303,6 +303,7 @@ public sealed class HtmlReportRenderer
         AppendProcessDetails(html, report, artifactLookup, artifactLinks);
         AppendSecurityPrivilegeTelemetry(html, report, artifactLookup, artifactLinks);
         AppendDroppedFiles(html, report, artifactLookup, artifactLinks);
+        AppendStartupPersistence(html, report, artifactLookup, artifactLinks);
         AppendRegistryBehavior(html, report, artifactLookup, artifactLinks);
         AppendNetworkBehavior(html, report, artifactLookup, artifactLinks);
         AppendR0Events(html, report, artifactLookup, artifactLinks);
@@ -439,6 +440,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             ("process", "Process details"),
             ("security", "Security / privilege telemetry"),
             ("files", "File system activity"),
+            ("startup", "Startup / persistence diff"),
             ("registry", "Registry behavior"),
             ("network", "Network behavior"),
             ("r0", "R0 / driver events"),
@@ -468,6 +470,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         QuickLink(html, "process", "Process details", report.Events.Count(IsSampleBehaviorProcessEvent).ToString());
         QuickLink(html, "security", "Security / privilege", report.Events.Count(IsSampleBehaviorSecurityPrivilegeEvent).ToString());
         QuickLink(html, "files", "File system activity", report.Events.Count(IsSampleBehaviorFileEvent).ToString());
+        QuickLink(html, "startup", "Startup diff", report.Events.Count(IsSampleBehaviorStartupEvent).ToString());
         QuickLink(html, "network", "Network behavior", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString());
         QuickLink(html, "r0", "R0 sample/health", report.Events.Count(IsR0Event).ToString());
         QuickLink(html, "vt", "VT lookups", report.Events.Count(IsVirusTotalEvent).ToString());
@@ -1137,6 +1140,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Process exits", CountSampleBehaviorEvents(report, "process.exit").ToString(), "risk-info");
         Metric(html, "Registry events", report.Events.Count(IsSampleBehaviorRegistryEvent).ToString(), "risk-medium");
         Metric(html, "File events", report.Events.Count(IsSampleBehaviorFileEvent).ToString(), "risk-medium");
+        Metric(html, "Startup diff events", report.Events.Count(IsSampleBehaviorStartupEvent).ToString(), "risk-medium");
         Metric(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString(), "risk-medium");
         Metric(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString(), "risk-info");
         Metric(html, "R0 health/readiness", report.Events.Count(IsR0CollectionHealthEvent).ToString(), "risk-info");
@@ -1988,6 +1992,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             BuildStoryEvidenceLines(droppedArtifacts, droppedEvents.Count > 0 ? droppedEvents : fileEvents),
             "Dropped-file artifactEvidenceMatrix",
             droppedMatrix);
+        var startupEvents = sampleEvents.Where(IsStartupEvent).ToList();
+        var startupSurfaces = startupEvents
+            .Select(evt => FirstEventDataValue(evt, "startupSurface") ?? evt.EventType)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var startupEvidence = startupEvents.Take(8).Select(EventOneLine).ToList();
 
         var screenshotArtifacts = StoryArtifactsByKind(artifacts, ArtifactKind.Screenshot);
         var screenshotEvents = report.Events.Where(IsScreenshotEvidenceEvent).OrderBy(evt => evt.Timestamp).ToList();
@@ -2060,6 +2073,19 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                     ArtifactEvidenceMatrixMetric(droppedMatrix)
                 ],
                 droppedEvidence),
+            CreateEvidenceStoryCard(
+                "Startup persistence diff",
+                $"{startupEvents.Count} rows",
+                startupEvents.Count > 0 ? "high" : "low",
+                "Before/after startup inventory facts are summarized before raw rows so services, tasks, Run keys, WMI, IFEO, Winlogon, LSA, AppInit, Winsock, and shell-extension persistence stay explainable.",
+                [
+                    $"Startup diff rows: {startupEvents.Count}",
+                    $"Created/modified: {startupEvents.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "change") ?? string.Empty, "created", "modified"))}",
+                    $"Deleted: {startupEvents.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "change") ?? string.Empty, "deleted"))}",
+                    $"User-writable targets: {startupEvents.Count(StartupEventHasUserWritableTarget)}",
+                    $"Surfaces: {string.Join(", ", startupSurfaces)}"
+                ],
+                startupEvidence),
             CreateEvidenceStoryCard(
                 "Screenshot evidence",
                 $"{screenshotArtifacts.Count} captures",
@@ -3311,6 +3337,85 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         AppendEventTable(html, "files", "File system activity", report.Events.Where(IsSampleBehaviorFileEvent), artifactLookup, artifacts);
+    }
+
+    /// <summary>
+    /// Appends before/after startup and persistence inventory diffs.
+    /// Inputs are normalized startup.* events projected from services,
+    /// scheduled tasks, Run keys, WMI, Winlogon, IFEO, LSA, AppInit, Winsock,
+    /// and shell-extension snapshots; processing summarizes surfaces first and
+    /// then renders bounded evidence rows; the method returns no value.
+    /// </summary>
+    private static void AppendStartupPersistence(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var startupEvents = report.Events
+            .Where(IsSampleBehaviorStartupEvent)
+            .OrderBy(evt => evt.Timestamp)
+            .ToList();
+        html.AppendLine("<section id=\"startup\" class=\"card\"><h2>Startup / persistence diff</h2>");
+        html.AppendLine("<div class=\"section-note\"><strong>Before/after startup diff.</strong> This section shows aggregated startup facts projected from services, drivers, scheduled tasks, Run keys, Startup folders, WMI subscriptions, Winlogon, IFEO/SilentProcessExit, LSA, AppInit/AppCert, Winsock, shell extensions, Active Setup, time providers, print monitors, and Netsh helpers. If a surface is absent, the report says no rows were collected instead of inventing behavior.</div>");
+
+        if (startupEvents.Count == 0)
+        {
+            Empty(html, "No startup.* before/after diff rows were collected. This means the startup inventory did not observe created/modified/deleted entries in the inline report window, not that the sample cannot persist.");
+            html.AppendLine("</section>");
+            return;
+        }
+
+        var createdOrModified = startupEvents.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "change") ?? string.Empty, "created", "modified"));
+        var deleted = startupEvents.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "change") ?? string.Empty, "deleted"));
+        var userWritableTargets = startupEvents.Count(StartupEventHasUserWritableTarget);
+        var surfaces = startupEvents
+            .Select(evt => FirstEventDataValue(evt, "startupSurface") ?? "(unknown)")
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var categories = startupEvents
+            .GroupBy(evt => FirstEventDataValue(evt, "startupCategory") ?? "(unknown)", StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .Select(group => $"{group.Key}={group.Count()}")
+            .ToList();
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "Startup / persistence diff",
+                $"startupRows={startupEvents.Count}",
+                $"createdOrModified={createdOrModified}",
+                $"deleted={deleted}",
+                $"userWritableTargets={userWritableTargets}",
+                $"surfaces={string.Join(", ", surfaces)}",
+                $"categories={string.Join(", ", categories)}",
+                .. startupEvents.Take(12).Select(EventOneLine)
+            ]);
+
+        html.AppendLine("<div class=\"overview-strip\">");
+        AppendOverviewItem(html, "Startup rows", startupEvents.Count.ToString(CultureInfo.InvariantCulture), "Unified startup.* facts retained from before/after inventory diffs.", startupEvents.Count > 0 ? "risk-medium" : "risk-low");
+        AppendOverviewItem(html, "Created/modified", createdOrModified.ToString(CultureInfo.InvariantCulture), "Persistence surfaces that appeared or changed after launch.", createdOrModified > 0 ? "risk-high" : "risk-low");
+        AppendOverviewItem(html, "Deleted", deleted.ToString(CultureInfo.InvariantCulture), "Deleted startup inventory rows can indicate cleanup or rollback behavior.", deleted > 0 ? "risk-medium" : "risk-low");
+        AppendOverviewItem(html, "User-writable targets", userWritableTargets.ToString(CultureInfo.InvariantCulture), "Startup values pointing at Temp/AppData/Public/Downloads/ProgramData or script/executable payloads.", userWritableTargets > 0 ? "risk-high" : "risk-info");
+        html.AppendLine("</div>");
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy startup diff summary", copy)}</div>");
+        html.AppendLine("<div class=\"relationship-tags\">");
+        foreach (var surface in surfaces.Take(20))
+        {
+            html.AppendLine($"<span class=\"chip chip-info copyable\" data-copy=\"{A(surface)}\">{E(surface)}</span>");
+        }
+
+        foreach (var category in categories)
+        {
+            html.AppendLine($"<span class=\"chip chip-muted copyable\" data-copy=\"{A(category)}\">{E(category)}</span>");
+        }
+
+        html.AppendLine("</div>");
+        AppendEventRows(html, startupEvents, artifactLookup, artifacts);
+        html.AppendLine("</section>");
     }
 
     /// <summary>
@@ -6454,6 +6559,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
     private static bool IsSampleBehaviorRegistryEvent(SandboxEvent evt) => IsSampleBehaviorEvent(evt) && IsRegistryEvent(evt);
 
+    private static bool IsSampleBehaviorStartupEvent(SandboxEvent evt) => IsSampleBehaviorEvent(evt) && IsStartupEvent(evt);
+
     private static bool IsSampleBehaviorNetworkEvent(SandboxEvent evt) => IsSampleBehaviorEvent(evt) && IsNetworkEvent(evt);
 
     private static bool IsSampleBehaviorProcessEvent(SandboxEvent evt) =>
@@ -6821,6 +6928,57 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     {
         return evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsStartupEvent(SandboxEvent evt)
+    {
+        return evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+            TextEqualsAny(
+                evt.EventType,
+                "startup_item.created",
+                "startup_item.modified",
+                "startup_item.deleted",
+                "startup_item.diff_truncated",
+                "registry.run.created",
+                "registry.run.modified",
+                "registry.run.deleted",
+                "registry.run.diff_truncated",
+                "service.created",
+                "service.modified",
+                "service.deleted",
+                "service.diff_truncated",
+                "scheduled_task.created",
+                "scheduled_task.modified",
+                "scheduled_task.deleted",
+                "scheduled_task.diff_truncated");
+    }
+
+    private static bool StartupEventHasUserWritableTarget(SandboxEvent evt)
+    {
+        var target = string.Join(
+            "\n",
+            evt.Path,
+            evt.CommandLine,
+            FirstEventDataValue(evt, "target"),
+            FirstEventDataValue(evt, "value"),
+            FirstEventDataValue(evt, "imagePath"),
+            FirstEventDataValue(evt, "serviceDll"),
+            FirstEventDataValue(evt, "taskToRun"),
+            FirstEventDataValue(evt, "rawSummary"));
+        return TextContainsAny(
+            target,
+            @"\Temp\",
+            @"\AppData\",
+            @"\Users\Public\",
+            @"\Downloads\",
+            @"\ProgramData\",
+            ".ps1",
+            ".vbs",
+            ".js",
+            ".hta",
+            ".scr",
+            ".dll",
+            ".exe");
     }
 
     /// <summary>
