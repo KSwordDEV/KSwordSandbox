@@ -72,17 +72,17 @@ internal static class SettingsPage
             <p class="row"><a class="button secondary" href="/" data-zh="返回主界面" data-en="Back to dashboard">返回主界面</a></p>
           </header>
           <main>
-            <section id="vtSettingsSection" data-copy="VirusTotal status={{Attr(virusTotal.Configured ? "configured" : "not-configured")}}; source={{Attr(virusTotal.Source)}}; api-key=process-only-current-web-host; persistence=process-only-no-file; official files/{hash} lookup only; no sample upload">
+            <section id="vtSettingsSection" data-copy="VirusTotal 状态={{Attr(virusTotal.Configured ? "已配置 / configured" : "未配置 / not-configured")}}；来源={{Attr(virusTotal.Source)}}；API Key=仅当前 Web Host 进程；持久化=不落盘；官方 files/{hash} 只查 SHA-256；不上传样本字节 / VirusTotal status={{Attr(virusTotal.Configured ? "configured" : "not-configured")}}; source={{Attr(virusTotal.Source)}}; process-only key; no sample upload">
               <h2 data-zh="VirusTotal 官方 hash-only 结果" data-en="VirusTotal official hash-only results">VirusTotal 官方 hash-only 结果</h2>
               <p class="muted" data-zh="当前只对样本 SHA-256 调用 VirusTotal 官方 files/{hash} 报告查询；不上传样本字节、不提交扫描 URL、不写样本内容。不配置、未收录、限速、鉴权失败、超时或查询失败时，主流程继续运行且不会产生噪音日志；状态只在动态监控页/API 中静默展示，不写任务日志或行为日志。" data-en="The integration only calls VirusTotal official files/{hash} report lookup for the sample SHA-256; it does not upload sample bytes, submit scan URLs, or write sample contents. Missing keys, not-found, rate limits, auth failures, timeouts, or lookup failures keep the main flow running without noisy logs; status is shown quietly on the live monitor/API without job or behavior logs.">当前只对样本 SHA-256 调用 VirusTotal 官方 files/{hash} 报告查询；不上传样本字节、不提交扫描 URL、不写样本内容。不配置、未收录、限速、鉴权失败、超时或查询失败时，主流程继续运行且不会产生噪音日志；状态只在动态监控页/API 中静默展示，不写任务日志或行为日志。</p>
-              <button class="copy-btn" type="button" data-copy="VirusTotal status={{Attr(virusTotal.Configured ? "configured" : "not-configured")}}; source={{Attr(virusTotal.Source)}}; api-key=process-only-current-web-host; persistence=process-only-no-file; official files/{hash} hash lookup only; does not upload sample bytes" data-copy-label="VirusTotal settings summary" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
+              <button class="copy-btn" type="button" data-copy="VirusTotal：{{Attr(virusTotal.Configured ? "已配置 / configured" : "未配置 / not-configured")}}；来源={{Attr(virusTotal.Source)}}；API Key 仅写入当前 Web Host 进程；WebUI 不落盘；官方 files/{hash} 只查 hash；不上传样本字节 / process-only key, no persisted secret, official hash lookup only, no sample upload" data-copy-label="VirusTotal settings summary" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
               <div class="metric">
                 <strong data-zh="安全提示" data-en="Security note">安全提示</strong>
-                <p class="muted" data-copy="VirusTotal API key WebUI updates are process-only for the current Web Host and never persisted to disk." data-zh="在本页输入的 API Key 只写入当前 Web Host 进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘，也不会修改 User/Machine 环境变量。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。" data-en="Keys entered here are written only to the current Web Host process environment variable KSWORDBOX_VIRUSTOTAL_API_KEY (current process environment variable); the WebUI never persists them to disk and never modifies User/Machine environment variables. For restart-stable use, set a User/Machine environment variable before starting the Web Host.">在本页输入的 API Key 只写入当前 Web Host 进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘，也不会修改 User/Machine 环境变量。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。</p>
+                <p class="muted" data-copy="VirusTotal API Key 仅写入当前 Web Host 进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 永不落盘，也不修改 User/Machine 环境变量 / process-only current Web Host key; never persisted to disk." data-zh="在本页输入的 API Key 只写入当前 Web Host 进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘，也不会修改 User/Machine 环境变量。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。" data-en="Keys entered here are written only to the current Web Host process environment variable KSWORDBOX_VIRUSTOTAL_API_KEY (current process environment variable); the WebUI never persists them to disk and never modifies User/Machine environment variables. For restart-stable use, set a User/Machine environment variable before starting the Web Host.">在本页输入的 API Key 只写入当前 Web Host 进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘，也不会修改 User/Machine 环境变量。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。</p>
               </div>
               <div class="metric">
                 <strong data-zh="动态监控页展示策略" data-en="Live monitor display policy">动态监控页展示策略</strong>
-                <p class="muted" data-copy="VT quiet taxonomy: not_configured, not_found, rate_limited, authentication_failed, timeout, lookup_failed, missing_hash, invalid_hash; display-only on /jobs/{jobId}/live-events and no job/behavior logs." data-zh="上传 EXE 后会进入 /jobs/{jobId}/live-events；VirusTotal 的静默状态包括未配置、未收录、限速、鉴权失败、超时、查询失败、缺少/无效 SHA-256。该页只展示状态，不阻断分析、不写任务/行为日志。" data-en="After EXE upload, the UI enters /jobs/{jobId}/live-events; VirusTotal quiet states include not configured, not found, rate limited, authentication failed, timeout, lookup failed, and missing/invalid SHA-256. The page displays status only, without blocking analysis or writing job/behavior logs.">上传 EXE 后会进入 /jobs/{jobId}/live-events；VirusTotal 的静默状态包括未配置、未收录、限速、鉴权失败、超时、查询失败、缺少/无效 SHA-256。该页只展示状态，不阻断分析、不写任务/行为日志。</p>
+                <p class="muted" data-copy="VT 静默状态：未配置、未收录、限速、鉴权失败、超时、查询失败、缺少/无效 SHA-256；仅 /jobs/{jobId}/live-events 与 API 展示，不写 job/behavior log，不阻断分析 / display-only quiet states; no job/behavior logs." data-zh="上传 EXE 后会进入 /jobs/{jobId}/live-events；VirusTotal 的静默状态包括未配置、未收录、限速、鉴权失败、超时、查询失败、缺少/无效 SHA-256。该页只展示状态，不阻断分析、不写任务/行为日志。" data-en="After EXE upload, the UI enters /jobs/{jobId}/live-events; VirusTotal quiet states include not configured, not found, rate limited, authentication failed, timeout, lookup failed, and missing/invalid SHA-256. The page displays status only, without blocking analysis or writing job/behavior logs.">上传 EXE 后会进入 /jobs/{jobId}/live-events；VirusTotal 的静默状态包括未配置、未收录、限速、鉴权失败、超时、查询失败、缺少/无效 SHA-256。该页只展示状态，不阻断分析、不写任务/行为日志。</p>
               </div>
               <div class="metric">
                 <strong data-zh="状态" data-en="Status">状态</strong>
@@ -98,7 +98,7 @@ internal static class SettingsPage
               </div>
               <div class="metric">
                 <strong data-zh="API Key 持久化" data-en="API key persistence">API Key 持久化</strong>
-                <code data-copy="WebUI process-only current Web Host environment; does not persist VirusTotal API keys to disk">仅当前进程 / WebUI 不落盘</code>
+                <code data-copy="仅当前 Web Host 进程；WebUI 不落盘；不修改 User/Machine 环境变量 / process-only current Web Host; no disk persistence">仅当前进程 / WebUI 不落盘</code>
               </div>
               <div class="metric">
                 <strong data-zh="策略摘要" data-en="Policy summary">策略摘要</strong>
@@ -109,7 +109,7 @@ internal static class SettingsPage
 
               <div class="metric">
                 <strong data-zh="官方摘要字段" data-en="Official summary fields">官方摘要字段</strong>
-                <p class="muted" data-copy="VT official summary fields: engineCounts, lastAnalysisStats, lastAnalysisDateUtc, reputation/communityScore, officialFileObject, officialSummary, zhOfficialSummary, permalink/detectionPermalink/officialApiSelfLink." data-zh="结果 API 会返回官方引擎统计、最后分析时间、信誉/社区分数、officialFileObject、officialSummary/zhOfficialSummary 和 VirusTotal 链接；这些都是 hash 报告元数据，不是样本行为。" data-en="The result API returns official engine counts, last analysis time, reputation/community score, officialFileObject, officialSummary/zhOfficialSummary, and VirusTotal links; these are hash-report metadata, not sample behavior.">结果 API 会返回官方引擎统计、最后分析时间、信誉/社区分数、officialFileObject、officialSummary/zhOfficialSummary 和 VirusTotal 链接；这些都是 hash 报告元数据，不是样本行为。</p>
+                <p class="muted" data-copy="VT 官方摘要字段 / official fields：引擎统计(engineCounts)、最后分析时间(lastAnalysisDateUtc)、信誉/社区分数、officialFileObject、officialSummary/zhOfficialSummary、permalink/detectionPermalink/API self link；这些是 hash 报告元数据，不是样本行为 / hash-report metadata, not behavior." data-zh="结果 API 会返回官方引擎统计、最后分析时间、信誉/社区分数、officialFileObject、officialSummary/zhOfficialSummary 和 VirusTotal 链接；这些都是 hash 报告元数据，不是样本行为。" data-en="The result API returns official engine counts, last analysis time, reputation/community score, officialFileObject, officialSummary/zhOfficialSummary, and VirusTotal links; these are hash-report metadata, not sample behavior.">结果 API 会返回官方引擎统计、最后分析时间、信誉/社区分数、officialFileObject、officialSummary/zhOfficialSummary 和 VirusTotal 链接；这些都是 hash 报告元数据，不是样本行为。</p>
               </div>
 
               <label for="apiKey" data-zh="VirusTotal API Key（仅写入当前进程）" data-en="VirusTotal API key (write to current process only)">VirusTotal API Key（仅写入当前进程）</label>
@@ -120,14 +120,14 @@ internal static class SettingsPage
               </div>
               <p id="status" class="muted" data-copy=""></p>
             </section>
-            <section id="vmSettingsSection" data-copy="VM WebUI preset loading">
+            <section id="vmSettingsSection" data-copy="本机 WebUI VM 预设：只保存到当前浏览器 localStorage；作为上传页每任务覆盖值；不改 config/Core/Driver/Guest / local WebUI VM preset, browser-local only">
               <h2 data-zh="WebUI 虚拟机预设" data-en="WebUI VM preset">WebUI 虚拟机预设</h2>
-              <p class="muted" data-zh="这些值保存在当前浏览器 localStorage，只作为上传页的每任务覆盖值；不会改配置（config）、Core、Driver 或 Guest 业务。" data-en="These values are saved in this browser's localStorage and only become per-job overrides on the upload page; they do not modify config, Core, Driver, or Guest behavior.">这些值保存在当前浏览器 localStorage，只作为上传页的每任务覆盖值；不会改配置（config）、Core、Driver 或 Guest 业务。</p>
+              <p class="muted" data-zh="这些值保存在当前浏览器 localStorage，只作为上传页的每任务覆盖值；不会改配置（config）、Core、Driver 或 Guest 业务。产物/下载是否真正就绪，以动态监控页的 Artifacts 卡片和最终报告为准。" data-en="These values are saved in this browser's localStorage and only become per-job overrides on the upload page; they do not modify config, Core, Driver, or Guest behavior. Artifact/download readiness is confirmed on the dynamic monitor Artifacts cards and in the final report.">这些值保存在当前浏览器 localStorage，只作为上传页的每任务覆盖值；不会改配置（config）、Core、Driver 或 Guest 业务。产物/下载是否真正就绪，以动态监控页的 Artifacts 卡片和最终报告为准。</p>
               <div id="vmPresetSummary" class="summary" data-copy="" data-copy-label="VM preset summary"></div>
               <div class="grid">
-                <div id="vmPresetCoreCard" class="card" data-copy="VM preset core card">
+                <div id="vmPresetCoreCard" class="card" data-copy="VM 与时长预设加载中 / VM and duration preset loading">
                   <h3 data-zh="VM 与时长" data-en="VM and duration">VM 与时长</h3>
-                  <button id="copyVmPresetCoreCard" class="copy-btn" type="button" data-copy="VM preset core card" data-copy-label="VM and duration preset card" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
+                  <button id="copyVmPresetCoreCard" class="copy-btn" type="button" data-copy="VM 与时长预设加载中 / VM and duration preset loading" data-copy-label="VM and duration preset card" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
                   <label for="settingsGoldenVmName" data-zh="VM 名称" data-en="VM name">VM 名称</label>
                   <input id="settingsGoldenVmName" placeholder="KSwordSandbox-Win10-Golden" data-copy-label="VM name preset">
                   <label for="settingsGoldenSnapshotName" data-zh="检查点" data-en="Checkpoint">检查点</label>
@@ -136,9 +136,9 @@ internal static class SettingsPage
                   <input id="settingsDurationSeconds" type="number" min="1" max="900" value="120" data-copy-label="analysis duration preset">
                   <p id="settingsDurationHint" class="field-hint" data-copy="" data-copy-label="duration preset hint">-</p>
                 </div>
-                <div id="vmPresetGuestCard" class="card" data-copy="VM preset guest card">
+                <div id="vmPresetGuestCard" class="card" data-copy="Guest 用户预设加载中；密码仅从本机密钥环境变量读取 / Guest preset loading; password is read from local secret env only">
                   <h3 data-zh="Guest 用户提示" data-en="Guest user hint">Guest 用户提示</h3>
-                  <button id="copyVmPresetGuestCard" class="copy-btn" type="button" data-copy="VM preset guest card" data-copy-label="guest preset card" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
+                  <button id="copyVmPresetGuestCard" class="copy-btn" type="button" data-copy="Guest 用户预设加载中；密码仅从本机密钥环境变量读取 / Guest preset loading; password is read from local secret env only" data-copy-label="guest preset card" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
                   <label for="settingsGuestUserName" data-zh="Guest 用户" data-en="Guest user">Guest 用户</label>
                   <input id="settingsGuestUserName" placeholder="SandboxUser" data-copy-label="guest user preset">
                   <p id="settingsGuestHint" class="field-hint" data-copy="" data-copy-label="guest credential hint">-</p>
@@ -147,9 +147,9 @@ internal static class SettingsPage
                   <label for="settingsGuestPayloadRoot" data-zh="Guest 工具目录（主机）" data-en="Guest tool folder (host)">Guest 工具目录（主机）</label>
                   <input id="settingsGuestPayloadRoot" placeholder="D:\Temp\KSwordSandbox\payload\guest-tools" data-copy-label="guest payload root preset">
                 </div>
-                <div id="vmPresetArtifactCard" class="card" data-copy="VM preset artifact card">
+                <div id="vmPresetArtifactCard" class="card" data-copy="R0 与产物采集预设加载中；实际产物就绪以动态监控页 Artifacts 卡片和最终报告为准 / R0 and artifact preset loading">
                   <h3 data-zh="R0 与产物采集" data-en="R0 and artifacts">R0 与产物采集</h3>
-                  <button id="copyVmPresetArtifactCard" class="copy-btn" type="button" data-copy="VM preset artifact card" data-copy-label="R0 artifact preset card" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
+                  <button id="copyVmPresetArtifactCard" class="copy-btn" type="button" data-copy="R0 与产物采集预设加载中；实际产物就绪以动态监控页 Artifacts 卡片和最终报告为准 / R0 and artifact preset loading" data-copy-label="R0 artifact preset card" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
                   <div class="toggle-card readonly-toggle">
                     <label for="settingsR0Enabled"><input id="settingsR0Enabled" type="checkbox" disabled> <span data-zh="R0 总开关来自 config" data-en="R0 master switch comes from config">R0 总开关来自 config</span></label>
                     <p id="settingsR0Hint" class="field-hint" data-copy="" data-copy-label="R0 config hint">-</p>

@@ -15,7 +15,9 @@
     "runtimePayloadSource": "external RuntimePublishRoot only; repository bin/obj/x64 binaries are rejected",
     "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; optional runtime publish entries are recorded in package-manifest.generated.json when skipped for layout dry-runs, while handoff uses -RequireCompleteRuntimePayloads; generated reviewerChecklist and sourceRuntimeSafetyMetadata identify source/runtime safety boundaries; package/readiness do not use GUI signing fallback or CSignTool",
     "machineReadableComponentProgress": "package-manifest.generated.json:componentProgress and release-readiness.json:componentProgress",
-    "machineReadableGapAudit": "package-manifest.generated.json:gapAudit and release-readiness.json:gapAudit cover no fresh live evidence, RuntimePublishRoot completeness, self-noise guard readiness, and component progress",
+    "machineReadableGapAudit": "package-manifest.generated.json:gapAudit and release-readiness.json:gapAudit use ksword.release.gap-audit.v28 and cover no fresh live evidence, RuntimePublishRoot completeness, self-noise guard readiness, no VM mutation/no signing guardrails, and component progress",
+    "runtimeCompletenessDiagnostics": "package-manifest.generated.json:operatorDiagnostics.runtimeCompletenessDiagnostics and release-readiness.json:gapAudit.runtimePublishRootCompleteness expose root placement, expected runtimePublish entries, missing/empty/incomplete counts, expected leaf gaps, forbidden-file previews, and handoffAllowed",
+    "runtimePublishEntriesAreOptionalForLayoutButRequiredForHandoff": true,
     "reviewerChecklistJson": "package-manifest.generated.json:reviewerChecklist and release-readiness.json:reviewerChecklist",
     "noFreshLiveGuardrail": "package/readiness do not generate fresh live evidence; release notes must say 本候选未刷新 fresh live evidence unless a lab job id is recorded"
   },
@@ -30,7 +32,8 @@
       "sourceRuntimeSafetyMetadata declaring source-only/source exclusions, external RuntimePublishRoot-only runtime payloads, and non-mutating safety state",
       "safety contract for secrets, VM state, runtime evidence, signing, GUI signing fallback, push/publish, and CSignTool",
       "machine-readable componentProgress snapshot for deployment/productization review",
-      "machine-readable gapAudit snapshot for no fresh live evidence, RuntimePublishRoot completeness, self-noise guard readiness, and component progress",
+      "machine-readable gapAudit v28 snapshot for no fresh live evidence, RuntimePublishRoot completeness, no VM mutation/no signing guardrails, self-noise guard readiness, and component progress",
+      "operatorDiagnostics.runtimePublishRootDiagnostics and runtimeCompletenessDiagnostics for package manifest clarity",
       "reviewerChecklist JSON and no-fresh-live guardrail fields"
     ],
     "selfHashNote": "The generated manifest lists itself in files but omits a recursive self-hash from fileInventory."
@@ -197,6 +200,7 @@
       "source": "host-web",
       "target": "app/host-web",
       "required": false,
+      "handoffRequired": true,
       "note": "Expected external publish output for KSword.Sandbox.Web."
     },
     {
@@ -204,6 +208,7 @@
       "source": "guest-tools",
       "target": "payload/guest-tools",
       "required": false,
+      "handoffRequired": true,
       "note": "Expected external staged guest payload root produced by scripts/Prepare-GuestPayload.ps1 or a release pipeline."
     },
     {
@@ -211,6 +216,7 @@
       "source": "tools/job-tool",
       "target": "tools/job-tool",
       "required": false,
+      "handoffRequired": true,
       "note": "Expected external publish output for KSword.Sandbox.JobTool."
     },
     {
@@ -218,6 +224,7 @@
       "source": "tools/postprocess",
       "target": "tools/postprocess",
       "required": false,
+      "handoffRequired": true,
       "note": "Expected external publish output for KSword.Sandbox.PostProcess."
     }
   ],
@@ -440,6 +447,11 @@
       {
         "id": "runtime-publish-root",
         "handoffGate": "external RuntimePublishRoot; host-web, guest-tools, tools/job-tool, tools/postprocess; no repository bin/obj/x64 fallback",
+        "appliesTo": "runtime"
+      },
+      {
+        "id": "runtime-completeness-diagnostics",
+        "handoffGate": "runtimeCompletenessDiagnostics.summary.missingCount = 0, incompleteCount = 0, forbiddenFileCount = 0, and handoffAllowed = true before runtime handoff",
         "appliesTo": "runtime"
       },
       {

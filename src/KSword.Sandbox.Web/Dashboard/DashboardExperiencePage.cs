@@ -215,14 +215,14 @@ internal static class DashboardExperiencePage
               <p class="hint" data-zh="首屏按云沙箱操作习惯组织：先选择样本，再看 VM / VirusTotal / 证据采集就绪状态，最后点击一个主按钮。任务创建后会打开动态监控页确认后台接管状态和真实进度，不需要再找“启动”按钮。" data-en="The first screen follows a polished cloud-sandbox flow: choose a sample, review VM / VirusTotal / evidence readiness, then press one primary button. After the job is created, the dynamic monitor opens to confirm background handoff and real progress; no extra Start button hunting.">首屏按云沙箱操作习惯组织：先选择样本，再看 VM / VirusTotal / 证据采集就绪状态，最后点击一个主按钮。任务创建后会打开动态监控页确认后台接管状态和真实进度，不需要再找“启动”按钮。</p>
               <div id="operatorReadinessChips" class="readiness-strip" data-copy="等待配置加载 / waiting for readiness" data-copy-label="operator readiness summary"></div>
               <div class="operator-hero-grid">
-                <div class="operator-brief" data-copy="KSword WebUI one-click run: upload exe, plan, start VM, open live monitor">
+                <div class="operator-brief" data-copy="KSword WebUI 一键分析：上传 EXE、生成计划、提交 VM、打开动态监控；样本留在本机，VT 只做 hash-only 查询 / one-click run: upload EXE, plan, start VM, open live monitor">
                   <strong data-zh="本地安全边界" data-en="Local safety boundary">本地安全边界</strong>
                   <span data-zh="样本只保存到本机 runtime root；VirusTotal 只查 SHA-256，不上传样本字节。若 VT 未配置、未收录或调用失败，只作为页面静默状态，主流程继续。" data-en="Samples are saved only to the local runtime root; VirusTotal performs SHA-256 lookup only and never uploads sample bytes. If VT is missing, not found, or fails, it remains a quiet page status and the main flow continues.">样本只保存到本机 runtime root；VirusTotal 只查 SHA-256，不上传样本字节。若 VT 未配置、未收录或调用失败，只作为页面静默状态，主流程继续。</span>
                 </div>
                 <div class="operator-flow" aria-label="上传执行路径 / Upload execution path">
-                  <div class="operator-step" data-copy="1. Choose local EXE"><b data-zh="1. 选择 EXE" data-en="1. Choose EXE">1. 选择 EXE</b><span data-zh="支持点击或拖拽到上传区域。" data-en="Click or drag into the upload zone.">支持点击或拖拽到上传区域。</span></div>
-                  <div class="operator-step" data-copy="2. Review VM VT artifact readiness"><b data-zh="2. 看就绪态" data-en="2. Review readiness">2. 看就绪态</b><span data-zh="VM、检查点、R0、VT 和产物选项都可右键复制。" data-en="VM, checkpoint, R0, VT, and artifact options are right-click copyable.">VM、检查点、R0、VT 和产物选项都可右键复制。</span></div>
-                  <div class="operator-step" data-copy="3. Upload submits VM analysis and opens monitor"><b data-zh="3. 提交分析" data-en="3. Submit analysis">3. 提交分析</b><span data-zh="提交后打开动态监控页查看启动状态和真实进度。" data-en="Submission opens the dynamic monitor for start status and real progress.">提交后打开动态监控页查看启动状态和真实进度。</span></div>
+                  <div class="operator-step" data-copy="1. 选择本机 EXE / Choose local EXE"><b data-zh="1. 选择 EXE" data-en="1. Choose EXE">1. 选择 EXE</b><span data-zh="支持点击或拖拽到上传区域。" data-en="Click or drag into the upload zone.">支持点击或拖拽到上传区域。</span></div>
+                  <div class="operator-step" data-copy="2. 复核 VM / VT / 证据就绪态 / Review VM / VT / artifact readiness"><b data-zh="2. 看就绪态" data-en="2. Review readiness">2. 看就绪态</b><span data-zh="VM、检查点、R0、VT 和产物选项都可右键复制。" data-en="VM, checkpoint, R0, VT, and artifact options are right-click copyable.">VM、检查点、R0、VT 和产物选项都可右键复制。</span></div>
+                  <div class="operator-step" data-copy="3. 提交分析并打开监控 / Submit analysis and open monitor"><b data-zh="3. 提交分析" data-en="3. Submit analysis">3. 提交分析</b><span data-zh="提交后打开动态监控页查看启动状态和真实进度。" data-en="Submission opens the dynamic monitor for start status and real progress.">提交后打开动态监控页查看启动状态和真实进度。</span></div>
                 </div>
               </div>
             </section>
@@ -255,11 +255,11 @@ internal static class DashboardExperiencePage
                       <button type="button" onclick="applySamplePreset('memory')" data-copy="内存取证：180s，启用内存 dump（支持时含子进程） / Memory forensic: 180s, memory dumps including children when supported" data-zh="内存取证" data-en="Memory forensic">内存取证</button>
                     </div>
                     <button class="primary-cta" onclick="uploadAndPlan()" data-zh="开始分析：上传 → 提交 VM → 打开监控" data-en="Start analysis: upload → submit VM → monitor">开始分析：上传 → 提交 VM → 打开监控</button>
-                    <p class="microcopy" data-copy="Upload creates a job, attempts VM analysis, and opens the live monitor" data-zh="点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。" data-en="After click, the browser shows real upload progress. If VM start preflight fails, the UI still preserves the created job, failure reason, and monitor/recent-job entry points so context is not lost.">点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。</p>
-                    <div id="uploadAutoStartNotice" class="callout" data-copy="upload/start=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; current page opens monitor; no popup required" data-copy-label="upload auto-start live redirect affordance">
+                    <p class="microcopy" data-copy="上传会创建任务、尝试提交 VM 分析并打开实时监控；若预检失败会保留任务上下文 / Upload creates a job, attempts VM analysis, and opens the live monitor" data-zh="点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。" data-en="After click, the browser shows real upload progress. If VM start preflight fails, the UI still preserves the created job, failure reason, and monitor/recent-job entry points so context is not lost.">点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。</p>
+                    <div id="uploadAutoStartNotice" class="callout" data-copy="一键路径：接口=/api/files/upload/start；跳转=/jobs/{jobId}/live-events；当前页进入监控；无需弹窗 / One-click path: endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; no popup" data-copy-label="upload auto-start live redirect affordance">
                       <strong data-zh="一键接管路径" data-en="One-click handoff path">一键接管路径</strong>
                       <p class="hint" data-zh="主按钮使用 /api/files/upload/start：保存样本、创建任务、提交后台 VM 分析，然后当前页面进入 /jobs/{jobId}/live-events；右键或点击按钮可复制这条操作路径。" data-en="The primary button uses /api/files/upload/start: save sample, create job, submit background VM analysis, then navigate the current page to /jobs/{jobId}/live-events. Right-click or use the button to copy this operation path.">主按钮使用 /api/files/upload/start：保存样本、创建任务、提交后台 VM 分析，然后当前页面进入 /jobs/{jobId}/live-events；右键或点击按钮可复制这条操作路径。</p>
-                      <button class="copy-btn" type="button" data-copy="upload/start=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; current page opens monitor; no popup required" data-copy-label="one-click handoff path" data-zh="复制一键路径" data-en="Copy handoff path">复制一键路径</button>
+                      <button class="copy-btn" type="button" data-copy="一键路径：接口=/api/files/upload/start；跳转=/jobs/{jobId}/live-events；当前页进入监控；无需弹窗 / One-click path: endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; no popup" data-copy-label="one-click handoff path" data-zh="复制一键路径" data-en="Copy handoff path">复制一键路径</button>
                     </div>
                   </div>
               </div>
@@ -784,7 +784,7 @@ internal static class DashboardExperiencePage
                   if (!supported) {
                     input.checked = false;
                   }
-                  input.setAttribute('data-copy', `${option.labelZh} / ${option.labelEn}: ${supported ? 'supported' : 'unsupported'}; ${option.flag}`);
+                  input.setAttribute('data-copy', `${option.labelZh} / ${option.labelEn}：${supported ? t('已支持', 'supported') : t('未支持', 'unsupported')}；参数 / flag=${option.flag}`);
                 }
 
                 if (card) {
@@ -1275,7 +1275,7 @@ internal static class DashboardExperiencePage
               setUploadAutoStartNotice(
                 t('正在提交一键动态分析', 'Submitting one-click dynamic analysis'),
                 t('正在调用 /api/files/upload/start；完成后当前页面会自动进入实时监控页，不会打开弹窗。', 'Calling /api/files/upload/start; when complete, the current page navigates to the live monitor without a popup.'),
-                'upload/start=/api/files/upload/start; state=submitting; redirect=/jobs/{jobId}/live-events; popup=false',
+                '一键路径：接口=/api/files/upload/start；状态=提交中；跳转=/jobs/{jobId}/live-events；弹窗=否 / endpoint=/api/files/upload/start; state=submitting; redirect=/jobs/{jobId}/live-events; popup=false',
                 false);
               try {
                 const form = new FormData();
@@ -1405,7 +1405,7 @@ internal static class DashboardExperiencePage
                 setUploadAutoStartNotice(
                   t('上传已完成，等待后台接管', 'Upload complete; waiting for background handoff'),
                   message,
-                  `phase=processing; endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; no popup or extra dashboard tab required`,
+                  `阶段=后台接管中 / phase=processing; endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; no popup or extra dashboard tab required`,
                   false,
                   '',
                   '');
@@ -1424,7 +1424,7 @@ internal static class DashboardExperiencePage
                 setUploadAutoStartNotice(
                   t('正在上传：一键接管排队中', 'Uploading: one-click handoff queued'),
                   message,
-                  `phase=uploading; sample=${name}; percent=${percent}; endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events`,
+                  `阶段=上传中 / phase=uploading; 样本 / sample=${name}; 进度 / percent=${percent}; endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events`,
                   false,
                   '',
                   '');
@@ -1438,7 +1438,7 @@ internal static class DashboardExperiencePage
               setUploadAutoStartNotice(
                 t('正在上传：一键接管排队中', 'Uploading: one-click handoff queued'),
                 message,
-                `phase=uploading; sample=${name}; sent=${formatBytes(loaded)}; endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events`,
+                `阶段=上传中 / phase=uploading; 样本 / sample=${name}; 已发送 / sent=${formatBytes(loaded)}; endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events`,
                 false,
                 '',
                 '');
@@ -1461,7 +1461,7 @@ internal static class DashboardExperiencePage
                 ? t('后台启动预检未通过；监控页会保留任务上下文，执行流程页可查看失败阶段。', 'Background preflight did not pass; the monitor keeps job context and the execution-flow page shows the failed stage.')
                 : t('后台执行已交给 Web Host；监控页会显示真实进度流、原始事件和证据入口。', 'Background execution has been handed to the Web Host; the monitor shows the real progress stream, raw events, and evidence links.')));
               const countdown = t(`约 ${delaySeconds} 秒后自动打开监控页。`, `Opening the monitor automatically in about ${delaySeconds} seconds.`);
-              const copy = `${headline}; job=${jobId}; state=${state}; monitor=${href}; detail=${detail}`;
+              const copy = `${headline}; 任务 / job=${jobId}; 状态 / state=${state}; 监控页 / monitor=${href}; 详情 / detail=${detail}`;
               target.className = `status ${isError ? 'error' : 'ok'}`;
               target.setAttribute('data-copy', copy);
               target.setAttribute('data-copy-label', 'upload monitor handoff');
@@ -1730,7 +1730,7 @@ internal static class DashboardExperiencePage
               const enabled = lanes.filter(([value]) => Boolean(value)).map(([, label]) => label);
               return enabled.length > 0
                 ? enabled.join(', ')
-                : t('未启用敏感产物采集', 'no sensitive artifact collection enabled');
+                : t('未启用敏感产物采集（动态监控页仍会显示基础报告/events 状态）', 'no sensitive artifact collection enabled; the dynamic monitor still shows basic report/events status');
             }
 
             function buildVmRunSummary(job) {
@@ -1852,7 +1852,7 @@ internal static class DashboardExperiencePage
                     <summary data-zh="最近消息" data-en="Recent messages">最近消息</summary>
                     ${messages ? `<ul>${messages}</ul>` : '<p class="hint" data-zh="暂无任务消息。" data-en="No job messages recorded.">暂无任务消息。</p>'}
                   </details>
-                  <div id="executionResult" class="hint" data-copy="plan ready; dashboard summary only" data-copy-label="plan summary">${t('计划已就绪。主界面只显示摘要；如需排障，请打开“进度页（执行流程）”。', 'The plan is ready. The dashboard shows a summary only; open the progress page (execution flow) for troubleshooting.')}</div>
+                  <div id="executionResult" class="hint" data-copy="计划已就绪；主界面仅显示摘要；排障请打开进度页（执行流程） / plan ready; dashboard summary only; open execution-flow for troubleshooting" data-copy-label="plan summary">${t('计划已就绪。主界面只显示摘要；如需排障，请打开“进度页（执行流程）”。', 'The plan is ready. The dashboard shows a summary only; open the progress page (execution flow) for troubleshooting.')}</div>
                 </article>`;
               applyLanguage();
               if (latestRunbookProgressSnapshot) {
@@ -1949,7 +1949,7 @@ internal static class DashboardExperiencePage
                   ? `<a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(reportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}">${escapeHtml(reportState.link)}</a>`
                   : `<span class="hint">${escapeHtml(t('报告待生成', 'Report not ready'))}</span>`;
                 return `
-                <article class="recent-job-card" data-copy="${escapeAttribute(`job=${jobId}; status=${statusLabel}; report=${reportState.badge}`)}" data-copy-label="recent job summary">
+                <article class="recent-job-card" data-copy="${escapeAttribute(`任务 / job=${jobId}; 状态 / status=${statusLabel}; 报告 / report=${reportState.badge}`)}" data-copy-label="recent job summary">
                   <h3><span data-zh="任务 / Job" data-en="Job">任务 / Job</span> <code data-copy="${escapeAttribute(jobId)}" data-copy-label="job id">${escapeHtml(shortJobId)}</code></h3>
                   <div class="recent-job-meta">
                     <span class="pill" data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</span>
@@ -2047,7 +2047,7 @@ internal static class DashboardExperiencePage
                 <div class="metric"><strong>${t('当前步骤', 'Current step')}</strong><span data-copy="${escapeAttribute(current)}" data-copy-label="current analysis step">${escapeHtml(current)}</span></div>
                 <div class="metric"><strong>${t('已耗时', 'Elapsed')}</strong><span data-copy="${escapeAttribute(elapsed)}" data-copy-label="analysis elapsed">${escapeHtml(elapsed)}</span></div>
                 <div class="metric"><strong>${t('失败原因', 'Failure reason')}</strong><span class="${isFailure ? 'error' : 'hint'}" data-copy="${escapeAttribute(failure)}" data-copy-label="analysis failure reason">${escapeHtml(failure)}</span></div>`;
-              facts.setAttribute('data-copy', `step=${current}; elapsed=${elapsed}; failure=${failure}`);
+              facts.setAttribute('data-copy', `当前步骤 / step=${current}; 已耗时 / elapsed=${elapsed}; 失败原因 / failure=${failure}`);
               facts.setAttribute('data-copy-label', 'analysis progress summary');
             }
 
@@ -2221,7 +2221,7 @@ internal static class DashboardExperiencePage
                     ? t('分析已停止', 'Analysis stopped')
                     : t(`分析进度约 ${percent}%`, `Analysis about ${percent}%`);
                 meta.textContent = label;
-                meta.setAttribute('data-copy', `${label}; elapsed=${elapsed}; executed=${executed}; state=${state}; issue=${failureReason || '-'}`);
+                meta.setAttribute('data-copy', `${label}; 已耗时 / elapsed=${elapsed}; 已执行 / executed=${executed}; 状态 / state=${state}; 问题 / issue=${failureReason || '-'}`);
               }
 
               const currentPrefix = done
@@ -2627,7 +2627,7 @@ internal static class DashboardExperiencePage
               const importMessage = wrapper && wrapper.guestImportMessage ? `<p class="${wrapper.guestImportSucceeded ? 'ok' : 'hint'}" data-copy="${escapeAttribute(wrapper.guestImportMessage)}">${escapeHtml(localizeServerMessage(wrapper.guestImportMessage))}</p>` : '';
               const successClass = result.success ? 'status-ok' : 'status-failed';
               document.getElementById('executionResult').innerHTML = `
-                <div class="pathbox" data-copy="mode=${escapeAttribute(result.mode)}; success=${result.success}; executed=${result.executedSteps}/${result.totalSteps}; duration=${escapeAttribute(formatDuration(result.duration))}" data-copy-label="runbook execution summary">
+                <div class="pathbox" data-copy="执行模式 / mode=${escapeAttribute(result.mode)}; 是否成功 / success=${result.success}; 已执行步骤 / executed=${result.executedSteps}/${result.totalSteps}; 耗时 / duration=${escapeAttribute(formatDuration(result.duration))}" data-copy-label="runbook execution summary">
                   <p><strong>${t('分析结果', 'Analysis result')}:</strong> <span class="${successClass}">${result.success ? t('已完成', 'Completed') : t('未完成', 'Not completed')}</span></p>
                   <p><strong>${t('耗时', 'Duration')}:</strong> ${escapeHtml(formatDuration(result.duration))}</p>
                   ${result.success ? '' : `<p class="error">${escapeHtml(t('主页面不展开技术步骤；请打开进度页查看失败阶段。', 'The dashboard does not expand technical steps; open the progress page for the failed stage.'))}</p>`}

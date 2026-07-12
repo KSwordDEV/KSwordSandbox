@@ -494,6 +494,7 @@ internal sealed class GuestArtifactWriter
             AddIfMissing(metadata, "zhHint", "未集成协议解析时，请优先查看 artifactCount/fileCount/totalBytes、lastArtifactRelativePath、lastDiagnosticEtlRelativePath、lastDiagnosticPacketCountStatus 与 sha256 等文件完整性字段。");
         }
 
+        AddCollectionArtifactFieldDefaults(metadata, collectionArtifacts, status);
         AddLastCollectionEventMetadata(
             metadata,
             events,
@@ -544,6 +545,56 @@ internal sealed class GuestArtifactWriter
             Reason = reason,
             Metadata = metadata
         };
+    }
+
+    private static void AddCollectionArtifactFieldDefaults(
+        Dictionary<string, string> metadata,
+        IReadOnlyList<ArtifactDescriptor> collectionArtifacts,
+        string status)
+    {
+        if (collectionArtifacts.Count > 0)
+        {
+            var primary = collectionArtifacts
+                .OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .First();
+            AddIfMissing(metadata, "artifactRelativePath", primary.RelativePath);
+            AddIfMissing(metadata, "artifactRelativePathStatus", "captured");
+            AddIfMissing(metadata, "artifactSelector", primary.RelativePath);
+            AddIfMissing(metadata, "stableArtifactSelector", primary.RelativePath);
+            AddIfMissing(metadata, "canonicalArtifactSelector", primary.RelativePath);
+            AddIfMissing(metadata, "downloadSelector", primary.RelativePath);
+            AddIfMissing(metadata, "artifactSafeLink", primary.SafeLink);
+            AddIfMissing(metadata, "artifactSelectorKind", "safe-output-relative-path");
+            AddIfMissing(metadata, "sizeBytes", primary.SizeBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            AddIfMissing(metadata, "artifactSizeBytes", primary.SizeBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            AddIfMissing(metadata, "sizeBytesStatus", "computed");
+            AddIfMissing(metadata, "sha256", primary.Sha256);
+            AddIfMissing(metadata, "artifactSha256", primary.Sha256);
+            AddIfMissing(metadata, "sha256Status", string.IsNullOrWhiteSpace(primary.Sha256) ? "missing" : "computed");
+            AddIfMissing(metadata, "artifactHashStatus", string.IsNullOrWhiteSpace(primary.Sha256) ? "missing" : "computed");
+            AddIfMissing(metadata, "hashStatus", string.IsNullOrWhiteSpace(primary.Sha256) ? "missing" : "computed");
+            AddIfMissing(metadata, "artifactExists", "true");
+            return;
+        }
+
+        var emptyStatus = status switch
+        {
+            "disabled" => "disabled",
+            "failed" => "failed",
+            "skipped" => "skipped",
+            "enabled-empty" => "not-created",
+            "not-implemented" => "not-implemented",
+            _ => "not-created"
+        };
+        metadata.TryAdd("artifactRelativePath", string.Empty);
+        AddIfMissing(metadata, "artifactRelativePathStatus", emptyStatus);
+        metadata.TryAdd("sizeBytes", string.Empty);
+        metadata.TryAdd("sha256", string.Empty);
+        AddIfMissing(metadata, "sizeBytesStatus", emptyStatus);
+        AddIfMissing(metadata, "sha256Status", emptyStatus);
+        AddIfMissing(metadata, "artifactHashStatus", emptyStatus);
+        AddIfMissing(metadata, "hashStatus", emptyStatus);
+        AddIfMissing(metadata, "artifactExists", "false");
     }
 
     private static string DetermineCollectionStatus(
@@ -1174,6 +1225,7 @@ internal sealed class GuestArtifactWriter
             "artifactSha256",
             "artifactHashAlgorithm",
             "artifactSizeBytes",
+            "artifactRelativePath",
             "hashStatus",
             "artifactHashStatus",
             "artifactIntegrityState",

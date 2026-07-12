@@ -26,6 +26,8 @@ internal static class GuestSelfNoiseMetadata
     /// </summary>
     public static void Apply(SandboxEvent evt)
     {
+        GuestArtifactEventQuality.Apply(evt);
+
         if (!ShouldTagAsSelfNoise(evt))
         {
             return;

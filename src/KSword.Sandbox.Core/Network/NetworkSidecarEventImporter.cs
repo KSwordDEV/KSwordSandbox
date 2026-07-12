@@ -17,6 +17,9 @@ namespace KSword.Sandbox.Core.Network;
 public sealed class NetworkSidecarEventImporter
 {
     private const int MaxLines = 4096;
+    private const int MaxFlattenedFields = 512;
+    private const int MaxJsonDepth = 16;
+    private const int MaxLinePreviewChars = 160;
 
     private static readonly Regex KeyValueTokenRegex = new(
         "(?<key>[A-Za-z_@][A-Za-z0-9_.-]*)\\s*(?:=|:)\\s*(?:\"(?<quoted>[^\"]*)\"|'(?<single>[^']*)'|(?<value>\\S+))",
@@ -56,6 +59,13 @@ public sealed class NetworkSidecarEventImporter
                     ["parserInputKind"] = "network-sidecar",
                     ["parserBounded"] = "true",
                     ["parserMaxLines"] = MaxLines.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["parserLinesRead"] = FirstEventDataValue(events, "parserLinesRead"),
+                    ["parserLineLimitHit"] = FirstEventDataValue(events, "parserLineLimitHit"),
+                    ["parserMaxFlattenedFields"] = MaxFlattenedFields.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["parserMaxJsonDepth"] = MaxJsonDepth.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["parserMaxFieldValueLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["sidecarProvenanceModel"] = "sourceArtifact=sidecar; pcapSourceArtifact=linked-parent-capture",
+                    ["protocolHealthSummaryScope"] = "behavior-counted-canonical-events",
                     ["tsharkRequired"] = "false"
                 }),
             .. events
@@ -70,12 +80,13 @@ public sealed class NetworkSidecarEventImporter
         }
 
         var events = new List<SandboxEvent>();
+        var lineNumber = 0;
+        var lineLimitHit = false;
         try
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             using var reader = new StreamReader(stream);
             string? line;
-            var lineNumber = 0;
             while (lineNumber < MaxLines && (line = reader.ReadLine()) is not null)
             {
                 lineNumber++;
@@ -94,13 +105,46 @@ public sealed class NetworkSidecarEventImporter
                     TryImportLogLine(trimmed, path, lineNumber, source, events);
                 }
             }
+
+            lineLimitHit = lineNumber >= MaxLines && !reader.EndOfStream;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
         {
             events.Add(CreateParseError(path, 0, ex.Message, source, "stream", "sidecar_stream_parse_error", "sidecar.stream"));
         }
 
+        ApplySidecarParserBounds(events, lineNumber, lineLimitHit);
         return events;
+    }
+
+    private static void ApplySidecarParserBounds(List<SandboxEvent> events, int linesRead, bool lineLimitHit)
+    {
+        var linesReadText = linesRead.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var limitHitText = lineLimitHit.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant();
+        foreach (var evt in events)
+        {
+            evt.Data["parserLinesRead"] = linesReadText;
+            evt.Data["parserLineLimitHit"] = limitHitText;
+            evt.Data["sidecarLineLimitHit"] = limitHitText;
+            evt.Data["parserMaxLines"] = MaxLines.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            evt.Data["parserMaxFlattenedFields"] = MaxFlattenedFields.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            evt.Data["parserMaxJsonDepth"] = MaxJsonDepth.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            evt.Data["parserMaxFieldValueLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            NetworkTelemetrySchema.ApplyHealthAndLocalization(evt.Data);
+        }
+    }
+
+    private static string FirstEventDataValue(IReadOnlyCollection<SandboxEvent> events, string key)
+    {
+        foreach (var evt in events)
+        {
+            if (evt.Data.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
     }
 
     public static bool IsLikelyNetworkSidecarPath(string path)
@@ -143,7 +187,7 @@ public sealed class NetworkSidecarEventImporter
         {
             using var document = JsonDocument.Parse(line);
             var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            FlattenJson(document.RootElement, fields, prefix: string.Empty);
+            FlattenJson(document.RootElement, fields, prefix: string.Empty, depth: 0);
             if (TryCreateNetworkEvent(fields, path, lineNumber, source, "jsonl", out var evt))
             {
                 events.Add(evt);
@@ -224,7 +268,15 @@ public sealed class NetworkSidecarEventImporter
             ["parserInputKind"] = "network-sidecar",
             ["parserBounded"] = "true",
             ["parserMaxLines"] = MaxLines.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserMaxFlattenedFields"] = MaxFlattenedFields.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserMaxJsonDepth"] = MaxJsonDepth.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserMaxFieldValueLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserFieldLimitHit"] = FirstValue(fields, "parserFieldLimitHit") ?? "false",
+            ["parserDepthLimitHit"] = FirstValue(fields, "parserDepthLimitHit") ?? "false",
+            ["parserFlattenedFieldCount"] = fields.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["sidecarImportProvenance"] = "sidecar-artifact",
+            ["sidecarProvenanceModel"] = "sourceArtifact=sidecar; pcapSourceArtifact=linked-parent-capture",
+            ["sidecarSourceArtifactPath"] = source.FullPath,
             ["sidecarSourceArtifactRelativePath"] = source.RelativePath,
             ["sidecarSourceArtifactName"] = source.Name,
             ["sidecarSourceArtifactSelector"] = source.RelativePath
@@ -342,7 +394,12 @@ public sealed class NetworkSidecarEventImporter
             ["parserInputKind"] = "network-sidecar",
             ["parserBounded"] = "true",
             ["parserMaxLines"] = MaxLines.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserMaxFlattenedFields"] = MaxFlattenedFields.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserMaxJsonDepth"] = MaxJsonDepth.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserMaxFieldValueLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["sidecarImportProvenance"] = "sidecar-artifact",
+            ["sidecarProvenanceModel"] = "sourceArtifact=sidecar; pcapSourceArtifact=linked-parent-capture",
+            ["sidecarSourceArtifactPath"] = source.FullPath,
             ["sidecarSourceArtifactRelativePath"] = source.RelativePath,
             ["sidecarSourceArtifactName"] = source.Name,
             ["sidecarSourceArtifactSelector"] = source.RelativePath,
@@ -970,19 +1027,37 @@ public sealed class NetworkSidecarEventImporter
         return NetworkTelemetrySchema.NormalizeProtocol(value);
     }
 
-    private static void FlattenJson(JsonElement element, Dictionary<string, string> fields, string prefix)
+    private static void FlattenJson(JsonElement element, Dictionary<string, string> fields, string prefix, int depth)
     {
+        if (depth > MaxJsonDepth)
+        {
+            fields["parserDepthLimitHit"] = "true";
+            return;
+        }
+
+        if (fields.Count >= MaxFlattenedFields)
+        {
+            fields["parserFieldLimitHit"] = "true";
+            return;
+        }
+
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
                 foreach (var property in element.EnumerateObject())
                 {
+                    if (fields.Count >= MaxFlattenedFields)
+                    {
+                        fields["parserFieldLimitHit"] = "true";
+                        break;
+                    }
+
                     var key = string.IsNullOrWhiteSpace(prefix) ? property.Name : $"{prefix}.{property.Name}";
-                    FlattenJson(property.Value, fields, key);
+                    FlattenJson(property.Value, fields, key, depth + 1);
                     if (string.Equals(property.Name, "data", StringComparison.OrdinalIgnoreCase) &&
                         property.Value.ValueKind == JsonValueKind.Object)
                     {
-                        FlattenJson(property.Value, fields, string.Empty);
+                        FlattenJson(property.Value, fields, string.Empty, depth + 1);
                     }
                 }
 
@@ -1010,7 +1085,7 @@ public sealed class NetworkSidecarEventImporter
 
     private static string ValueAsString(JsonElement element)
     {
-        return element.ValueKind switch
+        var value = element.ValueKind switch
         {
             JsonValueKind.String => element.GetString() ?? string.Empty,
             JsonValueKind.Number => element.GetRawText(),
@@ -1018,6 +1093,7 @@ public sealed class NetworkSidecarEventImporter
             JsonValueKind.False => "false",
             _ => element.GetRawText()
         };
+        return NetworkTelemetrySchema.BoundDataValue(value);
     }
 
     private static Dictionary<string, string> ParseKeyValueLine(string line)
@@ -1025,6 +1101,12 @@ public sealed class NetworkSidecarEventImporter
         var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match match in KeyValueTokenRegex.Matches(line))
         {
+            if (fields.Count >= MaxFlattenedFields)
+            {
+                fields["parserFieldLimitHit"] = "true";
+                break;
+            }
+
             var key = match.Groups["key"].Value;
             var value = match.Groups["quoted"].Success
                 ? match.Groups["quoted"].Value
@@ -1033,7 +1115,7 @@ public sealed class NetworkSidecarEventImporter
                     : match.Groups["value"].Value;
             if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
             {
-                fields[key] = value.Trim('"', '\'');
+                fields[key] = NetworkTelemetrySchema.BoundDataValue(value.Trim('"', '\''));
             }
         }
 
@@ -1199,7 +1281,7 @@ public sealed class NetworkSidecarEventImporter
     {
         if (!string.IsNullOrWhiteSpace(value) && !fields.ContainsKey(key))
         {
-            fields[key] = value;
+            fields[key] = NetworkTelemetrySchema.BoundDataValue(value);
         }
     }
 
@@ -1233,7 +1315,12 @@ public sealed class NetworkSidecarEventImporter
             ["parserInputKind"] = "network-sidecar",
             ["parserBounded"] = "true",
             ["parserMaxLines"] = MaxLines.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserMaxFlattenedFields"] = MaxFlattenedFields.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserMaxJsonDepth"] = MaxJsonDepth.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserMaxFieldValueLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["sidecarImportProvenance"] = "sidecar-artifact",
+            ["sidecarProvenanceModel"] = "sourceArtifact=sidecar; pcapSourceArtifact=linked-parent-capture",
+            ["sidecarSourceArtifactPath"] = source.FullPath,
             ["sidecarSourceArtifactRelativePath"] = source.RelativePath,
             ["sidecarSourceArtifactName"] = source.Name,
             ["sidecarSourceArtifactSelector"] = source.RelativePath,
@@ -1245,7 +1332,7 @@ public sealed class NetworkSidecarEventImporter
                 ? $"Sidecar 第 {lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)} 行解析失败；请检查 JSON 引号、换行截断或 exporter 字段格式。"
                 : "Sidecar 文件读取或解析失败；请检查文件是否仍在写入、被截断或编码异常。"
         };
-        NetworkTelemetrySchema.AddIfNotEmpty(data, "linePreview", Truncate(linePreview, 160));
+        NetworkTelemetrySchema.AddIfNotEmpty(data, "linePreview", Truncate(linePreview, MaxLinePreviewChars));
         NetworkTelemetrySchema.AddArtifactData(data, source);
         NetworkTelemetrySchema.ApplyHealthAndLocalization(data);
         return new SandboxEvent
@@ -1264,9 +1351,13 @@ public sealed class NetworkSidecarEventImporter
 
     private static string? Truncate(string? value, int maxLength)
     {
-        return string.IsNullOrWhiteSpace(value) || value.Length <= maxLength
-            ? value
-            : value[..maxLength];
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        var bounded = NetworkTelemetrySchema.BoundDataValue(value);
+        return bounded.Length <= maxLength ? bounded : bounded[..maxLength];
     }
 
     private static bool Contains(string? value, string needle)

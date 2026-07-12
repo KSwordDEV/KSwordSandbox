@@ -159,7 +159,7 @@ app.MapPost("/api/jobs/{jobId:guid}/enrichments/virustotal", async Task<IResult>
 app.MapGet("/api/jobs/{jobId:guid}/runbook/progress", (Guid jobId, SandboxJobService service, RunbookProgressStore progressStore) =>
 {
     return TryReadOrCreateRunbookProgressSnapshot(jobId, service, progressStore, out var snapshot, out var errorResult)
-        ? Results.Ok(snapshot)
+        ? Results.Ok(BuildRunbookProgressApiPayload(service, jobId, snapshot!))
         : errorResult ?? Results.NotFound(new { error = $"任务 {jobId:D} 还没有分析进度快照 / The job does not have a runbook progress snapshot yet." });
 });
 // GET /api/jobs/{jobId}/progress/stream is the preferred lightweight
@@ -313,6 +313,9 @@ app.MapPost("/api/files/upload/start", async Task<IResult> (HttpRequest request,
         var job = service.Plan(submission);
         var runbookRequest = BuildRunbookExecuteRequestFromUploadForm(form);
         var runbookStart = TryStartBackgroundRunbook(job.JobId, runbookRequest, service, executor, currentConfig, progressStore, backgroundStore);
+        var runbookProgress = TryReadOrCreateRunbookProgressSnapshot(job.JobId, service, progressStore, out var progressSnapshot, out _) && progressSnapshot is not null
+            ? BuildRunbookProgressApiPayload(service, job.JobId, progressSnapshot)
+            : null;
         return Results.Ok(new
         {
             Uploaded = candidate,
@@ -322,6 +325,7 @@ app.MapPost("/api/files/upload/start", async Task<IResult> (HttpRequest request,
             ExecutionFlowHref = $"/jobs/{job.JobId:D}/execution-flow",
             ReportHref = $"/api/jobs/{job.JobId:D}/report/html",
             BackgroundHref = $"/api/jobs/{job.JobId:D}/runbook/background",
+            RunbookProgress = runbookProgress,
             RunbookStart = runbookStart
         });
     }
@@ -877,6 +881,138 @@ static bool TryReadOrCreateRunbookProgressSnapshot(
 }
 
 /// <summary>
+/// Builds the WebUI progress payload while preserving the legacy raw snapshot
+/// fields. Inputs are the selected snapshot and job service; processing adds
+/// RunbookProgressContract durability/freshness metadata beside the raw step
+/// list so older dashboard code can keep reading steps while the live monitor
+/// prefers contract fields for source path, staleness, counts, and hints.
+/// </summary>
+static object BuildRunbookProgressApiPayload(
+    SandboxJobService service,
+    Guid jobId,
+    SandboxRunbookProgressSnapshot snapshot)
+{
+    var contract = BuildRunbookProgressContract(service, jobId, snapshot);
+    return BuildRunbookProgressApiPayloadFromContract(snapshot, contract);
+}
+
+static object BuildRunbookProgressApiPayloadFromContract(
+    SandboxRunbookProgressSnapshot snapshot,
+    RunbookProgressContract contract)
+{
+    return new
+    {
+        snapshot.JobId,
+        snapshot.TargetVmName,
+        snapshot.Mode,
+        snapshot.State,
+        snapshot.TotalSteps,
+        snapshot.CompletedSteps,
+        snapshot.ExecutedSteps,
+        snapshot.CurrentStepIndex,
+        snapshot.CurrentStepId,
+        snapshot.CurrentStepTitle,
+        snapshot.CurrentPhase,
+        snapshot.CurrentCategory,
+        snapshot.ProgressPercent,
+        snapshot.Success,
+        snapshot.Message,
+        snapshot.StartedAtUtc,
+        snapshot.UpdatedAtUtc,
+        snapshot.Duration,
+        snapshot.Steps,
+        contract.DurableSourcePath,
+        contract.SnapshotUpdatedAtUtc,
+        contract.SnapshotAge,
+        contract.StaleThreshold,
+        contract.IsStale,
+        contract.LatestStepSummary,
+        contract.CompletedStepCount,
+        contract.FailedStepCount,
+        contract.RunningStepCount,
+        contract.OperatorHintsZh,
+        ProgressContract = contract
+    };
+}
+
+static RunbookProgressContract BuildRunbookProgressContract(
+    SandboxJobService service,
+    Guid jobId,
+    SandboxRunbookProgressSnapshot snapshot)
+{
+    var durableSourcePath = ResolveRunbookProgressDurableSourcePath(service.GetJob(jobId));
+    return RunbookProgressContract.FromSnapshot(
+        snapshot,
+        durableSourcePath,
+        DateTimeOffset.UtcNow);
+}
+
+static string? ResolveRunbookProgressDurableSourcePath(AnalysisJob? job)
+{
+    if (job is null)
+    {
+        return null;
+    }
+
+    var progressPath = ResolveRunbookProgressPath(job);
+    var executionPath = NormalizeDurableSourcePath(job.RunbookExecutionResultPath);
+    if (!string.IsNullOrWhiteSpace(progressPath) && File.Exists(progressPath))
+    {
+        return progressPath;
+    }
+
+    if (!string.IsNullOrWhiteSpace(executionPath) && File.Exists(executionPath))
+    {
+        return executionPath;
+    }
+
+    return progressPath ?? executionPath;
+}
+
+static string? ResolveRunbookProgressPath(AnalysisJob job)
+{
+    var sibling = FirstNonEmpty(
+        job.RunbookExecutionResultPath,
+        job.JsonReportPath,
+        job.HtmlReportPath,
+        job.HtmlReportZhPath,
+        job.HtmlReportEnPath);
+    if (string.IsNullOrWhiteSpace(sibling))
+    {
+        return null;
+    }
+
+    try
+    {
+        var directory = Path.GetDirectoryName(sibling);
+        return string.IsNullOrWhiteSpace(directory)
+            ? null
+            : Path.GetFullPath(Path.Combine(directory, "runbook-progress.json"));
+    }
+    catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+    {
+        return null;
+    }
+}
+
+static string? NormalizeDurableSourcePath(string? path)
+{
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        return null;
+    }
+
+    try
+    {
+        return Path.GetFullPath(path);
+    }
+    catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+    {
+        return path;
+    }
+}
+
+/// <summary>
 /// Streams UI-safe runbook/background progress with Server-Sent Events.
 /// Inputs are route/query values, HTTP context, and WebUI stores; processing
 /// subscribes to the bounded progress channel and uses occasional heartbeats
@@ -916,7 +1052,7 @@ static async Task WriteRunbookProgressStreamAsync(
     await WriteRunbookProgressStreamFrameAsync(
         context.Response,
         eventName,
-        BuildRunbookProgressStreamPayload(jobId, currentProgress, background, eventName),
+        BuildRunbookProgressStreamPayload(jobId, currentProgress, background, eventName, service),
         cancellationToken);
 
     if (IsRunbookProgressStreamTerminal(currentProgress, background))
@@ -972,7 +1108,7 @@ static async Task WriteRunbookProgressStreamAsync(
             await WriteRunbookProgressStreamFrameAsync(
                 context.Response,
                 eventName,
-                BuildRunbookProgressStreamPayload(jobId, currentProgress, background, eventName),
+                BuildRunbookProgressStreamPayload(jobId, currentProgress, background, eventName, service),
                 cancellationToken);
 
             if (IsRunbookProgressStreamTerminal(currentProgress, background))
@@ -988,7 +1124,7 @@ static async Task WriteRunbookProgressStreamAsync(
             await WriteRunbookProgressStreamFrameAsync(
                 context.Response,
                 "timeout",
-                BuildRunbookProgressStreamPayload(jobId, currentProgress, background, "timeout"),
+                BuildRunbookProgressStreamPayload(jobId, currentProgress, background, "timeout", service),
                 cancellationToken);
         }
     }
@@ -1007,9 +1143,11 @@ static object BuildRunbookProgressStreamPayload(
     Guid jobId,
     SandboxRunbookProgressSnapshot progress,
     RunbookBackgroundExecutionSnapshot background,
-    string eventName)
+    string eventName,
+    SandboxJobService service)
 {
     var state = ResolveRunbookProgressStreamState(progress, background);
+    var durableProgress = BuildRunbookProgressContract(service, jobId, progress);
     return new
     {
         SchemaVersion = 1,
@@ -1022,8 +1160,9 @@ static object BuildRunbookProgressStreamPayload(
         TerminalKind = state is "failed" or "canceled" ? "error" : state is "completed" ? "final" : null,
         Message = ResolveRunbookProgressStreamMessage(progress, background),
         ProgressPercent = ComputeRunbookProgressPercent(progress),
-        CurrentStep = BuildRunbookProgressStreamCurrentStep(progress),
-        Progress = progress,
+        CurrentStep = BuildRunbookProgressStreamCurrentStep(progress, durableProgress),
+        Progress = BuildRunbookProgressApiPayloadFromContract(progress, durableProgress),
+        DurableProgress = durableProgress,
         Background = BuildSafeRunbookBackgroundSnapshot(background)
     };
 }
@@ -1044,6 +1183,18 @@ static object BuildSafeRunbookBackgroundSnapshot(RunbookBackgroundExecutionSnaps
         snapshot.Duration,
         snapshot.GuestImportSucceeded,
         snapshot.GuestImportMessage,
+        snapshot.DurableSourcePath,
+        snapshot.DurableProgressSourcePath,
+        snapshot.DurableExecutionSourcePath,
+        snapshot.SnapshotGeneratedAtUtc,
+        snapshot.SnapshotAge,
+        snapshot.StaleThreshold,
+        snapshot.IsStale,
+        snapshot.CompletedStepCount,
+        snapshot.FailedStepCount,
+        snapshot.RunningStepCount,
+        snapshot.LatestStepSummary,
+        snapshot.OperatorHintsZh,
         Job = BuildSafeRunbookBackgroundJobSnapshot(snapshot.Job)
     };
 }
@@ -1065,8 +1216,40 @@ static object? BuildSafeRunbookBackgroundJobSnapshot(AnalysisJob? job)
         };
 }
 
-static object? BuildRunbookProgressStreamCurrentStep(SandboxRunbookProgressSnapshot progress)
+static object? BuildRunbookProgressStreamCurrentStep(
+    SandboxRunbookProgressSnapshot progress,
+    RunbookProgressContract durableProgress)
 {
+    if (durableProgress.LatestStepSummary is not null)
+    {
+        var latest = durableProgress.LatestStepSummary;
+        return new
+        {
+            latest.StepIndex,
+            latest.StepNumber,
+            latest.TotalSteps,
+            latest.Ordinal,
+            latest.StepId,
+            latest.Title,
+            DisplayText = string.IsNullOrWhiteSpace(latest.Title)
+                ? $"{latest.Ordinal} {latest.StepId}"
+                : $"{latest.Ordinal} {latest.Title}",
+            latest.State,
+            latest.Phase,
+            latest.Category,
+            StateMeaning = "UI-safe latest runbook step summary from RunbookProgressContract; command text/stdout/stderr are intentionally excluded.",
+            Source = "runbook-progress-contract-latest-step-summary",
+            ProgressState = progress.State,
+            progress.CompletedSteps,
+            progress.ExecutedSteps,
+            latest.StartedAtUtc,
+            latest.Duration,
+            latest.ExitCode,
+            latest.Message,
+            latest.RemediationHintZh
+        };
+    }
+
     var steps = progress.Steps;
     var totalSteps = Math.Max(progress.TotalSteps, steps.Count);
     var runningStep = steps.FirstOrDefault(step => string.Equals(step.State, SandboxRunbookProgressStates.Running, StringComparison.OrdinalIgnoreCase));
@@ -1094,6 +1277,8 @@ static object? BuildRunbookProgressStreamCurrentStep(SandboxRunbookProgressSnaps
         currentStep.Title,
         DisplayText = BuildRunbookCurrentStepDisplay(currentStep, totalSteps),
         currentStep.State,
+        currentStep.Phase,
+        currentStep.Category,
         StateMeaning = "UI-safe real runbook step status from the progress stream; command text/stdout/stderr are intentionally excluded.",
         Source = source,
         ProgressState = progress.State,
@@ -1102,7 +1287,8 @@ static object? BuildRunbookProgressStreamCurrentStep(SandboxRunbookProgressSnaps
         currentStep.StartedAtUtc,
         currentStep.Duration,
         currentStep.ExitCode,
-        currentStep.Message
+        currentStep.Message,
+        currentStep.RemediationHintZh
     };
 }
 

@@ -75,6 +75,8 @@ public sealed class PcapArtifactEventImporter
                         ["parserMaxProtocolEvents"] = MaxProtocolEvents.ToString(CultureInfo.InvariantCulture),
                         ["parserMaxFlowEvents"] = MaxFlowEvents.ToString(CultureInfo.InvariantCulture),
                         ["parserPacketLimitHit"] = (packets.Count >= MaxPackets).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                        ["duplicatePolicy"] = "normalized-events-canonical; raw-pcap-rows-compatibility-nonbehavior",
+                        ["protocolHealthSummaryScope"] = "behavior-counted-canonical-events",
                         ["pcapSourceDiagnostic"] = "native parser used; tshark not required",
                         ["tsharkRequired"] = "false",
                         ["tsharkAvailable"] = IsTsharkAvailable().ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
@@ -111,6 +113,7 @@ public sealed class PcapArtifactEventImporter
                         ["parserMaxPayloadBytes"] = MaxPayloadBytes.ToString(CultureInfo.InvariantCulture),
                         ["parserMaxProtocolEvents"] = MaxProtocolEvents.ToString(CultureInfo.InvariantCulture),
                         ["parserMaxFlowEvents"] = MaxFlowEvents.ToString(CultureInfo.InvariantCulture),
+                        ["duplicatePolicy"] = "normalized-events-canonical; raw-pcap-rows-compatibility-nonbehavior",
                         ["pcapSourceDiagnostic"] = "pcap parse_error emitted with boundary diagnostics",
                         ["tsharkRequired"] = "false",
                         ["tsharkAvailable"] = IsTsharkAvailable().ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
@@ -341,7 +344,8 @@ public sealed class PcapArtifactEventImporter
                 }
 
                 events.Add(protocolEvent);
-                if (protocolEvent.Data.TryGetValue("protocolHealth", out var protocolHealth) &&
+                if (IsBehaviorCounted(protocolEvent) &&
+                    protocolEvent.Data.TryGetValue("protocolHealth", out var protocolHealth) &&
                     !string.IsNullOrWhiteSpace(protocolHealth))
                 {
                     protocolHealthCounts[protocolHealth] = protocolHealthCounts.TryGetValue(protocolHealth, out var count)
@@ -357,6 +361,16 @@ public sealed class PcapArtifactEventImporter
             }
         }
 
+        var flowEvents = flows.Values
+            .OrderBy(flow => flow.FirstSeenUtc)
+            .Take(MaxFlowEvents)
+            .SelectMany(flow => new[]
+            {
+                flow.ToEvent(path, "pcap.flow", source),
+                flow.ToEvent(path, "network.flow", source)
+            })
+            .ToList();
+        var allGeneratedEvents = events.Concat(flowEvents).ToList();
         var summaryData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["schema"] = NetworkTelemetrySchema.SchemaVersion,
@@ -374,10 +388,17 @@ public sealed class PcapArtifactEventImporter
             ["parserMaxFlowEvents"] = MaxFlowEvents.ToString(CultureInfo.InvariantCulture),
             ["parserPacketLimitHit"] = (packets.Count >= MaxPackets).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["parserProtocolEventLimitHit"] = (protocolEvents >= MaxProtocolEvents).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["parserFlowEventLimitHit"] = (flows.Count > MaxFlowEvents).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["pcapSourceDiagnostic"] = "native parser used; tshark not required",
             ["packetCount"] = packets.Count.ToString(CultureInfo.InvariantCulture),
             ["parsedPacketCount"] = parsedPackets.ToString(CultureInfo.InvariantCulture),
             ["flowCount"] = flows.Count.ToString(CultureInfo.InvariantCulture),
+            ["flowEventCount"] = flowEvents.Count.ToString(CultureInfo.InvariantCulture),
+            ["canonicalBehaviorEventCount"] = allGeneratedEvents.Count(IsBehaviorCounted).ToString(CultureInfo.InvariantCulture),
+            ["rawPcapCompatibilityEventCount"] = allGeneratedEvents.Count(IsRawPcapCompatibility).ToString(CultureInfo.InvariantCulture),
+            ["compatibilityEventCount"] = allGeneratedEvents.Count(IsRawPcapCompatibility).ToString(CultureInfo.InvariantCulture),
+            ["duplicatePolicy"] = "normalized-events-canonical; raw-pcap-rows-compatibility-nonbehavior",
+            ["protocolHealthSummaryScope"] = "behavior-counted-canonical-protocol-events",
             ["byteCount"] = bytes.ToString(CultureInfo.InvariantCulture),
             ["protocol"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
             ["protocols"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
@@ -397,11 +418,7 @@ public sealed class PcapArtifactEventImporter
             Data = summaryData
         });
 
-        foreach (var flow in flows.Values.OrderBy(flow => flow.FirstSeenUtc).Take(MaxFlowEvents))
-        {
-            events.Add(flow.ToEvent(path, "pcap.flow", source));
-            events.Add(flow.ToEvent(path, "network.flow", source));
-        }
+        events.AddRange(flowEvents);
 
         return events;
     }
@@ -420,7 +437,7 @@ public sealed class PcapArtifactEventImporter
                     Timestamp = packet.Timestamp,
                     Source = "host",
                     Path = path,
-                    Data = packet.BaseData(dnsData, "dns", source)
+                    Data = packet.BaseData(PcapProtocolData(dnsData, packet, "dns.query", "pcap.dns", compatibilityRow: true), "dns", source)
                 };
                 yield return NetworkTelemetrySchema.CreateNetworkEvent(
                     "dns.query",
@@ -434,7 +451,7 @@ public sealed class PcapArtifactEventImporter
                     packet.DestinationIp,
                     packet.DestinationPort,
                     source,
-                    dnsData);
+                    PcapProtocolData(dnsData, packet, "dns.query", "pcap.dns", compatibilityRow: false));
             }
         }
 
@@ -450,7 +467,7 @@ public sealed class PcapArtifactEventImporter
                     Timestamp = packet.Timestamp,
                     Source = "host",
                     Path = path,
-                    Data = packet.BaseData(httpData, "http", source)
+                    Data = packet.BaseData(PcapProtocolData(httpData, packet, "http.request", "pcap.http", compatibilityRow: true), "http", source)
                 };
                 yield return NetworkTelemetrySchema.CreateNetworkEvent(
                     "http.request",
@@ -464,7 +481,7 @@ public sealed class PcapArtifactEventImporter
                     packet.DestinationIp,
                     packet.DestinationPort,
                     source,
-                    httpData);
+                    PcapProtocolData(httpData, packet, "http.request", "pcap.http", compatibilityRow: false));
             }
 
             var tls = TryParseTls(packet.Payload.AsSpan());
@@ -477,7 +494,7 @@ public sealed class PcapArtifactEventImporter
                     Timestamp = packet.Timestamp,
                     Source = "host",
                     Path = path,
-                    Data = packet.BaseData(tlsData, "tls", source)
+                    Data = packet.BaseData(PcapProtocolData(tlsData, packet, "tls.connection", "pcap.tls", compatibilityRow: true), "tls", source)
                 };
                 yield return NetworkTelemetrySchema.CreateNetworkEvent(
                     "tls.connection",
@@ -491,9 +508,75 @@ public sealed class PcapArtifactEventImporter
                     packet.DestinationIp,
                     packet.DestinationPort,
                     source,
-                    tlsData);
+                    PcapProtocolData(tlsData, packet, "tls.connection", "pcap.tls", compatibilityRow: false));
             }
         }
+    }
+
+    private static Dictionary<string, string> PcapProtocolData(
+        IReadOnlyDictionary<string, string> protocolData,
+        DecodedPacket packet,
+        string canonicalEventType,
+        string compatibilityEventType,
+        bool compatibilityRow)
+    {
+        var duplicateGroupKey = PcapDuplicateGroupKey(packet, canonicalEventType, protocolData);
+        var data = new Dictionary<string, string>(protocolData, StringComparer.OrdinalIgnoreCase)
+        {
+            ["packetIndex"] = packet.PacketIndex.ToString(CultureInfo.InvariantCulture),
+            ["pcapPacketIndex"] = packet.PacketIndex.ToString(CultureInfo.InvariantCulture),
+            ["pcapProtocolEventKey"] = duplicateGroupKey,
+            ["duplicateGroupKey"] = duplicateGroupKey,
+            ["duplicatePolicy"] = "normalized-events-canonical; raw-pcap-rows-compatibility-nonbehavior",
+            ["canonicalEventType"] = canonicalEventType,
+            ["normalizedEventType"] = canonicalEventType,
+            ["pcapCompatibilityEventType"] = compatibilityEventType,
+            ["rawPcapCompatibilityRow"] = compatibilityRow.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["duplicateRole"] = compatibilityRow ? "raw-pcap-compatibility" : "normalized-canonical",
+            ["parserMetadataValueMaxLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(CultureInfo.InvariantCulture)
+        };
+
+        if (compatibilityRow)
+        {
+            data["duplicateOfEventType"] = canonicalEventType;
+            data["behaviorCounted"] = "false";
+            data["nonbehavior"] = "true";
+            data["semanticLane"] = "nonbehavior";
+            data["behaviorLane"] = "raw-pcap-compatibility";
+            data["behaviorScope"] = "raw-pcap-compatibility";
+            data["noisePolicy"] = "nonbehavior-duplicate-compatibility";
+            data["collectorNoiseScope"] = "nonbehavior-evidence-quality";
+            data["sampleBehaviorBoundary"] = "nonbehavior-separated";
+            data["behaviorCountingPolicy"] = "excluded-raw-pcap-compatibility";
+        }
+        else
+        {
+            data["canonicalBehaviorRow"] = "true";
+            data["behaviorCountingPolicy"] = "included-normalized-canonical";
+        }
+
+        return data;
+    }
+
+    private static string PcapDuplicateGroupKey(
+        DecodedPacket packet,
+        string canonicalEventType,
+        IReadOnlyDictionary<string, string> protocolData)
+    {
+        var discriminator = FirstNonEmpty(
+            ValueOrEmpty(protocolData, "queryName"),
+            ValueOrEmpty(protocolData, "url"),
+            ValueOrEmpty(protocolData, "host"),
+            ValueOrEmpty(protocolData, "sni"),
+            ValueOrEmpty(protocolData, "handshakeType"),
+            ValueOrEmpty(protocolData, "statusCode"));
+        return string.Join(
+            "|",
+            "pcap",
+            packet.PacketIndex.ToString(CultureInfo.InvariantCulture),
+            canonicalEventType,
+            packet.FlowKey,
+            discriminator);
     }
 
     private static Dictionary<string, string> DnsData(DnsInfo dns)
@@ -701,18 +784,18 @@ public sealed class PcapArtifactEventImporter
 
         if (etherType == 0x0800 && frame.Length >= offset + 20)
         {
-            return TryDecodeIpv4Packet(packet.Timestamp, frame[offset..]);
+            return TryDecodeIpv4Packet(packet.Index, packet.Timestamp, frame[offset..]);
         }
 
         if (etherType == 0x86DD && frame.Length >= offset + 40)
         {
-            return TryDecodeIpv6Packet(packet.Timestamp, frame[offset..]);
+            return TryDecodeIpv6Packet(packet.Index, packet.Timestamp, frame[offset..]);
         }
 
         return null;
     }
 
-    private static DecodedPacket? TryDecodeIpv4Packet(DateTimeOffset timestamp, ReadOnlySpan<byte> ip)
+    private static DecodedPacket? TryDecodeIpv4Packet(int packetIndex, DateTimeOffset timestamp, ReadOnlySpan<byte> ip)
     {
         var version = ip[0] >> 4;
         var ihl = (ip[0] & 0x0F) * 4;
@@ -732,6 +815,7 @@ public sealed class PcapArtifactEventImporter
         }
 
         return TryDecodeTransport(
+            packetIndex,
             timestamp,
             sourceIp,
             destinationIp,
@@ -739,7 +823,7 @@ public sealed class PcapArtifactEventImporter
             ip.Slice(ihl, availableLength - ihl));
     }
 
-    private static DecodedPacket? TryDecodeIpv6Packet(DateTimeOffset timestamp, ReadOnlySpan<byte> ip)
+    private static DecodedPacket? TryDecodeIpv6Packet(int packetIndex, DateTimeOffset timestamp, ReadOnlySpan<byte> ip)
     {
         var version = ip[0] >> 4;
         if (version != 6 || ip.Length < 40)
@@ -796,6 +880,7 @@ public sealed class PcapArtifactEventImporter
         var sourceIp = new IPAddress(ip.Slice(8, 16)).ToString();
         var destinationIp = new IPAddress(ip.Slice(24, 16)).ToString();
         return TryDecodeTransport(
+            packetIndex,
             timestamp,
             sourceIp,
             destinationIp,
@@ -809,6 +894,7 @@ public sealed class PcapArtifactEventImporter
     }
 
     private static DecodedPacket? TryDecodeTransport(
+        int packetIndex,
         DateTimeOffset timestamp,
         string sourceIp,
         string destinationIp,
@@ -826,6 +912,7 @@ public sealed class PcapArtifactEventImporter
             }
 
             return new DecodedPacket(
+                packetIndex,
                 timestamp,
                 sourceIp,
                 destinationIp,
@@ -840,6 +927,7 @@ public sealed class PcapArtifactEventImporter
             var sourcePort = BinaryPrimitives.ReadUInt16BigEndian(transport.Slice(0, 2));
             var destinationPort = BinaryPrimitives.ReadUInt16BigEndian(transport.Slice(2, 2));
             return new DecodedPacket(
+                packetIndex,
                 timestamp,
                 sourceIp,
                 destinationIp,
@@ -1827,6 +1915,20 @@ public sealed class PcapArtifactEventImporter
         return data.TryGetValue(key, out var value) ? value : string.Empty;
     }
 
+    private static bool IsBehaviorCounted(SandboxEvent evt)
+    {
+        return evt.Data.TryGetValue("behaviorCounted", out var behaviorCounted) &&
+            string.Equals(behaviorCounted, "true", StringComparison.OrdinalIgnoreCase) &&
+            (!evt.Data.TryGetValue("nonbehavior", out var nonbehavior) ||
+                !string.Equals(nonbehavior, "true", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsRawPcapCompatibility(SandboxEvent evt)
+    {
+        return evt.Data.TryGetValue("rawPcapCompatibilityRow", out var value) &&
+            string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string StatusFamily(string? statusCode)
     {
         return int.TryParse(statusCode, NumberStyles.Integer, CultureInfo.InvariantCulture, out var status) &&
@@ -2012,6 +2114,8 @@ public sealed class PcapArtifactEventImporter
         metadata["sourcePcapArtifactRelativePath"] = pcapSource.RelativePath;
         metadata["sourcePcapArtifactSelector"] = pcapSource.RelativePath;
         metadata["sourcePcapDownloadSelector"] = pcapSource.RelativePath;
+        metadata["sidecarParentPcapLinked"] = "true";
+        metadata["sidecarPcapLinkSource"] = "pcap-import-adjacent-sidecar";
         try
         {
             var info = new FileInfo(pcapSource.FullPath);
@@ -2155,6 +2259,7 @@ public sealed class PcapArtifactEventImporter
         string ProtocolHealth);
 
     private sealed record DecodedPacket(
+        int PacketIndex,
         DateTimeOffset Timestamp,
         string SourceIp,
         string DestinationIp,
@@ -2178,10 +2283,13 @@ public sealed class PcapArtifactEventImporter
             var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["ipFamily"] = IpFamily,
+                ["packetIndex"] = PacketIndex.ToString(CultureInfo.InvariantCulture),
+                ["pcapPacketIndex"] = PacketIndex.ToString(CultureInfo.InvariantCulture),
                 ["payloadBytes"] = Payload.Length.ToString(CultureInfo.InvariantCulture),
                 ["parserInputKind"] = "packet-capture",
                 ["parserBounded"] = "true",
                 ["parserMaxPayloadBytes"] = MaxPayloadBytes.ToString(CultureInfo.InvariantCulture),
+                ["parserMetadataValueMaxLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(CultureInfo.InvariantCulture),
                 ["packetCaptureImportProvenance"] = "pcap-artifact",
                 ["packetFactSource"] = "native-pcap-packet"
             };
@@ -2257,6 +2365,13 @@ public sealed class PcapArtifactEventImporter
 
         public SandboxEvent ToEvent(string path, string eventType, NetworkArtifactSource source)
         {
+            var isCompatibilityRow = string.Equals(eventType, "pcap.flow", StringComparison.OrdinalIgnoreCase);
+            var duplicateGroupKey = string.Join(
+                "|",
+                "pcap-flow",
+                Protocol,
+                NetworkTelemetrySchema.Endpoint(SourceIp, SourcePort),
+                NetworkTelemetrySchema.Endpoint(DestinationIp, DestinationPort));
             var data = NetworkTelemetrySchema.CreateEndpointData(
                 Protocol,
                 SourceIp,
@@ -2274,8 +2389,28 @@ public sealed class PcapArtifactEventImporter
                     ["payloadBytes"] = PayloadBytes.ToString(CultureInfo.InvariantCulture),
                     ["payloadByteCount"] = PayloadBytes.ToString(CultureInfo.InvariantCulture),
                     ["firstSeenUtc"] = FirstSeenUtc.ToString("O"),
-                    ["lastSeenUtc"] = LastSeenUtc.ToString("O")
+                    ["lastSeenUtc"] = LastSeenUtc.ToString("O"),
+                    ["duplicateGroupKey"] = duplicateGroupKey,
+                    ["duplicatePolicy"] = "normalized-events-canonical; raw-pcap-rows-compatibility-nonbehavior",
+                    ["canonicalEventType"] = "network.flow",
+                    ["normalizedEventType"] = "network.flow",
+                    ["pcapCompatibilityEventType"] = "pcap.flow",
+                    ["rawPcapCompatibilityRow"] = isCompatibilityRow.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                    ["duplicateRole"] = isCompatibilityRow ? "raw-pcap-compatibility" : "normalized-canonical",
+                    ["parserMetadataValueMaxLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(CultureInfo.InvariantCulture),
+                    ["behaviorCounted"] = isCompatibilityRow ? "false" : "true",
+                    ["nonbehavior"] = isCompatibilityRow ? "true" : "false",
+                    ["semanticLane"] = isCompatibilityRow ? "nonbehavior" : "behavior",
+                    ["behaviorLane"] = isCompatibilityRow ? "raw-pcap-compatibility" : "sample-network-behavior",
+                    ["behaviorScope"] = isCompatibilityRow ? "raw-pcap-compatibility" : "network-behavior",
+                    ["sampleBehaviorBoundary"] = isCompatibilityRow ? "nonbehavior-separated" : "sample-countable",
+                    ["collectorNoiseScope"] = isCompatibilityRow ? "nonbehavior-evidence-quality" : "sample-or-external-network"
                 });
+            if (isCompatibilityRow)
+            {
+                data["duplicateOfEventType"] = "network.flow";
+            }
+
             return new SandboxEvent
             {
                 EventType = eventType,

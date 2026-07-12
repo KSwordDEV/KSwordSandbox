@@ -22,6 +22,11 @@
 - Every typed payload structure also starts with `Version` and `Size`; payload
   parsers must treat too-small payloads as typed-payload failures while keeping
   the common header, `sequence`, and bounded payload hex evidence.
+- Collector driver rows must preserve generic payload-version aliases for every
+  record: `payloadVersion`, `payloadVersionHex`, `payloadSchemaVersion`,
+  `expectedPayloadVersion`, `payloadVersionStatus`, and
+  `producerPayloadVersionFieldSet`. Unknown/header-only records use zero-valued
+  aliases rather than omitting the keys.
 - `KSWORD_SANDBOX_EVENT_SCHEMA_NAME` and `KSWORD_SANDBOX_EVENT_SCHEMA_VERSION`
   are the JSONL-visible event schema identifiers. Synthetic event-quality tests
   must preserve these fields for mock rows and stress rows so mock/live output
@@ -115,6 +120,14 @@ typed payload starts with `Version` at offset 0 and `Size` at offset 4;
 can detect drift before a live driver is opened. Future field growth must use a
 new negotiated version or an explicit draft/successor structure; it must not
 silently change the existing v1 layout.
+
+Additional compile-time ABI guards now pin the fixed capability, producer-mask,
+and READ_EVENTS negotiation structures (`KSWORD_SANDBOX_CAPABILITIES_REPLY`,
+`KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_*`, and
+`KSWORD_SANDBOX_READ_EVENTS_*`) on both the driver and collector sides. The
+collector self-check exposes their key offsets (`capabilities*Offset`,
+`setProducerEnableMaskReply*Offset`, `readEventsBytesWrittenOffset`,
+`readEventsNextSequenceOffset`) as no-device evidence.
 
 The network producer also exposes a separate
 `KSWORD_SANDBOX_NETWORK_STATUS_REPLY` through
@@ -293,6 +306,16 @@ loading a real driver:
   and mock rows name `StressJsonlNoiseEvidence` so importers know which
   `noise*`, `collectorNoise*`, `selfNoise*`, behavior-counting, and
   `sampleBehaviorCandidate` fields must survive noisy corpora.
+- Behavior-counting evidence: collector lifecycle, readiness, capabilities,
+  batch summary, ABI self-check, IOCTL failure/protocol error, optional-IOCTL,
+  and network-status-unavailable rows must explicitly emit
+  `behaviorCounted=false` and `nonbehavior=true`. Driver rows that are not
+  collector/producer self-noise emit `behaviorCounted=true`; emitted self-noise
+  audit rows emit `behaviorCounted=false`.
+- Stress-field evidence: live driver rows still emit stable stress keys with
+  non-stress defaults (`stress=false`, `stressOrdinal=-1`,
+  `stressCorpusRole=live-driver-event`) so live, mock, and counted stress JSONL
+  can be compared by field name.
 - Stress inputs: use mock JSONL plus bounded collector knobs such as
   `--max-events`, `--max-read-batches`, `--duration 0`, `--poll-ms`, and
   `--heartbeat` to prove high-volume drain behavior without CSignTool, service

@@ -127,6 +127,7 @@ bool EmitIoctlFailure(
     data.AddUtf8("processIdSource", "top-level");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCollectorNonBehaviorFields(data, "ioctl-failure", "emit-ioctl-failure-not-sample-behavior");
     data.AddBool("collectionNoise", true);
     data.AddBool("collectorNoise", true);
     data.AddBool("collectorSelfNoise", false);
@@ -192,6 +193,7 @@ bool EmitProtocolError(
     data.AddUtf8("processIdSource", "top-level");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCollectorNonBehaviorFields(data, "driver-protocol-error", "emit-protocol-error-not-sample-behavior");
     data.AddBool("collectionNoise", true);
     data.AddBool("collectorNoise", true);
     data.AddBool("collectorSelfNoise", false);
@@ -280,6 +282,7 @@ bool EmitOptionalIoctlUnavailable(
     data.AddUtf8("processIdSource", "top-level");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCollectorNonBehaviorFields(data, "optional-ioctl-unavailable", "emit-optional-ioctl-diagnostic-not-sample-behavior");
     data.AddBool("collectionNoise", true);
     data.AddBool("collectorNoise", true);
     data.AddBool("collectorSelfNoise", false);
@@ -351,6 +354,7 @@ bool EmitNetworkStatusUnavailable(
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "driver-network-status", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(data, "driver-network-status-unavailable", "emit-network-status-diagnostic-not-sample-behavior");
     data.AddBool("collectionNoise", true);
     data.AddBool("collectorNoise", true);
     data.AddBool("collectorSelfNoise", false);

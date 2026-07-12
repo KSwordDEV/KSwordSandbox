@@ -254,6 +254,14 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   Chinese operator fields. This does not change sample behavior events such as
   `process.*`, `file.*`, TCP, service, scheduled task, startup item, or
   registry behavior diffs.
+- Optional artifact collection rows (`artifact.dropped_file.*`,
+  `screenshot.*`, `memory_dump.*`, and `packet_capture.*`) also pass through a
+  shared field normalizer before final `events.json` / manifest writing. This
+  keeps `artifactRelativePath`, `sizeBytes`, `sha256`,
+  `artifactRelativePathStatus`, `sizeBytesStatus`, `sha256Status`,
+  `artifactIntegrityState`, `rootProcessIdStatus`, and `treeLineageStatus`
+  present on captured, skipped, disabled, failed, and summary rows. Empty values
+  are intentional for rows that did not create a downloadable file.
 
 事件模型仍然是 `KSword.Sandbox.Abstractions.SandboxEvent`；附加细节放在既有字符串
 `Data` dictionary 中，避免修改 Core/Web/Abstractions 共享契约。
@@ -365,8 +373,10 @@ host artifact index 将这些文件分类为 `memory-dump`，不新增共享 art
 事件都会尽量保留 `rootProcessId`、`treeLineage`、`capturePolicy`、
 `artifactRelativePathStatus`、`artifactAttemptEvent`、`childProcessArtifactEvent`、
 `childProcessDumpOutcome`、`directChildProcessDumpEnabled`、`deeperDescendantProcessDumpEnabled`、
-`descendantDumpOptInScope` 和 `zhHint`；如果 root PID 本身不可用，则用
-`rootProcessIdStatus` / `treeLineageStatus` 明确标记不可用。
+`descendantDumpOptInScope`、`descendantDumpOptInMode`、`descendantDumpOptInOption`、
+`memoryDumpOptInApplied`、`rootDumpOptInApplied`、`descendantDumpOptInApplied`
+和 `zhHint`；如果 root PID 本身不可用，则用 `rootProcessIdStatus` /
+`treeLineageStatus` 明确标记不可用。
 
 ## 可选网络抓包 / Optional packet capture
 

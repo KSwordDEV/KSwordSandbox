@@ -141,8 +141,14 @@ these normalized `eventType` values:
 Common `data` fields include `ioctl`, `batchIndex`, `recordOffset`, `version`,
 `versionHex`, `recordSize`, `driverEventType`, `driverEventTypeName`, `flags`,
 `flagsHex`, `sequence`, `timestampQpc`, `driverProcessId`, `driverThreadId`,
-`payloadSize`, `payloadHexBytes`, `payloadTruncated`, `payloadHex`, and
-`typedPayloadParsed`.
+`payloadSize`, `payloadVersion`, `payloadVersionHex`,
+`payloadSchemaVersion`, `expectedPayloadVersion`,
+`expectedPayloadVersionHex`, `payloadVersionStatus`,
+`producerPayloadVersionFieldSet`, `payloadHexBytes`, `payloadTruncated`,
+`payloadHex`, and `typedPayloadParsed`. Live driver rows also emit
+`stress=false`, `stressOrdinal=-1`, `stressCount=0`, and
+`stressCorpusRole=live-driver-event`; synthetic stress rows override those
+stress fields with counted corpus values.
 
 Common attribution fields are additive and string-valued:
 
@@ -159,9 +165,11 @@ Common attribution fields are additive and string-valued:
 - `behaviorCounted` / `nonbehavior`: explicit host hints for behavior
   accounting. Collector health, readiness, capabilities, batch summary, and
   JSONL tolerance/noise-probe rows emit `behaviorCounted=false` and
-  `nonbehavior=true`. Driver rows that pass collector/producer self-noise
-  filtering emit `behaviorCounted=true`; emitted self-noise audit rows emit
-  `behaviorCounted=false`.
+  `nonbehavior=true`. This includes lifecycle rows, `--abi-self-check`,
+  IOCTL/protocol/optional-IOCTL diagnostic rows, and unavailable
+  `r0collector.driverNetworkStatus` rows. Driver rows that pass
+  collector/producer self-noise filtering emit `behaviorCounted=true`; emitted
+  self-noise audit rows emit `behaviorCounted=false`.
 - `noisePolicy`, `producerHint`, `producerProcessHint`, and `selfProcessHint`:
   additive text hints explaining whether a row followed suppression,
   emit-self-noise, collector-diagnostic, or synthetic-noise policy, and whether
@@ -208,6 +216,10 @@ smoke rows:
   `noiseObservedCount`, `lossObservedCount`, and
   `backpressureObservedCount` so readiness evidence can be compared without
   scanning every driver row.
+- `stress`, `stressOrdinal`, `stressCount`, and `stressCorpusRole`: stable
+  stress aliases on all driver-category rows. Live rows use explicit
+  non-stress defaults; counted synthetic stress rows set `stress=true` and
+  keep the `StressJsonl*` evidence fields.
 
 中文：event-quality aliases 的目标是让 import/report 在 JSONL 很大、存在 injected
 noise、队列溢出或 collector-side sampling 时仍能追溯证据完整性。它们是质量/压力标签，
@@ -318,9 +330,12 @@ handshake, or maliciousness.
 
 Synthetic driver-category rows have `data.mock:"true"` and
 `data.typedPayloadStatus:"mock"` so host reports can distinguish plumbing tests
-from real R0 telemetry. The `r0collector.mockDriverEvent` marker also carries
+from real R0 telemetry. They also carry explicit behavior hints:
+sample-or-system synthetic driver rows emit `behaviorCounted=true` and
+`nonbehavior=false`, while the `r0collector.mockDriverEvent` marker emits
+`behaviorCounted=false` and `nonbehavior=true`. The marker also carries
 `stress=true` and the `StressJsonl*` evidence fields in stress mode so a quick
-schema smoke can validate row count and sequence range before reading all
+schema check can validate row count and sequence range before reading all
 driver-category rows.
 
 ## CLI fields that affect JSONL
@@ -390,11 +405,15 @@ corpus includes:
   `EventsDropped`/`eventsDropped`, `processed`/`eligible`/`emitted`/
   `suppressed`/`skipped`, `head`/`tail`, `sampling`, `loss`, and
   `backpressureObserved`;
-- mock or stress driver rows with `mock:"true"`, `stress:"true"`,
-  `eventSchemaName`, `eventSchemaVersion`, `version`, `recordSize`,
-  `payloadSize`, `payloadSchema`, `payloadVersion`, `payloadVersionHex`,
-  `payloadSchemaVersion`, `typedPayloadStatus`, and monotonic `sequence`
-  values;
+- mock/stress driver rows with `mock:"true"` and stable `stress` fields
+  (`stress:"true"` on counted stress rows, `stress:"false"` on ordinary mock
+  rows), plus `eventSchemaName`, `eventSchemaVersion`, `version`,
+  `recordSize`, `payloadSize`, `payloadSchema`, `payloadVersion`,
+  `payloadVersionHex`, `payloadSchemaVersion`, `typedPayloadStatus`, and
+  monotonic `sequence` values;
+- live driver rows with `stress:"false"` plus the same
+  `payloadVersion`/`payloadVersionHex`/`payloadSchemaVersion` aliases so live
+  and no-device rows can be compared without first checking run mode;
 - malformed, truncated, blank, or extra-field rows to verify robust parsing;
 - attribution and self-noise fields (`eventOrigin`, `producerCategory`,
   `subjectKind`, `processIdSource`, `selfNoise`, `collectorSelfNoise`,

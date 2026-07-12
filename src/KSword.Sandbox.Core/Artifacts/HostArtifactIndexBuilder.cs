@@ -1535,9 +1535,15 @@ public sealed class HostArtifactIndexBuilder
         }
 
         var last = rejections[^1];
+        var reasonCounts = rejections
+            .Where(rejection => !string.IsNullOrWhiteSpace(rejection.Reason))
+            .GroupBy(rejection => rejection.Reason, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
         metadata["rejectionDiagnosticsAvailable"] = "true";
         metadata["rejectedArtifactCount"] = rejections.Count.ToString(CultureInfo.InvariantCulture);
         metadata["lastRejectedArtifactReason"] = last.Reason;
+        AddIfNotEmpty(metadata, "lastRejectedArtifactReasonZh", CollectionReasonZh(last.Reason));
         AddIfNotEmpty(metadata, "lastRejectedArtifactName", last.Name);
         AddIfNotEmpty(metadata, "lastRejectedArtifactSelector", last.AttemptedSelector);
         AddIfNotEmpty(metadata, "lastRejectedArtifactKind", last.Kind == ArtifactKind.Unknown ? string.Empty : last.Kind.ToString());
@@ -1549,6 +1555,7 @@ public sealed class HostArtifactIndexBuilder
                 .Where(reason => !string.IsNullOrWhiteSpace(reason))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(reason => reason, StringComparer.OrdinalIgnoreCase));
+        metadata["artifactRejectionReasonCountsJson"] = JsonSerializer.Serialize(reasonCounts, JsonOptions);
         metadata["artifactRejectionsJson"] = JsonSerializer.Serialize(
             rejections.Select(rejection => new
             {
@@ -1557,6 +1564,7 @@ public sealed class HostArtifactIndexBuilder
                 rejection.Name,
                 rejection.AttemptedSelector,
                 rejection.Reason,
+                ReasonZh = CollectionReasonZh(rejection.Reason),
                 rejection.HostRelativeGuestRoot
             }),
             JsonOptions);
@@ -1626,16 +1634,18 @@ public sealed class HostArtifactIndexBuilder
         AddIfMissing(metadata, "collectionDisplayNameZh", CollectionDisplayNameZh(collectionName, resolvedKind));
         AddIfMissing(metadata, "collectionNameZh", CollectionDisplayNameZh(collectionName, resolvedKind));
         AddIfMissing(metadata, "artifactKindZh", ArtifactKindNameZh(resolvedKind));
-        AddIfMissing(metadata, "downloadableArtifactCount", downloadableArtifactCount.ToString(CultureInfo.InvariantCulture));
-        AddIfMissing(metadata, "hasDownloadableArtifacts", (downloadableArtifactCount > 0).ToString(CultureInfo.InvariantCulture).ToLowerInvariant());
-        AddIfMissing(metadata, "sensitiveCollection", IsSensitiveArtifactKind(resolvedKind).ToString(CultureInfo.InvariantCulture).ToLowerInvariant());
-        AddIfMissing(metadata, "downloadSelectorPolicy", "relative-index-selectors-only");
-        AddIfMissing(metadata, "downloadSecurityPolicy", "server-indexed-relative-selector");
-        AddIfMissing(metadata, "downloadRejectionPolicy", "reject-empty-absolute-traversal-unindexed-missing");
-        AddIfMissing(metadata, "safeSelectorFields", "relativePath,safeLink,importPath,downloadSelector,downloadSafeLink");
-        AddIfMissing(metadata, "selectorMetadataVersion", "artifact-selector-v2");
-        AddIfMissing(metadata, "selectorAuthority", "host-artifact-index");
-        AddIfMissing(metadata, "selectorAvailability", downloadableArtifactCount > 0 ? "available" : "unavailable");
+        metadata["downloadableArtifactCount"] = downloadableArtifactCount.ToString(CultureInfo.InvariantCulture);
+        metadata["hasDownloadableArtifacts"] = (downloadableArtifactCount > 0).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        metadata["sensitiveCollection"] = IsSensitiveArtifactKind(resolvedKind).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        metadata["sensitiveCollectionReason"] = SensitiveArtifactReason(resolvedKind);
+        metadata["sensitiveCollectionReasonZh"] = SensitiveArtifactReasonZh(resolvedKind);
+        metadata["downloadSelectorPolicy"] = "relative-index-selectors-only";
+        metadata["downloadSecurityPolicy"] = "server-indexed-relative-selector";
+        metadata["downloadRejectionPolicy"] = "reject-empty-absolute-traversal-unindexed-missing";
+        metadata["safeSelectorFields"] = "relativePath,safeLink,importPath,downloadSelector,downloadSafeLink";
+        metadata["selectorMetadataVersion"] = "artifact-selector-v2";
+        metadata["selectorAuthority"] = "host-artifact-index";
+        metadata["selectorAvailability"] = downloadableArtifactCount > 0 ? "available" : "unavailable";
         AddIfMissing(metadata, "zhStatus", CollectionStatusZh(normalizedStatus));
         AddIfMissing(metadata, "zhReason", CollectionReasonZh(normalizedReason));
         AddIfMissing(metadata, "zhHint", CollectionHintZh(collectionName, normalizedStatus, normalizedReason, downloadableArtifactCount));
@@ -1991,12 +2001,14 @@ public sealed class HostArtifactIndexBuilder
 
     private static void AddArtifactIdentityMetadata(Dictionary<string, string> metadata, ArtifactDescriptor artifact)
     {
-        AddIfMissing(metadata, "artifactKind", artifact.Kind.ToString());
-        AddIfMissing(metadata, "sourceArtifactKind", artifact.Kind.ToString());
-        AddIfMissing(metadata, "sourceArtifactKindZh", ArtifactKindNameZh(artifact.Kind));
-        AddIfMissing(metadata, "artifactRelativePath", artifact.RelativePath);
-        AddIfMissing(metadata, "sourceArtifactRelativePath", artifact.RelativePath);
-        AddIfMissing(metadata, "importPath", artifact.ImportPath);
+        var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(artifact.RelativePath);
+        var importPath = FirstNonEmpty(ArtifactDescriptorFactory.NormalizeSelector(artifact.ImportPath), relativePath);
+        metadata["artifactKind"] = artifact.Kind.ToString();
+        metadata["sourceArtifactKind"] = artifact.Kind.ToString();
+        metadata["sourceArtifactKindZh"] = ArtifactKindNameZh(artifact.Kind);
+        SetIfNotEmpty(metadata, "artifactRelativePath", relativePath);
+        SetIfNotEmpty(metadata, "sourceArtifactRelativePath", relativePath);
+        SetIfNotEmpty(metadata, "importPath", importPath);
         AddIfMissing(metadata, "sourceArtifactPath", artifact.FullPath);
         AddIfMissing(metadata, "fullPath", artifact.FullPath);
         if (artifact.SizeBytes > 0)
@@ -2018,47 +2030,54 @@ public sealed class HostArtifactIndexBuilder
             ? Path.GetFileName(artifact.RelativePath)
             : artifact.Name;
         var safeFileName = SafeDownloadFileName(fileName);
+        var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(artifact.RelativePath);
+        var safeLink = ArtifactDescriptorFactory.BuildSafeLink(relativePath);
+        var importPath = FirstNonEmpty(ArtifactDescriptorFactory.NormalizeSelector(artifact.ImportPath), relativePath);
         var sampleEvidenceArtifact = IsSensitiveArtifact(artifact)
             .ToString(CultureInfo.InvariantCulture)
             .ToLowerInvariant();
         AddIfMissing(metadata, "apiMetadataVersion", "artifact-descriptor-v1");
-        AddIfMissing(metadata, "metadataBehaviorCounted", "false");
-        AddIfMissing(metadata, "metadataNonbehavior", "true");
-        AddIfMissing(metadata, "artifactDescriptorScope", "host-artifact-index-metadata");
-        AddIfMissing(metadata, "sampleBehaviorImpact", "metadata-only-do-not-score");
-        AddIfMissing(metadata, "sampleEvidenceArtifact", sampleEvidenceArtifact);
-        AddIfMissing(metadata, "evidenceDerivedFromSample", sampleEvidenceArtifact);
-        AddIfMissing(metadata, "contentType", contentType);
-        AddIfMissing(metadata, "downloadContentType", contentType);
-        AddIfMissing(metadata, "downloadFileName", fileName);
-        AddIfMissing(metadata, "safeDownloadFileName", safeFileName);
-        AddIfMissing(metadata, "contentDispositionFileName", safeFileName);
-        AddIfMissing(metadata, "safeContentDispositionFileName", safeFileName);
-        AddIfMissing(metadata, "contentDispositionPolicy", "attachment-filename-sanitized-from-indexed-artifact-name");
-        AddIfMissing(metadata, "downloadSelector", artifact.RelativePath);
-        AddIfMissing(metadata, "downloadSafeLink", artifact.SafeLink);
-        AddIfMissing(metadata, "safeRelativeSelector", artifact.RelativePath);
-        AddIfMissing(metadata, "reportRelativeHref", artifact.SafeLink);
-        AddIfMissing(metadata, "reportRelativeDownloadName", safeFileName);
-        AddIfMissing(metadata, "downloadAvailable", "true");
-        AddIfMissing(metadata, "downloadResolutionState", "available");
-        AddIfMissing(metadata, "downloadReadiness", "host-file-present");
-        AddIfMissing(metadata, "downloadRejectionCode", "none");
-        AddIfMissing(metadata, "downloadSelectorKind", "relativePath");
-        AddIfMissing(metadata, "selectorMetadataVersion", "artifact-selector-v2");
-        AddIfMissing(metadata, "selectorAuthority", "host-artifact-index");
-        AddIfMissing(metadata, "selectorArtifactKind", artifact.Kind.ToString());
-        AddIfMissing(metadata, "selectorCollectionName", artifact.CollectionName);
-        AddIfMissing(metadata, "selectorSafety", "normalized-relative-indexed");
-        AddIfMissing(metadata, "streamAuthority", "host-artifact-index");
-        AddIfMissing(metadata, "selectorEncoding", "path-segment-url-encoded-safeLink");
-        AddIfMissing(metadata, "selectorFields", "relativePath,safeLink,importPath,downloadSelector,downloadSafeLink");
-        AddIfMissing(metadata, "downloadSecurityPolicy", "server-indexed-relative-selector");
-        AddIfMissing(metadata, "downloadRejectionPolicy", "reject-empty-absolute-traversal-unindexed-missing");
-        AddIfMissing(metadata, "downloadIndexPolicy", "artifact-index-relative-selectors-only");
+        metadata["metadataBehaviorCounted"] = "false";
+        metadata["metadataNonbehavior"] = "true";
+        metadata["artifactDescriptorScope"] = "host-artifact-index-metadata";
+        metadata["sampleBehaviorImpact"] = "metadata-only-do-not-score";
+        metadata["sampleEvidenceArtifact"] = sampleEvidenceArtifact;
+        metadata["evidenceDerivedFromSample"] = sampleEvidenceArtifact;
+        metadata["sensitiveArtifact"] = sampleEvidenceArtifact;
+        metadata["sensitiveArtifactReason"] = SensitiveArtifactReason(artifact.Kind);
+        metadata["sensitiveArtifactReasonZh"] = SensitiveArtifactReasonZh(artifact.Kind);
+        metadata["contentType"] = contentType;
+        metadata["downloadContentType"] = contentType;
+        metadata["downloadFileName"] = safeFileName;
+        metadata["safeDownloadFileName"] = safeFileName;
+        metadata["contentDispositionFileName"] = safeFileName;
+        metadata["safeContentDispositionFileName"] = safeFileName;
+        metadata["contentDispositionPolicy"] = "attachment-filename-sanitized-from-indexed-artifact-name";
+        SetIfNotEmpty(metadata, "downloadSelector", relativePath);
+        SetIfNotEmpty(metadata, "downloadSafeLink", safeLink);
+        SetIfNotEmpty(metadata, "safeRelativeSelector", relativePath);
+        SetIfNotEmpty(metadata, "reportRelativeHref", safeLink);
+        metadata["reportRelativeDownloadName"] = safeFileName;
+        metadata["downloadAvailable"] = "true";
+        metadata["downloadResolutionState"] = "available";
+        metadata["downloadReadiness"] = "host-file-present";
+        metadata["downloadRejectionCode"] = "none";
+        metadata["downloadSelectorKind"] = "relativePath";
+        metadata["selectorMetadataVersion"] = "artifact-selector-v2";
+        metadata["selectorAuthority"] = "host-artifact-index";
+        metadata["selectorArtifactKind"] = artifact.Kind.ToString();
+        SetIfNotEmpty(metadata, "selectorCollectionName", artifact.CollectionName);
+        metadata["selectorSafety"] = "normalized-relative-indexed";
+        metadata["streamAuthority"] = "host-artifact-index";
+        metadata["selectorEncoding"] = "path-segment-url-encoded-safeLink";
+        metadata["selectorFields"] = "relativePath,safeLink,importPath,downloadSelector,downloadSafeLink";
+        metadata["downloadSecurityPolicy"] = "server-indexed-relative-selector";
+        metadata["downloadRejectionPolicy"] = "reject-empty-absolute-traversal-unindexed-missing";
+        metadata["downloadIndexPolicy"] = "artifact-index-relative-selectors-only";
         AddIfMissing(metadata, "downloadHintZh", "仅允许使用 Host artifact-index.json 中的相对 downloadSelector 下载；拒绝绝对路径、路径穿越、未索引或已缺失文件。");
         AddIfMissing(metadata, "zhHint", "这是 Host 产物索引元数据，用于安全下载和溯源，不作为样本行为判定。");
-        AddIfMissing(metadata, "isDownloadable", "true");
+        metadata["isDownloadable"] = "true";
+        SetIfNotEmpty(metadata, "importPath", importPath);
         if (artifact.SizeBytes > 0)
         {
             AddIfMissing(metadata, "sizeDisplay", FormatByteCount(artifact.SizeBytes));
@@ -2095,6 +2114,30 @@ public sealed class HostArtifactIndexBuilder
             ArtifactKind.Log => "日志",
             ArtifactKind.Bundle => "归档包",
             _ => "产物"
+        };
+    }
+
+    private static string SensitiveArtifactReason(ArtifactKind kind)
+    {
+        return kind switch
+        {
+            ArtifactKind.DroppedFile => "dropped-file-content",
+            ArtifactKind.Screenshot => "desktop-screenshot-content",
+            ArtifactKind.MemoryDump => "process-memory-content",
+            ArtifactKind.PacketCapture => "network-packet-content",
+            _ => "not-sensitive-by-artifact-kind"
+        };
+    }
+
+    private static string SensitiveArtifactReasonZh(ArtifactKind kind)
+    {
+        return kind switch
+        {
+            ArtifactKind.DroppedFile => "掉落文件可能包含样本释放的载荷或用户数据",
+            ArtifactKind.Screenshot => "截图可能包含桌面敏感内容",
+            ArtifactKind.MemoryDump => "内存转储可能包含凭据、文档片段或进程内存",
+            ArtifactKind.PacketCapture => "抓包可能包含网络流量内容和端点信息",
+            _ => "该 artifact kind 默认不属于高敏证据"
         };
     }
 
@@ -2301,6 +2344,14 @@ public sealed class HostArtifactIndexBuilder
         if (!metadata.ContainsKey(key) || string.IsNullOrWhiteSpace(metadata[key]))
         {
             AddIfNotEmpty(metadata, key, value);
+        }
+    }
+
+    private static void SetIfNotEmpty(Dictionary<string, string> metadata, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            metadata[key] = value;
         }
     }
 

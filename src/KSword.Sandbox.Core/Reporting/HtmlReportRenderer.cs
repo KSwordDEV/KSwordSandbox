@@ -500,6 +500,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     {
         var behaviorCountedFalse = report.Events.Count(IsBehaviorCountedFalseEvent);
         var nonBehavior = report.Events.Count(IsNonBehaviorEvent);
+        var notSampleBehavior = report.Events.Count(IsNotSampleBehaviorMarkerEvent);
         var collectorSelfNoise = report.Events.Count(IsCollectorSelfNoiseEvent);
         var vtQuiet = report.Events.Count(IsVirusTotalQuietStateEvent);
         var r0Health = report.Events.Count(IsR0CollectionHealthEvent);
@@ -513,6 +514,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 $"excludedFromBehaviorStory={excludedUnion}",
                 $"behaviorCountedFalse={behaviorCountedFalse}",
                 $"nonbehavior={nonBehavior}",
+                $"notSampleBehavior={notSampleBehavior}",
                 $"collectorSelfNoise={collectorSelfNoise}",
                 $"vtQuietStates={vtQuiet}",
                 $"r0HealthRows={r0Health}",
@@ -521,12 +523,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
         html.AppendLine("<h3>Collection/self-noise policy</h3>");
         html.AppendLine("<div class=\"compact-evidence-summary copyable\" data-copy=\"" + A(copy) + "\"><strong>Collection/self-noise policy.</strong><br>");
-        html.AppendLine("Behavior story counts exclude rows marked <code>behaviorCounted=false</code>, <code>nonbehavior</code>, collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.");
+        html.AppendLine("Behavior story counts exclude rows marked <code>behaviorCounted=false</code>, <code>nonbehavior</code>, <code>notSampleBehavior</code>, collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.");
         html.AppendLine("<div class=\"story-metrics\">");
         html.AppendLine($"<span>sample behavior {E(sampleBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>excluded union {E(excludedUnion.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>behaviorCounted=false {E(behaviorCountedFalse.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>nonbehavior {E(nonBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>notSampleBehavior {E(notSampleBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>collectorSelfNoise {E(collectorSelfNoise.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>VT quiet {E(vtQuiet.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>R0 health {E(r0Health.ToString(CultureInfo.InvariantCulture))}</span>");
@@ -1242,6 +1245,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Artifact IOCs", artifactIocs.Count.ToString(), "risk-info");
         html.AppendLine("</div>");
         AppendGraphNoiseBoundaryCard(html, report);
+        AppendBehaviorStoryRouting(html, report);
 
         AppendEvidenceNarrativeSpine(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts);
         AppendEvidenceSummaryCards(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
@@ -1308,6 +1312,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         var sampleBehavior = report.Events.Count(IsSampleBehaviorEvent);
         var behaviorCountedFalse = report.Events.Count(IsBehaviorCountedFalseEvent);
         var nonBehavior = report.Events.Count(IsNonBehaviorEvent);
+        var notSampleBehavior = report.Events.Count(IsNotSampleBehaviorMarkerEvent);
         var collectorSelfNoise = report.Events.Count(IsCollectorSelfNoiseEvent);
         var healthRows = report.Events.Count(IsCollectionHealthEvent);
         var vtQuiet = report.Events.Count(IsVirusTotalQuietStateEvent);
@@ -1325,6 +1330,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 $"excludedRows={excluded}",
                 $"behaviorCountedFalse={behaviorCountedFalse}",
                 $"nonBehavior={nonBehavior}",
+                $"notSampleBehavior={notSampleBehavior}",
                 $"collectorSelfNoise={collectorSelfNoise}",
                 $"collectionHealthRows={healthRows}",
                 $"vtQuietRows={vtQuiet}",
@@ -1335,7 +1341,134 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine($"<div class=\"compact-evidence-summary copyable\" data-copy=\"{A(copy)}\"><strong>Graph self-noise boundary / 图谱自噪声边界</strong><br>");
         html.AppendLine($"Sample behavior rows / 样本行为行: <b>{E(sampleBehavior.ToString(CultureInfo.InvariantCulture))}</b>; excluded collection/reputation rows / 已分离采集与信誉行: <b>{E(excluded.ToString(CultureInfo.InvariantCulture))}</b>.");
         html.AppendLine("<br><span class=\"muted\">Hint / 提示: these rows remain copyable in R0/VT/Raw sections and report.json; graph cards do not promote them into sample behavior.</span>");
-        html.AppendLine($"<div class=\"story-metrics\"><span>behaviorCounted=false {E(behaviorCountedFalse.ToString(CultureInfo.InvariantCulture))}</span><span>nonbehavior {E(nonBehavior.ToString(CultureInfo.InvariantCulture))}</span><span>collector {E(collectorSelfNoise.ToString(CultureInfo.InvariantCulture))}</span><span>health {E(healthRows.ToString(CultureInfo.InvariantCulture))}</span><span>VT quiet {E(vtQuiet.ToString(CultureInfo.InvariantCulture))}</span></div>{CopyButton("Copy graph boundary", copy)}</div>");
+        html.AppendLine($"<div class=\"story-metrics\"><span>behaviorCounted=false {E(behaviorCountedFalse.ToString(CultureInfo.InvariantCulture))}</span><span>nonbehavior {E(nonBehavior.ToString(CultureInfo.InvariantCulture))}</span><span>notSampleBehavior {E(notSampleBehavior.ToString(CultureInfo.InvariantCulture))}</span><span>collector {E(collectorSelfNoise.ToString(CultureInfo.InvariantCulture))}</span><span>health {E(healthRows.ToString(CultureInfo.InvariantCulture))}</span><span>VT quiet {E(vtQuiet.ToString(CultureInfo.InvariantCulture))}</span></div>{CopyButton("Copy graph boundary", copy)}</div>");
+    }
+
+    /// <summary>
+    /// Appends a copyable route map that makes the behavior/nonbehavior split
+    /// visible before dense graph cards. Inputs are all report events; processing
+    /// counts sample behavior, excluded evidence, and top exclusion reasons.
+    /// </summary>
+    private static void AppendBehaviorStoryRouting(StringBuilder html, AnalysisReport report)
+    {
+        if (report.Events.Count == 0)
+        {
+            return;
+        }
+
+        var sampleEvents = report.Events.Where(IsSampleBehaviorEvent).OrderBy(evt => evt.Timestamp).ToList();
+        var excludedEvents = report.Events.Where(IsExcludedFromBehaviorStoryEvent).OrderBy(evt => evt.Timestamp).ToList();
+        var reasonCounts = BuildBehaviorExclusionReasonCounts(report.Events);
+        var sampleFamilies = sampleEvents
+            .Select(EventFamilyLabel)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+        var excludedFamilies = excludedEvents
+            .Select(EventFamilyLabel)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+        var reasonSummary = FormatReasonCounts(reasonCounts.Take(6).ToList());
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "Behavior story routing",
+                $"totalEvents={report.Events.Count}",
+                $"sampleBehaviorRows={sampleEvents.Count}",
+                $"excludedRows={excludedEvents.Count}",
+                $"sampleFamilies={string.Join(",", sampleFamilies)}",
+                $"excludedFamilies={string.Join(",", excludedFamilies)}",
+                "excludedReasonHits:",
+                .. reasonCounts.Select(reason => $"{reason.Label}={reason.Count}"),
+                "sampleExamples:",
+                .. sampleEvents.Take(5).Select(EventOneLine),
+                "excludedExamples:",
+                .. excludedEvents.Take(5).Select(EventOneLine)
+            ]);
+
+        html.AppendLine("<h3>Behavior story routing</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Behavior story routing.</strong> The graph, process tree, network cards, file table, and registry table use only sample-behavior rows. Collection metadata, <code>nonbehavior</code>, <code>notSampleBehavior</code>, collector self-noise, VT quiet states, and R0 health remain visible in their own lanes and raw events.</div>");
+        html.AppendLine($"<div class=\"overview-strip behavior-routing-overview copyable\" data-copy=\"{A(copy)}\">");
+        AppendOverviewItem(
+            html,
+            "Sample behavior route",
+            sampleEvents.Count.ToString(CultureInfo.InvariantCulture),
+            sampleFamilies.Count == 0 ? "No runtime behavior rows were promoted into graph/process/network sections." : $"Families promoted: {string.Join(", ", sampleFamilies)}.",
+            sampleEvents.Count > 0 ? "risk-info" : "risk-low");
+        AppendOverviewItem(
+            html,
+            "Excluded evidence route",
+            excludedEvents.Count.ToString(CultureInfo.InvariantCulture),
+            excludedFamilies.Count == 0 ? "No explicit nonbehavior/self-noise rows were observed." : $"Families kept out of sample behavior: {string.Join(", ", excludedFamilies)}.",
+            excludedEvents.Count > 0 ? "risk-info" : "risk-low");
+        AppendOverviewItem(
+            html,
+            "Top excluded reasons",
+            reasonCounts.Count.ToString(CultureInfo.InvariantCulture),
+            string.IsNullOrWhiteSpace(reasonSummary) ? "No exclusion markers were observed." : reasonSummary,
+            reasonCounts.Count > 0 ? "risk-info" : "risk-low");
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy behavior routing", copy)}</div>");
+        html.AppendLine("</div>");
+        html.AppendLine($"<details class=\"relationship-details\"><summary>Behavior routing evidence examples</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+    }
+
+    private static IReadOnlyList<(string Label, int Count)> BuildBehaviorExclusionReasonCounts(IEnumerable<SandboxEvent> events)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var evt in events)
+        {
+            if (IsBehaviorCountedFalseEvent(evt))
+            {
+                IncrementReasonCount(counts, "behaviorCounted=false");
+            }
+
+            if (IsNonBehaviorEvent(evt))
+            {
+                IncrementReasonCount(counts, "nonbehavior");
+            }
+
+            if (IsNotSampleBehaviorMarkerEvent(evt))
+            {
+                IncrementReasonCount(counts, "notSampleBehavior");
+            }
+
+            if (IsCollectorSelfNoiseEvent(evt))
+            {
+                IncrementReasonCount(counts, "collectorSelfNoise");
+            }
+
+            if (IsCollectionHealthEvent(evt))
+            {
+                IncrementReasonCount(counts, "collectionHealth");
+            }
+
+            if (IsVirusTotalQuietStateEvent(evt))
+            {
+                IncrementReasonCount(counts, "vtQuiet");
+            }
+        }
+
+        return counts
+            .OrderByDescending(pair => pair.Value)
+            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(pair => (pair.Key, pair.Value))
+            .ToList();
+    }
+
+    private static void IncrementReasonCount(IDictionary<string, int> counts, string reason)
+    {
+        counts.TryGetValue(reason, out var current);
+        counts[reason] = current + 1;
+    }
+
+    private static string FormatReasonCounts(IReadOnlyCollection<(string Label, int Count)> reasonCounts)
+    {
+        return reasonCounts.Count == 0
+            ? string.Empty
+            : string.Join("; ", reasonCounts.Select(reason => $"{reason.Label}: {reason.Count}"));
     }
 
     /// <summary>
@@ -1694,8 +1827,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy story lane", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand bounded story evidence ({E(shownEvidenceCount.ToString(CultureInfo.InvariantCulture))}/{E(observedEvidenceCount.ToString(CultureInfo.InvariantCulture))} observed rows)</summary><ol class=\"story-evidence-list\">");
+            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand bounded story evidence ({E(shownEvidenceCount.ToString(CultureInfo.InvariantCulture))}/{E(observedEvidenceCount.ToString(CultureInfo.InvariantCulture))} observed rows)</summary>");
             AppendEvidenceExpansionSummary(html, "Story evidence expansion summary", shownEvidenceCount, observedEvidenceCount, "Raw normalized events/report.json and Artifact links", card.EvidenceLines);
+            html.AppendLine("<ol class=\"story-evidence-list\">");
             foreach (var line in card.EvidenceLines.Take(12))
             {
                 html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(line)}</code></li>");
@@ -1929,6 +2063,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     {
         var hiddenCount = Math.Max(0, sourceCount - renderedCount);
         var firstEvidence = evidenceLines.FirstOrDefault(line => !string.IsNullOrWhiteSpace(line)) ?? "-";
+        var previewLines = evidenceLines
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Take(3)
+            .ToList();
         var copy = string.Join(
             Environment.NewLine,
             [
@@ -1937,7 +2075,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 $"sourceEvidence={sourceCount}",
                 $"hiddenEvidence={hiddenCount}",
                 $"completeSource={completeSource}",
-                $"firstEvidence={firstEvidence}"
+                $"firstEvidence={firstEvidence}",
+                "previewEvidence:",
+                .. previewLines
             ]);
         html.AppendLine($"<div class=\"evidence-expansion-summary copyable\" data-copy=\"{A(copy)}\">");
         html.AppendLine($"<strong>{E(title)}</strong>");
@@ -1947,6 +2087,17 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine($"<span class=\"chip chip-low\">complete source: {E(completeSource)}</span>");
         html.AppendLine("</div>");
         html.AppendLine($"<div class=\"copy-hint\">First evidence: <code>{E(firstEvidence)}</code></div>");
+        if (previewLines.Count > 0)
+        {
+            html.AppendLine("<ol class=\"compact-list evidence-preview-list\">");
+            foreach (var line in previewLines)
+            {
+                html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(line)}</code></li>");
+            }
+
+            html.AppendLine("</ol>");
+        }
+
         html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy evidence expansion summary", copy)}</div>");
         html.AppendLine("</div>");
     }
@@ -2333,6 +2484,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("<section id=\"artifacts\" class=\"card\"><h2>Artifact links</h2>");
         html.AppendLine("<div class=\"section-note\"><strong>Artifact evidence cards.</strong> Collection status, safe download selectors, duplicate grouping, and rejection diagnostics are summarized before the dense artifact table. Safe report-relative links can open or download; absolute host/guest paths remain copy-only evidence.</div>");
         AppendArtifactCollectionStatusCards(html, report, artifacts);
+        AppendArtifactEvidenceMatrixNarrative(html, report, artifacts);
         AppendArtifactIndexStory(html, artifacts);
         if (artifacts.Count == 0)
         {
@@ -2359,6 +2511,80 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("</tbody></table>");
         html.AppendLine("<div class=\"copy-hint\">Safe links are relative to the report artifact root; unsafe or guest-local paths are shown as copyable text only.</div>");
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends a compact artifact-evidence matrix narrative before the dense
+    /// artifact table. Inputs are normalized events and indexed artifacts;
+    /// processing merges artifactEvidenceMatrix events with artifact-index
+    /// fallback counts; return is none.
+    /// </summary>
+    private static void AppendArtifactEvidenceMatrixNarrative(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var rows = BuildArtifactEvidenceMatrixRows(report.Events, artifacts);
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        var readyRows = rows.Count(row => IsReadyArtifactMatrixState(row.State));
+        var totalArtifacts = rows.Sum(row => Math.Max(0, row.Count));
+        var totalBytes = rows.Sum(row => Math.Max(0, row.Bytes));
+        var matrixLines = rows
+            .Select(row => ArtifactEvidenceMatrixEvidenceLine("artifactEvidenceMatrix narrative", row))
+            .ToList();
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "Artifact evidence matrix narrative",
+                $"lanes={rows.Count}",
+                $"readyLanes={readyRows}",
+                $"artifactReferences={totalArtifacts}",
+                $"totalBytes={totalBytes}",
+                "lanes:",
+                .. matrixLines
+            ]);
+
+        html.AppendLine("<h3>Artifact evidence matrix narrative</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Artifact evidence matrix narrative.</strong> Matrix lanes summarize dropped files, screenshots, memory dumps, and packet captures before the artifact table. Counts come from normalized <code>artifactEvidenceMatrix</code> rows when present and fall back to the artifact index, so missing lanes stay explicit without expanding raw rows.</div>");
+        html.AppendLine($"<div class=\"overview-strip artifact-matrix-narrative copyable\" data-copy=\"{A(copy)}\">");
+        AppendOverviewItem(
+            html,
+            "Matrix lanes",
+            rows.Count.ToString(CultureInfo.InvariantCulture),
+            $"Ready lanes: {readyRows}; bounded lane cards summarize collection state before dense artifacts.",
+            readyRows > 0 ? "risk-info" : "risk-low");
+        AppendOverviewItem(
+            html,
+            "Artifact references",
+            totalArtifacts.ToString(CultureInfo.InvariantCulture),
+            $"Total bytes represented by matrix lanes: {FormatBytes(totalBytes)}.",
+            totalArtifacts > 0 ? "risk-info" : "risk-low");
+        AppendOverviewItem(
+            html,
+            "Selector coverage",
+            rows.Count(row => !string.IsNullOrWhiteSpace(row.Selectors)).ToString(CultureInfo.InvariantCulture),
+            "Rows with selectors can be copied directly; safe Open/Download actions remain in the artifact table.",
+            rows.Any(row => !string.IsNullOrWhiteSpace(row.Selectors)) ? "risk-info" : "risk-low");
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy artifact matrix narrative", copy)}</div>");
+        html.AppendLine("</div>");
+        html.AppendLine("<details class=\"evidence-expansion-card\"><summary>Artifact evidence matrix narrative rows</summary>");
+        AppendEvidenceExpansionSummary(html, "Artifact matrix expansion summary", rows.Count, rows.Count, "Artifact links and Raw normalized events/report.json", matrixLines);
+        html.AppendLine("<ol class=\"compact-list\">");
+        foreach (var line in matrixLines.Take(EvidenceStoryInlineLimit))
+        {
+            html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(line)}</code></li>");
+        }
+
+        html.AppendLine("</ol></details>");
+    }
+
+    private static bool IsReadyArtifactMatrixState(string state)
+    {
+        return TextEqualsAny(state, "ready", "captured", "observed", "available", "complete");
     }
 
     /// <summary>
@@ -3182,6 +3408,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         var artifactReferenceCount = orderedEvents.Count(EventHasArtifactReference);
         var networkCount = orderedEvents.Count(IsNetworkEvent);
         var r0Count = orderedEvents.Count(IsR0Event);
+        var sampleBehaviorCount = orderedEvents.Count(IsSampleBehaviorEvent);
+        var excludedBehaviorCount = orderedEvents.Count(IsExcludedFromBehaviorStoryEvent);
+        var excludedReasonSummary = FormatReasonCounts(BuildBehaviorExclusionReasonCounts(orderedEvents).Take(4).ToList());
         var hiddenRange = hiddenCount == 0
             ? "none"
             : $"{inlineEventCount + 1}-{orderedEvents.Count}";
@@ -3197,6 +3426,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 $"artifactReferencedEvents={artifactReferenceCount}",
                 $"networkEvents={networkCount}",
                 $"r0Events={r0Count}",
+                $"sampleBehaviorRows={sampleBehaviorCount}",
+                $"excludedBehaviorStoryRows={excludedBehaviorCount}",
+                $"excludedReasonSummary={excludedReasonSummary}",
                 "policy=HTML keeps bounded representative rows; report.json and source artifacts remain complete evidence."
             ]);
 
@@ -3227,6 +3459,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             $"{artifactReferenceCount} / {networkCount} / {r0Count}",
             "Counts expose evidence anchors before opening raw pages: artifact references, network rows, and R0/driver rows.",
             artifactReferenceCount + networkCount + r0Count > 0 ? "risk-info" : "risk-low");
+        AppendOverviewItem(
+            html,
+            "Behavior routing",
+            $"{sampleBehaviorCount}/{excludedBehaviorCount}",
+            string.IsNullOrWhiteSpace(excludedReasonSummary) ? "All raw rows currently route as sample behavior or neutral evidence." : $"Sample/excluded raw rows; top excluded markers: {excludedReasonSummary}.",
+            excludedBehaviorCount > 0 ? "risk-info" : "risk-low");
         html.AppendLine("</div>");
         html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy raw slimming story", copy)}</div>");
     }
@@ -5824,6 +6062,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     {
         return IsBehaviorCountedFalseEvent(evt) ||
             IsNonBehaviorEvent(evt) ||
+            IsNotSampleBehaviorMarkerEvent(evt) ||
             IsSampleBehaviorCandidateFalseEvent(evt) ||
             IsCollectorSelfNoiseEvent(evt) ||
             IsVirusTotalQuietStateEvent(evt) ||
@@ -5838,6 +6077,56 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     private static bool IsSampleBehaviorCandidateFalseEvent(SandboxEvent evt)
     {
         return EventDataBoolFalse(evt, "sampleBehaviorCandidate", "sample_behavior_candidate");
+    }
+
+    private static bool IsNotSampleBehaviorMarkerEvent(SandboxEvent evt)
+    {
+        if (EventDataBoolTrue(
+                evt,
+                "notSampleBehavior",
+                "not_sample_behavior",
+                "notBehaviorCandidate",
+                "not_behavior_candidate",
+                "hostImportSelfNoise",
+                "operationalEvent",
+                "reportOnly",
+                "report_only"))
+        {
+            return true;
+        }
+
+        if (IsSampleBehaviorCandidateFalseEvent(evt) ||
+            EventDataBoolFalse(evt, "sampleBehavior", "sample_behavior", "behaviorEvent", "behavior_event"))
+        {
+            return true;
+        }
+
+        var scope = FirstEventDataValue(
+            evt,
+            "behaviorScope",
+            "sampleBehaviorScope",
+            "eventScope",
+            "scope",
+            "classification",
+            "eventRole");
+        return TextEqualsAny(
+            scope ?? string.Empty,
+            "nonbehavior",
+            "non-behavior",
+            "not-sample",
+            "not_sample",
+            "collection",
+            "collector",
+            "self-noise",
+            "self_noise",
+            "metadata",
+            "diagnostic",
+            "health",
+            "evidence-health",
+            "report-only",
+            "report_only",
+            "artifact-index",
+            "reputation");
     }
 
     private static bool IsNonBehaviorEvent(SandboxEvent evt)
@@ -6990,12 +7279,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Behavior detections", "行为命中"),
         ("Collection/self-noise policy", "采集/自噪声策略"),
         ("Collection/self-noise policy.", "采集/自噪声策略。"),
+        ("Behavior story counts exclude rows marked <code>behaviorCounted=false</code>, <code>nonbehavior</code>, <code>notSampleBehavior</code>, collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.", "行为叙事计数会排除标记为 <code>behaviorCounted=false</code>、<code>nonbehavior</code>、<code>notSampleBehavior</code>、采集器自噪声、VT 安静状态以及 R0 健康/就绪诊断的行。这些行仍会在各自专用章节和原始规范化事件/report.json 中可见；原始分页和折叠证据保持不变。"),
         ("Behavior story counts exclude rows marked <code>behaviorCounted=false</code>, <code>nonbehavior</code>, collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.", "行为叙事计数会排除标记为 <code>behaviorCounted=false</code>、<code>nonbehavior</code>、采集器自噪声、VT 安静状态以及 R0 健康/就绪诊断的行。这些行仍会在各自专用章节和原始规范化事件/report.json 中可见；原始分页和折叠证据保持不变。"),
         ("Copy collection policy", "复制采集策略"),
         ("sample behavior", "样本行为"),
         ("excluded union", "排除并集"),
         ("behaviorCounted=false", "behaviorCounted=false"),
         ("nonbehavior", "nonbehavior"),
+        ("notSampleBehavior", "notSampleBehavior"),
         ("collectorSelfNoise", "collectorSelfNoise"),
         ("VT quiet", "VT 安静"),
         ("R0 health", "R0 健康"),
@@ -7184,6 +7475,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Stable relationship lane copy map", "稳定关系通道复制图"),
         ("Copy stable relationship lanes", "复制稳定关系通道"),
         ("representativePaths:", "代表路径："),
+        ("Behavior story routing", "行为故事路由"),
+        ("Behavior story routing.", "行为故事路由。"),
+        ("Sample behavior route", "样本行为路由"),
+        ("Excluded evidence route", "已排除证据路由"),
+        ("Top excluded reasons", "主要排除原因"),
+        ("Copy behavior routing", "复制行为路由"),
+        ("Behavior routing evidence examples", "行为路由证据示例"),
         ("Evidence lane health", "证据通道健康状态"),
         ("Artifact lane health:", "证据文件通道健康："),
         ("Process relation path", "进程关系路径"),
@@ -7192,6 +7490,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Artifact evidence cards.", "证据文件证据卡。"),
         ("Evidence lane health for dropped files, screenshots, memory dumps, packet captures, and driver events is summarized before the dense artifact table. Collection status, safe download selectors, duplicate grouping, and rejection diagnostics stay visible; safe report-relative links can open or download, while absolute host/guest paths remain copy-only evidence.", "落地文件、截图、内存转储、抓包和驱动事件的证据通道健康状态会先于密集证据文件表汇总。采集状态、安全下载选择器、重复分组和拒绝诊断保持可见；安全的报告相对链接可以打开或下载，主机/guest 绝对路径保持为仅复制证据。"),
         ("Artifact collection status", "证据采集状态"),
+        ("Artifact evidence matrix narrative", "证据文件矩阵叙事"),
+        ("Artifact evidence matrix narrative.", "证据文件矩阵叙事。"),
+        ("Matrix lanes", "矩阵通道"),
+        ("Artifact references", "证据文件引用"),
+        ("Selector coverage", "选择器覆盖"),
+        ("Copy artifact matrix narrative", "复制证据文件矩阵叙事"),
+        ("Artifact evidence matrix narrative rows", "证据文件矩阵叙事行"),
+        ("Artifact matrix expansion summary", "证据文件矩阵展开摘要"),
         ("Artifact index evidence", "证据文件索引证据"),
         ("Host artifact index.", "主机证据文件索引。"),
         ("Download buttons use safe report-relative selectors only; duplicate grouping and rejection diagnostics explain why guest manifest references were accepted, deduplicated, or rejected.", "下载按钮只使用安全的报告相对选择器；重复分组和拒绝诊断说明 guest manifest 引用为何被接受、去重或拒绝。"),

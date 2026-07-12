@@ -1199,6 +1199,141 @@ std::string ActivityKind(const std::string& family, const std::string& operation
     return family + "." + (operationName.empty() ? "unknown" : operationName);
 }
 
+// Input: Public driver event type.
+// Processing: Returns the fixed v1 payload schema name advertised by the shared
+// kernel/user ABI. Header-only and future event types intentionally return a
+// stable "none" label so JSONL rows still carry payload-version fields.
+// Return: Payload schema name for known typed payloads, or "none".
+std::string DriverPayloadSchemaName(const ULONG eventType) {
+    switch (eventType) {
+    case KswSandboxEventTypeDriverLoad:
+        return "KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD";
+    case KswSandboxEventTypeProcess:
+        return "KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD";
+    case KswSandboxEventTypeImage:
+        return "KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD";
+    case KswSandboxEventTypeFile:
+        return "KSWORD_SANDBOX_FILE_EVENT_PAYLOAD";
+    case KswSandboxEventTypeRegistry:
+        return "KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD";
+    case KswSandboxEventTypeNetwork:
+        return "KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD";
+    default:
+        return "none";
+    }
+}
+
+// Input: Public driver event type.
+// Processing: Maps known typed producers to the exact v1 payload version value
+// that the kernel producer must stamp at payload offset 0.
+// Return: Expected payload version, or 0 for header-only/unknown rows.
+ULONG ExpectedDriverPayloadVersion(const ULONG eventType) {
+    switch (eventType) {
+    case KswSandboxEventTypeDriverLoad:
+        return KSWORD_SANDBOX_INTERFACE_VERSION;
+    case KswSandboxEventTypeProcess:
+        return KSWORD_SANDBOX_PROCESS_EVENT_VERSION;
+    case KswSandboxEventTypeImage:
+        return KSWORD_SANDBOX_IMAGE_EVENT_VERSION;
+    case KswSandboxEventTypeFile:
+        return KSWORD_SANDBOX_FILE_EVENT_VERSION;
+    case KswSandboxEventTypeRegistry:
+        return KSWORD_SANDBOX_REGISTRY_EVENT_VERSION;
+    case KswSandboxEventTypeNetwork:
+        return KSWORD_SANDBOX_NETWORK_EVENT_VERSION;
+    default:
+        return 0;
+    }
+}
+
+// Input: Public driver event type.
+// Processing: Maps known typed producers to their fixed v1 payload sizes.
+// Return: Expected payload size, or 0 for header-only/unknown rows.
+ULONG ExpectedDriverPayloadSize(const ULONG eventType) {
+    switch (eventType) {
+    case KswSandboxEventTypeDriverLoad:
+        return static_cast<ULONG>(sizeof(KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD));
+    case KswSandboxEventTypeProcess:
+        return static_cast<ULONG>(sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD));
+    case KswSandboxEventTypeImage:
+        return static_cast<ULONG>(sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD));
+    case KswSandboxEventTypeFile:
+        return static_cast<ULONG>(sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD));
+    case KswSandboxEventTypeRegistry:
+        return static_cast<ULONG>(sizeof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD));
+    case KswSandboxEventTypeNetwork:
+        return static_cast<ULONG>(sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD));
+    default:
+        return 0;
+    }
+}
+
+// Input: Driver event header, optional payload bytes, and JSON builder.
+// Processing: Emits generic payload-version aliases for every driver row before
+// family-specific payload parsing. This keeps live rows aligned with synthetic
+// stress/mock rows even when a payload is short, absent, or from a future type.
+// Return: No return value; builder is mutated when non-null.
+void AddDriverPayloadVersionEvidence(
+    const KSWORD_SANDBOX_EVENT_HEADER& header,
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    JsonDataObjectBuilder* data) {
+    if (data == nullptr) {
+        return;
+    }
+
+    const ULONG expectedPayloadVersion = ExpectedDriverPayloadVersion(header.Type);
+    const ULONG expectedPayloadSize = ExpectedDriverPayloadSize(header.Type);
+    const bool schemaKnown = expectedPayloadVersion != 0 && expectedPayloadSize != 0;
+    const bool hasVersionPrefix = payload != nullptr && payloadBytes >= sizeof(ULONG);
+    const bool hasSizePrefix = payload != nullptr && payloadBytes >= (2U * sizeof(ULONG));
+    ULONG payloadVersion = 0;
+    ULONG payloadSizePrefix = 0;
+
+    if (hasVersionPrefix) {
+        std::memcpy(&payloadVersion, payload, sizeof(payloadVersion));
+    }
+    if (hasSizePrefix) {
+        std::memcpy(&payloadSizePrefix, payload + sizeof(ULONG), sizeof(payloadSizePrefix));
+    }
+
+    const bool payloadVersionCompatible =
+        schemaKnown && hasVersionPrefix && payloadVersion == expectedPayloadVersion;
+    const bool payloadSizePrefixCompatible =
+        schemaKnown && hasSizePrefix && payloadSizePrefix == expectedPayloadSize;
+
+    std::string payloadVersionStatus;
+    if (!schemaKnown) {
+        payloadVersionStatus = payloadBytes == 0 ? "header-only-or-unknown" : "unknown-payload-schema";
+    } else if (!hasVersionPrefix || !hasSizePrefix) {
+        payloadVersionStatus = "payload-too-small-for-version-size-prefix";
+    } else if (!payloadVersionCompatible) {
+        payloadVersionStatus = "payload-version-mismatch";
+    } else if (!payloadSizePrefixCompatible) {
+        payloadVersionStatus = "payload-size-mismatch";
+    } else {
+        payloadVersionStatus = "v1-compatible";
+    }
+
+    data->AddUnsigned("payloadVersion", payloadVersion);
+    data->AddUtf8("payloadVersionHex", HexUnsignedLongLong(payloadVersion, 8));
+    data->AddUnsigned("payloadSchemaVersion", payloadVersion);
+    data->AddUnsigned("expectedPayloadVersion", expectedPayloadVersion);
+    data->AddUtf8("expectedPayloadVersionHex", HexUnsignedLongLong(expectedPayloadVersion, 8));
+    data->AddUnsigned("expectedPayloadSize", expectedPayloadSize);
+    data->AddUnsigned("payloadSizePrefix", payloadSizePrefix);
+    data->AddBool("payloadVersionPrefixPresent", hasVersionPrefix);
+    data->AddBool("payloadSizePrefixPresent", hasSizePrefix);
+    data->AddBool("payloadVersionCompatible", payloadVersionCompatible);
+    data->AddBool("payloadSizePrefixCompatible", payloadSizePrefixCompatible);
+    data->AddUtf8("payloadVersionStatus", payloadVersionStatus);
+    data->AddUtf8("payloadSchemaExpected", DriverPayloadSchemaName(header.Type));
+    data->AddUtf8(
+        "payloadVersionPolicy",
+        "driver rows always emit payloadVersion/payloadVersionHex/payloadSchemaVersion; typed parsers require fixed v1 Version and Size prefixes");
+    data->AddUtf8("producerPayloadVersionFieldSet", kTypedPayloadVersionFieldSet);
+}
+
 // Input: Driver event sequence and JSON builder.
 // Processing: Emits stable concrete-event sequence semantics before verbose ABI
 // fields so report sampling keeps the meaning beside the sequence value.
@@ -3906,7 +4041,13 @@ std::string BuildDriverEventData(
     AddConcreteEventSequenceSemantics(data, header.Sequence);
     AddDriverNoiseClassificationFields(data, attribution);
     AddTypedReportCompatibilityData(header, payload, payloadBytes, &data);
+    AddDriverPayloadVersionEvidence(header, payload, payloadBytes, &data);
     data.AddUtf8("collectorNoisePolicy", attribution.collectorNoisePolicy);
+    data.AddBool("stress", false);
+    data.AddSigned("stressOrdinal", -1);
+    data.AddUnsigned("stressCount", 0);
+    data.AddUtf8("stressCorpusRole", "live-driver-event");
+    data.AddUtf8("StressJsonlNoiseEvidence", kStressJsonlNoiseEvidence);
     data.AddBool("noise", attribution.selfNoise);
     data.AddBool("collectorNoise", attribution.collectorNoise);
     data.AddBool("collectorSelfNoise", attribution.collectorNoise);

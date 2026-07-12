@@ -94,6 +94,8 @@ public sealed class NetworkArtifactEventImporter
                     ["parserBounded"] = "true",
                     ["packetCaptureImportProvenance"] = "pcap-artifact",
                     ["sidecarImportProvenance"] = "sidecar-artifact",
+                    ["duplicatePolicy"] = "normalized-events-canonical; raw-pcap-rows-compatibility-nonbehavior",
+                    ["protocolHealthSummaryScope"] = "behavior-counted-canonical-events",
                     ["manifestPresent"] = (manifest is not null).ToString().ToLowerInvariant(),
                     ["artifactCount"] = candidates.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["pcapArtifactCount"] = pcapArtifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -222,17 +224,38 @@ public sealed class NetworkArtifactEventImporter
             ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, string>(source.Metadata, StringComparer.OrdinalIgnoreCase);
         var parentRelativePath = ArtifactDescriptorFactory.SafeRelativePath(importRoot, parentPcapPath);
-        metadata["pcapSourceArtifactPath"] = parentPcapPath;
-        metadata["pcapSourceArtifactName"] = Path.GetFileName(parentPcapPath);
-        metadata["pcapSourceArtifactRelativePath"] = parentRelativePath;
-        metadata["pcapArtifactRelativePath"] = parentRelativePath;
-        metadata["pcapSourceArtifactSelector"] = parentRelativePath;
-        metadata["pcapDownloadSelector"] = parentRelativePath;
-        metadata["sourcePcapArtifactPath"] = parentPcapPath;
-        metadata["sourcePcapArtifactName"] = Path.GetFileName(parentPcapPath);
-        metadata["sourcePcapArtifactRelativePath"] = parentRelativePath;
-        metadata["sourcePcapArtifactSelector"] = parentRelativePath;
-        metadata["sourcePcapDownloadSelector"] = parentRelativePath;
+        var existingParent = FirstNonEmpty(
+            MetadataValue(metadata, "pcapSourceArtifactRelativePath"),
+            MetadataValue(metadata, "sourcePcapArtifactRelativePath"),
+            MetadataValue(metadata, "pcapSourceArtifactPath"),
+            MetadataValue(metadata, "sourcePcapArtifactPath"));
+        if (!string.IsNullOrWhiteSpace(existingParent) &&
+            !string.Equals(existingParent, parentRelativePath, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(existingParent, parentPcapPath, StringComparison.OrdinalIgnoreCase))
+        {
+            metadata["sidecarParentPcapLinked"] = "true";
+            metadata["sidecarPcapLinkConflict"] = "manifest-vs-adjacent";
+            metadata["sidecarPcapLinkConflictPolicy"] = "keep-existing-parent-metadata";
+            metadata["sidecarPcapLinkInferredPath"] = parentPcapPath;
+            metadata["sidecarPcapLinkInferredRelativePath"] = parentRelativePath;
+            return source with { Metadata = metadata };
+        }
+
+        AddIfMissing(metadata, "pcapSourceArtifactPath", parentPcapPath);
+        AddIfMissing(metadata, "pcapSourceArtifactName", Path.GetFileName(parentPcapPath));
+        AddIfMissing(metadata, "pcapSourceArtifactRelativePath", parentRelativePath);
+        AddIfMissing(metadata, "pcapArtifactRelativePath", parentRelativePath);
+        AddIfMissing(metadata, "pcapSourceArtifactSelector", parentRelativePath);
+        AddIfMissing(metadata, "pcapDownloadSelector", parentRelativePath);
+        AddIfMissing(metadata, "sourcePcapArtifactPath", parentPcapPath);
+        AddIfMissing(metadata, "sourcePcapArtifactName", Path.GetFileName(parentPcapPath));
+        AddIfMissing(metadata, "sourcePcapArtifactRelativePath", parentRelativePath);
+        AddIfMissing(metadata, "sourcePcapArtifactSelector", parentRelativePath);
+        AddIfMissing(metadata, "sourcePcapDownloadSelector", parentRelativePath);
+        metadata["sidecarParentPcapLinked"] = "true";
+        metadata["sidecarPcapLinkSource"] = string.IsNullOrWhiteSpace(existingParent)
+            ? "adjacent-sibling-pcap"
+            : "existing-parent-metadata";
         return source with { Metadata = metadata };
     }
 
@@ -314,6 +337,21 @@ public sealed class NetworkArtifactEventImporter
     {
         return metadata.TryGetValue(key, out var value) &&
             string.Equals(value, expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? MetadataValue(IReadOnlyDictionary<string, string> metadata, string key)
+    {
+        return metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
+    }
+
+    private static void AddIfMissing(Dictionary<string, string> metadata, string key, string value)
+    {
+        if (!metadata.ContainsKey(key) && !string.IsNullOrWhiteSpace(value))
+        {
+            metadata[key] = value;
+        }
     }
 
     private static string FirstNonEmpty(params string?[] values)

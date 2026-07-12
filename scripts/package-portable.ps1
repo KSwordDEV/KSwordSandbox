@@ -585,6 +585,43 @@ function Add-PackageDiagnostic {
     })
 }
 
+function Get-RuntimePublishRootPlacementDiagnostics {
+    $provided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
+    $resolvedPath = if ($provided) { Get-FullPathNoRequire -Path $RuntimePublishRoot } else { $null }
+    $repoFull = (Get-FullPathNoRequire -Path $RepositoryRoot).TrimEnd('\', '/')
+    $repoPrefix = $repoFull + [System.IO.Path]::DirectorySeparatorChar
+    $exists = ($provided -and (Test-Path -LiteralPath $resolvedPath -PathType Container))
+    $outsideRepository = if ($provided) {
+        (($resolvedPath.TrimEnd('\', '/') -ine $repoFull) -and (-not $resolvedPath.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)))
+    }
+    else {
+        $false
+    }
+
+    return [ordered]@{
+        schema = 'ksword.release.runtime-publish-root-placement.v28'
+        provided = $provided
+        requestedPath = if ($provided) { $RuntimePublishRoot } else { $null }
+        resolvedPath = $resolvedPath
+        exists = $exists
+        outsideRepository = $outsideRepository
+        repositoryRoot = $RepositoryRoot
+        repositoryBinaryFallbackAllowed = $false
+        gateMode = if (-not $provided) {
+            'layout-dry-run-no-runtime-publish-root'
+        }
+        elseif (-not $outsideRepository) {
+            'blocked-runtime-publish-root-inside-repository'
+        }
+        elseif (-not $exists) {
+            'blocked-runtime-publish-root-missing'
+        }
+        else {
+            'external-runtime-publish-root'
+        }
+    }
+}
+
 function Get-RuntimePublishEntryDiagnostics {
     param([Parameter(Mandatory)][object]$Manifest)
 
@@ -607,7 +644,9 @@ function Get-RuntimePublishEntryDiagnostics {
         $source = [string](Get-ObjectPropertyValue -InputObject $entry -Name 'source' -DefaultValue '')
         $target = Get-EntryTargetRelativePath -Entry $entry -Source $source
         $required = [bool](Get-ObjectPropertyValue -InputObject $entry -Name 'required' -DefaultValue $true)
+        $handoffRequired = [bool](Get-ObjectPropertyValue -InputObject $entry -Name 'handoffRequired' -DefaultValue $true)
         $note = [string](Get-ObjectPropertyValue -InputObject $entry -Name 'note' -DefaultValue '')
+        $expectedLeaves = @($expectedRuntimePayloadLeaves[$source] | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
         $sourcePath = $null
         $exists = $false
         $fileCount = 0
@@ -625,7 +664,7 @@ function Get-RuntimePublishEntryDiagnostics {
                         $fullName = [System.IO.Path]::GetFullPath($_.FullName)
                         $fullName.Substring($sourcePath.TrimEnd('\', '/').Length + 1).Replace('\', '/')
                     })
-                $missingExpectedLeaves = @($expectedRuntimePayloadLeaves[$source] | Where-Object {
+                $missingExpectedLeaves = @($expectedLeaves | Where-Object {
                         $leafAlternatives = @($_ -split '\|' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
                         $matched = $false
                         foreach ($leafAlternative in $leafAlternatives) {
@@ -648,11 +687,12 @@ function Get-RuntimePublishEntryDiagnostics {
                 source = $source
                 target = $target
                 required = $required
+                handoffRequired = $handoffRequired
                 sourcePath = $sourcePath
                 exists = $exists
                 fileCount = $fileCount
                 totalBytes = $totalBytes
-                expectedLeaves = @($expectedRuntimePayloadLeaves[$source])
+                expectedLeaves = @($expectedLeaves)
                 missingExpectedLeaves = @($missingExpectedLeaves)
                 forbiddenFilePreview = @($forbiddenFilePreview)
                 note = $note
@@ -683,34 +723,61 @@ function Get-PackageRuntimePublishSummary {
     $present = @($RuntimeEntries | Where-Object { [bool]$_.exists })
     $missing = @($RuntimeEntries | Where-Object { -not [bool]$_.exists })
     $incomplete = @($RuntimeEntries | Where-Object { [bool]$_.exists -and (@($_.missingExpectedLeaves).Count -gt 0 -or @($_.forbiddenFilePreview).Count -gt 0 -or [int]$_.fileCount -eq 0) })
+    $empty = @($RuntimeEntries | Where-Object { [bool]$_.exists -and [int]$_.fileCount -eq 0 })
     $missingRequired = @($missing | Where-Object { [bool]$_.required })
     $missingOptional = @($missing | Where-Object { -not [bool]$_.required })
+    $missingHandoffRequired = @($missing | Where-Object { [bool]$_.handoffRequired })
+    $missingExpectedLeafCount = 0
+    $forbiddenFileCount = 0
+    $totalPayloadBytes = [Int64]0
+    foreach ($entry in @($RuntimeEntries)) {
+        $missingExpectedLeafCount += @($entry.missingExpectedLeaves).Count
+        $forbiddenFileCount += @($entry.forbiddenFilePreview).Count
+        if ($null -ne $entry.PSObject.Properties['totalBytes']) {
+            $totalPayloadBytes += [Int64]$entry.totalBytes
+        }
+    }
 
     return [ordered]@{
+        schema = 'ksword.release.runtime-publish-completeness.v28'
         expectedCount = @($RuntimeEntries).Count
         presentCount = $present.Count
         missingCount = $missing.Count
         missingRequiredCount = $missingRequired.Count
         missingOptionalCount = $missingOptional.Count
+        missingHandoffRequiredCount = $missingHandoffRequired.Count
         incompleteCount = $incomplete.Count
+        emptyCount = $empty.Count
+        missingExpectedLeafCount = $missingExpectedLeafCount
+        forbiddenFileCount = $forbiddenFileCount
+        totalPayloadBytes = $totalPayloadBytes
         missingRequiredSources = @($missingRequired | ForEach-Object { $_.source })
         missingOptionalSources = @($missingOptional | ForEach-Object { $_.source })
+        missingHandoffRequiredSources = @($missingHandoffRequired | ForEach-Object { $_.source })
         incompleteSources = @($incomplete | ForEach-Object { $_.source })
+        emptySources = @($empty | ForEach-Object { $_.source })
+        presentSources = @($present | ForEach-Object { $_.source })
         missingExpectedLeaves = @($RuntimeEntries | Where-Object { @($_.missingExpectedLeaves).Count -gt 0 } | ForEach-Object { [ordered]@{ source = $_.source; missing = @($_.missingExpectedLeaves) } })
         forbiddenFilePreviews = @($RuntimeEntries | Where-Object { @($_.forbiddenFilePreview).Count -gt 0 } | ForEach-Object { [ordered]@{ source = $_.source; forbidden = @($_.forbiddenFilePreview) } })
         completeRuntimePackageReady = if ($PackageKind -ne 'runtime') { $true } else { $missing.Count -eq 0 -and $incomplete.Count -eq 0 }
-        layoutDryRun = ($PackageKind -eq 'runtime' -and ($missing.Count -gt 0 -or $incomplete.Count -gt 0))
+        layoutDryRun = ($PackageKind -eq 'runtime' -and ($StageOnly.IsPresent -or -not [bool]$RequireCompleteRuntimePayloads -or $missing.Count -gt 0 -or $incomplete.Count -gt 0))
         failureMode = if ($PackageKind -ne 'runtime') {
             'notApplicable'
         }
         elseif ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
             'runtimePublishRootNotProvided'
         }
-        elseif ($missingRequired.Count -gt 0) {
-            'missingRequiredRuntimePayload'
+        elseif ($missingHandoffRequired.Count -gt 0) {
+            'missingHandoffRequiredRuntimePayload'
         }
         elseif ($missingOptional.Count -gt 0) {
             'missingOptionalRuntimePayload'
+        }
+        elseif ($empty.Count -gt 0) {
+            'emptyRuntimePayloadDirectory'
+        }
+        elseif ($forbiddenFileCount -gt 0) {
+            'forbiddenRuntimePayloadFile'
         }
         elseif ($incomplete.Count -gt 0) {
             'incompleteRuntimePayloadContents'
@@ -764,8 +831,10 @@ function Get-ReleaseComponentProgressSnapshot {
     return [ordered]@{
         schema = 'ksword.release.component-progress.v1'
         generatedAtUtc = $now
-        purpose = 'Machine-readable reviewer snapshot for deployment/productization handoff; it is not fresh Hyper-V/live evidence.'
+        purpose = 'Machine-readable reviewer snapshot for deployment/productization handoff; it is not fresh Hyper-V/live evidence; gapAudit uses ksword.release.gap-audit.v28.'
         noFreshLiveEvidenceGenerated = $true
+        freshLiveEvidenceGenerated = $false
+        gapAuditSchema = 'ksword.release.gap-audit.v28'
         releaseNotesFallbackZh = '本候选未刷新 fresh live evidence'
         components = @(
             [ordered]@{
@@ -822,25 +891,35 @@ function Get-ReleaseComponentProgressSnapshot {
 
 function Get-PackageGapAuditSnapshot {
     $runtimeSummary = $script:operatorDiagnostics.runtimePublishSummary
+    $rootDiagnostics = $script:operatorDiagnostics.runtimePublishRootDiagnostics
     $runtimeRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
     $runtimeHandoffAllowed = if ($PackageKind -eq 'runtime') { [bool]$script:operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed } else { $true }
     return [ordered]@{
-        schema = 'ksword.release.gap-audit.v27'
+        schema = 'ksword.release.gap-audit.v28'
+        contractVersion = 28
         generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
         packageKind = $PackageKind
         purpose = 'Machine-readable release/productization gap audit from portable packaging; no live evidence is generated.'
+        validationProfile = 'package-portable-local-only-no-smoke-no-live'
+        generatedBy = 'scripts/package-portable.ps1'
         nonMutating = [ordered]@{
             hyperVLive = $false
             smokeTests = $false
+            vmStartRestoreStop = $false
+            vmMutation = $false
             driverSigning = $false
+            guiSigningFallback = $false
             csignTool = $false
             gitPush = $false
             networkPublish = $false
         }
         noFreshLiveEvidence = [ordered]@{
             generated = $false
+            claimAllowedWithoutLabJob = $false
+            releaseNotesMustUseFallbackWhenNoJobId = $true
             releaseNotesFallbackZh = '本候选未刷新 fresh live evidence'
             requiredForClaim = @('commit', 'job id', 'RuntimePublishRoot/runtime root', 'generated time', 'report.json', 'report.zh.html', 'report.en.html')
+            rejectedSubstitutes = @('package-manifest.generated.json', 'source package StageOnly dry-run', 'runtime layout dry-run', 'release-readiness.json')
             remediationZh = '打包只生成 staging/zip/metadata；没有实验室 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
         }
         runtimePublishRootCompleteness = [ordered]@{
@@ -848,8 +927,12 @@ function Get-PackageGapAuditSnapshot {
             runtimePublishRoot = if ($runtimeRootProvided) { $RuntimePublishRoot } else { $null }
             requireCompleteRuntimePayloads = [bool]$RequireCompleteRuntimePayloads
             handoffAllowed = $runtimeHandoffAllowed
+            handoffGateStatus = if ($runtimeHandoffAllowed) { 'verified' } elseif ($PackageKind -eq 'runtime' -and [bool]$RequireCompleteRuntimePayloads) { 'blocked-or-failed' } elseif ($PackageKind -eq 'runtime') { 'layout-dry-run-only' } else { 'not-applicable' }
+            rootDiagnostics = $rootDiagnostics
+            entries = @($script:operatorDiagnostics.runtimePublishEntries)
             missingCount = if ($null -eq $runtimeSummary) { $null } else { [int]$runtimeSummary.missingCount }
             incompleteCount = if ($null -eq $runtimeSummary) { $null } else { [int]$runtimeSummary.incompleteCount }
+            summary = $runtimeSummary
             expectedSources = @('host-web', 'guest-tools', 'tools/job-tool', 'tools/postprocess')
             remediationZh = '完整 runtime handoff 必须传入仓库外 RuntimePublishRoot 和 -RequireCompleteRuntimePayloads，并确认 missingCount/incompleteCount 均为 0；不要从仓库 bin/obj/x64 兜底复制。'
         }
@@ -857,6 +940,8 @@ function Get-PackageGapAuditSnapshot {
             staticAuditOnly = $true
             smokeExecuted = $false
             state = 'documented-not-executed-by-packaging'
+            behaviorConclusionAllowed = $false
+            requiredBoundaries = @('self-noise excluded from sample behavior', 'collection-health remains evidence-quality only', 'VT quiet state is not behavior', 'behaviorCounted=false rows remain non-behavioral')
             evidence = @('componentProgress:self-noise-guard-readiness', 'docs/release.md', 'docs/run.md', 'rules/behavior-rules.json')
             remediationZh = '若需要证明自噪声护栏，使用允许的静态/readiness 审计；package-portable.ps1 不运行 smoke、Hyper-V live 或报告生成。'
         }
@@ -891,14 +976,26 @@ function Update-PackageOperatorDiagnostics {
     $missingRuntimeEntries = @($runtimeEntries | Where-Object { -not [bool]$_.exists })
     $runtimeSummary = Get-PackageRuntimePublishSummary -RuntimeEntries $runtimeEntries
     $recommendedActions = Get-PackageOperatorRecommendedActions -RuntimeEntries $runtimeEntries -RuntimeSummary $runtimeSummary
+    $runtimeRootDiagnostics = Get-RuntimePublishRootPlacementDiagnostics
     $script:operatorDiagnostics = [ordered]@{
         packageKind = $PackageKind
         runtimePublishRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
         runtimePublishRoot = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { $null } else { $RuntimePublishRoot }
         runtimePublishRootRequiredForCompleteRuntime = ($PackageKind -eq 'runtime')
         runtimePublishRootMustBeOutsideRepository = $true
+        runtimePublishRootDiagnostics = $runtimeRootDiagnostics
         runtimePublishEntries = @($runtimeEntries)
         runtimePublishSummary = $runtimeSummary
+        runtimeCompletenessDiagnostics = [ordered]@{
+            schema = 'ksword.release.runtime-publish-completeness.v28'
+            rootDiagnostics = $runtimeRootDiagnostics
+            summary = $runtimeSummary
+            entries = @($runtimeEntries)
+            expectedSources = @($runtimeEntries | ForEach-Object { $_.source })
+            handoffGate = 'Runtime handoff requires external RuntimePublishRoot, -RequireCompleteRuntimePayloads, all runtimePublish entries present, expected leaves present, no forbidden files, and not -StageOnly.'
+            noRepositoryFallback = $true
+            noBuildOrVmMutation = $true
+        }
         missingRuntimePublishEntries = @($missingRuntimeEntries | ForEach-Object { $_.source })
         incompleteRuntimePublishEntries = @($runtimeEntries | Where-Object { [bool]$_.exists -and (@($_.missingExpectedLeaves).Count -gt 0 -or @($_.forbiddenFilePreview).Count -gt 0 -or [int]$_.fileCount -eq 0) } | ForEach-Object { $_.source })
         runtimePublishReady = if ($PackageKind -ne 'runtime') { $true } else { $missingRuntimeEntries.Count -eq 0 -and [int]$runtimeSummary.incompleteCount -eq 0 }
@@ -918,7 +1015,7 @@ function Update-PackageOperatorDiagnostics {
         }
         runtimeDryRunGuardrail = [ordered]@{
             isLayoutDryRun = ($PackageKind -eq 'runtime' -and ($StageOnly.IsPresent -or -not [bool]$RequireCompleteRuntimePayloads -or $missingRuntimeEntries.Count -gt 0 -or [int]$runtimeSummary.incompleteCount -gt 0))
-            handoffAllowed = ($PackageKind -ne 'runtime' -or ((-not $StageOnly.IsPresent) -and [bool]$RequireCompleteRuntimePayloads -and $missingRuntimeEntries.Count -eq 0 -and [int]$runtimeSummary.incompleteCount -eq 0 -and -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)))
+            handoffAllowed = ($PackageKind -ne 'runtime' -or ((-not $StageOnly.IsPresent) -and [bool]$RequireCompleteRuntimePayloads -and $missingRuntimeEntries.Count -eq 0 -and [int]$runtimeSummary.incompleteCount -eq 0 -and [bool]$runtimeRootDiagnostics.exists -and [bool]$runtimeRootDiagnostics.outsideRepository))
             handoffRequires = @(
                 '仓库外 RuntimePublishRoot / external RuntimePublishRoot',
                 '-RequireCompleteRuntimePayloads',
@@ -964,9 +1061,12 @@ function Update-PackageOperatorDiagnostics {
             networkPublish = $false
         }
         freshLiveEvidenceGuardrail = [ordered]@{
+            freshLiveEvidenceGenerated = $false
             packagingCreatesFreshLiveEvidence = $false
             releaseReadinessCreatesFreshLiveEvidence = $false
             freshNotepad5sClaimRequiresLabRun = $true
+            claimAllowedWithoutLabJob = $false
+            releaseNotesMustUseFallbackWhenNoJobId = $true
             liveCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live'
             requiredReleaseNoteFields = @('commit', 'jobId', 'runtimeRoot', 'generatedAtUtc/localTime', 'report.json/report.zh.html/report.en.html paths')
             chinese = '中文提示：本脚本只做本机 staging/zip，不启动 Hyper-V live；没有记录 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
@@ -1348,7 +1448,7 @@ function Write-GeneratedPackageManifest {
     }
 
     $metadataPath = Join-SafePath -Root $stageRoot -RelativePath 'package-manifest.generated.json'
-    $metadata | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $metadataPath -Encoding UTF8
+    $metadata | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $metadataPath -Encoding UTF8
     [void]$script:copiedFiles.Add('package-manifest.generated.json')
     $metadataItem = Get-Item -LiteralPath $metadataPath
     [void]$script:copiedFileRecords.Add([pscustomobject][ordered]@{

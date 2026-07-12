@@ -17,6 +17,8 @@ public static class NetworkTelemetrySchema
 
     public const string ImportSummaryEventType = "network.import.summary";
 
+    public const int MaxDataValueLength = 4096;
+
     public static Dictionary<string, string> CreateEndpointData(
         string? protocol,
         string? sourceIp,
@@ -157,6 +159,8 @@ public static class NetworkTelemetrySchema
         IDictionary<string, string>? extra = null)
     {
         var materialized = importedEvents.ToList();
+        var canonicalBehaviorEvents = materialized.Where(IsBehaviorCountedEvent).ToList();
+        var rawPcapCompatibilityEventCount = CountByDataValue(materialized, "rawPcapCompatibilityRow", "true");
         var protocols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var evt in materialized)
         {
@@ -184,12 +188,20 @@ public static class NetworkTelemetrySchema
             ["parseErrorCount"] = CountEvents(materialized, "parse_error").ToString(CultureInfo.InvariantCulture),
             ["nonbehaviorEventCount"] = CountByDataValue(materialized, "nonbehavior", "true").ToString(CultureInfo.InvariantCulture),
             ["behaviorCountedEventCount"] = CountByDataValue(materialized, "behaviorCounted", "true").ToString(CultureInfo.InvariantCulture),
+            ["canonicalBehaviorEventCount"] = canonicalBehaviorEvents.Count.ToString(CultureInfo.InvariantCulture),
+            ["compatibilityEventCount"] = rawPcapCompatibilityEventCount.ToString(CultureInfo.InvariantCulture),
+            ["rawPcapCompatibilityEventCount"] = rawPcapCompatibilityEventCount.ToString(CultureInfo.InvariantCulture),
             ["collectorSelfNoiseEventCount"] = CountByDataValue(materialized, "collectorSelfNoise", "true").ToString(CultureInfo.InvariantCulture),
-            ["protocolHealthSummary"] = BuildDataValueSummary(materialized, "protocolHealth"),
+            ["protocolHealthSummary"] = BuildDataValueSummary(canonicalBehaviorEvents, "protocolHealth"),
             ["collectionHealthSummary"] = BuildDataValueSummary(materialized, "collectionHealth"),
-            ["protocolHealthWarningCount"] = CountByDataValue(materialized, "protocolHealth", "warning").ToString(CultureInfo.InvariantCulture),
-            ["protocolHealthDegradedCount"] = CountByDataValue(materialized, "protocolHealth", "degraded").ToString(CultureInfo.InvariantCulture),
-            ["protocolHealthOkCount"] = CountByDataValue(materialized, "protocolHealth", "ok").ToString(CultureInfo.InvariantCulture),
+            ["protocolHealthWarningCount"] = CountByDataValue(canonicalBehaviorEvents, "protocolHealth", "warning").ToString(CultureInfo.InvariantCulture),
+            ["protocolHealthDegradedCount"] = CountByDataValue(canonicalBehaviorEvents, "protocolHealth", "degraded").ToString(CultureInfo.InvariantCulture),
+            ["protocolHealthOkCount"] = CountByDataValue(canonicalBehaviorEvents, "protocolHealth", "ok").ToString(CultureInfo.InvariantCulture),
+            ["protocolHealthSummaryScope"] = "behavior-counted-canonical-events",
+            ["collectionHealthSummaryScope"] = "all-imported-events",
+            ["eventCountPolicy"] = "all-imported-events-including-nonbehavior-and-compatibility",
+            ["behaviorCountPolicy"] = "behaviorCounted=true canonical rows only",
+            ["duplicatePolicy"] = "normalized-events-canonical; raw-pcap-rows-compatibility-nonbehavior",
             ["protocols"] = string.Join(",", protocols.OrderBy(value => value, StringComparer.OrdinalIgnoreCase)),
             ["protocol"] = string.Join(",", protocols.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
         };
@@ -240,6 +252,19 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "importArtifactName", source.Name);
         AddIfNotEmpty(data, "importArtifactRelativePath", source.RelativePath);
         AddIfNotEmpty(data, "importArtifactSelector", source.RelativePath);
+        if (IsSidecarSource(source))
+        {
+            AddIfNotEmpty(data, "sidecarImportProvenance", "sidecar-artifact");
+            AddIfNotEmpty(data, "sidecarSourceArtifactPath", source.FullPath);
+            AddIfNotEmpty(data, "sidecarSourceArtifactName", source.Name);
+            AddIfNotEmpty(data, "sidecarSourceArtifactRelativePath", source.RelativePath);
+            AddIfNotEmpty(data, "sidecarSourceArtifactSelector", source.RelativePath);
+            AddIfNotEmpty(data, "sidecarDownloadSelector", source.RelativePath);
+            AddIfNotEmpty(data, "sidecarArtifactKind", source.ArtifactKind);
+            AddIfNotEmpty(data, "sidecarEvidenceRole", source.EvidenceRole);
+            AddIfNotEmpty(data, "sidecarImportMode", source.ImportMode);
+        }
+
         AddIfNotEmpty(data, "importProvenance", "host-imported-network-artifact");
         AddIfNotEmpty(data, "provenance", "host-imported-guest-artifact");
         if (IsPacketCaptureSource(source))
@@ -278,6 +303,7 @@ public static class NetworkTelemetrySchema
                 string.Equals(pair.Key, "sourceArtifactSelector", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "artifactSelector", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "sourceDownloadSelector", StringComparison.OrdinalIgnoreCase) ||
+                pair.Key.StartsWith("sidecar", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "rootProcessId", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "treeLineage", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "processId", StringComparison.OrdinalIgnoreCase) ||
@@ -331,6 +357,15 @@ public static class NetworkTelemetrySchema
                     data["parentArtifactSha256"] = sha256;
                     data["parentHashSha256"] = sha256;
                 }
+
+                if (IsSidecarSource(source))
+                {
+                    data["sidecarSourceArtifactSizeBytes"] = sizeText;
+                    data["sidecarSourceArtifactSha256"] = sha256;
+                    data["sidecarArtifactSizeBytes"] = sizeText;
+                    data["sidecarArtifactSha256"] = sha256;
+                    data["sidecarHashSha256"] = sha256;
+                }
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
@@ -342,6 +377,7 @@ public static class NetworkTelemetrySchema
     public static void ApplyHealthAndLocalization(Dictionary<string, string> data)
     {
         ApplyProvenanceAndBehaviorMetadata(data);
+        ApplyParserMetadataPolicy(data);
 
         if (!data.ContainsKey("collectionHealth"))
         {
@@ -520,12 +556,27 @@ public static class NetworkTelemetrySchema
             InferSourceComponent(data, collectorProcessName));
         AddIfNotEmpty(data, "sourceComponent", sourceComponent);
 
-        var isNonBehavior = string.Equals(eventKind, "summary", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(eventKind, "parse_error", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(eventKind, "health", StringComparison.OrdinalIgnoreCase);
         var isCollectorSelfNoise = !string.IsNullOrWhiteSpace(collectorProcessName) ||
             string.Equals(sourceComponent, "ksword-r0collector", StringComparison.OrdinalIgnoreCase);
+        var structuralNonBehavior = string.Equals(eventKind, "summary", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(eventKind, "parse_error", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(eventKind, "health", StringComparison.OrdinalIgnoreCase);
+        var explicitNonBehavior = string.Equals(ValueOrEmpty(data, "nonbehavior"), "true", StringComparison.OrdinalIgnoreCase);
+        var explicitBehaviorExcluded = string.Equals(ValueOrEmpty(data, "behaviorCounted"), "false", StringComparison.OrdinalIgnoreCase);
+        var explicitBehaviorIncluded = string.Equals(ValueOrEmpty(data, "behaviorCounted"), "true", StringComparison.OrdinalIgnoreCase);
+        var isNonBehavior = structuralNonBehavior || explicitNonBehavior || explicitBehaviorExcluded || isCollectorSelfNoise;
+        if (explicitBehaviorIncluded && !structuralNonBehavior && !explicitNonBehavior && !isCollectorSelfNoise)
+        {
+            isNonBehavior = false;
+        }
+
         data["collectorSelfNoise"] = BoolString(isCollectorSelfNoise);
+        if (isCollectorSelfNoise)
+        {
+            data["notSampleBehavior"] = "true";
+            data["sampleBehaviorCandidate"] = "false";
+        }
+
         AddIfNotEmpty(data, "collectorNoiseScope", isCollectorSelfNoise
             ? "collector-self-noise"
             : isNonBehavior
@@ -537,14 +588,24 @@ public static class NetworkTelemetrySchema
                 ? "nonbehavior-separated"
                 : "sample-countable");
 
-        if (!data.ContainsKey("behaviorCounted"))
+        data["behaviorCounted"] = BoolString(!isNonBehavior);
+        data["nonbehavior"] = BoolString(isNonBehavior);
+
+        if (!data.ContainsKey("semanticLane"))
         {
-            data["behaviorCounted"] = BoolString(!isNonBehavior);
+            data["semanticLane"] = isNonBehavior ? "nonbehavior" : "behavior";
         }
 
-        if (!data.ContainsKey("nonbehavior"))
+        if (!data.ContainsKey("behaviorLane"))
         {
-            data["nonbehavior"] = BoolString(isNonBehavior);
+            data["behaviorLane"] = InferBehaviorLane(data, eventKind, isNonBehavior, isCollectorSelfNoise);
+        }
+
+        if (!data.ContainsKey("behaviorCountingPolicy"))
+        {
+            data["behaviorCountingPolicy"] = isNonBehavior
+                ? "excluded-from-sample-behavior-counts"
+                : "included-in-sample-behavior-counts";
         }
 
         if (!data.ContainsKey("behaviorScope"))
@@ -554,7 +615,7 @@ public static class NetworkTelemetrySchema
                 "summary" => "network-import-summary",
                 "parse_error" => "network-import-parse-error",
                 "health" => "network-collection-health",
-                "dns" or "http" or "tls" or "connection" or "packet" => "network-behavior",
+                "dns" or "http" or "tls" or "connection" or "packet" => isNonBehavior ? "network-compatibility-or-diagnostic" : "network-behavior",
                 _ => "network-telemetry"
             };
         }
@@ -721,8 +782,15 @@ public static class NetworkTelemetrySchema
     {
         if (!string.IsNullOrWhiteSpace(value))
         {
-            data[key] = value;
+            data[key] = BoundDataValue(value);
         }
+    }
+
+    public static string BoundDataValue(string value)
+    {
+        return value.Length <= MaxDataValueLength
+            ? value
+            : value[..MaxDataValueLength];
     }
 
     private static void AddAliases(Dictionary<string, string> data, string? value, params string[] keys)
@@ -1954,6 +2022,62 @@ public static class NetworkTelemetrySchema
         return value.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
     }
 
+    private static string InferBehaviorLane(
+        IReadOnlyDictionary<string, string> data,
+        string eventKind,
+        bool isNonBehavior,
+        bool isCollectorSelfNoise)
+    {
+        if (!isNonBehavior)
+        {
+            return isCollectorSelfNoise ? "collector-separated-behavior" : "sample-network-behavior";
+        }
+
+        if (isCollectorSelfNoise)
+        {
+            return "collector-self-noise";
+        }
+
+        if (string.Equals(FirstDataValue(data, "rawPcapCompatibilityRow"), "true", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(FirstDataValue(data, "duplicateRole"), "raw-pcap-compatibility", StringComparison.OrdinalIgnoreCase))
+        {
+            return "raw-pcap-compatibility";
+        }
+
+        return eventKind.ToLowerInvariant() switch
+        {
+            "summary" => "import-summary",
+            "parse_error" => "parser-diagnostic",
+            "health" => "collection-health",
+            _ => "nonbehavior-diagnostic"
+        };
+    }
+
+    private static void ApplyParserMetadataPolicy(Dictionary<string, string> data)
+    {
+        if (!HasAnyDataValue(
+                data,
+                "parser",
+                "parserInputKind",
+                "parserBounded",
+                "parserMaxPackets",
+                "parserMaxPayloadBytes",
+                "parserMaxProtocolEvents",
+                "parserMaxFlowEvents",
+                "parserMaxLines",
+                "parserPacketLimitHit",
+                "parserProtocolEventLimitHit",
+                "parserLineLimitHit"))
+        {
+            return;
+        }
+
+        data["parserMetadataBounded"] = "true";
+        data["parserMetadataValueMaxLength"] = MaxDataValueLength.ToString(CultureInfo.InvariantCulture);
+        data["parserMetadataPolicy"] = "bounded-parser-metadata-nonbehavior-coverage-boundary";
+        AddIfNotEmpty(data, "parserLimitBehavior", "nonbehavior-coverage-boundary");
+    }
+
     private static string DetectCollectorProcessName(IReadOnlyDictionary<string, string> data)
     {
         var processNames = new[]
@@ -2032,6 +2156,13 @@ public static class NetworkTelemetrySchema
             source.FullPath.EndsWith(".pcapng", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsSidecarSource(NetworkArtifactSource source)
+    {
+        return string.Equals(source.ImportMode, "sidecar-artifact", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(source.EvidenceRole, "network-telemetry-sidecar", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(source.CollectionName, "network-sidecars", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void AddSourceArtifactAliases(Dictionary<string, string> data)
     {
         var selector = FirstDataValue(
@@ -2056,6 +2187,7 @@ public static class NetworkTelemetrySchema
 
     private static void AddPcapSourceArtifactIdentity(Dictionary<string, string> data, NetworkArtifactSource source)
     {
+        var isSidecarSource = IsSidecarSource(source);
         var pcapPath = FirstDataValue(data, "pcapSourceArtifactPath", "sourcePcapArtifactPath");
         var pcapRelativePath = FirstDataValue(
             data,
@@ -2101,6 +2233,19 @@ public static class NetworkTelemetrySchema
             }
         }
 
+        if (string.IsNullOrWhiteSpace(pcapPath) &&
+            string.IsNullOrWhiteSpace(pcapRelativePath) &&
+            string.IsNullOrWhiteSpace(pcapSha256))
+        {
+            if (isSidecarSource)
+            {
+                AddIfNotEmpty(data, "sidecarParentPcapLinked", "false");
+                AddIfNotEmpty(data, "sidecarPcapLinkSource", "none");
+            }
+
+            return;
+        }
+
         var pcapName = FirstNonEmpty(
             FirstDataValue(data, "pcapSourceArtifactName", "sourcePcapArtifactName"),
             string.IsNullOrWhiteSpace(pcapPath) ? string.Empty : Path.GetFileName(pcapPath),
@@ -2124,6 +2269,11 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "parentDownloadSelector", pcapRelativePath);
         AddIfNotEmpty(data, "parentArtifactKind", "PacketCapture");
         AddIfNotEmpty(data, "parentEvidenceRole", "packet-capture");
+        if (isSidecarSource)
+        {
+            AddIfNotEmpty(data, "sidecarParentPcapLinked", "true");
+            AddIfNotEmpty(data, "sidecarPcapLinkSource", FirstNonEmpty(FirstDataValue(data, "sidecarPcapLinkSource"), "artifact-metadata"));
+        }
 
         if (string.IsNullOrWhiteSpace(pcapPath))
         {
@@ -2442,6 +2592,26 @@ public static class NetworkTelemetrySchema
     private static bool IsEventType(SandboxEvent evt, string eventType)
     {
         return string.Equals(evt.EventType, eventType, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsBehaviorCountedEvent(SandboxEvent evt)
+    {
+        var eventKind = ValueOrEmpty(evt.Data, "eventKind");
+        if (string.Equals(eventKind, "summary", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(eventKind, "parse_error", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(eventKind, "health", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (evt.Data.TryGetValue("nonbehavior", out var nonbehavior) &&
+            string.Equals(nonbehavior, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !evt.Data.TryGetValue("behaviorCounted", out var behaviorCounted) ||
+            string.Equals(behaviorCounted, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string InferCollectionHealth(IReadOnlyDictionary<string, string> data)

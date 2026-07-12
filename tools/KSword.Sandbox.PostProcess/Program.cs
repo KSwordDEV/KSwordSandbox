@@ -418,12 +418,16 @@ internal static class PostProcessProgram
                 Timestamp = now,
                 Source = "host",
                 Path = eventsPath,
-                Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                Data = CreateHostOperationalEventData(
+                    "guest-events-imported",
+                    "postprocess-guest-import-summary-not-sample-behavior",
+                    "PostProcess import summary records host-side report rebuilding, not sample behavior.",
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["jobId"] = jobId.ToString("D"),
                     ["jobRoot"] = jobRoot,
                     ["importedEventCount"] = guestEventCount.ToString()
-                }
+                })
             },
             new SandboxEvent
             {
@@ -431,12 +435,52 @@ internal static class PostProcessProgram
                 Timestamp = now,
                 Source = "host",
                 Path = jobRoot,
-                Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                Data = CreateHostOperationalEventData(
+                    "report-generated",
+                    "postprocess-report-generated-summary-not-sample-behavior",
+                    "PostProcess report generation summary is host control-plane metadata, not sample behavior.",
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["generator"] = "KSword.Sandbox.PostProcess"
-                }
+                })
             }
         ];
+    }
+
+    private static Dictionary<string, string> CreateHostOperationalEventData(
+        string evidenceKind,
+        string reason,
+        string hint,
+        IReadOnlyDictionary<string, string>? values = null)
+    {
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["behaviorCounted"] = "false",
+            ["nonbehavior"] = "true",
+            ["notSampleBehavior"] = "true",
+            ["sampleBehaviorCandidate"] = "false",
+            ["eventKind"] = "diagnostic",
+            ["evidenceRole"] = "host-control-plane",
+            ["behaviorScope"] = "host-operational",
+            ["operationalEvent"] = "true",
+            ["hostGenerated"] = "true",
+            ["hostImportSelfNoise"] = "true",
+            ["nonbehaviorReason"] = reason,
+            ["hostOperationalKind"] = evidenceKind,
+            ["behaviorCountingPolicy"] = "host-control-plane-events-are-not-sample-behavior",
+            ["zhBehaviorHint"] = "该行由 Host/PostProcess 生成，用于记录导入或报告生成状态；behaviorCounted=false，不计入样本行为。",
+            ["operatorHint"] = hint
+        };
+
+        if (values is not null)
+        {
+            foreach (var (key, value) in values)
+            {
+                data[key] = value;
+            }
+        }
+
+        return data;
     }
 
     private static Dictionary<string, int> BuildMetrics(

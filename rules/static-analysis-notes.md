@@ -135,18 +135,22 @@ Do not globally exclude `source=r0collector` in rules whose purpose is to
 consume parsed R0 rows; instead, require the semantic fields and suppress known
 collector-health or self-noise markers.
 
-For recent high-signal scoring rules, the v26 guard baseline is:
+For recent high-signal scoring rules, the v26/v27 guard baseline is:
 `behaviorCounted=false`, `nonbehavior=true`, `collectorSelfNoise=true`,
-`collectorNoise=true`, `source=collection-health`, `source=virustotal`,
-`source=r0collector`, and explicit `KSword.Sandbox.Agent.exe` /
-`KSword.Sandbox.R0Collector.exe` process-name exclusions where those fields are
-not the behavior being intentionally consumed. Treat open-source references
-such as SigmaHQ, Elastic detection-rules, Splunk Security Content, and LOLBAS as
-behavior-family inspiration only; keep KSword predicates expressed over local
-event fields and add source-reference tags only through existing rule `tags`.
-The v27 behavior-rule batch follows this constraint by using tags such as
-`open-source-reference`, `sigma-style`, `elastic-style`, `splunk-style`, and
-`lolbas-inspired`; no dedicated source-reference schema field exists.
+`collectorNoise=true`, `noise=true`, `selfNoise=true`,
+`source=collection-health`, `source=virustotal`, `source=r0collector`, and
+explicit `KSword.Sandbox.Agent.exe` / `KSword.Sandbox.R0Collector.exe`
+process-name exclusions where those fields are not the behavior being
+intentionally consumed. New v28 scoring additions also include
+`sampleBehaviorCandidate=false` so imported artifacts, enrichment rows, and
+collector-derived non-sample rows cannot satisfy high-signal predicates. Treat
+open-source references such as SigmaHQ, Elastic detection-rules, Splunk Security
+Content, and LOLBAS as behavior-family inspiration only; keep KSword predicates
+expressed over local event fields and add source-reference tags only through
+existing rule `tags`. The v27 and v28 behavior-rule batches follow this
+constraint by using tags such as `open-source-reference`, `sigma-style`,
+`elastic-style`, `splunk-style`, and `lolbas-inspired`; no dedicated
+source-reference schema field exists.
 
 ## Artifact-backed correlation handoff
 

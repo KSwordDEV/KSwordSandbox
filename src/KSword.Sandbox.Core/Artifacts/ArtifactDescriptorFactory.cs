@@ -439,18 +439,16 @@ public static class ArtifactDescriptorFactory
         long? sizeBytes,
         string? sha256)
     {
-        AddDefault(metadata, "artifactRelativePath", relativePath);
-        AddDefault(metadata, "sourceArtifactRelativePath", relativePath);
+        SetOrRemove(metadata, "artifactRelativePath", relativePath);
+        SetOrRemove(metadata, "sourceArtifactRelativePath", relativePath);
         var importPath = FirstNonEmpty(NormalizeSelector(MetadataValue(metadata, "importPath")), relativePath);
-        if (!string.IsNullOrWhiteSpace(importPath))
-        {
-            metadata["importPath"] = importPath;
-        }
+        SetOrRemove(metadata, "importPath", importPath);
 
         AddDefault(metadata, "sourceArtifactPath", fullPath);
         AddDefault(metadata, "fullPath", fullPath);
-        AddDefault(metadata, "downloadFileName", SafeDownloadFileName(FirstNonEmpty(Path.GetFileName(fullPath), Path.GetFileName(relativePath), "artifact.bin")));
-        AddDefault(metadata, "safeDownloadFileName", SafeDownloadFileName(FirstNonEmpty(Path.GetFileName(fullPath), Path.GetFileName(relativePath), "artifact.bin")));
+        var safeDownloadFileName = SafeDownloadFileName(FirstNonEmpty(Path.GetFileName(fullPath), Path.GetFileName(relativePath), "artifact.bin"));
+        metadata["downloadFileName"] = safeDownloadFileName;
+        metadata["safeDownloadFileName"] = safeDownloadFileName;
         if (sizeBytes is > 0)
         {
             var sizeText = sizeBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -464,6 +462,17 @@ public static class ArtifactDescriptorFactory
             AddDefault(metadata, "sourceArtifactSha256", sha256);
             AddDefault(metadata, "hash.sha256", sha256);
         }
+    }
+
+    private static void SetOrRemove(Dictionary<string, string> metadata, string key, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            metadata.Remove(key);
+            return;
+        }
+
+        metadata[key] = value;
     }
 
     private static void ApplyKindMetadataDefaults(ArtifactKind kind, Dictionary<string, string> metadata, bool includeAvailability)

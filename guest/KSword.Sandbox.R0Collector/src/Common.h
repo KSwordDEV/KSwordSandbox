@@ -30,7 +30,7 @@ inline constexpr int kSyntheticSemanticSelfCheckRows = 6;
 inline constexpr DWORD kSyntheticSampleProcessId = 4242U;
 inline constexpr const char* kSyntheticSemanticSelfCheckScenarios =
     "process-lineage|dns|http|tls|lateral-movement|download-execute";
-inline constexpr unsigned long kAbiSelfCheckDiagnosticsVersion = 4U;
+inline constexpr unsigned long kAbiSelfCheckDiagnosticsVersion = 5U;
 inline constexpr const char* kStableAbiVersionFields =
     "collectorAbiVersion|collectorAbiVersionHex|abiVersionMajor|abiVersionMinor|eventHeaderVersion|eventHeaderVersionHex|eventSchemaName|eventSchemaVersion|eventSchemaVersionHex|version|versionHex|payloadVersion|payloadVersionHex|payloadSchemaVersion";
 inline constexpr const char* kStressJsonlLossEvidence =
@@ -66,7 +66,14 @@ inline constexpr size_t kAbiGuardStatusQueueHighWatermarkOffset = offsetof(KSWOR
 inline constexpr size_t kAbiGuardStatusTotalEventsDroppedOffset = offsetof(KSWORD_SANDBOX_STATUS_REPLY, TotalEventsDropped);
 inline constexpr size_t kAbiGuardStatusTotalEventsBackpressuredOffset = offsetof(KSWORD_SANDBOX_STATUS_REPLY, TotalEventsBackpressured);
 inline constexpr size_t kAbiGuardStatusLastEnqueueFailureOffset = offsetof(KSWORD_SANDBOX_STATUS_REPLY, LastEnqueueFailureNtStatus);
+inline constexpr size_t kAbiGuardCapabilitiesCapabilityFlagsOffset = offsetof(KSWORD_SANDBOX_CAPABILITIES_REPLY, CapabilityFlags);
+inline constexpr size_t kAbiGuardCapabilitiesEventHeaderVersionOffset = offsetof(KSWORD_SANDBOX_CAPABILITIES_REPLY, EventHeaderVersion);
+inline constexpr size_t kAbiGuardCapabilitiesReadEventsReplyHeaderSizeOffset = offsetof(KSWORD_SANDBOX_CAPABILITIES_REPLY, ReadEventsReplyHeaderSize);
+inline constexpr size_t kAbiGuardSetProducerEnableMaskReplyEffectiveMaskOffset = offsetof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY, EffectiveEnableMask);
+inline constexpr size_t kAbiGuardSetProducerEnableMaskReplySupportedMaskOffset = offsetof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY, SupportedProducerMask);
+inline constexpr size_t kAbiGuardReadEventsBytesWrittenOffset = offsetof(KSWORD_SANDBOX_READ_EVENTS_REPLY, BytesWritten);
 inline constexpr size_t kAbiGuardReadEventsEventsDroppedOffset = offsetof(KSWORD_SANDBOX_READ_EVENTS_REPLY, EventsDropped);
+inline constexpr size_t kAbiGuardReadEventsNextSequenceOffset = offsetof(KSWORD_SANDBOX_READ_EVENTS_REPLY, NextSequence);
 inline constexpr size_t kAbiGuardReadEventsEventsOffset = offsetof(KSWORD_SANDBOX_READ_EVENTS_REPLY, Events);
 inline constexpr size_t kAbiGuardNetworkStatusTodoMaskOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, TodoMask);
 inline constexpr size_t kAbiGuardNetworkStatusPayloadVersionOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, PayloadVersion);
@@ -111,8 +118,32 @@ static_assert(kAbiGuardStatusTotalEventsBackpressuredOffset == 88U,
     "KSWORD_SANDBOX_STATUS_REPLY.TotalEventsBackpressured offset changed.");
 static_assert(kAbiGuardStatusLastEnqueueFailureOffset == 112U,
     "KSWORD_SANDBOX_STATUS_REPLY.LastEnqueueFailureNtStatus offset changed.");
+static_assert(sizeof(KSWORD_SANDBOX_CAPABILITIES_REPLY) == 104U,
+    "KSWORD_SANDBOX_CAPABILITIES_REPLY size changed; update R0Collector ABI diagnostics and tests.");
+static_assert(kAbiGuardCapabilitiesCapabilityFlagsOffset == 16U,
+    "KSWORD_SANDBOX_CAPABILITIES_REPLY.CapabilityFlags offset changed.");
+static_assert(kAbiGuardCapabilitiesEventHeaderVersionOffset == 32U,
+    "KSWORD_SANDBOX_CAPABILITIES_REPLY.EventHeaderVersion offset changed.");
+static_assert(kAbiGuardCapabilitiesReadEventsReplyHeaderSizeOffset == 44U,
+    "KSWORD_SANDBOX_CAPABILITIES_REPLY.ReadEventsReplyHeaderSize offset changed.");
+static_assert(sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST) == 48U,
+    "KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST size changed.");
+static_assert(sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY) == 56U,
+    "KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY size changed.");
+static_assert(kAbiGuardSetProducerEnableMaskReplyEffectiveMaskOffset == 12U,
+    "KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY.EffectiveEnableMask offset changed.");
+static_assert(kAbiGuardSetProducerEnableMaskReplySupportedMaskOffset == 16U,
+    "KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY.SupportedProducerMask offset changed.");
+static_assert(sizeof(KSWORD_SANDBOX_READ_EVENTS_REQUEST) == 56U,
+    "KSWORD_SANDBOX_READ_EVENTS_REQUEST size changed.");
+static_assert(kAbiGuardReadEventsBytesWrittenOffset == 16U,
+    "KSWORD_SANDBOX_READ_EVENTS_REPLY.BytesWritten offset changed.");
 static_assert(kAbiGuardReadEventsEventsDroppedOffset == 24U,
     "KSWORD_SANDBOX_READ_EVENTS_REPLY.EventsDropped offset changed.");
+static_assert(kAbiGuardReadEventsNextSequenceOffset == 32U,
+    "KSWORD_SANDBOX_READ_EVENTS_REPLY.NextSequence offset changed.");
+static_assert(KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE == 40U,
+    "KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE changed.");
 static_assert(kAbiGuardReadEventsEventsOffset == KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE,
     "KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE must point at Events.");
 static_assert(sizeof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY) == 128U,

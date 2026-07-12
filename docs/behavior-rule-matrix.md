@@ -3,21 +3,26 @@
 This document describes the behavior rules in `rules/behavior-rules.json`.
 The matrix is intentionally conservative: rules classify normalized sandbox
 events for reporting, but they do not by themselves prove malicious intent.
-As of the local v27 behavior-rule expansion,
-`rules/behavior-rules.json` contains 578 rules
-with no duplicate IDs in the cheap JSON audit. The v27 batch adds 10 bounded
-rules across IFEO/BITS persistence, DLL/APC injection, SVCCTL/WinRM lateral
-movement, tool-enumeration and sleep-skew anti-sandbox gates, and
-Certutil/Mshta download-execute chains. It uses public SigmaHQ, Elastic,
+As of the local v28 behavior-rule expansion,
+`rules/behavior-rules.json` contains 588 rules
+with no duplicate IDs in the cheap JSON audit. The v28 batch adds 10 bounded
+rules across WMI/COM persistence, hollowing and reflective-loader injection,
+DCOM/WMI lateral movement, device/window anti-sandbox gates, and
+Rundll32/InstallUtil download-execute chains. It uses public SigmaHQ, Elastic,
 Splunk, and LOLBAS behavior families only as inspiration; the landed rules are
-new KSword predicates over local fields and carry source-reference tags through
-the existing `tags` metadata. The previous v26 self-noise guard hardening kept
-rule volume unchanged and hardened recent high-signal scoring rules against
-KSword collection/self-noise by adding explicit `behaviorCounted=false`,
-`nonbehavior=true`, `collectorNoise=true`, `collectorSelfNoise=true`,
-`source=r0collector`, `source=virustotal`, `source=collection-health`, and
-sandbox agent/R0Collector process-name exclusions where those guards reduce
-false positives without suppressing positive sample events. The v25 batch adds 8 constrained
+new KSword predicates over local fields, carry source-reference tags through
+the existing `tags` metadata, and add explicit `sampleBehaviorCandidate=false`
+exclusions alongside the v27/v26 self-noise baseline. The previous v27 batch
+adds 10 bounded rules across IFEO/BITS persistence, DLL/APC injection,
+SVCCTL/WinRM lateral movement, tool-enumeration and sleep-skew anti-sandbox
+gates, and Certutil/Mshta download-execute chains. The earlier v26 self-noise
+guard hardening kept rule volume unchanged and hardened recent high-signal
+scoring rules against KSword collection/self-noise by adding explicit
+`behaviorCounted=false`, `nonbehavior=true`, `collectorNoise=true`,
+`collectorSelfNoise=true`, `source=r0collector`, `source=virustotal`,
+`source=collection-health`, and sandbox agent/R0Collector process-name
+exclusions where those guards reduce false positives without suppressing
+positive sample events. The v25 batch adds 8 constrained
 rules over structured DNS answer scope, HTTP transfer hints, TLS certificate
 CN/validity fields, host artifact evidence matrices and memory/screenshot/PCAP
 selectors, and R0 backpressure/loss quality fields. The v23 batch adds 10 constrained
@@ -241,6 +246,7 @@ future parser rows.
 | Script execution behavior | `script-interpreter`, `script-file-executed` | `process.start` | `medium` | `T1059` | Matches interpreter names and script-like command-line extensions. |
 | Script/LOLBin proxy expansion | `hh-compiled-help-remote-script-execution`, `msxsl-remote-xsl-script-execution`, `forfiles-script-proxy-execution` | `process.start` | `medium` to `high` | `T1202`, `T1218`, `T1220` | Adds constrained HH, MSXSL, and forfiles proxy-execution rules. Each rule requires the LOLBin plus remote/script or child-command evidence and excludes sandbox agent/R0 collector command self-noise. |
 | Open-source reference LOLBin/API monitor expansion | `odbcconf-regsvr-user-writable-dll-proxy-execution`, `mmc-user-writable-msc-proxy-execution`, `named-pipe-impersonation-api-observed` | `process.start`, `process.new`, `api.call`, `named_pipe.impersonation`, `pipe.impersonation` | `high` | `T1218.008`, `T1218.014`, `T1134.001` | Lands public ATT&CK/Sigma-style ideas with sandbox-safe constraints: Odbcconf must use `REGSVR` plus a user-writable DLL, MMC must load a user-writable `.msc`, and named-pipe impersonation must include an impersonation API plus pipe name. |
+| v28 behavior-rule expansion | `persistence-wmi-commandline-consumer-user-writable`, `persistence-com-scriptleturl-remote-clsid-hijack`, `injection-hollowing-unmap-write-setcontext-resume`, `injection-reflective-loader-user-writable-module`, `lateral-dcom-shellwindows-remote-script-launch`, `lateral-wmi-admin-share-payload-execution`, `anti-sandbox-device-object-probe-exit-gate`, `anti-sandbox-window-title-analysis-gate`, `download-execute-rundll32-mshtml-remote-script`, `download-execute-installutil-remote-assembly-launch` | `wmi.event_consumer`, `wmi.subscription`, `registry.*`, `driver.registry`, `api.sequence`, `process.hollowing`, `image.load`, `process.injection`, `dcom.activation`, `wmi.process_create`, `wmic.command`, `antiAnalysis.sandboxCheck`, `anti_sandbox.check`, `api.call`, `process.start`, `process.new`, `download.execute`, `behavior.download_execute` | `medium` to `high` | `T1546.003`, `T1546.015`, `T1055.012`, `T1055.001`, `T1021.003`, `T1047`, `T1497.001`, `T1218.011`, `T1218.004` | Adds a bounded SigmaHQ/Elastic/Splunk/LOLBAS-inspired batch without copying upstream rule text. Each rule requires multi-field regex, same-field AND, remote host, user-writable payload, device/window gate, or download/execution correlation evidence and carries v27 self-noise guards: `behaviorCounted=false`, `sampleBehaviorCandidate=false`, `nonbehavior=true`, collection/VT/R0 source exclusions, all four noise markers, and sandbox plumbing process exclusions. |
 | v27 behavior-rule expansion | `persistence-ifeo-verifierdll-user-writable`, `persistence-bits-notifycmdline-user-writable`, `injection-createremotethread-loadlibrary-user-dll`, `injection-queueuserapc-loadlibrary-suspended-process`, `lateral-svcctl-remote-service-user-writable-binary`, `lateral-winrm-encoded-command-remote-target`, `anti-sandbox-tool-enumeration-gated-exit`, `anti-sandbox-sleep-skew-gated-execution`, `download-execute-certutil-urlcache-user-launch`, `download-execute-mshta-remote-scriptlet-user-payload` | `registry.set`, `registry.create`, `driver.registry`, `bits.job.*`, `api.call`, `api.sequence`, `process.injection`, `thread.remote`, `service.*`, `process.start`, `process.new`, `smb.pipe.open`, `pcap.smb`, `powershell.scriptblock`, `winrm.command`, `antiAnalysis.sandboxCheck`, `anti_sandbox.check`, `api.sleep`, `download.execute`, `behavior.download_execute` | `medium` to `high` | `T1546`, `T1197`, `T1055.001`, `T1055.004`, `T1569.002`, `T1021.006`, `T1497.001`, `T1497.003`, `T1105`, `T1218.005` | Adds a coherent SigmaHQ/Elastic/Splunk/LOLBAS-inspired batch without copying upstream rule text. Every rule requires multi-field regex, same-field AND, numeric threshold, remote-host, user-writable payload, or download/execution correlation evidence and carries v26 guards for collection-health, VT quiet states, R0/collector self-noise, and sandbox plumbing process names. |
 | Advanced PowerShell and command syntax | `powershell-encoded-command-base64-regex`, `powershell-amsi-bypass-scriptblock-field-and`, `wmic-shadowcopy-delete-field-and`, `wevtutil-log-clear-command-regex`, `bcdedit-recovery-ignoreallfailures-command` | `process.start`, `process.new`, `powershell.scriptblock`, `scriptblock.text`, `api.call` | `high` | `T1059.001`, `T1070.001`, `T1490`, `T1562.001` | Uses regex and same-field-AND predicates for EncodedCommand base64 payloads, AMSI bypass script blocks, WMIC shadow-copy deletion, event-log clearing, and recovery-policy tamper. Agent/R0Collector command self-noise and collection-health metadata are excluded. |
 | v23 high-signal Windows behavior expansion | `persistence-time-provider-user-writable-dll`, `persistence-netsh-helper-user-writable-dll`, `persistence-screensaver-executable-user-writable`, `injection-process-doppelganging-transaction-sequence`, `injection-process-ghosting-delete-pending-section`, `lateral-dcom-excel-application-remote-launch`, `lateral-smb-psexesvc-pipe-or-service`, `anti-sandbox-human-interaction-gated-exit`, `anti-sandbox-vm-service-registry-probe-gate`, `download-execute-office-remote-template-launch` | `registry.set`, `registry.create`, `driver.registry`, `api.call`, `api.sequence`, `behavior.injection`, `process.hollowing`, `process.image`, `process.start`, `process.new`, `smb.pipe.open`, `pcap.smb`, `antiAnalysis.sandboxCheck`, `anti_sandbox.check`, `behavior.anti_analysis`, `download.execute`, `behavior.download_execute` | `medium` to `high` | `T1547.003`, `T1546`, `T1546.002`, `T1055`, `T1021.003`, `T1021.002`, `T1497.001`, `T1105` | Adds a bounded MITRE/Sigma/Elastic/Splunk-inspired batch without copying upstream rule text. Each rule requires regex or same-field/all-field context on registry paths, user-writable payload paths, API sequences, remote host/COM metadata, SMB named-pipe fields, anti-sandbox gates, or Office remote-template launch correlation, with collection-health, VT quiet-state, sandbox-agent, and R0/self-noise exclusions. |

@@ -539,6 +539,62 @@ internal static class LiveEventsPage
               return undefined;
             }
 
+            function normalizeProgressApiPayload(payload) {
+              // Accept both today's compatibility payload and an envelope-shaped
+              // future payload. The returned object keeps raw snapshot fields
+              // plus RunbookProgressContract metadata for the live UX.
+              if (!payload || typeof payload !== 'object') { return payload; }
+              const progress = objectValue(payload, 'progress', 'Progress', 'snapshot', 'Snapshot');
+              if (!progress || typeof progress !== 'object') {
+                return payload;
+              }
+
+              const contract = objectValue(payload, 'durableProgress', 'DurableProgress', 'progressContract', 'ProgressContract');
+              if (contract && typeof contract === 'object' && !objectValue(progress, 'progressContract', 'ProgressContract')) {
+                progress.progressContract = contract;
+              }
+
+              return progress;
+            }
+
+            function hasProgressContractShape(value) {
+              return Boolean(value && typeof value === 'object' && (
+                objectValue(value, 'latestStepSummary', 'LatestStepSummary') ||
+                objectValue(value, 'operatorHintsZh', 'OperatorHintsZh') ||
+                objectValue(value, 'durableSourcePath', 'DurableSourcePath') ||
+                objectValue(value, 'isStale', 'IsStale') !== undefined ||
+                objectValue(value, 'completedStepCount', 'CompletedStepCount') !== undefined));
+            }
+
+            function progressContractFromSnapshot(snapshot) {
+              const envelopeContract = lastProgressStreamEnvelope?.durableProgress || null;
+              const direct = objectValue(snapshot, 'progressContract', 'ProgressContract', 'durableProgress', 'DurableProgress');
+              if (direct && typeof direct === 'object') { return direct; }
+              if (hasProgressContractShape(snapshot)) { return snapshot; }
+              return hasProgressContractShape(envelopeContract) ? envelopeContract : null;
+            }
+
+            function contractValue(contract, camel, pascal) {
+              return objectValue(contract, camel, pascal || (camel ? camel.charAt(0).toUpperCase() + camel.slice(1) : camel));
+            }
+
+            function contractTextValue(contract, camel, pascal) {
+              const value = contractValue(contract, camel, pascal);
+              return value === undefined || value === null ? '' : String(value).trim();
+            }
+
+            function contractArrayValue(contract, camel, pascal) {
+              const value = contractValue(contract, camel, pascal);
+              return Array.isArray(value) ? value : [];
+            }
+
+            function contractBoolValue(contract, camel, pascal) {
+              const value = contractValue(contract, camel, pascal);
+              if (typeof value === 'boolean') { return value; }
+              if (typeof value === 'string') { return value.toLowerCase() === 'true'; }
+              return Boolean(value);
+            }
+
             function vtValue(result, camel, pascal) {
               return objectValue(result, camel, pascal || (camel ? camel.charAt(0).toUpperCase() + camel.slice(1) : camel));
             }
@@ -638,14 +694,16 @@ internal static class LiveEventsPage
               if (eventName === 'heartbeat' && !payload.progress && !payload.background) {
                 setProgressStreamStatus(t('真实进度流心跳正常，等待下一条进度快照。', 'Real progress stream heartbeat is healthy; waiting for the next progress snapshot.'));
               }
-              if (payload.progress) {
-                renderRunbookProgress(payload.progress, payload.currentStep || payload.CurrentStep);
+              const progressPayload = payload.progress || payload.Progress;
+              const backgroundPayload = payload.background || payload.Background;
+              if (progressPayload) {
+                renderRunbookProgress(normalizeProgressApiPayload(progressPayload), payload.currentStep || payload.CurrentStep);
               }
-              if (payload.background) {
-                if (payload.background.job) {
-                  latestJobSnapshot = normalizeJobSnapshot(payload.background.job);
+              if (backgroundPayload) {
+                if (backgroundPayload.job) {
+                  latestJobSnapshot = normalizeJobSnapshot(backgroundPayload.job);
                 }
-                renderBackgroundStatus(payload.background);
+                renderBackgroundStatus(backgroundPayload);
               }
 
               const terminal = Boolean(payload.terminal) || ['final', 'failed'].includes(eventName);
@@ -670,8 +728,11 @@ internal static class LiveEventsPage
             }
 
             function normalizeProgressStreamEnvelope(payload, eventName) {
-              const progress = payload.progress || payload.Progress || null;
-              const streamStep = normalizeRunbookStepInfo(payload.currentStep || payload.CurrentStep, progress);
+              const progress = normalizeProgressApiPayload(payload.progress || payload.Progress || null);
+              const durableProgress = objectValue(payload, 'durableProgress', 'DurableProgress') || progressContractFromSnapshot(progress);
+              const streamStep = normalizeRunbookStepInfo(
+                payload.currentStep || payload.CurrentStep || contractValue(durableProgress, 'latestStepSummary'),
+                progress);
               return {
                 eventName: eventName || payload.event || payload.Event || 'snapshot',
                 transport: payload.transport || payload.Transport || 'sse',
@@ -680,7 +741,8 @@ internal static class LiveEventsPage
                 generatedAtUtc: payload.generatedAtUtc || payload.GeneratedAtUtc || '',
                 progressPercent: Number(firstDefined(payload.progressPercent, payload.ProgressPercent, progressPercent(progress || {}))),
                 message: payload.message || payload.Message || '',
-                currentStep: streamStep
+                currentStep: streamStep,
+                durableProgress
               };
             }
 
@@ -719,9 +781,10 @@ internal static class LiveEventsPage
               try {
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/progress`, { cache: 'no-store' });
                 const payload = await requireOk(response, t('分析进度', 'runbook progress'));
-                renderRunbookProgress(payload);
+                const snapshot = normalizeProgressApiPayload(payload);
+                renderRunbookProgress(snapshot);
                 renderOperatorCockpit();
-                if (payload && ['completed', 'failed', 'canceled'].includes(String(payload.state || '').toLowerCase()) && progressTimer) {
+                if (snapshot && ['completed', 'failed', 'canceled'].includes(String(snapshot.state || '').toLowerCase()) && progressTimer) {
                   clearInterval(progressTimer);
                   progressTimer = null;
                 }
@@ -978,17 +1041,37 @@ internal static class LiveEventsPage
             }
 
             function progressSnapshotUpdatedAt(snapshot) {
-              return lastProgressStreamEnvelope?.generatedAtUtc ||
+              const contract = progressContractFromSnapshot(snapshot);
+              return contractTextValue(contract, 'snapshotUpdatedAtUtc') ||
+                snapshot?.snapshotUpdatedAtUtc || snapshot?.SnapshotUpdatedAtUtc ||
                 snapshot?.updatedAtUtc || snapshot?.UpdatedAtUtc ||
-                snapshot?.generatedAtUtc || snapshot?.GeneratedAtUtc || '';
+                snapshot?.generatedAtUtc || snapshot?.GeneratedAtUtc ||
+                lastProgressStreamEnvelope?.generatedAtUtc || '';
             }
 
-            function progressFreshnessInfo(value, state) {
+            function progressFreshnessInfo(value, state, contract) {
               const source = value ? String(value) : '';
               const parsed = Date.parse(source);
               const terminal = ['completed', 'failed', 'canceled'].includes(String(state || '').toLowerCase());
+              const contractAgeSeconds = timeSpanToSeconds(contractValue(contract, 'snapshotAge'));
+              const thresholdSeconds = timeSpanToSeconds(contractValue(contract, 'staleThreshold'));
+              const hasContractStale = contractValue(contract, 'isStale') !== undefined;
+              if (hasContractStale || contractAgeSeconds !== null || thresholdSeconds !== null) {
+                const derivedAge = contractAgeSeconds !== null
+                  ? contractAgeSeconds
+                  : (Number.isFinite(parsed) ? Math.max(0, Math.round((Date.now() - parsed) / 1000)) : null);
+                return {
+                  source,
+                  ageSeconds: derivedAge,
+                  stale: hasContractStale ? contractBoolValue(contract, 'isStale') : (!terminal && derivedAge !== null && thresholdSeconds !== null && derivedAge > thresholdSeconds),
+                  terminal,
+                  thresholdSeconds,
+                  contractDriven: true
+                };
+              }
+
               if (!Number.isFinite(parsed)) {
-                return { source, ageSeconds: null, stale: false, terminal };
+                return { source, ageSeconds: null, stale: false, terminal, thresholdSeconds: null, contractDriven: false };
               }
 
               const ageSeconds = Math.max(0, Math.round((Date.now() - parsed) / 1000));
@@ -996,7 +1079,9 @@ internal static class LiveEventsPage
                 source,
                 ageSeconds,
                 stale: !terminal && ageSeconds >= 120,
-                terminal
+                terminal,
+                thresholdSeconds: 120,
+                contractDriven: false
               };
             }
 
@@ -1010,12 +1095,27 @@ internal static class LiveEventsPage
                 return t(`终态快照，最后更新 ${age} 前`, `terminal snapshot, last updated ${age} ago`);
               }
 
+              const threshold = info.thresholdSeconds == null ? '' : formatAgeSeconds(info.thresholdSeconds);
+              if (info.contractDriven && threshold) {
+                return info.stale
+                  ? t(`进度可能陈旧，快照年龄 ${age}（阈值 ${threshold}）`, `progress may be stale; snapshot age ${age} (threshold ${threshold})`)
+                  : t(`进度新鲜，快照年龄 ${age}（阈值 ${threshold}）`, `progress fresh; snapshot age ${age} (threshold ${threshold})`);
+              }
+
               return info.stale
                 ? t(`进度可能停滞，最后更新 ${age} 前`, `progress may be stale; last updated ${age} ago`)
                 : t(`进度新鲜，最后更新 ${age} 前`, `progress fresh; last updated ${age} ago`);
             }
 
             function progressDurabilityText(snapshot, streamInfo) {
+              const contract = progressContractFromSnapshot(snapshot);
+              const durableSource = contractTextValue(contract, 'durableSourcePath');
+              if (durableSource) {
+                return streamInfo
+                  ? t(`SSE 正在展示真实步骤；持久化来源：${durableSource}`, `SSE is showing the real step; durable source: ${durableSource}`)
+                  : t(`持久化来源：${durableSource}`, `Durable source: ${durableSource}`);
+              }
+
               const hasDurableShape = Boolean(snapshot && (snapshot.updatedAtUtc || snapshot.UpdatedAtUtc || snapshot.generatedAtUtc || snapshot.GeneratedAtUtc));
               if (streamInfo) {
                 return t('SSE 实时步骤正在更新；同一快照会写入 durable runbook-progress.json，刷新页面后继续可见。', 'SSE real step is updating; the same snapshot is written to durable runbook-progress.json and remains visible after refresh.');
@@ -1032,22 +1132,31 @@ internal static class LiveEventsPage
               return t('尚未收到 durable 更新时间；保持页面打开等待真实执行器快照。', 'No durable update timestamp yet; keep the page open for a real executor snapshot.');
             }
 
-            function renderRunbookExecutionDiagnostics(snapshot, currentInfo, sourceText, freshnessText, durabilityText, failedStep) {
+            function renderRunbookExecutionDiagnostics(snapshot, currentInfo, sourceText, freshnessText, durabilityText, failedStep, contract) {
               const steps = Array.isArray(snapshot?.steps) ? snapshot.steps : [];
               const counts = steps.reduce((acc, step) => {
                 const key = String(step.state || 'pending').toLowerCase();
                 acc[key] = (acc[key] || 0) + 1;
                 return acc;
               }, {});
+              const contractCounts = {
+                completed: Number(contractValue(contract, 'completedStepCount')),
+                failed: Number(contractValue(contract, 'failedStepCount')),
+                running: Number(contractValue(contract, 'runningStepCount'))
+              };
               const currentCopy = currentInfo
                 ? `${currentInfo.ordinalText}; id=${currentInfo.stepId || '-'}; title=${currentInfo.title || '-'}; state=${currentInfo.state || '-'}; exit=${currentInfo.exitCode ?? '-'}`
                 : t('当前步骤尚未确定', 'current step not determined yet');
-              const countsCopy = Object.entries(counts).map(([key, value]) => `${key}=${value}`).join('; ') || 'no-steps';
+              const countsCopy = Object.values(contractCounts).some(Number.isFinite)
+                ? `completed=${Number.isFinite(contractCounts.completed) ? contractCounts.completed : 0}; failed=${Number.isFinite(contractCounts.failed) ? contractCounts.failed : 0}; running=${Number.isFinite(contractCounts.running) ? contractCounts.running : 0}`
+                : (Object.entries(counts).map(([key, value]) => `${key}=${value}`).join('; ') || 'no-steps');
+              const durableSource = contractTextValue(contract, 'durableSourcePath') || '-';
               const terminalAdvice = failedStep
                 ? t('失败排障：打开执行流程页查看完整终态输出；实时页仅在折叠区展示必要 stdout/stderr。', 'Failure triage: open Execution flow for full terminal output; the Live page only shows necessary stdout/stderr in collapsed areas.')
                 : t('正常值守：主视图只看真实步骤、新鲜度和证据就绪；命令/stdout/stderr 保持折叠。', 'Normal monitoring: use real step, freshness, and artifact readiness in the main view; commands/stdout/stderr stay collapsed.');
               const copy = [
                 `source=${sourceText}`,
+                `durableSourcePath=${durableSource}`,
                 `freshness=${freshnessText}`,
                 `durability=${durabilityText}`,
                 `current=${currentCopy}`,
@@ -1056,6 +1165,7 @@ internal static class LiveEventsPage
               ].join(' | ');
               const rows = [
                 [t('进度来源', 'Progress source'), sourceText],
+                [t('持久化来源路径', 'Durable source path'), durableSource],
                 [t('持久化说明', 'Durability note'), durabilityText],
                 [t('新鲜度', 'Freshness'), freshnessText],
                 [t('当前步骤', 'Current step'), currentCopy],
@@ -1078,6 +1188,33 @@ internal static class LiveEventsPage
               if (minutes < 60) { return `${minutes}m ${rest}s`; }
               const hours = Math.floor(minutes / 60);
               return `${hours}h ${minutes % 60}m`;
+            }
+
+            function timeSpanToSeconds(value) {
+              if (value === undefined || value === null || value === '') { return null; }
+              if (typeof value === 'number') {
+                return Number.isFinite(value) ? Math.max(0, value) : null;
+              }
+
+              const text = String(value).trim();
+              if (!text) { return null; }
+              const numeric = Number(text);
+              if (Number.isFinite(numeric)) { return Math.max(0, numeric); }
+
+              const daySplit = text.split('.');
+              const timePart = daySplit.length === 2 ? daySplit[1] : text;
+              const daySeconds = daySplit.length === 2 && Number.isFinite(Number(daySplit[0]))
+                ? Number(daySplit[0]) * 86400
+                : 0;
+              const parts = timePart.split(':').map(part => Number(part));
+              if (parts.length < 2 || parts.length > 3 || parts.some(part => !Number.isFinite(part))) {
+                return null;
+              }
+
+              const seconds = parts.length === 3
+                ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+                : parts[0] * 60 + parts[1];
+              return Math.max(0, Math.round(daySeconds + seconds));
             }
 
             function formatElapsedBetween(start, end) {
@@ -1157,12 +1294,15 @@ internal static class LiveEventsPage
               if (!target) { return; }
 
               const snapshot = lastProgressSnapshot || {};
+              const progressContract = progressContractFromSnapshot(snapshot);
               const streamStep = lastProgressStreamEnvelope?.currentStep || null;
-              const currentInfo = normalizeRunbookStepInfo(streamStep, snapshot) || currentStepInfoFromSnapshot(snapshot);
+              const contractStep = normalizeRunbookStepInfo(contractValue(progressContract, 'latestStepSummary'), snapshot);
+              const currentInfo = normalizeRunbookStepInfo(streamStep, snapshot) || contractStep || currentStepInfoFromSnapshot(snapshot);
               const rawState = lastProgressStreamEnvelope?.state || String(snapshot.state || 'pending').toLowerCase();
               const stepTitle = currentInfo?.title || snapshot.currentStepTitle || (rawState === 'completed' ? t('所有 runbook 步骤已完成', 'all runbook steps completed') : t('等待真实 runbook 步骤', 'waiting for real runbook step'));
               const stepState = currentInfo?.state ? formatProgressState(currentInfo.state) : (localizeServerStatus(rawState) || formatProgressState(rawState));
-              const stepCopy = `当前真实步骤=${stepTitle}; 状态=${stepState}; 来源=${progressStreamLabel()}; 提示=无需查看命令/stdout/stderr，失败时打开执行流程页`;
+              const durableSource = contractTextValue(progressContract, 'durableSourcePath') || '-';
+              const stepCopy = `当前真实步骤=${stepTitle}; 状态=${stepState}; 来源=${progressStreamLabel()}; durableSource=${durableSource}; 提示=无需查看命令/stdout/stderr，失败时打开执行流程页`;
 
               const vt = lastVirusTotalResult;
               const vtStatus = vt ? normalizeVirusTotalStatus(vt) : 'pending';
@@ -1188,6 +1328,12 @@ internal static class LiveEventsPage
               const reportCopy = `报告=${reportReady ? 'ready-or-terminal' : 'pending'}; action=${reportAction}`;
 
               const hints = [
+                ...contractArrayValue(progressContract, 'operatorHintsZh').slice(0, 6).map((hint, index) => ({
+                  title: index === 0 ? t('进度契约提示', 'Progress contract hint') : t(`进度契约提示 ${index + 1}`, `Progress contract hint ${index + 1}`),
+                  body: String(hint),
+                  tone: contractBoolValue(progressContract, 'isStale') ? 'failed' : 'endpoint',
+                  copy: `RunbookProgressContract.operatorHintsZh[${index}]=${String(hint)}`
+                })),
                 { title: t('当前步骤怎么处理', 'How to handle current step'), body: t(`当前真实步骤：${stepTitle}；状态：${stepState}。失败时打开“执行流程”，实时页不展开命令/stdout/stderr。`, `Current real step: ${stepTitle}; state: ${stepState}. If it fails, open Execution flow; the live page does not expand commands/stdout/stderr.`), tone: rawState === 'failed' || rawState === 'canceled' ? 'failed' : 'ready', copy: stepCopy },
                 { title: t('VT 查询/持久化状态', 'VT lookup/persistence state'), body: vtAction, tone: vtStatus === 'found' ? 'ready' : 'quiet', copy: vtCopy },
                 { title: t('证据/下载状态', 'Evidence/download status'), body: artifactAction, tone: artifactSummary.downloadableCount > 0 ? 'ready' : artifactSummary.indexLoaded ? 'waiting' : 'quiet', copy: artifactCopy },
@@ -1212,8 +1358,10 @@ internal static class LiveEventsPage
 
             function renderRunbookCockpitCard() {
               const snapshot = lastProgressSnapshot || {};
+              const progressContract = progressContractFromSnapshot(snapshot);
               const streamStep = lastProgressStreamEnvelope?.currentStep || null;
-              const currentInfo = normalizeRunbookStepInfo(streamStep, snapshot) || currentStepInfoFromSnapshot(snapshot);
+              const contractStep = normalizeRunbookStepInfo(contractValue(progressContract, 'latestStepSummary'), snapshot);
+              const currentInfo = normalizeRunbookStepInfo(streamStep, snapshot) || contractStep || currentStepInfoFromSnapshot(snapshot);
               const rawState = lastProgressStreamEnvelope?.state || String(snapshot.state || 'pending').toLowerCase();
               const stateLabel = localizeServerStatus(rawState) || formatProgressState(rawState);
               const percent = lastProgressStreamEnvelope?.progressPercent ?? progressPercent(snapshot);
@@ -1221,11 +1369,12 @@ internal static class LiveEventsPage
               const stepState = currentInfo?.state ? formatProgressState(currentInfo.state) : stateLabel;
               const ordinal = currentInfo?.ordinalText || t('步骤序号待定', 'step ordinal pending');
               const transport = progressStreamLabel();
-              const freshness = progressFreshnessInfo(progressSnapshotUpdatedAt(snapshot), rawState);
+              const freshness = progressFreshnessInfo(progressSnapshotUpdatedAt(snapshot), rawState, progressContract);
               const updatedAt = freshness.source || '';
               const freshnessText = progressFreshnessText(freshness);
+              const durableSource = contractTextValue(progressContract, 'durableSourcePath');
               const tone = freshness.stale ? 'failed' : rawState === 'completed' ? 'ready' : (rawState === 'failed' || rawState === 'canceled' ? 'failed' : (progressStreamMode === 'sse' ? 'endpoint' : 'waiting'));
-              const copy = `${t('当前真实步骤', 'Current real step')}=${stepTitle}; ${t('状态', 'state')}=${stepState}; ${t('进度', 'progress')}=${percent}%; ${transport}; ${freshnessText}; ${updatedAt}`;
+              const copy = `${t('当前真实步骤', 'Current real step')}=${stepTitle}; ${t('状态', 'state')}=${stepState}; ${t('进度', 'progress')}=${percent}%; ${transport}; ${freshnessText}; durableSource=${durableSource || '-'}; ${updatedAt}`;
               return {
                 copy,
                 html: `<article class="cockpit-card ${tone}" data-copy="${escapeAttr(copy)}">
@@ -1236,10 +1385,11 @@ internal static class LiveEventsPage
                     <span class="pill endpoint" data-copy="${escapeAttr(ordinal)}">${escapeHtml(ordinal)}</span>
                     <span class="pill quiet" data-copy="${escapeAttr(transport)}">${escapeHtml(transport)}</span>
                     <span class="pill ${freshness.stale ? 'failed' : freshness.ageSeconds == null ? 'waiting' : 'ready'}" data-copy="${escapeAttr(freshnessText)}">${escapeHtml(freshnessText)}</span>
+                    ${durableSource ? `<span class="pill endpoint" data-copy="${escapeAttr(durableSource)}">${escapeHtml(t('持久化来源已知', 'durable source known'))}</span>` : ''}
                     <span class="pill" data-copy="${escapeAttr(String(percent))}">${escapeHtml(`${percent}%`)}</span>
                     ${cockpitCopyButton(copy)}
                   </div>
-                  <p class="muted">${escapeHtml(t('优先取 progress stream 的 currentStep；退化时才用轮询快照。', 'Prefers progress stream currentStep; falls back to polling snapshots only when needed.'))}</p>
+                  <p class="muted">${escapeHtml(contractStep ? t('当前步骤来自 RunbookProgressContract.latestStepSummary；退化时才扫描 raw steps。', 'Current step comes from RunbookProgressContract.latestStepSummary; raw steps are scanned only as fallback.') : t('优先取 progress stream 的 currentStep；退化时才用轮询快照。', 'Prefers progress stream currentStep; falls back to polling snapshots only when needed.'))}</p>
                 </article>`
               };
             }
@@ -2214,16 +2364,20 @@ internal static class LiveEventsPage
               const total = Math.max(steps.length, Number(firstDefined(raw.totalSteps, raw.TotalSteps, snapshot?.totalSteps, snapshot?.TotalSteps, 0)) || 0);
               const title = firstTextValue(raw.displayText, raw.DisplayText, raw.title, raw.Title, raw.stepId, raw.StepId);
               const state = String(firstDefined(raw.state, raw.State, snapshot?.state, snapshot?.State, 'pending')).toLowerCase();
-              const ordinal = stepIndex >= 0
+              const explicitOrdinal = firstTextValue(raw.ordinal, raw.Ordinal);
+              const ordinal = explicitOrdinal || (stepIndex >= 0
                 ? `${stepIndex + 1}/${Math.max(total, stepIndex + 1)}`
-                : (Number.isFinite(Number(stepNumberValue)) ? `${Number(stepNumberValue)}/${Math.max(total, Number(stepNumberValue))}` : '');
+                : (Number.isFinite(Number(stepNumberValue)) ? `${Number(stepNumberValue)}/${Math.max(total, Number(stepNumberValue))}` : ''));
               return {
                 raw,
                 stepIndex,
                 stepId: firstTextValue(raw.stepId, raw.StepId),
                 title,
                 state,
+                phase: firstTextValue(raw.phase, raw.Phase),
+                category: firstTextValue(raw.category, raw.Category),
                 message: firstTextValue(raw.message, raw.Message),
+                remediationHintZh: firstTextValue(raw.remediationHintZh, raw.RemediationHintZh),
                 startedAtUtc: firstTextValue(raw.startedAtUtc, raw.StartedAtUtc),
                 duration: firstDefined(raw.duration, raw.Duration),
                 exitCode: firstDefined(raw.exitCode, raw.ExitCode),
@@ -2233,6 +2387,9 @@ internal static class LiveEventsPage
             }
 
             function currentStepInfoFromSnapshot(snapshot) {
+              const contractStep = normalizeRunbookStepInfo(contractValue(progressContractFromSnapshot(snapshot), 'latestStepSummary'), snapshot);
+              if (contractStep) { return contractStep; }
+
               const steps = Array.isArray(snapshot?.steps) ? snapshot.steps : [];
               if (!steps.length) { return null; }
               const index = snapshot.currentStepIndex === null || snapshot.currentStepIndex === undefined ? -1 : Number(snapshot.currentStepIndex);
@@ -2257,9 +2414,17 @@ internal static class LiveEventsPage
               lastProgressSnapshot = snapshot;
               const target = document.getElementById('runbookProgress');
               if (!target || !snapshot) { return; }
+              const progressContract = progressContractFromSnapshot(snapshot);
               const steps = Array.isArray(snapshot.steps) ? snapshot.steps : [];
-              const total = Math.max(steps.length, Number(snapshot.totalSteps || 0));
-              const completed = Math.max(0, Number(snapshot.completedSteps || 0));
+              const contractStepSummary = contractValue(progressContract, 'latestStepSummary');
+              const contractTotal = Number(contractValue(contractStepSummary, 'totalSteps'));
+              const total = Math.max(steps.length, Number(snapshot.totalSteps || 0), Number.isFinite(contractTotal) ? contractTotal : 0);
+              const contractCompleted = Number(contractValue(progressContract, 'completedStepCount'));
+              const contractFailed = Number(contractValue(progressContract, 'failedStepCount'));
+              const contractRunning = Number(contractValue(progressContract, 'runningStepCount'));
+              const completed = Math.max(0, Number.isFinite(contractCompleted) ? contractCompleted : Number(snapshot.completedSteps || 0));
+              const failedCount = Math.max(0, Number.isFinite(contractFailed) ? contractFailed : steps.filter(step => ['failed', 'canceled'].includes(String(step.state || '').toLowerCase())).length);
+              const runningCount = Math.max(0, Number.isFinite(contractRunning) ? contractRunning : steps.filter(step => String(step.state || '').toLowerCase() === 'running').length);
               const executed = Math.max(0, Number(snapshot.executedSteps || 0));
               const rawState = String(snapshot.state || 'pending').toLowerCase();
               const state = formatProgressState(rawState);
@@ -2271,27 +2436,43 @@ internal static class LiveEventsPage
                 : progressPercent(snapshot);
               const stageIndex = estimateMonitorStageIndex(percent, done, failed);
               const streamInfo = normalizeRunbookStepInfo(streamCurrentStep || lastProgressStreamEnvelope?.currentStep, snapshot);
+              const contractInfo = normalizeRunbookStepInfo(contractStepSummary, snapshot);
               const snapshotInfo = currentStepInfoFromSnapshot(snapshot);
-              const currentInfo = streamInfo || snapshotInfo;
-              const current = snapshot.currentStepTitle || currentInfo?.title || (done ? t('所有步骤已完成', 'all steps completed') : t('等待下一步', 'waiting for next step'));
+              const currentInfo = streamInfo || contractInfo || snapshotInfo;
+              const current = currentInfo?.title || snapshot.currentStepTitle || (done ? t('所有步骤已完成', 'all steps completed') : t('等待下一步', 'waiting for next step'));
               const currentState = currentInfo?.state ? formatProgressState(currentInfo.state) : state;
               const currentOrdinal = currentInfo?.ordinalText || t('步骤序号待定', 'step ordinal pending');
-              const currentSource = streamInfo ? t('真实进度流 currentStep', 'real progress stream currentStep') : t('轮询/持久化快照', 'poll/durable snapshot');
+              const currentSource = streamInfo
+                ? t('真实进度流 currentStep', 'real progress stream currentStep')
+                : contractInfo
+                  ? t('RunbookProgressContract.latestStepSummary', 'RunbookProgressContract.latestStepSummary')
+                  : t('轮询/持久化快照', 'poll/durable snapshot');
               const elapsed = formatDuration(snapshot.duration) || '-';
-              const freshness = progressFreshnessInfo(progressSnapshotUpdatedAt(snapshot), rawState);
+              const freshness = progressFreshnessInfo(progressSnapshotUpdatedAt(snapshot), rawState, progressContract);
               const freshnessText = progressFreshnessText(freshness);
               const durabilityText = progressDurabilityText(snapshot, streamInfo);
               const freshnessTone = freshness.stale ? 'failed' : freshness.ageSeconds == null ? 'waiting' : 'ready';
+              const durableSource = contractTextValue(progressContract, 'durableSourcePath');
+              const countText = t(`完成 ${completed} / 失败 ${failedCount} / 运行中 ${runningCount} / 总数 ${total}`, `completed ${completed} / failed ${failedCount} / running ${runningCount} / total ${total}`);
               const failedStep = steps.find(step => ['failed', 'canceled'].includes(String(step.state || '').toLowerCase()));
               const failureReason = buildProgressFailureReason(snapshot, failedStep);
               const message = snapshot.message ? `<p class="muted" data-copy="${escapeAttr(localizeServerMessage(snapshot.message))}">${escapeHtml(localizeServerMessage(snapshot.message))}</p>` : '';
               const failure = failureReason ? `<p class="error" data-copy="${escapeAttr(failureReason)}">${t('失败原因：', 'Failure reason: ')}${escapeHtml(failureReason)}</p>` : '';
               const stageRail = renderMonitorStages(stageIndex, done, failed);
-              const focusCopy = `${state}; ${completed}/${total}; 当前=${current}; 当前状态=${currentState}; 序号=${currentOrdinal}; 来源=${currentSource}; 持久化=${durabilityText}; 已执行=${executed}; 已耗时=${elapsed}; 快照=${freshnessText}; 更新时间=${freshness.source || '-'}`;
+              const focusCopy = `${state}; ${completed}/${total}; ${countText}; 当前=${current}; 当前状态=${currentState}; 序号=${currentOrdinal}; 来源=${currentSource}; 持久化来源=${durableSource || '-'}; 持久化=${durabilityText}; 已执行=${executed}; 已耗时=${elapsed}; 快照=${freshnessText}; 更新时间=${freshness.source || '-'}`;
               const stepCards = steps.slice(0, 32).map(step => renderRunbookStepCard(step, currentInfo, total)).join('');
               const hiddenCount = Math.max(0, steps.length - 32);
               const hiddenNotice = hiddenCount > 0 ? `<p class="muted">${escapeHtml(t(`另有 ${hiddenCount} 个步骤已折叠，执行流程页可查看完整列表。`, `${hiddenCount} additional steps are hidden; open Execution flow for the full list.`))}</p>` : '';
-              const executionDiagnostics = renderRunbookExecutionDiagnostics(snapshot, currentInfo, currentSource, freshnessText, durabilityText, failedStep);
+              const contractHintList = contractArrayValue(progressContract, 'operatorHintsZh').slice(0, 4);
+              const contractHintHtml = contractHintList.length
+                ? `<div class="operator-hints" data-copy="${escapeAttr(contractHintList.join(' | '))}">
+                    <strong>${escapeHtml(t('RunbookProgressContract.operatorHintsZh', 'RunbookProgressContract.operatorHintsZh'))}</strong>
+                    <div class="operator-hint-list">
+                      ${contractHintList.map((hint, index) => `<article class="operator-hint ${freshness.stale ? 'failed' : 'endpoint'}" data-copy="${escapeAttr(String(hint))}"><strong>${escapeHtml(t(`提示 ${index + 1}`, `Hint ${index + 1}`))}</strong><p>${escapeHtml(String(hint))}</p></article>`).join('')}
+                    </div>
+                  </div>`
+                : '';
+              const executionDiagnostics = renderRunbookExecutionDiagnostics(snapshot, currentInfo, currentSource, freshnessText, durabilityText, failedStep, progressContract);
               target.innerHTML = `
                 <div class="card-status">
                   <span class="pill ${failed ? 'failed' : done ? 'ready' : 'endpoint'}" data-copy="${escapeAttr(state)}">${escapeHtml(state)}</span>
@@ -2303,7 +2484,9 @@ internal static class LiveEventsPage
                   <div><span>${escapeHtml(t('当前真实步骤', 'Current real step'))}</span><strong>${escapeHtml(current)}</strong></div>
                   <div><span>${escapeHtml(t('当前步骤状态', 'Current step status'))}</span><strong>${escapeHtml(currentState)}</strong></div>
                   <div><span>${escapeHtml(t('步骤序号', 'Step ordinal'))}</span><strong>${escapeHtml(currentOrdinal)}</strong></div>
+                  <div><span>${escapeHtml(t('步骤计数', 'Step counts'))}</span><strong data-copy="${escapeAttr(countText)}">${escapeHtml(countText)}</strong></div>
                   <div><span>${escapeHtml(t('进度来源', 'Progress source'))}</span><strong>${escapeHtml(currentSource)}</strong></div>
+                  <div><span>${escapeHtml(t('持久化来源路径', 'Durable source path'))}</span><strong>${durableSource ? `<code data-copy="${escapeAttr(durableSource)}">${escapeHtml(durableSource)}</code>` : escapeHtml(t('尚未确认', 'not confirmed yet'))}</strong></div>
                   <div><span>${escapeHtml(t('快照新鲜度', 'Snapshot freshness'))}</span><strong class="pill ${freshnessTone}" data-copy="${escapeAttr(freshnessText)}">${escapeHtml(freshnessText)}</strong></div>
                   <div><span>${escapeHtml(t('持久化进度', 'Durable progress'))}</span><strong data-copy="${escapeAttr(durabilityText)}">${escapeHtml(durabilityText)}</strong></div>
                   <div><span>${escapeHtml(t('更新时间', 'Updated at'))}</span><strong data-copy="${escapeAttr(freshness.source || '-')}">${escapeHtml(freshness.source || '-')}</strong></div>
@@ -2312,6 +2495,7 @@ internal static class LiveEventsPage
                 </div>
                 ${message}
                 ${failure}
+                ${contractHintHtml}
                 ${executionDiagnostics}
                 <div class="monitor-stage-grid" aria-label="${escapeAttr(t('分析阶段进度', 'analysis stage progress'))}">${stageRail}</div>
                 <div class="step-list">${stepCards || `<p class="muted">${t('尚无步骤快照。', 'No step snapshot yet.')}</p>`}</div>
@@ -2408,13 +2592,22 @@ internal static class LiveEventsPage
 
             function progressPercent(snapshot) {
               const steps = Array.isArray(snapshot?.steps) ? snapshot.steps : [];
-              const total = Math.max(steps.length, Number(snapshot?.totalSteps || 0));
+              const contract = progressContractFromSnapshot(snapshot);
+              const contractStep = contractValue(contract, 'latestStepSummary');
+              const explicitPercent = Number(firstDefined(snapshot?.progressPercent, snapshot?.ProgressPercent));
+              if (Number.isFinite(explicitPercent) && explicitPercent > 0) {
+                return Math.max(0, Math.min(100, Math.round(explicitPercent)));
+              }
+
+              const total = Math.max(steps.length, Number(snapshot?.totalSteps || 0), Number(contractValue(contractStep, 'totalSteps')) || 0);
               if (total <= 0) { return 0; }
               const state = String(snapshot?.state || '').toLowerCase();
               if (state === 'completed' || snapshot?.success === true) { return 100; }
-              const completed = Math.max(0, Number(snapshot?.completedSteps || 0));
+              const contractCompleted = Number(contractValue(contract, 'completedStepCount'));
+              const contractRunning = Number(contractValue(contract, 'runningStepCount'));
+              const completed = Math.max(0, Number.isFinite(contractCompleted) ? contractCompleted : Number(snapshot?.completedSteps || 0));
               const currentIndex = snapshot?.currentStepIndex === null || snapshot?.currentStepIndex === undefined ? -1 : Number(snapshot.currentStepIndex);
-              const hasRunning = steps.some(step => String(step.state || '').toLowerCase() === 'running');
+              const hasRunning = (Number.isFinite(contractRunning) && contractRunning > 0) || steps.some(step => String(step.state || '').toLowerCase() === 'running');
               const runningCredit = hasRunning ? 0.45 : (currentIndex >= 0 && completed <= currentIndex ? 0.25 : 0);
               const numerator = Math.max(completed, currentIndex >= 0 ? currentIndex : 0) + runningCredit;
               const percent = Math.round((Math.min(total, numerator) / total) * 100);

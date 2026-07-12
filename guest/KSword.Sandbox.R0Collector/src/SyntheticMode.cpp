@@ -15,6 +15,24 @@ std::string BoolText(const bool value) {
     return value ? "true" : "false";
 }
 
+// Input: Mock row extra-data vector and a field name.
+// Processing: Checks whether the caller will override a default field later in
+// the same synthetic row, avoiding duplicate JSON object keys.
+// Return: true when the extra-data set already contains the field.
+bool ExtraDataHasKey(const MockExtraData& extraData, const char* key) {
+    if (key == nullptr) {
+        return false;
+    }
+
+    for (const auto& item : extraData) {
+        if (item.first == key) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void AddSyntheticAbiVersionFields(JsonDataObjectBuilder& data) {
     data.AddUnsigned("collectorAbiVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
     data.AddUtf8("collectorAbiVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
@@ -491,6 +509,10 @@ bool EmitMockDriverCategoryEvent(
     data.AddUtf8("noiseClassificationConfidence", "high");
     data.AddUtf8("noiseProbeKind", "none");
     data.AddBool("sampleBehaviorCandidate", true);
+    data.AddBool("behaviorCounted", true);
+    data.AddBool("nonbehavior", false);
+    data.AddUtf8("behaviorCountingPolicy", "synthetic-driver-rows-are-sample-or-system-behavior-candidates");
+    data.AddUtf8("nonbehaviorReason", "none");
     data.AddUtf8("sampleBehaviorCandidateReason", "synthetic-sample-or-system-candidate");
     data.AddBool("collectionDiagnostic", false);
     data.AddBool("collectionNoise", false);
@@ -516,6 +538,18 @@ bool EmitMockDriverCategoryEvent(
     data.AddUtf8("payloadVersionStatus", "mock-v1-compatible");
     data.AddUtf8("payloadVersionPolicy", "synthetic rows mirror fixed v1 producer payload versions; live rows must match Version and Size before typed parsing");
     data.AddUtf8("producerPayloadVersionFieldSet", kTypedPayloadVersionFieldSet);
+    if (!ExtraDataHasKey(extraData, "stress")) {
+        data.AddBool("stress", false);
+    }
+    if (!ExtraDataHasKey(extraData, "stressOrdinal")) {
+        data.AddSigned("stressOrdinal", -1);
+    }
+    if (!ExtraDataHasKey(extraData, "stressCount")) {
+        data.AddSigned("stressCount", options.stressCount);
+    }
+    if (!ExtraDataHasKey(extraData, "stressCorpusRole")) {
+        data.AddUtf8("stressCorpusRole", "synthetic-driver-row");
+    }
     data.AddBool("lost", false);
     data.AddUnsigned("lostCount", 0);
     data.AddBool("lossObserved", false);
@@ -1260,6 +1294,7 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
     mockData.AddUtf8("producer", "r0collector");
     AddSyntheticSelfNoiseFilterFields(mockData);
     AddCollectorAttributionFields(mockData, "synthetic-mock-marker", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(mockData, "synthetic-mock-marker", "emit-synthetic-mock-marker-not-sample-behavior");
     mockData.AddBool("collectorNoise", false);
     mockData.AddBool("collectorSelfNoise", false);
     mockData.AddBool("selfProcess", false);

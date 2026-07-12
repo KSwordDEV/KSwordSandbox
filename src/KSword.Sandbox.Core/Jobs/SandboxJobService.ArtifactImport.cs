@@ -1,6 +1,8 @@
 using System.Globalization;
+using System.Text.Json;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Abstractions.Artifacts;
+using KSword.Sandbox.Core.Artifacts;
 
 namespace KSword.Sandbox.Core.Jobs;
 
@@ -57,12 +59,18 @@ public sealed partial class SandboxJobService
         HostArtifactIndex artifactIndex,
         IReadOnlyList<SandboxEvent> currentEvents)
     {
+        var droppedFileMaterialization = MaterializeDroppedFileArtifacts(jobRoot, guestEventsPath, artifactIndex.JobId, currentEvents);
+        if (droppedFileMaterialization.CopiedCount > 0)
+        {
+            artifactIndex = new HostArtifactIndexBuilder().Build(artifactIndex.JobId, jobRoot, artifactCollection);
+        }
+
         var generated = new List<SandboxEvent>();
         var eventKeys = currentEvents.Select(EventKey).ToHashSet(StringComparer.Ordinal);
-        AddGeneratedEvent(generated, eventKeys, CreateHostArtifactImportSummaryEvent(artifactIndex, jobRoot, guestEventsPath));
+        AddGeneratedEvent(generated, eventKeys, CreateHostArtifactImportSummaryEvent(artifactIndex, jobRoot, guestEventsPath, droppedFileMaterialization));
 
         foreach (var artifact in artifactIndex.Artifacts
-            .Where(IsSensitiveHostImportArtifact)
+            .Where(IsDownloadableSensitiveHostImportArtifact)
             .OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase))
         {
             AddGeneratedEvent(generated, eventKeys, CreateHostArtifactImportedEvent(artifact, jobRoot, guestEventsPath));
@@ -71,8 +79,8 @@ public sealed partial class SandboxJobService
         foreach (var expectation in ArtifactImportExpectations)
         {
             var artifactCount = artifactIndex.Artifacts.Count(artifact =>
-                artifact.Kind == expectation.Kind ||
-                string.Equals(artifact.CollectionName, expectation.CollectionName, StringComparison.OrdinalIgnoreCase));
+                IsDownloadableHostArtifact(artifact) &&
+                ArtifactMatchesExpectation(artifact, expectation));
             if (artifactCount > 0)
             {
                 continue;
@@ -133,9 +141,17 @@ public sealed partial class SandboxJobService
     private static SandboxEvent CreateHostArtifactImportSummaryEvent(
         HostArtifactIndex artifactIndex,
         string jobRoot,
-        string? guestEventsPath)
+        string? guestEventsPath,
+        DroppedFileMaterializationResult droppedFileMaterialization)
     {
-        var sensitiveImportCount = artifactIndex.Artifacts.Count(IsSensitiveHostImportArtifact);
+        var sensitiveImportCount = artifactIndex.Artifacts.Count(IsDownloadableSensitiveHostImportArtifact);
+        var sensitiveReasons = artifactIndex.Artifacts
+            .Where(IsSensitiveHostImportArtifact)
+            .Select(artifact => SensitiveArtifactReason(artifact.Kind))
+            .Where(reason => !string.IsNullOrWhiteSpace(reason))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(reason => reason, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         var duplicateGroupCount = artifactIndex.Artifacts
             .Select(artifact => MetadataValue(artifact.Metadata, "duplicateGroupId"))
             .Where(value => !string.IsNullOrWhiteSpace(value))
@@ -190,6 +206,8 @@ public sealed partial class SandboxJobService
             {
                 ["behaviorCounted"] = "false",
                 ["nonbehavior"] = "true",
+                ["metadataBehaviorCounted"] = "false",
+                ["metadataNonbehavior"] = "true",
                 ["behaviorScope"] = "artifact-import-summary",
                 ["notSampleBehavior"] = "true",
                 ["collectionNoise"] = "true",
@@ -201,7 +219,10 @@ public sealed partial class SandboxJobService
                 ["importMode"] = "host-artifact-index",
                 ["downloadPolicy"] = artifactIndex.DownloadPolicy,
                 ["importedSensitiveArtifactCount"] = sensitiveImportCount.ToString(CultureInfo.InvariantCulture),
+                ["importedDownloadableSensitiveArtifactCount"] = sensitiveImportCount.ToString(CultureInfo.InvariantCulture),
+                ["downloadableSensitiveArtifactCount"] = sensitiveImportCount.ToString(CultureInfo.InvariantCulture),
                 ["sensitiveArtifactCount"] = artifactIndex.SensitiveArtifactCount.ToString(CultureInfo.InvariantCulture),
+                ["sensitiveArtifactReasons"] = string.Join(",", sensitiveReasons),
                 ["downloadableArtifactCount"] = artifactIndex.DownloadableArtifactCount.ToString(CultureInfo.InvariantCulture),
                 ["artifactCount"] = artifactIndex.ArtifactCount.ToString(CultureInfo.InvariantCulture),
                 ["collectionCount"] = artifactIndex.CollectionCount.ToString(CultureInfo.InvariantCulture),
@@ -235,6 +256,14 @@ public sealed partial class SandboxJobService
                 ["memoryDumpBytes"] = BytesForKind(collectionStats, ArtifactKind.MemoryDump),
                 ["packetCaptureBytes"] = BytesForKind(collectionStats, ArtifactKind.PacketCapture),
                 ["rejectionDiagnosticCollections"] = string.Join(",", rejectedCollections),
+                ["droppedFileMaterializedCount"] = droppedFileMaterialization.CopiedCount.ToString(CultureInfo.InvariantCulture),
+                ["droppedFileMaterializationExistingCount"] = droppedFileMaterialization.ExistingCount.ToString(CultureInfo.InvariantCulture),
+                ["droppedFileMaterializationSkippedCount"] = droppedFileMaterialization.SkippedCount.ToString(CultureInfo.InvariantCulture),
+                ["droppedFileMaterializationSelectors"] = string.Join(",", droppedFileMaterialization.CopiedSelectors),
+                ["droppedFileMaterializationReasonCountsJson"] = JsonSerializer.Serialize(droppedFileMaterialization.ReasonCounts),
+                ["droppedFileMaterializationPolicy"] = "copy-existing-dropped-files-under-import-root-to-job-result-directory",
+                ["droppedFileResultDirectory"] = $"guest/{artifactIndex.JobId:N}/artifacts/dropped-files",
+                ["droppedFileResultDirectoryPolicy"] = "job-root-relative-host-result-directory",
                 ["sourceEventType"] = "host.artifact.index",
                 ["sourceEventPath"] = FirstNonEmpty(guestEventsPath, jobRoot),
                 ["indexRoot"] = jobRoot,
@@ -257,6 +286,8 @@ public sealed partial class SandboxJobService
             ["artifactRejected"] = "true",
             ["behaviorCounted"] = "false",
             ["nonbehavior"] = "true",
+            ["metadataBehaviorCounted"] = "false",
+            ["metadataNonbehavior"] = "true",
             ["behaviorScope"] = "artifact-import-rejection",
             ["notSampleBehavior"] = "true",
             ["collectionNoise"] = "true",
@@ -279,7 +310,9 @@ public sealed partial class SandboxJobService
             ["rejectionDiagnosticsAvailable"] = FirstNonEmpty(MetadataValue(collection.Metadata, "rejectionDiagnosticsAvailable"), "true"),
             ["rejectedArtifactCount"] = FirstNonEmpty(MetadataValue(collection.Metadata, "rejectedArtifactCount"), "0"),
             ["artifactRejectionReasons"] = FirstNonEmpty(MetadataValue(collection.Metadata, "artifactRejectionReasons"), collection.Reason),
+            ["artifactRejectionReasonCountsJson"] = FirstNonEmpty(MetadataValue(collection.Metadata, "artifactRejectionReasonCountsJson"), "{}"),
             ["lastRejectedArtifactReason"] = FirstNonEmpty(MetadataValue(collection.Metadata, "lastRejectedArtifactReason"), collection.Reason),
+            ["lastRejectedArtifactReasonZh"] = FirstNonEmpty(MetadataValue(collection.Metadata, "lastRejectedArtifactReasonZh"), RejectionReasonZh(collection.Reason)),
             ["lastRejectedArtifactSelector"] = FirstNonEmpty(MetadataValue(collection.Metadata, "lastRejectedArtifactSelector"), collection.ImportPath, collection.RelativePath),
             ["zhMessage"] = $"Host 已拒绝 {collection.Name} collection 中的不安全、缺失或重复 artifact 引用。",
             ["zhHint"] = FirstNonEmpty(
@@ -308,6 +341,21 @@ public sealed partial class SandboxJobService
                 string.Equals(artifact.CollectionName, expectation.CollectionName, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static bool IsDownloadableSensitiveHostImportArtifact(ArtifactDescriptor artifact)
+    {
+        return IsSensitiveHostImportArtifact(artifact) && IsDownloadableHostArtifact(artifact);
+    }
+
+    private static bool IsDownloadableHostArtifact(ArtifactDescriptor artifact)
+    {
+        return !string.IsNullOrWhiteSpace(ArtifactDescriptorFactory.NormalizeRelativePath(artifact.RelativePath)) &&
+            !string.IsNullOrWhiteSpace(ArtifactDescriptorFactory.NormalizeSafeLink(artifact.SafeLink)) &&
+            !string.IsNullOrWhiteSpace(ArtifactDescriptorFactory.NormalizeSelector(artifact.ImportPath)) &&
+            !string.IsNullOrWhiteSpace(artifact.FullPath) &&
+            File.Exists(artifact.FullPath) &&
+            string.Equals(FirstNonEmpty(MetadataValue(artifact.Metadata, "isDownloadable"), "true"), "true", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool HasRejectionDiagnostics(ArtifactCollectionDescriptor collection)
     {
         return string.Equals(MetadataValue(collection.Metadata, "rejectionDiagnosticsAvailable"), "true", StringComparison.OrdinalIgnoreCase) ||
@@ -319,6 +367,10 @@ public sealed partial class SandboxJobService
         string jobRoot,
         string? guestEventsPath)
     {
+        var relativeSelector = ArtifactDescriptorFactory.NormalizeRelativePath(artifact.RelativePath);
+        var safeLink = ArtifactDescriptorFactory.BuildSafeLink(relativeSelector);
+        var importPath = FirstNonEmpty(ArtifactDescriptorFactory.NormalizeSelector(artifact.ImportPath), relativeSelector);
+        var isSensitive = IsSensitiveHostImportArtifact(artifact).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         var sourceEventType = FirstNonEmpty(
             MetadataValue(artifact.Metadata, "sourceEventType"),
             MetadataValue(artifact.Metadata, "lastEventType"),
@@ -339,20 +391,33 @@ public sealed partial class SandboxJobService
             ["sourceArtifactKindZh"] = ChineseKindName(artifact.Kind),
             ["behaviorCounted"] = "false",
             ["nonbehavior"] = "true",
+            ["metadataBehaviorCounted"] = "false",
+            ["metadataNonbehavior"] = "true",
             ["behaviorScope"] = "artifact-import-metadata",
             ["notSampleBehavior"] = "true",
             ["collectionNoise"] = "true",
             ["hostImportSelfNoise"] = "true",
             ["selfNoisePolicy"] = "artifact-host-import-row-not-sample-behavior",
             ["sampleBehaviorImpact"] = "metadata-only-do-not-score",
-            ["sampleEvidenceArtifact"] = IsSensitiveHostImportArtifact(artifact).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
-            ["evidenceDerivedFromSample"] = IsSensitiveHostImportArtifact(artifact).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["sampleEvidenceArtifact"] = isSensitive,
+            ["evidenceDerivedFromSample"] = isSensitive,
+            ["sensitiveArtifact"] = isSensitive,
+            ["sensitiveArtifactReason"] = SensitiveArtifactReason(artifact.Kind),
+            ["sensitiveArtifactReasonZh"] = SensitiveArtifactReasonZh(artifact.Kind),
+            ["hostImportRowPurpose"] = "download-metadata-and-evidence-chain",
+            ["hostImportActionBehaviorCounted"] = "false",
+            ["eventGeneratedByHostImporter"] = "true",
             ["sourceEventType"] = sourceEventType,
-            ["downloadSelector"] = artifact.RelativePath,
-            ["downloadSafeLink"] = artifact.SafeLink,
-            ["safeRelativeSelector"] = artifact.RelativePath,
+            ["downloadSelector"] = relativeSelector,
+            ["downloadSafeLink"] = safeLink,
+            ["safeRelativeSelector"] = relativeSelector,
             ["downloadFileName"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadFileName"), artifact.Name),
             ["downloadContentType"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadContentType"), artifact.MimeType),
+            ["downloadAvailable"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadAvailable"), "true"),
+            ["downloadResolutionState"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadResolutionState"), "available"),
+            ["downloadReadiness"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadReadiness"), "host-file-present"),
+            ["downloadRejectionCode"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadRejectionCode"), "none"),
+            ["downloadSelectorKind"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadSelectorKind"), "relativePath"),
             ["downloadSecurityPolicy"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadSecurityPolicy"), "server-indexed-relative-selector"),
             ["downloadRejectionPolicy"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadRejectionPolicy"), "reject-empty-absolute-traversal-unindexed-missing"),
             ["downloadIndexPolicy"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadIndexPolicy"), "artifact-index-relative-selectors-only"),
@@ -361,10 +426,10 @@ public sealed partial class SandboxJobService
             ["isDownloadable"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "isDownloadable"), "true"),
             ["sourceEventPath"] = sourceEventPath,
             ["artifactCategory"] = artifact.Category,
-            ["artifactRelativePath"] = artifact.RelativePath,
-            ["sourceArtifactRelativePath"] = artifact.RelativePath,
-            ["safeLink"] = artifact.SafeLink,
-            ["importPath"] = artifact.ImportPath,
+            ["artifactRelativePath"] = relativeSelector,
+            ["sourceArtifactRelativePath"] = relativeSelector,
+            ["safeLink"] = safeLink,
+            ["importPath"] = importPath,
             ["fullPath"] = artifact.FullPath,
             ["collectionName"] = artifact.CollectionName,
             ["evidenceRole"] = artifact.EvidenceRole,
@@ -421,6 +486,218 @@ public sealed partial class SandboxJobService
         };
     }
 
+    private static DroppedFileMaterializationResult MaterializeDroppedFileArtifacts(
+        string jobRoot,
+        string? guestEventsPath,
+        Guid jobId,
+        IReadOnlyList<SandboxEvent> currentEvents)
+    {
+        var copiedSelectors = new List<string>();
+        var reasonCounts = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var existingCount = 0;
+        if (jobId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(guestEventsPath) ||
+            !File.Exists(guestEventsPath) ||
+            currentEvents.Count == 0)
+        {
+            return DroppedFileMaterializationResult.Empty;
+        }
+
+        string importRoot;
+        string resultGuestRoot;
+        try
+        {
+            importRoot = Path.GetDirectoryName(Path.GetFullPath(guestEventsPath)) ?? string.Empty;
+            resultGuestRoot = Path.GetFullPath(Path.Combine(jobRoot, "guest", jobId.ToString("N")));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return DroppedFileMaterializationResult.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(importRoot) || !Directory.Exists(importRoot))
+        {
+            return DroppedFileMaterializationResult.Empty;
+        }
+
+        var seenDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var evt in currentEvents.Where(IsCopiedDroppedFileEvent))
+        {
+            var selector = ResolveDroppedFileArtifactSelector(evt);
+            var resultRelativePath = NormalizeDroppedFileResultRelativePath(selector);
+            if (string.IsNullOrWhiteSpace(resultRelativePath))
+            {
+                IncrementReasonCount(reasonCounts, "missingSafeDroppedFileSelector");
+                continue;
+            }
+
+            var sourcePath = ResolveDroppedFileSourcePath(evt, importRoot, resultRelativePath);
+            if (string.IsNullOrWhiteSpace(sourcePath))
+            {
+                IncrementReasonCount(reasonCounts, "sourceMissingOrOutsideImportRoot");
+                continue;
+            }
+
+            string destinationPath;
+            try
+            {
+                destinationPath = Path.GetFullPath(Path.Combine(resultGuestRoot, resultRelativePath));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                IncrementReasonCount(reasonCounts, "unsafeDestinationPath");
+                continue;
+            }
+
+            if (!IsSameOrUnderDirectory(resultGuestRoot, destinationPath))
+            {
+                IncrementReasonCount(reasonCounts, "unsafeDestinationPath");
+                continue;
+            }
+
+            if (!seenDestinations.Add(destinationPath))
+            {
+                existingCount++;
+                continue;
+            }
+
+            if (PathsEqual(sourcePath, destinationPath) || File.Exists(destinationPath))
+            {
+                existingCount++;
+                continue;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+                File.Copy(sourcePath, destinationPath, overwrite: false);
+                copiedSelectors.Add($"guest/{jobId:N}/{ArtifactDescriptorFactory.NormalizeRelativePath(resultRelativePath)}");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+            {
+                IncrementReasonCount(reasonCounts, "copyFailed");
+            }
+        }
+
+        return new DroppedFileMaterializationResult(
+            copiedSelectors.Count,
+            existingCount,
+            reasonCounts.Values.Sum(),
+            copiedSelectors,
+            reasonCounts);
+    }
+
+    private static bool IsCopiedDroppedFileEvent(SandboxEvent evt)
+    {
+        if (!string.Equals(evt.EventType, "artifact.dropped_file.copied", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var collectionName = ReadNullableEventData(evt, "collectionName");
+        var evidenceRole = ReadNullableEventData(evt, "evidenceRole");
+        return string.IsNullOrWhiteSpace(collectionName) ||
+            string.Equals(collectionName, "dropped-files", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evidenceRole, "dropped-file", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveDroppedFileArtifactSelector(SandboxEvent evt)
+    {
+        return FirstNonEmpty(
+            ReadNullableEventData(evt, "artifactRelativePath"),
+            ReadNullableEventData(evt, "sourceArtifactRelativePath"),
+            ReadNullableEventData(evt, "downloadSelector"),
+            ReadNullableEventData(evt, "stableArtifactSelector"),
+            ReadNullableEventData(evt, "canonicalArtifactSelector"),
+            ReadNullableEventData(evt, "artifactSelector"),
+            ReadNullableEventData(evt, "safeRelativeSelector"),
+            ReadNullableEventData(evt, "relativePath"),
+            ReadNullableEventData(evt, "importPath"));
+    }
+
+    private static string NormalizeDroppedFileResultRelativePath(string selector)
+    {
+        var normalized = ArtifactDescriptorFactory.NormalizeSelector(selector);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        foreach (var marker in new[] { "artifacts/dropped-files/", "dropped-files/" })
+        {
+            var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIndex < 0)
+            {
+                continue;
+            }
+
+            var resultRelativePath = ArtifactDescriptorFactory.NormalizeRelativePath(normalized[markerIndex..]);
+            return string.IsNullOrWhiteSpace(Path.GetFileName(resultRelativePath)) ? string.Empty : resultRelativePath;
+        }
+
+        return string.Empty;
+    }
+
+    private static string ResolveDroppedFileSourcePath(
+        SandboxEvent evt,
+        string importRoot,
+        string resultRelativePath)
+    {
+        foreach (var candidate in new[]
+        {
+            evt.Path,
+            ReadNullableEventData(evt, "artifactFullPath"),
+            ReadNullableEventData(evt, "copiedPath"),
+            ReadNullableEventData(evt, "destinationPath")
+        })
+        {
+            var sourcePath = TryNormalizeImportRootFile(candidate, importRoot);
+            if (!string.IsNullOrWhiteSpace(sourcePath))
+            {
+                return sourcePath;
+            }
+        }
+
+        return TryNormalizeImportRootFile(Path.Combine(importRoot, resultRelativePath), importRoot);
+    }
+
+    private static string TryNormalizeImportRootFile(string? path, string importRoot)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            return File.Exists(fullPath) && IsSameOrUnderDirectory(importRoot, fullPath)
+                ? fullPath
+                : string.Empty;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool PathsEqual(string left, string right)
+    {
+        try
+        {
+            return string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    private static void IncrementReasonCount(IDictionary<string, int> reasonCounts, string reason)
+    {
+        reasonCounts[reason] = reasonCounts.TryGetValue(reason, out var count) ? count + 1 : 1;
+    }
+
     private static SandboxEvent CreateCollectionHealthEvent(
         ArtifactImportExpectation expectation,
         int artifactCount,
@@ -455,6 +732,8 @@ public sealed partial class SandboxJobService
             ["sourceArtifactKindZh"] = expectation.ChineseName,
             ["behaviorCounted"] = "false",
             ["nonbehavior"] = "true",
+            ["metadataBehaviorCounted"] = "false",
+            ["metadataNonbehavior"] = "true",
             ["behaviorScope"] = "collection-health",
             ["notSampleBehavior"] = "true",
             ["collectionNoise"] = "true",
@@ -465,6 +744,11 @@ public sealed partial class SandboxJobService
             ["evidenceDerivedFromSample"] = "false",
             ["sourceEventPath"] = sourceEventPath,
             ["artifactCount"] = artifactCount.ToString(CultureInfo.InvariantCulture),
+            ["downloadableArtifactCount"] = artifactCount.ToString(CultureInfo.InvariantCulture),
+            ["downloadAvailable"] = "false",
+            ["downloadResolutionState"] = FirstNonEmpty(collection?.Metadata.GetValueOrDefault("downloadResolutionState"), "missing"),
+            ["downloadRejectionCode"] = FirstNonEmpty(collection?.Metadata.GetValueOrDefault("downloadRejectionCode"), requested ? "missing-artifact-file" : "collection-not-requested"),
+            ["selectorSafety"] = FirstNonEmpty(collection?.Metadata.GetValueOrDefault("selectorSafety"), "unavailable"),
             ["expectedRelativePath"] = expectation.DefaultRelativePath,
             ["requested"] = requested.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["status"] = normalizedStatus,
@@ -581,31 +865,33 @@ public sealed partial class SandboxJobService
     private static int CountArtifactsForExpectation(IEnumerable<ArtifactDescriptor> artifacts, ArtifactImportExpectation expectation)
     {
         return artifacts.Count(artifact =>
-            artifact.Kind == expectation.Kind ||
-            string.Equals(artifact.CollectionName, expectation.CollectionName, StringComparison.OrdinalIgnoreCase));
+            IsDownloadableHostArtifact(artifact) &&
+            ArtifactMatchesExpectation(artifact, expectation));
     }
 
     private static long SumArtifactBytesForExpectation(IEnumerable<ArtifactDescriptor> artifacts, ArtifactImportExpectation expectation)
     {
         return artifacts
-            .Where(artifact =>
-                artifact.Kind == expectation.Kind ||
-                string.Equals(artifact.CollectionName, expectation.CollectionName, StringComparison.OrdinalIgnoreCase))
+            .Where(artifact => IsDownloadableHostArtifact(artifact) && ArtifactMatchesExpectation(artifact, expectation))
             .Sum(artifact => Math.Max(0, artifact.SizeBytes));
     }
 
     private static IReadOnlyList<string> SelectorsForExpectation(IEnumerable<ArtifactDescriptor> artifacts, ArtifactImportExpectation expectation)
     {
         return artifacts
-            .Where(artifact =>
-                artifact.Kind == expectation.Kind ||
-                string.Equals(artifact.CollectionName, expectation.CollectionName, StringComparison.OrdinalIgnoreCase))
+            .Where(artifact => IsDownloadableHostArtifact(artifact) && ArtifactMatchesExpectation(artifact, expectation))
             .Select(artifact => FirstNonEmpty(artifact.RelativePath, artifact.SafeLink, artifact.ImportPath))
             .Where(selector => !string.IsNullOrWhiteSpace(selector))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(selector => selector, StringComparer.OrdinalIgnoreCase)
             .Take(8)
             .ToList();
+    }
+
+    private static bool ArtifactMatchesExpectation(ArtifactDescriptor artifact, ArtifactImportExpectation expectation)
+    {
+        return artifact.Kind == expectation.Kind ||
+            string.Equals(artifact.CollectionName, expectation.CollectionName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string HasArtifactsForKind(IEnumerable<ArtifactImportCollectionStat> stats, ArtifactKind kind)
@@ -640,6 +926,42 @@ public sealed partial class SandboxJobService
             ArtifactKind.MemoryDump => "内存转储",
             ArtifactKind.PacketCapture => "抓包",
             _ => "产物"
+        };
+    }
+
+    private static string SensitiveArtifactReason(ArtifactKind kind)
+    {
+        return kind switch
+        {
+            ArtifactKind.DroppedFile => "dropped-file-content",
+            ArtifactKind.Screenshot => "desktop-screenshot-content",
+            ArtifactKind.MemoryDump => "process-memory-content",
+            ArtifactKind.PacketCapture => "network-packet-content",
+            _ => "not-sensitive-by-artifact-kind"
+        };
+    }
+
+    private static string SensitiveArtifactReasonZh(ArtifactKind kind)
+    {
+        return kind switch
+        {
+            ArtifactKind.DroppedFile => "掉落文件可能包含样本释放的载荷或用户数据",
+            ArtifactKind.Screenshot => "截图可能包含桌面敏感内容",
+            ArtifactKind.MemoryDump => "内存转储可能包含凭据、文档片段或进程内存",
+            ArtifactKind.PacketCapture => "抓包可能包含网络流量内容和端点信息",
+            _ => "该 artifact kind 默认不属于高敏证据"
+        };
+    }
+
+    private static string RejectionReasonZh(string reason)
+    {
+        return reason.Trim().ToLowerInvariant() switch
+        {
+            "unsafeguestartifactpath" => "guest manifest 产物路径不安全",
+            "missingguestartifactfile" => "guest manifest 指向的文件缺失",
+            "duplicateguestartifactreference" => "guest manifest 重复引用同一产物",
+            "guestmanifestartifactrejected" => "guest manifest 产物引用已被拒绝",
+            _ => reason
         };
     }
 
@@ -703,4 +1025,14 @@ public sealed partial class SandboxJobService
         int Count,
         long TotalBytes,
         IReadOnlyList<string> Selectors);
+
+    private sealed record DroppedFileMaterializationResult(
+        int CopiedCount,
+        int ExistingCount,
+        int SkippedCount,
+        IReadOnlyList<string> CopiedSelectors,
+        IReadOnlyDictionary<string, int> ReasonCounts)
+    {
+        public static DroppedFileMaterializationResult Empty { get; } = new(0, 0, 0, [], new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+    }
 }

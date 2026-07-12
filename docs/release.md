@@ -320,6 +320,12 @@ package safety guidance. Newer staging output should expose:
 - `runtimePublishSummary`: present/missing counts, missing required vs optional
   runtime payloads, `incompleteCount`, expected leaf-file gaps, forbidden-file
   previews, and whether this is a layout dry-run or complete runtime handoff.
+- `runtimePublishRootDiagnostics`: resolved root path, existence, outside-repository
+  status, `repositoryBinaryFallbackAllowed=false`, and why the root is blocked
+  or accepted.
+- `runtimeCompletenessDiagnostics`: v28 roll-up that repeats the root diagnostics,
+  per-entry `handoffRequired`, `missingCount`, `emptyCount`, `incompleteCount`,
+  `missingExpectedLeafCount`, `forbiddenFileCount`, and `handoffAllowed`.
 - `safeExclusionCategories`: operator-readable categories that must stay out of
   source/runtime packages: secrets, install state, samples, reports/events,
   captures/PCAP/dumps/traces, VM disks/checkpoints, build outputs, symbols,
@@ -338,9 +344,9 @@ package safety guidance. Newer staging output should expose:
   outputs are checked by read-only install/run status commands rather than by
   the package script. VT key means VirusTotal API key; Intel VT-x / AMD-V is
   the separate hardware virtualization prerequisite for Hyper-V.
-- `freshLiveEvidenceGuardrail`: explicit `false` for package/readiness fresh-live
-  creation, plus the lab `-Live` command and required release-note fields before
-  claiming current fresh live evidence.
+- `freshLiveEvidenceGuardrail`: `freshLiveEvidenceGenerated=false`,
+  `claimAllowedWithoutLabJob=false`, the lab `-Live` command, and required
+  release-note fields before claiming current fresh live evidence.
 
 It is a reviewer-facing handoff artifact, not a file to commit back into the
 source tree.
@@ -406,13 +412,19 @@ that directory when the source project is not present.
 - `componentProgress.components[].id`: `runtime-publish-root`, `package-safety-contract`,
   `release-smoke-scenarios`, `fresh-live-guardrail`, `self-noise-guard-readiness`,
   `operator-remediation-zh`。
-- `gapAudit.schema = ksword.release.gap-audit.v27`: 机器可读 gap audit，固定覆盖
-  `noFreshLiveEvidence`、`runtimePublishRootCompleteness`、`selfNoiseGuardReadiness`
-  和 `componentProgressStatus`。它只证明本地静态/readiness 门禁，不代表 live evidence。
+- `gapAudit.schema = ksword.release.gap-audit.v28`: 机器可读 gap audit，固定覆盖
+  `noFreshLiveEvidence`、`runtimePublishRootCompleteness`、`selfNoiseGuardReadiness`、
+  no VM mutation/no signing `guardrailResults` 和 `componentProgressStatus`。
+  它只证明本地静态/readiness 门禁，不代表 live evidence。
 - `reviewerChecklist`: source/runtime handoff 必过项、release notes 必写项和 `rejectIfPresent`。
 - `sourceRuntimeSafetyMetadata.runtimePackage.repositoryBinaryFallbackAllowed = false`：
   `RuntimePublishRoot` 只能是仓库外 publish 输出，不能回退到 `bin/obj/x64`。
-- `freshLiveEvidenceGuardrail` 和 `componentProgress.noFreshLiveEvidenceGenerated = true`：
+- `runtimePublishRootDiagnostics` / `runtimeCompletenessDiagnostics`:
+  runtime handoff 必须看到 root 在仓库外、`summary.missingCount = 0`、
+  `summary.incompleteCount = 0`、`summary.forbiddenFileCount = 0` 且
+  `handoffAllowed = true`。
+- `freshLiveEvidenceGuardrail`、`freshLiveEvidenceGenerated=false` 和
+  `componentProgress.noFreshLiveEvidenceGenerated = true`：
   没有实验室 `job id` 时，release notes 必须写“本候选未刷新 fresh live evidence”。
 - `selfNoiseGuardReadiness.staticAuditOnly = true`：自噪声护栏只做静态证据审计；
   采集器自噪声、collection-health、VT quiet state、`behaviorCounted=false` 行不得进入样本行为结论。

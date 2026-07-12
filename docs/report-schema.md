@@ -65,7 +65,9 @@ mock JSONL 行；它们保留为原始事件（raw events），带 `source=r0col
 R0Collector 自噪声是元数据，不是样本行为。若 driver-originated rows 的进程身份、
 data 字段或路径指向 `KSword.Sandbox.R0Collector.exe`、
 `KSword.Sandbox.Agent.exe`、collector staging directories 或 KSword driver
-device，这些行会保留在 `events` 和 raw HTML evidence 中，但会从 behavior counts、
+device，或事件显式标记 `behaviorCounted=false`、`nonbehavior`、
+`notSampleBehavior`、`sampleBehavior=false` / `sampleBehaviorCandidate=false`，
+这些行会保留在 `events` 和 raw HTML evidence 中，但会从 behavior counts、
 behavior graphs 以及 file/registry/network/process behavior sections 中排除。
 HTML R0 section 会单独报告 “Collector self-noise hidden / 已隐藏采集器自噪声”
 计数并附示例，保证证据质量可审计，同时不会抬高行为数量。
@@ -151,8 +153,14 @@ model into operator-facing sections:
   indicators, registry/path indicators, resources/TLS, tags, warnings, and the
   complete bounded interesting-string list;
 - dynamic analysis metrics;
+- a behavior-story routing card that shows which normalized rows feed the
+  sample-behavior graph/process/network/file/registry lanes and which rows stay
+  in collection/VT/R0/raw evidence lanes because they are nonbehavior,
+  `notSampleBehavior`, self-noise, or health/reputation metadata;
 - artifact links with safe relative Open/Download buttons when available, with
-  absolute local paths preserved only as copyable text;
+  absolute local paths preserved only as copyable text, plus an artifact
+  evidence-matrix narrative for dropped files, screenshots, memory dumps, and
+  packet captures before the dense artifact table;
 - timeline, process details/tree, dropped files, registry behavior, network
   behavior, R0/driver events, failure reasons, and raw normalized events;
 - a bilingual entry bar linking sibling `report.zh.html`, `report.en.html`,
@@ -160,10 +168,10 @@ model into operator-facing sections:
 
 The behavior graph and process/network relationship cards are intentionally
 weak-interaction/static. They separate collection metadata from sample behavior
-with a compact graph self-noise boundary card: `behaviorCounted=false`,
-`nonbehavior`, collector self-noise, VT quiet states, and R0 health/readiness
-rows remain in dedicated sections and raw normalized events, but are not
-promoted into process tree or evidence-graph behavior. When the current
+with compact graph self-noise and behavior-routing cards: `behaviorCounted=false`,
+`nonbehavior`, `notSampleBehavior`, collector self-noise, VT quiet states, and
+R0 health/readiness rows remain in dedicated sections and raw normalized events,
+but are not promoted into process tree or evidence-graph behavior. When the current
 artifact index or normalized events already link evidence to a process,
 endpoint, or edge, compact bilingual artifact badges are rendered on those
 cards/edges; full descriptors, hashes, selectors, and safe Open/Download
@@ -181,3 +189,6 @@ forensic copy/paste and schema compatibility.
 Raw normalized events are collapsed by default; command/stdout/stderr/
 PowerShell and similarly long technical fields are nested behind additional
 copyable collapsed `<details>` blocks so the main report remains readable.
+Evidence expanders include a bounded preview/summary before dense rows, and raw
+event pagination remains capped (`75` inline rows, `25` rows per page) with
+report.json/source artifacts as the complete record.

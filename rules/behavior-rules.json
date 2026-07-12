@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v27-behavior-rule-expansion",
+  "version": "2026-07-12-v28-behavior-rule-expansion",
   "rules": [
     {
       "id": "host-submission",
@@ -35207,6 +35207,901 @@
         ],
         "nonbehavior": [
           "true"
+        ]
+      }
+    },
+    {
+      "id": "persistence-wmi-commandline-consumer-user-writable",
+      "title": "WMI command-line event consumer launches user-writable payload",
+      "titleZh": "WMI 命令行事件消费者启动用户可写载荷",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "WMI event-consumer telemetry ties a CommandLine or ActiveScript consumer to a payload path in a user-writable location.",
+      "summaryZh": "WMI 事件消费者遥测将 CommandLine 或 ActiveScript 消费者与用户可写位置中的载荷路径关联。",
+      "mitreTechniqueId": "T1546.003",
+      "mitreTechniqueName": "Event Triggered Execution: Windows Management Instrumentation Event Subscription",
+      "eventTypes": [
+        "wmi.event_consumer",
+        "wmi.subscription",
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "allDataRegex": {
+        "consumerType": [
+          "(?i)(CommandLineEventConsumer|ActiveScriptEventConsumer)"
+        ],
+        "commandLineTemplate": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll|ps1|vbs|js|hta|bat|cmd)$"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.consumerName",
+        "data.consumerType",
+        "data.filterName",
+        "data.commandLineTemplate",
+        "data.query"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "persistence",
+        "wmi"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ],
+        "sampleBehaviorCandidate": [
+          "false"
+        ]
+      }
+    },
+    {
+      "id": "persistence-com-scriptleturl-remote-clsid-hijack",
+      "title": "COM CLSID ScriptletURL or scrobj hijack points remote code",
+      "titleZh": "COM CLSID ScriptletURL 或 scrobj 劫持指向远程代码",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Registry telemetry shows a per-user or machine COM CLSID scriptlet/scrobj registration that points to a remote script or user-writable payload.",
+      "summaryZh": "注册表遥测显示用户或机器范围 COM CLSID scriptlet/scrobj 注册指向远程脚本或用户可写载荷。",
+      "mitreTechniqueId": "T1546.015",
+      "mitreTechniqueName": "Event Triggered Execution: Component Object Model Hijacking",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "allDataRegex": {
+        "path": [
+          "(?i)Software\\\\Classes\\\\CLSID\\\\[{}0-9A-F-]+\\\\(?:InprocServer32|ScriptletURL|TreatAs)"
+        ],
+        "valueName": [
+          "(?i)^(?:ScriptletURL|InprocServer32|TreatAs)$"
+        ],
+        "value": [
+          "(?i)(https?://|script:|scrobj\\.dll|(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:sct|dll|js|vbs|hta))"
+        ]
+      },
+      "evidenceFields": [
+        "path",
+        "data.valueName",
+        "data.value",
+        "data.operation"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "persistence",
+        "com-hijack",
+        "scriptlet"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ],
+        "sampleBehaviorCandidate": [
+          "false"
+        ]
+      }
+    },
+    {
+      "id": "injection-hollowing-unmap-write-setcontext-resume",
+      "title": "Process hollowing unmap/write/context/resume sequence",
+      "titleZh": "进程空洞化 unmap/write/context/resume 序列",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "API-sequence telemetry reports a suspended process hollowing chain with image unmap, remote allocation/write, thread-context update, and resume.",
+      "summaryZh": "API 序列遥测报告挂起进程空洞化链，包含映像解除映射、远程分配/写入、线程上下文更新和恢复执行。",
+      "mitreTechniqueId": "T1055.012",
+      "mitreTechniqueName": "Process Injection: Process Hollowing",
+      "eventTypes": [
+        "api.sequence",
+        "process.hollowing",
+        "behavior.injection"
+      ],
+      "dataContainsAll": {
+        "operation": [
+          "CreateProcess",
+          "suspended",
+          "NtUnmapViewOfSection",
+          "VirtualAllocEx",
+          "WriteProcessMemory",
+          "SetThreadContext",
+          "ResumeThread"
+        ]
+      },
+      "allDataRegex": {
+        "targetImage": [
+          "(?i)^[a-z0-9_.-]+\\.exe$"
+        ],
+        "payloadPath": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll)$"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "data.operation",
+        "data.targetImage",
+        "data.payloadPath",
+        "data.targetProcessId"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "injection",
+        "process-hollowing"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ],
+        "sampleBehaviorCandidate": [
+          "false"
+        ]
+      }
+    },
+    {
+      "id": "injection-reflective-loader-user-writable-module",
+      "title": "Reflective loader maps user-writable module into process",
+      "titleZh": "反射式加载器将用户可写模块映射进进程",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Injection or image telemetry reports reflective/manual-map loading behavior for a DLL staged under a user-writable path.",
+      "summaryZh": "注入或映像遥测报告对用户可写路径下 DLL 的反射式或手动映射加载行为。",
+      "mitreTechniqueId": "T1055.001",
+      "mitreTechniqueName": "Process Injection: Dynamic-link library injection",
+      "eventTypes": [
+        "api.sequence",
+        "image.load",
+        "process.injection",
+        "behavior.injection"
+      ],
+      "dataContainsAll": {
+        "operation": [
+          "VirtualAlloc",
+          "WriteProcessMemory",
+          "DllMain"
+        ]
+      },
+      "allDataRegex": {
+        "loader": [
+          "(?i)(ReflectiveLoader|manual map|reflective dll|memory module)"
+        ],
+        "modulePath": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.dll$"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "data.loader",
+        "data.operation",
+        "data.modulePath",
+        "data.targetProcessName"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "injection",
+        "dll-injection",
+        "reflective-loader"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ],
+        "sampleBehaviorCandidate": [
+          "false"
+        ]
+      }
+    },
+    {
+      "id": "lateral-dcom-shellwindows-remote-script-launch",
+      "title": "DCOM ShellWindows remote script launch",
+      "titleZh": "DCOM ShellWindows 远程脚本启动",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "DCOM activation telemetry names a remote host and ShellWindows/ShellBrowserWindow class used to launch a script interpreter or user-writable payload.",
+      "summaryZh": "DCOM 激活遥测包含远程主机，并使用 ShellWindows/ShellBrowserWindow 类启动脚本解释器或用户可写载荷。",
+      "mitreTechniqueId": "T1021.003",
+      "mitreTechniqueName": "Remote Services: Distributed Component Object Model",
+      "eventTypes": [
+        "dcom.activation",
+        "api.call",
+        "process.start",
+        "process.new"
+      ],
+      "allDataRegex": {
+        "remoteHost": [
+          "(?i)^[A-Za-z0-9_.-]{2,}$"
+        ],
+        "comClass": [
+          "(?i)(ShellWindows|ShellBrowserWindow)"
+        ],
+        "command": [
+          "(?i)(powershell|cmd|mshta|wscript|rundll32|(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll|ps1|vbs|js|hta))"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.remoteHost",
+        "data.comClass",
+        "data.command"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "lateral-movement",
+        "dcom"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ],
+        "sampleBehaviorCandidate": [
+          "false"
+        ]
+      }
+    },
+    {
+      "id": "lateral-wmi-admin-share-payload-execution",
+      "title": "WMI remote process create executes admin-share payload",
+      "titleZh": "WMI 远程进程创建执行管理共享载荷",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "WMI or process telemetry links a remote host to Win32_Process creation of a payload staged through ADMIN$, C$, or remote Windows temporary paths.",
+      "summaryZh": "WMI 或进程遥测将远程主机与通过 ADMIN$、C$ 或远程 Windows 临时路径暂存的载荷执行关联。",
+      "mitreTechniqueId": "T1047",
+      "mitreTechniqueName": "Windows Management Instrumentation",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "wmi.process_create",
+        "wmic.command"
+      ],
+      "commandLineRegex": [
+        "(?i)\\b(wmic|powershell|wmiprvse)(?:\\.exe)?\\b.*(process\\s+call\\s+create|Win32_Process|Invoke-WmiMethod).*(\\\\+[A-Za-z0-9_.-]+\\\\+(?:ADMIN\\$|C\\$)|[A-Za-z]:\\\\Windows\\\\(?:Temp|Tasks)\\\\[^\\r\\n]+\\.(?:exe|bat|cmd|ps1))"
+      ],
+      "allDataRegex": {
+        "remoteHost": [
+          "(?i)^[A-Za-z0-9_.-]{2,}$"
+        ],
+        "payloadPath": [
+          "(?i)(?:\\\\+[A-Za-z0-9_.-]+\\\\+(?:ADMIN\\$|C\\$)\\\\+|[A-Za-z]:\\\\Windows\\\\(?:Temp|Tasks)\\\\)[^\\r\\n]+\\.(?:exe|bat|cmd|ps1)$"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.remoteHost",
+        "data.payloadPath",
+        "data.user"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "lateral-movement",
+        "wmi",
+        "admin-share"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ],
+        "sampleBehaviorCandidate": [
+          "false"
+        ]
+      }
+    },
+    {
+      "id": "anti-sandbox-device-object-probe-exit-gate",
+      "title": "VM device object probe gates execution",
+      "titleZh": "虚拟机设备对象探测控制执行",
+      "severity": "medium",
+      "confidence": "high",
+      "summary": "Anti-analysis telemetry reports device or driver object probing for virtualization/sandbox artifacts tied to an exit, abort, or suppression gate.",
+      "summaryZh": "反分析遥测报告针对虚拟化/沙箱设备或驱动对象的探测，并与退出、中止或抑制门控关联。",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion: System Checks",
+      "eventTypes": [
+        "antiAnalysis.sandboxCheck",
+        "anti_sandbox.check",
+        "api.call",
+        "process.start",
+        "process.new"
+      ],
+      "allDataRegex": {
+        "probe": [
+          "(?i)(CreateFile|NtOpenFile|QueryDosDevice|device|driver)"
+        ],
+        "artifact": [
+          "(?i)(\\\\\\.\\\\VBox|VBoxMiniRdrDN|vmci|vmmouse|qemu|SbieDrv|HGFS|vmhgfs|prl_)"
+        ],
+        "action": [
+          "(?i)(exit|abort|gate|terminate|suppress)"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.probe",
+        "data.artifact",
+        "data.action"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "anti-sandbox",
+        "anti-analysis",
+        "device-probe"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ],
+        "sampleBehaviorCandidate": [
+          "false"
+        ]
+      }
+    },
+    {
+      "id": "anti-sandbox-window-title-analysis-gate",
+      "title": "Analysis window-title check gates execution",
+      "titleZh": "分析工具窗口标题检查控制执行",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "Anti-analysis telemetry shows window or desktop enumeration matching analysis-tool names and driving an exit, sleep, or suppression gate.",
+      "summaryZh": "反分析遥测显示窗口或桌面枚举命中分析工具名称，并触发退出、休眠或抑制门控。",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion: System Checks",
+      "eventTypes": [
+        "antiAnalysis.sandboxCheck",
+        "anti_sandbox.check",
+        "api.call",
+        "behavior.anti_analysis"
+      ],
+      "allDataRegex": {
+        "check": [
+          "(?i)(FindWindow|EnumWindows|window title|foreground window|desktop)"
+        ],
+        "matchedName": [
+          "(?i)(procmon|process monitor|wireshark|ollydbg|x64dbg|ida|sandbox|cuckoo)"
+        ],
+        "action": [
+          "(?i)(exit|abort|gate|suppress|sleep)"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "data.check",
+        "data.matchedName",
+        "data.action"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "anti-sandbox",
+        "anti-analysis",
+        "window-enumeration"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ],
+        "sampleBehaviorCandidate": [
+          "false"
+        ]
+      }
+    },
+    {
+      "id": "download-execute-rundll32-mshtml-remote-script",
+      "title": "Rundll32 mshtml remote script download-execute chain",
+      "titleZh": "Rundll32 mshtml 远程脚本下载执行链",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Rundll32/mshtml proxy execution references a remote script source and correlates to a user-writable payload launch path.",
+      "summaryZh": "Rundll32/mshtml 代理执行引用远程脚本来源，并关联到用户可写载荷启动路径。",
+      "mitreTechniqueId": "T1218.011",
+      "mitreTechniqueName": "System Binary Proxy Execution: Rundll32",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "download.execute",
+        "behavior.download_execute"
+      ],
+      "commandLineRegex": [
+        "(?i)\\brundll32(?:\\.exe)?\\b.*(?:mshtml|RunHTMLApplication|javascript:|GetObject\\(|script:https?://|scrobj\\.dll).*(?:https?://|script:)"
+      ],
+      "allDataRegex": {
+        "sourceUrl": [
+          "(?i)^https?://"
+        ],
+        "executedPath": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll|ps1|vbs|js|hta)$"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.sourceUrl",
+        "data.executedPath"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "download-execute",
+        "lolbas-inspired",
+        "rundll32",
+        "proxy-execution"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ],
+        "sampleBehaviorCandidate": [
+          "false"
+        ]
+      }
+    },
+    {
+      "id": "download-execute-installutil-remote-assembly-launch",
+      "title": "InstallUtil launches downloaded user-writable assembly",
+      "titleZh": "InstallUtil 启动下载的用户可写程序集",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "InstallUtil proxy execution is paired with a remote transfer source and execution of a staged EXE or DLL under a user-writable directory.",
+      "summaryZh": "InstallUtil 代理执行与远程传输来源以及用户可写目录下 EXE 或 DLL 的执行相关联。",
+      "mitreTechniqueId": "T1218.004",
+      "mitreTechniqueName": "System Binary Proxy Execution: InstallUtil",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "download.execute",
+        "behavior.download_execute"
+      ],
+      "commandLineRegex": [
+        "(?i)\\bInstallUtil(?:\\.exe)?\\b.*(?:https?://|\\\\\\\\|Users|ProgramData|AppData|Temp|Downloads|Public).*\\.(?:exe|dll)"
+      ],
+      "allDataRegex": {
+        "sourceUrl": [
+          "(?i)^https?://"
+        ],
+        "executedPath": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll)$"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.sourceUrl",
+        "data.executedPath"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "download-execute",
+        "lolbas-inspired",
+        "installutil",
+        "proxy-execution"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ],
+        "sampleBehaviorCandidate": [
+          "false"
         ]
       }
     }

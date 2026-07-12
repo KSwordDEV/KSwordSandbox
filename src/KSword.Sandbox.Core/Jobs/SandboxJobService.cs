@@ -480,11 +480,15 @@ public sealed partial class SandboxJobService
                     EventType = "live.events.read_pending",
                     Source = "host",
                     Path = path,
-                    Data =
+                    Data = CreateHostOperationalEventData(
+                        "live-events-read-pending",
+                        "live-monitor-read-is-transient-not-sample-behavior",
+                        "Live monitor source is still being written; this diagnostic is not sample behavior.",
+                        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
                         ["exceptionType"] = ex.GetType().Name,
                         ["message"] = ex.Message
-                    }
+                    })
                 }
             ];
         }
@@ -907,11 +911,15 @@ public sealed partial class SandboxJobService
                     EventType = "enrichment.events.read_error",
                     Source = "host",
                     Path = path,
-                    Data =
+                    Data = CreateHostOperationalEventData(
+                        "enrichment-events-read-error",
+                        "enrichment-read-error-is-host-diagnostic-not-sample-behavior",
+                        "Host failed to read durable enrichment events; this diagnostic is not sample behavior.",
+                        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
                         ["exceptionType"] = ex.GetType().Name,
                         ["message"] = ex.Message
-                    }
+                    })
                 }
             ];
         }
@@ -968,10 +976,14 @@ public sealed partial class SandboxJobService
                     EventType = "driver.parse_error",
                     Source = "host",
                     Path = path,
-                    Data =
+                    Data = CreateHostOperationalEventData(
+                        "driver-jsonl-parse-error",
+                        "driver-jsonl-parse-error-is-host-diagnostic-not-sample-behavior",
+                        "Host could not parse one driver JSONL row; this diagnostic is not sample behavior.",
+                        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
                         ["line"] = line
-                    }
+                    })
                 });
             }
         }
@@ -1022,7 +1034,11 @@ public sealed partial class SandboxJobService
                 EventType = "hyperv.runbook.executed",
                 Source = "host",
                 Path = result.TargetVmName,
-                Data =
+                Data = CreateHostOperationalEventData(
+                    "hyperv-runbook-executed",
+                    "runbook-execution-summary-is-host-control-plane-not-sample-behavior",
+                    "Hyper-V runbook execution summary describes host orchestration, not sample behavior.",
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["mode"] = result.Mode.ToString(),
                     ["success"] = result.Success.ToString(),
@@ -1032,7 +1048,7 @@ public sealed partial class SandboxJobService
                     ["duration"] = result.Duration.ToString(),
                     ["resultPath"] = resultPath,
                     ["message"] = result.Message ?? string.Empty
-                }
+                })
             });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -1042,10 +1058,14 @@ public sealed partial class SandboxJobService
                 EventType = "hyperv.runbook.execution_result_error",
                 Source = "host",
                 Path = resultPath,
-                Data =
+                Data = CreateHostOperationalEventData(
+                    "hyperv-runbook-execution-result-error",
+                    "runbook-result-read-error-is-host-diagnostic-not-sample-behavior",
+                    "Host failed to read runbook execution result; this diagnostic is not sample behavior.",
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["error"] = ex.Message
-                }
+                })
             });
         }
     }
@@ -1067,10 +1087,14 @@ public sealed partial class SandboxJobService
             EventType = guestEventCount == 0 ? "guest.events.empty" : "guest.events.imported",
             Source = "host",
             Path = guestEventsPath,
-            Data =
+            Data = CreateHostOperationalEventData(
+                guestEventCount == 0 ? "guest-events-empty" : "guest-events-imported",
+                "guest-event-import-summary-is-host-metadata-not-sample-behavior",
+                "Host import summary records how many guest events were read; it is not sample behavior.",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["eventCount"] = guestEventCount.ToString()
-            }
+            })
         });
     }
 
@@ -1233,7 +1257,11 @@ public sealed partial class SandboxJobService
                 Source = "host",
                 Path = sample.FullPath,
                 CommandLine = submission.DisplayName ?? sample.FileName,
-                Data =
+                Data = CreateHostOperationalEventData(
+                    "submission-accepted",
+                    "submission-metadata-is-host-control-plane-not-sample-behavior",
+                    "Submission metadata records host job planning and must not be counted as sample behavior.",
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["sha256"] = sample.Sha256,
                     ["sha1"] = sample.Sha1,
@@ -1248,18 +1276,22 @@ public sealed partial class SandboxJobService
                     ["captureScreenshotsOverride"] = FormatNullableBool(submission.CaptureScreenshots),
                     ["captureMemoryDumpsOverride"] = FormatNullableBool(submission.CaptureMemoryDumps),
                     ["capturePacketCaptureOverride"] = FormatNullableBool(submission.CapturePacketCapture)
-                }
+                })
             },
             new SandboxEvent
             {
                 EventType = "hyperv.runbook.created",
                 Source = "host",
                 Path = runbook.TargetVmName,
-                Data =
+                Data = CreateHostOperationalEventData(
+                    "hyperv-runbook-created",
+                    "runbook-plan-is-host-control-plane-not-sample-behavior",
+                    "Runbook planning describes host orchestration and must not be counted as sample behavior.",
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["steps"] = runbook.Steps.Count.ToString(),
                     ["usesTemporaryVm"] = runbook.UsesTemporaryVm.ToString()
-                }
+                })
             }
         };
 
@@ -1269,6 +1301,49 @@ public sealed partial class SandboxJobService
         // YARA-like matches instead of a single opaque summary row.
         events.InsertRange(1, StaticAnalyzer.CreateEvents(sample.FullPath, staticAnalysis));
         return events;
+    }
+
+    /// <summary>
+    /// Builds explicit host/control-plane metadata for operational rows.
+    /// Inputs are a stable evidence kind, reason, human hint, and optional
+    /// event-specific values; processing stamps nonbehavior/self-noise fields
+    /// first and appends caller values; the method returns a dictionary ready
+    /// for SandboxEvent.Data.
+    /// </summary>
+    private static Dictionary<string, string> CreateHostOperationalEventData(
+        string evidenceKind,
+        string reason,
+        string hint,
+        IReadOnlyDictionary<string, string>? values = null)
+    {
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["behaviorCounted"] = "false",
+            ["nonbehavior"] = "true",
+            ["notSampleBehavior"] = "true",
+            ["sampleBehaviorCandidate"] = "false",
+            ["eventKind"] = "diagnostic",
+            ["evidenceRole"] = "host-control-plane",
+            ["behaviorScope"] = "host-operational",
+            ["operationalEvent"] = "true",
+            ["hostGenerated"] = "true",
+            ["hostImportSelfNoise"] = "true",
+            ["nonbehaviorReason"] = reason,
+            ["hostOperationalKind"] = evidenceKind,
+            ["behaviorCountingPolicy"] = "host-control-plane-events-are-not-sample-behavior",
+            ["zhBehaviorHint"] = "该行由 Host 生成，用于记录任务规划、导入、富化或运行手册状态；behaviorCounted=false，不计入样本行为。",
+            ["operatorHint"] = hint
+        };
+
+        if (values is not null)
+        {
+            foreach (var (key, value) in values)
+            {
+                data[key] = value;
+            }
+        }
+
+        return data;
     }
 
     /// <summary>

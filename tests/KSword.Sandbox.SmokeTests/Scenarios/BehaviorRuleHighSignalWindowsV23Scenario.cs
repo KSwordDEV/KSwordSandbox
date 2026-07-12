@@ -45,7 +45,8 @@ internal sealed class BehaviorRuleHighSignalWindowsV23Scenario : ISmokeTestScena
             string.Equals(rules.Version, "2026-07-12-v23-high-signal-behavior-expansion", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(rules.Version, "2026-07-12-v25-r0-file-network-semantic-fields", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(rules.Version, "2026-07-12-v26-self-noise-guard-hardening", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(rules.Version, "2026-07-12-v27-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase),
+            string.Equals(rules.Version, "2026-07-12-v27-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(rules.Version, "2026-07-12-v28-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase),
             "Behavior rules should carry the v23+ high-signal behavior expansion or newer self-noise/behavior hardening version.");
 
         var mitreTechniqueIds = ReadMitreTechniqueIds(mitreMapPath);

