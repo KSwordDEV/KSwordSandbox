@@ -2569,7 +2569,12 @@ function New-HyperVE2ESteps {
     [void]$steps.Add((New-HyperVE2EStep -Id 'stop-before-restore' -Phase 'start' -Title 'Stop golden VM before checkpoint restore' -PowerShell ("Stop-VM -Name {0} -TurnOff -Force -ErrorAction SilentlyContinue" -f (Quote-PowerShellString $Vm)) -MutatesVmState $true))
     [void]$steps.Add((New-HyperVE2EStep -Id 'restore-checkpoint' -Phase 'start' -Title 'Restore clean checkpoint' -PowerShell ("Restore-VMSnapshot -VMName {0} -Name {1} -Confirm:`$false" -f (Quote-PowerShellString $Vm), (Quote-PowerShellString $Snapshot)) -MutatesVmState $true))
     [void]$steps.Add((New-HyperVE2EStep -Id 'enable-guest-service' -Phase 'start' -Title 'Enable Guest Service Interface' -PowerShell (Get-EnableGuestServicePowerShell -Vm $Vm) -MutatesVmState $true))
-    [void]$steps.Add((New-HyperVE2EStep -Id 'start-vm' -Phase 'start' -Title 'Start restored golden VM' -PowerShell ("Start-VM -Name {0}" -f (Quote-PowerShellString $Vm)) -MutatesVmState $true))
+    $quotedVmForStart = Quote-PowerShellString $Vm
+    $startVmIfNeededPowerShell = "`$vm = Get-VM -Name $quotedVmForStart; " +
+        "if (`$vm.State -eq 'Running') { 'already-running' } " +
+        "elseif (`$vm.State -eq 'Paused') { Resume-VM -Name $quotedVmForStart } " +
+        "else { Start-VM -Name $quotedVmForStart }"
+    [void]$steps.Add((New-HyperVE2EStep -Id 'start-vm' -Phase 'start' -Title 'Start or resume restored golden VM if needed' -PowerShell $startVmIfNeededPowerShell -MutatesVmState $true))
     if ($OpenVmConsoleOnLiveStart) {
         $rdpHint = if ($RdpFallbackEnabled) {
             if ([string]::IsNullOrWhiteSpace($RdpTarget)) { 'fallback: discover VM IP and run mstsc.exe /v:<ip>' } else { "fallback: mstsc.exe /v:$RdpTarget" }
@@ -2749,7 +2754,7 @@ try {
     [void]$checks.Add((New-AdministratorCheck))
     [void]$checks.Add((New-HyperVFeatureCheck))
     [void]$checks.Add((New-CommandAvailabilityCheck -Name 'PowerShell Direct commands' -Commands @('New-PSSession', 'Invoke-Command', 'Copy-Item') -RequiredForLive $true))
-    [void]$checks.Add((New-CommandAvailabilityCheck -Name 'Hyper-V commands' -Commands @('Get-VM', 'Get-VMSnapshot', 'Get-VMIntegrationService', 'Enable-VMIntegrationService', 'Start-VM', 'Stop-VM', 'Restore-VMSnapshot', 'Copy-VMFile') -RequiredForLive $true))
+    [void]$checks.Add((New-CommandAvailabilityCheck -Name 'Hyper-V commands' -Commands @('Get-VM', 'Get-VMSnapshot', 'Get-VMIntegrationService', 'Enable-VMIntegrationService', 'Start-VM', 'Resume-VM', 'Stop-VM', 'Restore-VMSnapshot', 'Copy-VMFile') -RequiredForLive $true))
     if ($openVmConsoleOnLiveStart) {
         [void]$checks.Add((New-CommandAvailabilityCheck -Name 'Hyper-V VM console command' -Commands @('vmconnect.exe') -RequiredForLive $false))
     }

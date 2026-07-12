@@ -392,6 +392,32 @@ function Wait-VMRunning {
     throw "错误：VM '$VmName' 未在 $TimeoutSeconds 秒内进入 Running 状态；最后状态：$lastState。下一步：在 Hyper-V 管理器检查 VM 启动错误后重试。"
 }
 
+function Start-VMIfNeededAndWait {
+    param(
+        [Parameter(Mandatory)][string]$VmName,
+        [int]$TimeoutSeconds
+    )
+
+    $vm = Get-VM -Name $VmName -ErrorAction Stop
+    $state = $vm.State.ToString()
+    if ($state -eq 'Running') {
+        Write-HyperVJobStep "VM '$VmName' is already Running after checkpoint restore; skipping Start-VM."
+        Wait-VMRunning -VmName $VmName -TimeoutSeconds $TimeoutSeconds
+        return
+    }
+
+    if ($state -eq 'Paused') {
+        Write-HyperVJobStep "VM '$VmName' is Paused after checkpoint restore; resuming VM."
+        Resume-VM -Name $VmName -ErrorAction Stop
+    }
+    else {
+        Write-HyperVJobStep "VM '$VmName' state is '$state' after checkpoint restore; starting VM."
+        Start-VM -Name $VmName -ErrorAction Stop
+    }
+
+    Wait-VMRunning -VmName $VmName -TimeoutSeconds $TimeoutSeconds
+}
+
 function Get-OptionalPlanBoolean {
     param(
         [AllowNull()]$Object,
@@ -1031,6 +1057,7 @@ function Assert-LivePreconditions {
         'Restore-VMSnapshot',
         'Enable-VMIntegrationService',
         'Start-VM',
+        'Resume-VM',
         'Stop-VM',
         'Copy-VMFile',
         'Invoke-Command',
@@ -1341,8 +1368,7 @@ try {
     Invoke-RecordedStep -Id 'start-vm' -Title 'Start VM and wait for Running state' -ScriptBlock {
         if ($script:Cmdlet.ShouldProcess($plan.vm.name, 'Start VM')) {
             $script:VmMutationStarted = $true
-            Start-VM -Name $plan.vm.name
-            Wait-VMRunning -VmName $plan.vm.name -TimeoutSeconds ([int]$plan.timeouts.startupSeconds)
+            Start-VMIfNeededAndWait -VmName $plan.vm.name -TimeoutSeconds ([int]$plan.timeouts.startupSeconds)
         }
     }
 
