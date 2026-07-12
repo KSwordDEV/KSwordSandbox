@@ -588,6 +588,23 @@ function Start-HyperVVmConnectDesktop {
     }
 
     try {
+        $basicConsoleMessage = ''
+        try {
+            if ($ServerName -eq 'localhost' -or $ServerName -eq '.' -or $ServerName -ieq $env:COMPUTERNAME) {
+                $vmHost = Get-VMHost -ErrorAction Stop
+                if ([bool]$vmHost.EnableEnhancedSessionMode) {
+                    Set-VMHost -EnableEnhancedSessionMode $false -ErrorAction Stop
+                    $basicConsoleMessage = 'Host Enhanced Session Mode was enabled and was disabled before vmconnect.exe launch so VMConnect uses the basic console instead of prompting for enhanced-session credentials.'
+                }
+                else {
+                    $basicConsoleMessage = 'Host Enhanced Session Mode was already disabled; VMConnect should use the basic console.'
+                }
+            }
+        }
+        catch {
+            $basicConsoleMessage = "Could not disable Host Enhanced Session Mode before VMConnect launch: $($_.Exception.Message)"
+        }
+
         $argumentList = @(
             (Quote-NativeProcessArgument -Value $ServerName),
             (Quote-NativeProcessArgument -Value $VmName)
@@ -595,10 +612,10 @@ function Start-HyperVVmConnectDesktop {
         $process = Start-Process -FilePath $vmConnectPath -ArgumentList $argumentList -PassThru -WindowStyle Normal -ErrorAction Stop
         $verification = Test-DesktopLauncherStillPresent -Process $process -LauncherName 'vmconnect.exe'
         if (-not [bool]$verification.Success) {
-            return [pscustomobject]@{ Success = $false; ProcessId = $process.Id; Message = "vmconnect.exe launch did not produce a durable desktop window for VM '$VmName' on '$ServerName' (PID $($process.Id)): $($verification.Message)" }
+            return [pscustomobject]@{ Success = $false; ProcessId = $process.Id; Message = "vmconnect.exe launch did not produce a durable desktop window for VM '$VmName' on '$ServerName' (PID $($process.Id)): $($verification.Message) $basicConsoleMessage" }
         }
 
-        return [pscustomobject]@{ Success = $true; ProcessId = $process.Id; Message = "vmconnect.exe started and remained open for VM '$VmName' on '$ServerName' (PID $($process.Id))." }
+        return [pscustomobject]@{ Success = $true; ProcessId = $process.Id; Message = "vmconnect.exe started and remained open for VM '$VmName' on '$ServerName' (PID $($process.Id)). $basicConsoleMessage" }
     }
     catch {
         return [pscustomobject]@{ Success = $false; ProcessId = $null; Message = "vmconnect.exe launch failed: $($_.Exception.Message)" }
@@ -1052,10 +1069,12 @@ function Assert-LivePreconditions {
 
     Assert-CommandAvailable -Names @(
         'Get-VM',
+        'Get-VMHost',
         'Get-VMSnapshot',
         'Get-VMIntegrationService',
         'Restore-VMSnapshot',
         'Enable-VMIntegrationService',
+        'Set-VMHost',
         'Start-VM',
         'Resume-VM',
         'Stop-VM',

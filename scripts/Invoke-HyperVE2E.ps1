@@ -2582,7 +2582,7 @@ function New-HyperVE2ESteps {
         else {
             'fallback: disabled'
         }
-        [void]$steps.Add((New-HyperVE2EStep -Id 'open-vm-console' -Phase 'start' -Title 'Open interactive VM desktop for operator interaction' -PowerShell (("vmconnect.exe {0} {1}; {2}" -f (Quote-PowerShellString $VmConsoleServerName), (Quote-PowerShellString $Vm), $rdpHint)) -MutatesVmState $false))
+        [void]$steps.Add((New-HyperVE2EStep -Id 'open-vm-console' -Phase 'start' -Title 'Open interactive VM desktop for operator interaction' -PowerShell (("Set-VMHost -EnableEnhancedSessionMode false when opening local VMConnect basic console; vmconnect.exe {0} {1}; {2}" -f (Quote-PowerShellString $VmConsoleServerName), (Quote-PowerShellString $Vm), $rdpHint)) -MutatesVmState $false))
     }
     [void]$steps.Add((New-HyperVE2EStep -Id 'wait-powershell-direct' -Phase 'start' -Title 'Wait for PowerShell Direct in the guest' -PowerShell ("Invoke-Command -VMName {0} -Credential `$guestCredential -ScriptBlock {{ `$env:COMPUTERNAME }}" -f (Quote-PowerShellString $Vm)) -MutatesVmState $false))
     [void]$steps.Add((New-HyperVE2EStep -Id 'stage-guest-payload' -Phase 'start' -Title 'Copy Guest Agent and R0Collector payload into guest' -PowerShell ("Copy-Item -ToSession <PSSession> -Path {0}\agent\* -Destination <guestAgentDirectory> -Recurse -Force" -f $PayloadRoot) -MutatesVmState $true))
@@ -2754,7 +2754,7 @@ try {
     [void]$checks.Add((New-AdministratorCheck))
     [void]$checks.Add((New-HyperVFeatureCheck))
     [void]$checks.Add((New-CommandAvailabilityCheck -Name 'PowerShell Direct commands' -Commands @('New-PSSession', 'Invoke-Command', 'Copy-Item') -RequiredForLive $true))
-    [void]$checks.Add((New-CommandAvailabilityCheck -Name 'Hyper-V commands' -Commands @('Get-VM', 'Get-VMSnapshot', 'Get-VMIntegrationService', 'Enable-VMIntegrationService', 'Start-VM', 'Resume-VM', 'Stop-VM', 'Restore-VMSnapshot', 'Copy-VMFile') -RequiredForLive $true))
+    [void]$checks.Add((New-CommandAvailabilityCheck -Name 'Hyper-V commands' -Commands @('Get-VM', 'Get-VMHost', 'Get-VMSnapshot', 'Get-VMIntegrationService', 'Enable-VMIntegrationService', 'Set-VMHost', 'Start-VM', 'Resume-VM', 'Stop-VM', 'Restore-VMSnapshot', 'Copy-VMFile') -RequiredForLive $true))
     if ($openVmConsoleOnLiveStart) {
         [void]$checks.Add((New-CommandAvailabilityCheck -Name 'Hyper-V VM console command' -Commands @('vmconnect.exe') -RequiredForLive $false))
     }
