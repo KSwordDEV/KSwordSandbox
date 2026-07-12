@@ -717,6 +717,16 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             snapshotLookup,
             snapshotState,
             context);
+        if (string.Equals(eventType, "process.snapshot", StringComparison.OrdinalIgnoreCase))
+        {
+            evt.Data.TryAdd("behaviorCounted", "false");
+            evt.Data.TryAdd("nonbehavior", "true");
+            evt.Data.TryAdd("notSampleBehavior", "true");
+            evt.Data.TryAdd("sampleBehaviorCandidate", "false");
+            evt.Data.TryAdd("behaviorScope", "process-snapshot");
+            evt.Data.TryAdd("metadataOnly", "true");
+        }
+
         return evt;
     }
 
@@ -1846,7 +1856,13 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                     ["phase"] = ToPhaseLabel(phase),
                     ["change"] = change,
                     ["totalCount"] = totalCount.ToString(CultureInfo.InvariantCulture),
-                    ["emittedCount"] = emitted.ToString(CultureInfo.InvariantCulture)
+                    ["emittedCount"] = emitted.ToString(CultureInfo.InvariantCulture),
+                    ["behaviorCounted"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["notSampleBehavior"] = "true",
+                    ["sampleBehaviorCandidate"] = "false",
+                    ["collectionHealth"] = "true",
+                    ["behaviorScope"] = "system-inventory-diff-truncation"
                 }
             });
             return false;

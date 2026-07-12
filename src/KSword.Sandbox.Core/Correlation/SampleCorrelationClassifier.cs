@@ -213,14 +213,14 @@ public static class SampleCorrelationClassifier
                 NormalBehaviorBoundary(evt, data, context));
         }
 
-        if (IsDriverEvidence(evt))
-        {
-            return ClassifyDriverEvidence(evt, data, context);
-        }
-
         if (IsNetworkEvidence(evt))
         {
             return ClassifyNetworkEvidence(evt, data, context);
+        }
+
+        if (IsDriverEvidence(evt))
+        {
+            return ClassifyDriverEvidence(evt, data, context);
         }
 
         if (IsServiceOrScheduledTaskEvidence(evt))
@@ -339,9 +339,13 @@ public static class SampleCorrelationClassifier
         CorrelationContext context)
     {
         var target = FirstNonEmpty(
+            Value(data, "target"),
+            Value(data, "value"),
             Value(data, "imagePath"),
             Value(data, "serviceDll"),
             Value(data, "taskToRun"),
+            Value(data, "registryKeyPath"),
+            Value(data, "keyPath"),
             Value(data, "commandLine"),
             evt.CommandLine,
             evt.Path);
@@ -788,8 +792,12 @@ public static class SampleCorrelationClassifier
             PathOrCommandMatchesSample(Value(data, "processImagePath"), context) ||
             PathOrCommandMatchesSample(Value(data, "rootImagePath"), context) ||
             PathOrCommandMatchesSample(Value(data, "commandLine"), context) ||
+            PathOrCommandMatchesSample(Value(data, "target"), context) ||
+            PathOrCommandMatchesSample(Value(data, "value"), context) ||
             PathOrCommandMatchesSample(Value(data, "taskToRun"), context) ||
-            PathOrCommandMatchesSample(Value(data, "serviceDll"), context);
+            PathOrCommandMatchesSample(Value(data, "serviceDll"), context) ||
+            PathOrCommandMatchesSample(Value(data, "registryKeyPath"), context) ||
+            PathOrCommandMatchesSample(Value(data, "keyPath"), context);
     }
 
     private static bool EventLooksLikeSubmittedSample(SandboxEvent evt, string sampleFullPath, string sampleFileName)
@@ -833,7 +841,11 @@ public static class SampleCorrelationClassifier
     private static bool IsNetworkEvidence(SandboxEvent evt)
     {
         return evt.EventType.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("dns.", StringComparison.OrdinalIgnoreCase);
+            evt.EventType.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("tls.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsListenerEvent(SandboxEvent evt)
@@ -844,7 +856,10 @@ public static class SampleCorrelationClassifier
     private static bool IsServiceOrScheduledTaskEvidence(SandboxEvent evt)
     {
         return evt.EventType.StartsWith("service.", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase);
+            evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("startup_item.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("registry.run.", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsProcessEvidence(SandboxEvent evt)

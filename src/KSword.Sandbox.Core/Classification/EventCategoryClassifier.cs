@@ -22,7 +22,12 @@ public sealed class EventCategoryClassifier
             var value when value.StartsWith("process.", StringComparison.OrdinalIgnoreCase) => EventCategory.Process,
             var value when value.StartsWith("file.", StringComparison.OrdinalIgnoreCase) => EventCategory.FileSystem,
             var value when value.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) => EventCategory.Registry,
-            var value when value.StartsWith("network.", StringComparison.OrdinalIgnoreCase) => EventCategory.Network,
+            var value when value.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith("tls.", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase) => EventCategory.Network,
             var value when value.StartsWith("image.", StringComparison.OrdinalIgnoreCase) => EventCategory.Module,
             var value when value.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) => EventCategory.Driver,
             var value when value.StartsWith("agent.", StringComparison.OrdinalIgnoreCase) => EventCategory.GuestAgent,

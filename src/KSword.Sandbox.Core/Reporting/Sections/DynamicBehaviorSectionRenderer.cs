@@ -18,9 +18,9 @@ public sealed class DynamicBehaviorSectionRenderer : IReportSectionRenderer
     /// <inheritdoc />
     public string Render(AnalysisReport report)
     {
-        var rawCount = Metric(report, "rawEvents", report.Events.Count);
-        var inlineCount = Metric(report, "reportEvents", report.Events.Count);
-        var omittedCount = Metric(report, "omittedReportEvents", 0);
+        var rawCount = Metric(report, "rawEvents", Metric(report, "events.raw", report.Events.Count));
+        var inlineCount = Metric(report, "reportEvents", Metric(report, "events.report", report.Events.Count));
+        var omittedCount = Metric(report, "omittedReportEvents", Metric(report, "events.omittedFromReport", 0));
         var eventGroups = report.Events
             .GroupBy(evt => evt.EventType)
             .OrderBy(group => group.Key)

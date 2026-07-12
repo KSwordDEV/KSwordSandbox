@@ -6280,6 +6280,7 @@
       "title": "Dropped file artifact copied",
       "titleZh": "已复制落地文件证据",
       "severity": "info",
+      "includeNonBehaviorEvidence": true,
       "summary": "The guest artifact collector copied a newly-created sample working-directory file into artifacts/dropped-files for post-run analysis.",
       "summaryZh": "来宾证据采集器将新建的样本工作目录文件复制到 artifacts/dropped-files，供运行后分析。",
       "eventTypes": [
@@ -6304,6 +6305,7 @@
       "title": "Dropped file artifact copy skipped",
       "titleZh": "跳过落地文件工件复制",
       "severity": "info",
+      "includeNonBehaviorEvidence": true,
       "summary": "A dropped-file artifact copy candidate was skipped because it was missing, outside scope, invalid, under the output tree, or failed to copy.",
       "summaryZh": "行为规则命中“跳过落地文件工件复制”；请结合 evidenceFields、进程树和样本上下文复核。",
       "eventTypes": [
@@ -6327,6 +6329,7 @@
       "title": "Executable dropped-file artifact copied",
       "titleZh": "已复制落地可执行工件",
       "severity": "medium",
+      "includeNonBehaviorEvidence": true,
       "summary": "The copied dropped-file artifact path or source path indicates an executable, script, library, driver, or archive payload staged during execution.",
       "summaryZh": "行为规则命中“已复制落地可执行工件”；请结合 evidenceFields、进程树和样本上下文复核。",
       "mitreTechniqueId": "T1105",
@@ -6362,6 +6365,7 @@
       "title": "Guest artifact manifest written",
       "titleZh": "已写入来宾证据清单",
       "severity": "info",
+      "includeNonBehaviorEvidence": true,
       "summary": "The guest artifact writer produced a manifest that can correlate screenshots, dropped files, memory dumps, and other artifacts with normalized events.",
       "summaryZh": "来宾证据写入器生成了清单，可将截图、落地文件、内存转储和其他证据与规范化事件关联起来。",
       "eventTypes": [
@@ -9433,6 +9437,7 @@
       "title": "Packet capture artifact indexed",
       "titleZh": "已索引网络抓包证据文件",
       "severity": "info",
+      "includeNonBehaviorEvidence": true,
       "summary": "A manifest, host artifact, or PCAP import event recorded a packet-capture artifact path, hash, MIME type, or byte size for report linkage.",
       "summaryZh": "清单、主机证据或 PCAP 导入事件记录了抓包证据路径、哈希、MIME 类型或字节大小，用于报告关联。",
       "eventTypes": [
@@ -20553,6 +20558,7 @@
       "titleZh": "脚本下载产生的投放文件工件",
       "severity": "high",
       "confidence": "high",
+      "includeNonBehaviorEvidence": true,
       "summary": "Dropped-file artifact metadata ties a user-writable executable/script source path to a script or LOLBin downloader process and an HTTP(S) source URL.",
       "summaryZh": "投放文件工件元数据将用户可写的可执行/脚本源路径与脚本或 LOLBin 下载进程以及 HTTP(S) 来源 URL 关联起来。",
       "mitreTechniqueId": "T1105",
@@ -28955,6 +28961,7 @@
       "titleZh": "内存转储产物关联到进程身份",
       "severity": "info",
       "confidence": "medium",
+      "includeNonBehaviorEvidence": true,
       "summary": "A host-indexed memory dump artifact preserves a captured memory-dump source event, process identity, size, hash, and safe relative artifact selector for analyst correlation. This is artifact evidence, not a credential-dumping verdict by itself.",
       "summaryZh": "Host 索引的内存转储产物保留了已捕获的内存转储来源事件、进程身份、大小、哈希和安全相对产物选择器，便于分析关联；它本身不是凭据转储判定。",
       "eventTypes": [
@@ -29109,6 +29116,7 @@
       "titleZh": "释放的可执行产物关联到来源事件",
       "severity": "medium",
       "confidence": "medium",
+      "includeNonBehaviorEvidence": true,
       "summary": "A host-indexed dropped-file artifact links an executable, script, library, driver, or archive payload under artifacts/dropped-files to the original file event, hash, and safe download selector.",
       "summaryZh": "Host 索引的释放文件产物将 artifacts/dropped-files 下的可执行、脚本、库、驱动或归档载荷与原始文件事件、哈希和安全下载选择器关联。",
       "mitreTechniqueId": "T1105",
@@ -29271,6 +29279,7 @@
       "titleZh": "截图产物关联到捕获事件",
       "severity": "info",
       "confidence": "medium",
+      "includeNonBehaviorEvidence": true,
       "summary": "A host-indexed screenshot artifact preserves the captured screenshot source event, phase, size, hash, and safe relative artifact selector for report review. This records sandbox collection evidence rather than sample screen-capture behavior.",
       "summaryZh": "Host 索引的截图产物保留截图来源事件、阶段、大小、哈希和安全相对产物选择器用于报告审阅；这记录的是沙箱采集证据，而不是样本截图行为。",
       "eventTypes": [
@@ -35450,6 +35459,7 @@
       "titleZh": "证据矩阵包含可下载选择器",
       "severity": "info",
       "confidence": "medium",
+      "includeNonBehaviorEvidence": true,
       "summary": "The host artifact-import summary reports ready screenshots, memory dumps, and packet captures together with safe primary relative selectors, preserving evidence availability without treating collection status as malicious behavior.",
       "summaryZh": "Host artifact-import 摘要同时报告截图、内存转储和抓包已就绪，并带有安全主相对选择器；它保留证据可用性，但不把采集状态当作恶意行为。",
       "eventTypes": [
