@@ -123,8 +123,9 @@ internal static class AgentProgram
             {
                 FileName = options.SamplePath,
                 WorkingDirectory = workingDirectory,
-                UseShellExecute = false,
-                CreateNoWindow = true
+                UseShellExecute = true,
+                CreateNoWindow = false,
+                WindowStyle = ProcessWindowStyle.Normal
             };
 
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start sample process.");

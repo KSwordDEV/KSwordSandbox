@@ -2597,7 +2597,7 @@ function New-HyperVE2ESteps {
         [void]$steps.Add((New-HyperVE2EStep -Id 'install-driver-service' -Phase 'start' -Title 'Install and start guest R0 driver service' -PowerShell $installDriverPowerShell -MutatesVmState $true))
     }
 
-    $runAgentPowerShell = "Start-Process powershell.exe -ArgumentList <agent wrapper: $GuestAgentCommandLine>; pid -> $AgentPidPath; exit -> $AgentExitPath; driver events -> $DriverEventsPath"
+    $runAgentPowerShell = "Register and start an InteractiveToken Scheduled Task on the logged-in guest desktop; agent wrapper: $GuestAgentCommandLine; pid -> $AgentPidPath; exit -> $AgentExitPath; driver events -> $DriverEventsPath"
     if (-not [string]::IsNullOrWhiteSpace($R0CollectorCommandLine)) {
         $runAgentPowerShell += "; R0Collector sidecar args: $R0CollectorCommandLine"
     }

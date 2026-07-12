@@ -977,28 +977,30 @@ function Start-GuestAgent {
     $agentStderrPath = ([string]$Plan.guest.outputDirectory).TrimEnd('\', '/') + '\agent.stderr.log'
     $arguments = New-Object System.Collections.Generic.List[string]
     [void]$arguments.Add('--sample')
-    [void]$arguments.Add((Quote-PowerShellString $Plan.sample.guestPath))
+    [void]$arguments.Add([string]$Plan.sample.guestPath)
     [void]$arguments.Add('--out')
-    [void]$arguments.Add((Quote-PowerShellString $Plan.guest.outputDirectory))
+    [void]$arguments.Add([string]$Plan.guest.outputDirectory)
     [void]$arguments.Add('--duration')
     [void]$arguments.Add([string]$Plan.job.durationSeconds)
 
     if (ConvertTo-BooleanValue $Plan.driver.enabled) {
         [void]$arguments.Add('--driver-events')
-        [void]$arguments.Add((Quote-PowerShellString $Plan.driver.eventJsonLinesPath))
+        [void]$arguments.Add([string]$Plan.driver.eventJsonLinesPath)
         [void]$arguments.Add('--r0collector')
-        [void]$arguments.Add((Quote-PowerShellString $Plan.driver.r0CollectorPathInGuest))
+        [void]$arguments.Add([string]$Plan.driver.r0CollectorPathInGuest)
         [void]$arguments.Add('--driver-device')
-        [void]$arguments.Add((Quote-PowerShellString $Plan.driver.devicePath))
+        [void]$arguments.Add([string]$Plan.driver.devicePath)
 
         if (ConvertTo-BooleanValue $Plan.driver.useMockCollector) {
             [void]$arguments.Add('--r0-mock')
         }
     }
 
-    $launchLine = '& ' + (Quote-PowerShellString $Plan.guest.agentPath) + ' ' + (($arguments.ToArray()) -join ' ')
+    $quotedArguments = @($arguments.ToArray() | ForEach-Object { Quote-PowerShellString ([string]$_) })
+    $launchLine = '& ' + (Quote-PowerShellString $Plan.guest.agentPath) + ' ' + ($quotedArguments -join ' ')
     $script:GuestAgentArguments = @($arguments.ToArray())
     $script:GuestAgentCommandLine = $launchLine
+    $agentArgumentsJson = @($arguments.ToArray()) | ConvertTo-Json -Compress
     $script:R0CollectorMode = if (-not (ConvertTo-BooleanValue $Plan.driver.enabled)) {
         'Disabled'
     }
@@ -1025,37 +1027,119 @@ function Start-GuestAgent {
         $script:R0CollectorCommandLine = '& ' + (Quote-PowerShellString $Plan.driver.r0CollectorPathInGuest) + ' ' + (($collectorArguments.ToArray()) -join ' ')
     }
 
-    $agentCommand = @(
-        $launchLine,
-        '$exitCode = if ($global:LASTEXITCODE -is [int]) { $global:LASTEXITCODE } else { 0 }',
-        ('Set-Content -Path {0} -Value $exitCode -Encoding ASCII' -f (Quote-PowerShellString $Plan.guest.agentExitPath)),
-        'exit $exitCode'
-    ) -join '; '
-
     $launch = Invoke-Command -VMName $Plan.vm.name -Credential $Credential -ScriptBlock {
         param(
             [string]$GuestRoot,
-            [string]$AgentCommand,
+            [string]$OutputDirectory,
+            [string]$AgentPath,
+            [string]$AgentArgumentsJson,
             [string]$PidPath,
+            [string]$ExitPath,
             [string]$StdoutPath,
             [string]$StderrPath
         )
 
-        $process = Start-Process `
-            -FilePath 'powershell.exe' `
-            -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $AgentCommand) `
-            -WorkingDirectory $GuestRoot `
-            -RedirectStandardOutput $StdoutPath `
-            -RedirectStandardError $StderrPath `
-            -PassThru
-        $process.Id | Set-Content -Path $PidPath -Encoding ASCII
-        [pscustomobject][ordered]@{
-            ProcessId = $process.Id
-            PidPath = $PidPath
-            StdoutPath = $StdoutPath
-            StderrPath = $StderrPath
+        function Quote-GuestLiteral {
+            param([AllowNull()][string]$Value)
+            return ("'" + ([string]$Value).Replace("'", "''") + "'")
         }
-    } -ArgumentList $Plan.guest.workingDirectory, $agentCommand, $Plan.guest.agentPidPath, $agentStdoutPath, $agentStderrPath
+
+        function Quote-GuestNativeArgument {
+            param([AllowNull()][string]$Value)
+            return ('"' + ([string]$Value).Replace('"', '\"') + '"')
+        }
+
+        foreach ($commandName in @('New-ScheduledTaskAction', 'New-ScheduledTaskTrigger', 'New-ScheduledTaskPrincipal', 'Register-ScheduledTask', 'Start-ScheduledTask')) {
+            if ($null -eq (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) {
+                throw "错误：guest 缺少 ScheduledTasks cmdlet '$commandName'，无法在已登录桌面交互式启动 Guest Agent。下一步：确认 guest 是支持 Task Scheduler 的 Windows 版本。"
+            }
+        }
+
+        New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+        $taskSuffix = ([IO.Path]::GetFileName($OutputDirectory) -replace '[^A-Za-z0-9_-]', '')
+        if ([string]::IsNullOrWhiteSpace($taskSuffix)) {
+            $taskSuffix = [Guid]::NewGuid().ToString('N')
+        }
+
+        $taskName = "KSwordSandboxAgent_$taskSuffix"
+        $wrapperPath = Join-Path $OutputDirectory 'start-agent-interactive.ps1'
+        $argumentsJson = $AgentArgumentsJson
+        $wrapperLines = @(
+            '$ErrorActionPreference = ''Continue''',
+            'function Write-AsciiTextFile { param([string]$Path, [AllowNull()][object]$Value) [System.IO.File]::WriteAllText($Path, [string]$Value, [System.Text.Encoding]::ASCII) }',
+            '$agentPath = ' + (Quote-GuestLiteral $AgentPath),
+            '$guestRoot = ' + (Quote-GuestLiteral $GuestRoot),
+            '$pidPath = ' + (Quote-GuestLiteral $PidPath),
+            '$exitPath = ' + (Quote-GuestLiteral $ExitPath),
+            '$stdoutPath = ' + (Quote-GuestLiteral $StdoutPath),
+            '$stderrPath = ' + (Quote-GuestLiteral $StderrPath),
+            '$agentArguments = @''',
+            $argumentsJson,
+            '''@ | ConvertFrom-Json',
+            'try {',
+            '    Set-Location -LiteralPath $guestRoot',
+            '    $process = Start-Process -FilePath $agentPath -ArgumentList ([string[]]$agentArguments) -WorkingDirectory $guestRoot -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru',
+            '    Write-AsciiTextFile -Path $pidPath -Value $process.Id',
+            '    $process.WaitForExit()',
+            '    $process.Refresh()',
+            '    $exitCode = 0',
+            '    try { if ($null -ne $process.ExitCode) { $exitCode = [int]$process.ExitCode } } catch { $exitCode = 0 }',
+            '    Write-AsciiTextFile -Path $exitPath -Value $exitCode',
+            '    exit ([int]$exitCode)',
+            '}',
+            'catch {',
+            '    $_.Exception.Message | Set-Content -Path $stderrPath -Encoding UTF8',
+            '    Write-AsciiTextFile -Path $exitPath -Value -1',
+            '    exit 1',
+            '}'
+        )
+        Set-Content -Path $wrapperPath -Value $wrapperLines -Encoding UTF8
+        Remove-Item -LiteralPath $PidPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $ExitPath -Force -ErrorAction SilentlyContinue
+
+        try {
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+        }
+        catch {
+        }
+
+        $taskArgument = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File ' + (Quote-GuestNativeArgument $wrapperPath)
+        $launchMode = 'InteractiveScheduledTaskHiddenPowerShell'
+        $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $taskArgument
+        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5)
+        $userId = if ([string]::IsNullOrWhiteSpace($env:USERDOMAIN)) { $env:USERNAME } else { "$env:USERDOMAIN\$env:USERNAME" }
+        $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Highest
+        try {
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+        }
+        catch {
+            $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+        }
+
+        Start-ScheduledTask -TaskName $taskName
+        $deadline = (Get-Date).AddSeconds(20)
+        do {
+            if (Test-Path -LiteralPath $PidPath -PathType Leaf) {
+                $pidText = ([string](@(Get-Content -LiteralPath $PidPath -Raw))).Trim()
+                if ($pidText -match '^\d+$' -and [int]$pidText -gt 0) {
+                    return [pscustomobject][ordered]@{
+                        ProcessId = [int]$pidText
+                        PidPath = $PidPath
+                        StdoutPath = $StdoutPath
+                        StderrPath = $StderrPath
+                        TaskName = $taskName
+                        WrapperPath = $wrapperPath
+                        LaunchMode = $launchMode
+                    }
+                }
+            }
+
+            Start-Sleep -Milliseconds 500
+        } while ((Get-Date) -lt $deadline)
+
+        throw "错误：交互式 Scheduled Task '$taskName' 已启动，但 20 秒内没有写出 Guest Agent PID：$PidPath。下一步：在 VM 桌面或 Task Scheduler 查看任务历史，并检查 $wrapperPath / $StderrPath。"
+    } -ArgumentList $Plan.guest.workingDirectory, $Plan.guest.outputDirectory, $Plan.guest.agentPath, $agentArgumentsJson, $Plan.guest.agentPidPath, $Plan.guest.agentExitPath, $agentStdoutPath, $agentStderrPath
 
     $script:GuestAgentProcessId = @($launch | Select-Object -First 1)[0].ProcessId
 }
@@ -1226,7 +1310,7 @@ function Test-StartSkeletonEventsPresent {
     }
 
     try {
-        $content = (Get-Content -LiteralPath $Path -Raw).Trim()
+        $content = ([string](@(Get-Content -LiteralPath $Path -Raw))).Trim()
         if ([string]::IsNullOrWhiteSpace($content) -or $content -eq '[]') {
             return $false
         }

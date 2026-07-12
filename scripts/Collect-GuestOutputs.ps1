@@ -337,7 +337,7 @@ function Get-GuestAgentPid {
             return ''
         }
 
-        return (Get-Content -LiteralPath $Path -Raw).Trim()
+        return ([string](@(Get-Content -LiteralPath $Path -Raw))).Trim()
     } -ArgumentList $PidPath
 
     if ([string]::IsNullOrWhiteSpace([string]$pidText)) {
@@ -373,11 +373,19 @@ function Read-GuestAgentExitCode {
 
     $exitText = Invoke-Command -Session $Session -ScriptBlock {
         param([string]$Path)
-        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-            throw "错误：找不到 Guest Agent exit marker：$Path。下一步：等待更久或检查 Guest Agent 是否崩溃/未写出 marker。"
-        }
+        $deadline = (Get-Date).AddSeconds(15)
+        do {
+            if (Test-Path -LiteralPath $Path -PathType Leaf) {
+                $content = ([string](@(Get-Content -LiteralPath $Path -Raw))).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($content)) {
+                    return $content
+                }
+            }
 
-        return (Get-Content -LiteralPath $Path -Raw).Trim()
+            Start-Sleep -Milliseconds 500
+        } while ((Get-Date) -lt $deadline)
+
+        throw "错误：找不到非空 Guest Agent exit marker：$Path。下一步：等待更久或检查交互式 Guest Agent wrapper 是否仍在写 exit marker。"
     } -ArgumentList $ExitPath
 
     return [int]$exitText
@@ -679,7 +687,7 @@ function Test-CollectSkeletonEventsPresent {
     }
 
     try {
-        $content = (Get-Content -LiteralPath $Path -Raw).Trim()
+        $content = ([string](@(Get-Content -LiteralPath $Path -Raw))).Trim()
         if ([string]::IsNullOrWhiteSpace($content) -or $content -eq '[]') {
             return $false
         }

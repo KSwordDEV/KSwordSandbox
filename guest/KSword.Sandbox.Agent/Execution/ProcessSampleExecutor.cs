@@ -19,8 +19,9 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
         {
             FileName = plan.SamplePath,
             WorkingDirectory = plan.WorkingDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true
+            UseShellExecute = true,
+            CreateNoWindow = false,
+            WindowStyle = ProcessWindowStyle.Normal
         };
 
         Process? startedProcess;
