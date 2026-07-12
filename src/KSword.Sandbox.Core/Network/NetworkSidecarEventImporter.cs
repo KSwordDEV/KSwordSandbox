@@ -49,6 +49,7 @@ public sealed class NetworkSidecarEventImporter
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["importer"] = nameof(NetworkSidecarEventImporter),
+                    ["importSource"] = "sidecar-jsonl",
                     ["sidecarArtifactCount"] = "1",
                     ["pcapArtifactCount"] = "0",
                     ["parser"] = "jsonl-sidecar",
@@ -215,12 +216,25 @@ public sealed class NetworkSidecarEventImporter
         {
             ["sidecarLineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["sidecarFormat"] = sidecarFormat,
+            ["importSource"] = "sidecar-jsonl",
             ["parser"] = "sidecar-jsonl"
         };
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "originalEventType", originalEventType);
         AddSidecarProcessFields(fields, extra);
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "direction", FirstValue(fields, "direction", "flow.direction", "network.direction", "event.direction"));
         AddCommonSidecarFields(fields, extra);
+
+        if (IsNetworkHealth(fields, originalEventType))
+        {
+            AddNetworkHealthFields(fields, extra);
+            evt = ApplySidecarProcessContext(CreateNetworkHealthEvent(
+                path,
+                timestamp,
+                source,
+                originalEventType,
+                extra), fields);
+            return true;
+        }
 
         if (IsDns(fields, originalEventType))
         {
@@ -299,6 +313,93 @@ public sealed class NetworkSidecarEventImporter
         }
 
         return false;
+    }
+
+    private static SandboxEvent CreateNetworkHealthEvent(
+        string path,
+        DateTimeOffset timestamp,
+        NetworkArtifactSource source,
+        string? originalEventType,
+        Dictionary<string, string> extra)
+    {
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["schema"] = NetworkTelemetrySchema.SchemaVersion,
+            ["eventFamily"] = "network",
+            ["eventKind"] = "health",
+            ["importSource"] = "sidecar-jsonl",
+            ["parser"] = "sidecar-jsonl",
+            ["behaviorCounted"] = "false",
+            ["nonbehavior"] = "true",
+            ["behaviorScope"] = "network-collection-health",
+            ["noisePolicy"] = "nonbehavior-evidence-quality"
+        };
+
+        NetworkTelemetrySchema.AddIfNotEmpty(data, "originalEventType", originalEventType);
+        foreach (var pair in extra)
+        {
+            NetworkTelemetrySchema.AddIfNotEmpty(data, pair.Key, pair.Value);
+        }
+
+        NetworkTelemetrySchema.AddArtifactData(data, source);
+        NetworkTelemetrySchema.ApplyHealthAndLocalization(data);
+        return new SandboxEvent
+        {
+            EventType = !string.IsNullOrWhiteSpace(originalEventType) &&
+                originalEventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase)
+                    ? originalEventType
+                    : "network.health",
+            Timestamp = timestamp == default ? DateTimeOffset.UtcNow : timestamp,
+            Source = "host",
+            Path = path,
+            Data = data
+        };
+    }
+
+    private static bool IsNetworkHealth(IReadOnlyDictionary<string, string> fields, string? eventType)
+    {
+        return Contains(eventType, "driverNetworkStatus") ||
+            Contains(eventType, "networkStatus") ||
+            HasAny(
+                fields,
+                "networkStatusAvailable",
+                "readinessState",
+                "lastDegradeReasonName",
+                "supportedLayerMask",
+                "supportedLayerMaskHex",
+                "activeLayerMask",
+                "activeLayerMaskHex",
+                "lastRegisteredCalloutMask",
+                "lastAddedFilterMask",
+                "todoMask",
+                "queueFailureCount",
+                "classifyPayloadFailureCount",
+                "registerNtStatusHex",
+                "engineNtStatusHex",
+                "lastQueueFailureNtStatusHex");
+    }
+
+    private static void AddNetworkHealthFields(IReadOnlyDictionary<string, string> fields, Dictionary<string, string> extra)
+    {
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "diagnosticStage", FirstValue(fields, "diagnosticStage", "stage", "event.stage") ?? "networkStatus");
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "networkStatusAvailable", FirstValue(fields, "networkStatusAvailable", "available", "isAvailable"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "readinessState", FirstValue(fields, "readinessState", "state", "status"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "diagnosticCode", FirstValue(fields, "diagnosticCode", "code", "error.code"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "lastDegradeReasonName", FirstValue(fields, "lastDegradeReasonName", "degradeReason", "reason"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "supportedLayerMask", FirstValue(fields, "supportedLayerMask", "supportedLayerMaskHex"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "activeLayerMask", FirstValue(fields, "activeLayerMask", "activeLayerMaskHex"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "lastRegisteredCalloutMask", FirstValue(fields, "lastRegisteredCalloutMask", "lastRegisteredCalloutMaskHex"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "lastAddedFilterMask", FirstValue(fields, "lastAddedFilterMask", "lastAddedFilterMaskHex"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "todoMask", FirstValue(fields, "todoMask", "todoMaskHex"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "classifyCount", FirstValue(fields, "classifyCount"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "eventCount", FirstValue(fields, "eventCount"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "queueFailureCount", FirstValue(fields, "queueFailureCount"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "classifyPayloadFailureCount", FirstValue(fields, "classifyPayloadFailureCount"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "registerNtStatusHex", FirstValue(fields, "registerNtStatusHex"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "engineNtStatusHex", FirstValue(fields, "engineNtStatusHex"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "lastQueueFailureNtStatusHex", FirstValue(fields, "lastQueueFailureNtStatusHex"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "zhMessage", FirstValue(fields, "zhMessage"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "zhHint", FirstValue(fields, "zhHint"));
     }
 
     private static bool IsDns(IReadOnlyDictionary<string, string> fields, string? eventType)
@@ -633,6 +734,8 @@ public sealed class NetworkSidecarEventImporter
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "processRole", FirstValue(fields, "processRole", "process.role", "process.entry_leader.same_as_process"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "rootProcessName", FirstValue(fields, "rootProcessName", "rootProcessImage", "process.root.name", "process.entry_leader.name"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "rootCommandLine", FirstValue(fields, "rootCommandLine", "process.root.command_line", "process.entry_leader.command_line"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "collectorProcessName", FirstValue(fields, "collectorProcessName", "collector.processName", "collector.process.name"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "sourceComponent", FirstValue(fields, "sourceComponent", "source.component", "telemetrySource", "telemetry.source"));
     }
 
     private static SandboxEvent ApplySidecarProcessContext(SandboxEvent evt, IReadOnlyDictionary<string, string> fields)

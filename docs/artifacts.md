@@ -214,7 +214,7 @@ Screenshot events 还带 `phase` / `capturePhase`、`captureState`、`status`、
 `expectedRelativePath=screenshots/*.bmp`、创建文件时的 `artifactRelativePath`、captured BMP 的 event-level `sizeBytes` 与
 `sha256`、`artifactSelector` / `downloadSelector`、`artifactIntegrityState=verified`，以及样本进程身份已知时的
 `processRole`、`rootProcessId`、`processId` 和 root `treeLineage`。Captured 与 skipped
-rows 都包含 `behaviorCounted=false` / `nonbehavior=true` 和 `zhMessage` / `zhHint`。Skipped screenshots 保留 `reason`、`diagnosticStage`、可选 `exceptionType` 和可选
+rows 都包含 `behaviorCounted=false` / `nonbehavior=true` / `notSampleBehavior=true` 和 `zhMessage` / `zhHint`。Skipped screenshots 保留 `reason`、`diagnosticStage`、可选 `exceptionType` 和可选
 `win32Error`，并补充稳定的 `reasonCode` / `reasonCategory` / `reasonTaxonomy` / `zhReason`，但不让 run 失败。
 每个执行的截图阶段还写出 `screenshot.phase.summary`，汇总 `reasonCountsJson` 以及
 `firstArtifactSelector` / `lastArtifactSelector` / `largestArtifactSelector`。未请求截图时，Guest 写出一个 `screenshot.disabled` event，字段包括
@@ -256,7 +256,7 @@ rows 均包含 `zhMessage` / `zhHint`。Captured/skipped child targets also carr
 reported alongside captured dump artifacts. Probe timeouts 或 exceptions 映射为 `memory-dumps` collection 的 nonfatal failed status，
 而不是变成 `enabled-empty`。未请求 memory dumps 时，Guest 写出一个同形状的 `memory_dump.disabled` event。
 `memory_dump.sweep` event 是 summary（`summaryEvent=true`），带 `coverageTaxonomy`，
-并标记 `behaviorCounted=false` / `nonbehavior=true`，不计入 captured/skipped/failed collection status。
+并标记 `behaviorCounted=false` / `nonbehavior=true` / `notSampleBehavior=true`，不计入 captured/skipped/failed collection status。
 
 中文提示：内存转储失败/跳过不会阻止其他证据写出。中文提示用于区分目标进程已退出、PID 不可见、
 `MiniDumpWriteDump` 失败、权限不足或未显式启用。
@@ -338,7 +338,7 @@ dropped files、screenshots、memory dumps 或 artifact manifest 写出。成功
 Packet capture lifecycle events 带 `collectionName=packet-captures`、`evidenceRole=packet-capture`、`phase` /
 `capturePhase`、`status`、`captureState`、`nonfatal`、`expectedRelativePath=packet-captures/*.pcapng`，以及最终 PCAPNG path 的
 `artifactRelativePath`。Captured PCAPNG rows 还带 event-level `sizeBytes`、`sha256`、`processRole`、`rootProcessId`、root
-`treeLineage` 和 `zhMessage` / `zhHint`。ETL diagnostics 与 packet artifact 分离，使用 `etlRelativePath` /
+`treeLineage`、`behaviorCounted=false` / `nonbehavior=true` / `notSampleBehavior=true` 和 `zhMessage` / `zhHint`。ETL diagnostics 与 packet artifact 分离，使用 `etlRelativePath` /
 `diagnosticRelativePath`。当 PCAPNG path 已知时，events 还包含显式 `pcapngPath`、`pcapngRelativePath`、
 `packetCaptureRelativePath` 和 `sourceArtifactRelativePath`。
 

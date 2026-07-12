@@ -1,17 +1,10 @@
-# Host-to-Guest payload staging and live VM smoke
+# Host-to-Guest payload staging 与 live VM smoke
 
-This runbook documents the shortest local path to a useful "start a VM, run a
-harmless sample, import guest behavior, and refresh the HTML report" check.
-It keeps every generated binary, report, sample publish output, and VM artifact
-under `D:\Temp\KSwordSandbox` by default. Do not commit anything from that
-runtime tree.
+中文优先说明：本文记录最短本地路径，用于完成“启动 VM、运行 harmless sample、导入 guest behavior、刷新 HTML report”的验证。默认所有 generated binary、report、sample publish output 和 VM artifact 都放在 `D:\Temp\KSwordSandbox`；不要把该 runtime tree 中的任何内容提交到仓库。
 
-Canonical scope: this page owns Guest Agent/R0Collector payload staging and
-manifest freshness. Golden VM baseline details live in `docs/golden-vm.md`;
-current read-only preflight details live in `docs/hyperv-readiness.md`; full
-PlanOnly/WhatIf/Live script flow lives in `docs/hyperv-e2e-runbook.md`.
+范围：本页负责 Guest Agent/R0Collector payload staging 与 manifest freshness。Golden VM baseline 见 `docs/golden-vm.md`；当前只读 preflight 见 `docs/hyperv-readiness.md`；完整 PlanOnly/WhatIf/Live 脚本流程见 `docs/hyperv-e2e-runbook.md`。
 
-## 1. Build and stage guest tools on the host
+## 1. 在 host 上 build 并 stage guest tools
 
 Use `scripts/Prepare-GuestPayload.ps1` from the repository root. The script uses
 MSBuild for both guest-side projects:
@@ -20,13 +13,13 @@ MSBuild for both guest-side projects:
 - builds `guest/KSword.Sandbox.R0Collector/KSword.Sandbox.R0Collector.vcxproj`;
 - copies runtime files into `D:\Temp\KSwordSandbox\payload\guest-tools`.
 
-Default command:
+默认命令：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-GuestPayload.ps1
 ```
 
-Useful explicit command:
+显式参数命令：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-GuestPayload.ps1 `
@@ -39,7 +32,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-GuestPayload.ps1
   -R0CollectorExecutableName 'KSword.Sandbox.R0Collector.exe'
 ```
 
-Expected staged layout:
+预期 staged layout：
 
 ```text
 D:\Temp\KSwordSandbox\payload\guest-tools\
@@ -77,11 +70,10 @@ before refreshing a golden checkpoint or starting a live run:
 - `expectedGuestAgentPath` and `expectedR0CollectorPath`: guest paths the live
   runbook validates after staging.
 
-Freshness rule: if the repository head, guest source inputs, build settings, or
-expected guest paths changed after `generatedAtUtc` / `sourceLatestWriteUtc`,
-rerun `scripts/Prepare-GuestPayload.ps1` and keep the new payload under the
-external runtime tree. Do not copy an old payload into the golden VM just
-because the required files still exist.
+Freshness 规则：如果 repository head、guest source inputs、build settings 或
+expected guest paths 晚于 `generatedAtUtc` / `sourceLatestWriteUtc` 发生变化，
+请重新运行 `scripts/Prepare-GuestPayload.ps1`，并把新 payload 保留在外部
+runtime tree。不要因为 required files 仍然存在，就把旧 payload 复制进 golden VM。
 
 You can validate only the staged host files, without building or copying
 anything, by running:
@@ -205,7 +197,7 @@ Prepare these before running a live runbook:
    optional driver prerequisites, and local user account are ready, create the
    checkpoint named by local config, normally `Clean`.
 
-Run the read-only host preflight before attempting live execution:
+尝试 live execution 前先运行只读 host preflight：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 `
@@ -224,7 +216,7 @@ guest-deployed payload files with read-only `Invoke-Command`/`Test-Path`
 probes. If the VM is off, those probes are reported as warnings because the
 preflight will not start the VM.
 
-## 4. Build the harmless sample outside the repository
+## 4. 在仓库外 build harmless sample
 
 Publish the benign sample under `D:\Temp\KSwordSandbox\samples`:
 
@@ -256,7 +248,7 @@ The sample only creates a marker file, launches a short-lived `cmd.exe`, and
 optionally probes loopback and TEST-NET addresses. It is intended for safe
 pipeline validation, not for malware behavior coverage.
 
-## 5. Run one live runbook and refresh the report
+## 5. 执行一次 live runbook 并刷新 report
 
 Start the host Web API from an elevated PowerShell session so the live executor
 can run Hyper-V cmdlets:
@@ -315,7 +307,7 @@ $refreshed.guestEventsPath
 $refreshed.htmlReportPath
 ```
 
-Expected host output locations:
+预期 host output locations：
 
 ```text
 D:\Temp\KSwordSandbox\jobs\<job-id-n>\runbook-execution.json
@@ -329,7 +321,7 @@ Open the printed `report.html` locally and confirm that it includes guest
 process, file, optional network, and import marker events. Keep the whole
 `D:\Temp\KSwordSandbox\jobs\...` tree out of git.
 
-## Current R0Collector note
+## 当前 R0Collector 说明
 
 `Prepare-GuestPayload.ps1` stages `KSword.Sandbox.R0Collector.exe` so the VM has
 the user-mode bridge available. The generated runbook copies that staged bridge

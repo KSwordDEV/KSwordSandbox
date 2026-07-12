@@ -1,10 +1,10 @@
-# R0 driver core IOCTL and ABI contract
+# R0 driver core IOCTL 与 ABI 契约
 
-This document defines the stable kernel/user boundary owned by
-`driver/KSword.Sandbox.Driver/include/KSwordSandboxDriverIoctl.h`. It is the
-source of truth for future `KSword.Sandbox.R0Collector` capability negotiation.
+中文优先范围：本文定义由 `driver/KSword.Sandbox.Driver/include/KSwordSandboxDriverIoctl.h` 拥有的稳定 kernel/user 边界，是 `KSword.Sandbox.R0Collector` capability negotiation 的事实来源。
 
-## ABI versioning
+保留命令、IOCTL name、struct/field name、flag name 的英文拼写；说明文字优先中文。
+
+## ABI versioning（版本约束）
 
 - Current ABI version: `KSWORD_SANDBOX_ABI_VERSION_MAJOR = 1`,
   `KSWORD_SANDBOX_ABI_VERSION_MINOR = 0`.
@@ -27,9 +27,9 @@ source of truth for future `KSword.Sandbox.R0Collector` capability negotiation.
   must preserve these fields for mock rows and stress rows so mock/live output
   remains comparable.
 
-## Capability negotiation flow
+## Capability negotiation flow（能力协商流程）
 
-Recommended collector startup:
+推荐 collector 启动顺序：
 
 1. Open `\\.\KSwordSandboxDriver`.
 2. Issue `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES`.
@@ -51,7 +51,7 @@ Recommended collector startup:
 8. Use `IOCTL_KSWORD_SANDBOX_POLL` and `IOCTL_KSWORD_SANDBOX_READ_EVENTS` for
    the event stream.
 
-## Installation and live-load boundary
+## Installation 与 live-load 边界
 
 The ABI contract above starts only after an operator has explicitly loaded the
 driver in an isolated test VM. Installation, test-signing, service control, and
@@ -67,7 +67,7 @@ collector validation may open the device only after the explicit driver
 install/start step has succeeded and the JSON status reports the expected
 service/minifilter state.
 
-Current `CapabilityFlags` include:
+当前 `CapabilityFlags` 包括：
 
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_GET_HEALTH`
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_POLL`
@@ -89,7 +89,7 @@ Current `CapabilityFlags` include:
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA`
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS`
 
-## Producer runtime state and payload versions
+## Producer runtime state 与 payload 版本
 
 Each v1 event producer owns an explicit runtime state structure in the driver
 source instead of scattering loose callback globals:
@@ -136,7 +136,7 @@ Each payload comment in `KSwordSandboxDriverIoctl.h` states that `Version` must
 match the corresponding `KSWORD_SANDBOX_*_EVENT_VERSION` constant and `Size`
 must match `sizeof(the payload structure)` for the fixed v1 layout.
 
-## GET_HEALTH producer-mask snapshot
+## `GET_HEALTH` producer-mask snapshot
 
 `IOCTL_KSWORD_SANDBOX_GET_HEALTH` remains the legacy fixed-size probe, but the
 ABI 1.0 reserved space now carries a compact producer health snapshot for
@@ -160,7 +160,7 @@ collectors that still ignore the reserved area remain compatible.
 `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST` and returns
 `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY`.
 
-Current producer bits:
+当前 producer bits：
 
 - `KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER`
 - `KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS`
@@ -181,7 +181,7 @@ suppresses future enqueue attempts for that event type and increments
 `TotalEventsSuppressed`; it does not unregister kernel callbacks and does not
 remove events that were already queued.
 
-## Queue and status counters
+## Queue 与 status counters
 
 `IOCTL_KSWORD_SANDBOX_GET_STATUS` returns `KSWORD_SANDBOX_STATUS_REPLY` with:
 
@@ -255,7 +255,7 @@ This reduces the network readiness blind spot without redefining the v1 R0
 network event as a packet sensor.  Reports should still merge richer protocol
 semantics from Guest/PCAP imports.
 
-## Synthetic event-quality and backpressure contract
+## Synthetic event-quality 与 backpressure 契约
 
 The event ring is bounded and non-blocking. The default capacity is 1024 records,
 with build-time guard rails of 64..4096 slots. Producers must not wait on
@@ -311,7 +311,7 @@ names so stress failures are diagnosable without loading a real driver:
 
 ## IOCTL error contract
 
-Public handlers return standard NTSTATUS values:
+Public handlers 返回标准 NTSTATUS 值：
 
 - `STATUS_SUCCESS`: request completed; `IoStatus.Information` contains the
   number of bytes written.

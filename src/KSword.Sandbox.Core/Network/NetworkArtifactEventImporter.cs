@@ -83,11 +83,12 @@ public sealed class NetworkArtifactEventImporter
         [
             NetworkTelemetrySchema.CreateImportSummary(
                 importRoot,
-                NetworkArtifactSource.FromPath(importRoot, importRoot, artifactKind: "Directory", collectionName: "network-import", evidenceRole: "network-import-root"),
+                NetworkArtifactSource.FromPath(importRoot, importRoot, artifactKind: "Directory", collectionName: "network-import", evidenceRole: "network-import-root", importMode: "guest-artifact-aggregate"),
                 events,
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["importer"] = nameof(NetworkArtifactEventImporter),
+                    ["importSource"] = "guest-artifact-aggregate",
                     ["importScope"] = "guest-artifacts",
                     ["manifestPresent"] = (manifest is not null).ToString().ToLowerInvariant(),
                     ["artifactCount"] = candidates.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -157,7 +158,7 @@ public sealed class NetworkArtifactEventImporter
                             isPacketCapture ? ArtifactKind.PacketCapture.ToString() : ArtifactKind.Log.ToString(),
                             isPacketCapture ? "packet-captures" : "network-sidecars",
                             isPacketCapture ? "packet-capture" : "network-telemetry-sidecar",
-                            isPacketCapture ? "external-artifact" : "sidecar-artifact"),
+                            isPacketCapture ? "pcap-artifact" : "sidecar-artifact"),
                         importRoot),
                     "filesystem");
             }

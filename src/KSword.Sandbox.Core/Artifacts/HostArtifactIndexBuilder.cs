@@ -184,6 +184,12 @@ public sealed class HostArtifactIndexBuilder
                 ["schemaVersion"] = index.SchemaVersion.ToString(CultureInfo.InvariantCulture),
                 ["rootPathPolicy"] = index.RootPathPolicy,
                 ["downloadPolicy"] = index.DownloadPolicy,
+                ["metadataBehaviorCounted"] = "false",
+                ["metadataNonbehavior"] = "true",
+                ["artifactDescriptorScope"] = "host-artifact-index-metadata",
+                ["sampleBehaviorImpact"] = "metadata-only-do-not-score",
+                ["selectorAuthority"] = "host-artifact-index",
+                ["selectorSafety"] = "normalized-relative-indexed",
                 ["artifactCount"] = index.ArtifactCount.ToString(CultureInfo.InvariantCulture),
                 ["collectionCount"] = index.CollectionCount.ToString(CultureInfo.InvariantCulture),
                 ["downloadableArtifactCount"] = index.DownloadableArtifactCount.ToString(CultureInfo.InvariantCulture),
@@ -2012,7 +2018,16 @@ public sealed class HostArtifactIndexBuilder
             ? Path.GetFileName(artifact.RelativePath)
             : artifact.Name;
         var safeFileName = SafeDownloadFileName(fileName);
+        var sampleEvidenceArtifact = IsSensitiveArtifact(artifact)
+            .ToString(CultureInfo.InvariantCulture)
+            .ToLowerInvariant();
         AddIfMissing(metadata, "apiMetadataVersion", "artifact-descriptor-v1");
+        AddIfMissing(metadata, "metadataBehaviorCounted", "false");
+        AddIfMissing(metadata, "metadataNonbehavior", "true");
+        AddIfMissing(metadata, "artifactDescriptorScope", "host-artifact-index-metadata");
+        AddIfMissing(metadata, "sampleBehaviorImpact", "metadata-only-do-not-score");
+        AddIfMissing(metadata, "sampleEvidenceArtifact", sampleEvidenceArtifact);
+        AddIfMissing(metadata, "evidenceDerivedFromSample", sampleEvidenceArtifact);
         AddIfMissing(metadata, "contentType", contentType);
         AddIfMissing(metadata, "downloadContentType", contentType);
         AddIfMissing(metadata, "downloadFileName", fileName);

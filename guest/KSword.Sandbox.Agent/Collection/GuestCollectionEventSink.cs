@@ -18,6 +18,7 @@ internal sealed class GuestCollectionEventSink
     /// </summary>
     public void Add(SandboxEvent evt)
     {
+        GuestSelfNoiseMetadata.Apply(evt);
         events.Add(evt);
     }
 
@@ -28,7 +29,10 @@ internal sealed class GuestCollectionEventSink
     /// </summary>
     public void AddRange(IEnumerable<SandboxEvent> items)
     {
-        events.AddRange(items);
+        foreach (var item in items)
+        {
+            Add(item);
+        }
     }
 
     /// <summary>

@@ -378,10 +378,14 @@ void AddReadinessNoiseFields(
     data.AddUtf8("noiseDisposition", disposition);
     data.AddUtf8("noiseReasons", "collectionDiagnostic");
     data.AddUtf8("noiseFieldSet", kJsonlNoiseFieldSet);
+    AddCollectorNonBehaviorFields(data, "readiness-diagnostic", "emit-readiness-diagnostic-not-sample-behavior");
     data.AddBool("sampleBehaviorCandidate", false);
     data.AddWide(
         "zhNoiseHint",
         L"该 readiness 行是 Collector 采集健康/配置诊断，不是样本行为；报告应作为采集状态处理。");
+    data.AddWide(
+        "zhNoisePolicyHint",
+        L"readiness 噪声策略是写出诊断但不计入行为；Host 应按 collector health 处理。");
     data.AddWide(
         "zhOperatorHint",
         L"运营提示：先修复 readiness 的阻塞/降级项，再解读样本行为；可用 --abi-self-check 或 --stress-count 32 --inject-jsonl-noise 做无驱动验证。");
@@ -1180,6 +1184,7 @@ int RunReadinessDiagnoseMode(const Options& options, EventWriter& writer) {
     openedData.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     openedData.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(openedData, "collector-device-open", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(openedData, "readiness-device-open", "emit-readiness-device-open-not-sample-behavior");
     openedData.AddBool("collectorNoise", false);
     openedData.AddBool("collectorSelfNoise", false);
     openedData.AddBool("selfProcess", false);

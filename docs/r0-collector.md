@@ -451,7 +451,11 @@ KSword.Sandbox.R0Collector.exe `
 诊断 code。
 readiness/device-unavailable rows also keep `noiseClass=collector-diagnostic`,
 `noiseScope=collector-diagnostic`, `noiseDisposition`, `sampleBehaviorCandidate=false`,
-and `zhOperatorHint`, so operators can tell collection health from sample behavior.
+`behaviorCounted=false`, `nonbehavior=true`, `noisePolicy`, `producerHint`,
+`producerProcessHint`, `selfProcessHint`, and zh hints, so operators can tell
+collection health from sample behavior. `producerProcessHint` is especially
+important because top-level `processId`/`processName` on collector-owned rows
+refer to R0Collector itself, not the analyzed sample.
 
 `driver_no_events` 是 warning/degraded condition，不是 protocol failure：
 `READ_EVENTS` 已完成但 queue 为空。它通常表示 startup heartbeat 已被 drain，
@@ -551,6 +555,13 @@ Every collector-owned row keeps the event-quality fields stable under `data`:
 - `noise` is `false` for normal rows. It is `true` for the valid synthetic
   extra-field row emitted by `--inject-jsonl-noise` and for self-noise rows only
   when the operator explicitly uses `--emit-self-noise`.
+- `behaviorCounted`, `nonbehavior`, `behaviorCountingPolicy`,
+  `nonbehaviorReason`, `noisePolicy`, `producerHint`, `producerProcessHint`,
+  `selfProcessHint`, `zhBehaviorHint`, `zhProducerProcessHint`, and
+  `zhSelfProcessHint` make the policy explicit. Readiness, capabilities,
+  READ_EVENTS batch summaries, and synthetic JSONL noise probes set
+  `behaviorCounted=false` / `nonbehavior=true`; emitted driver rows only set
+  `behaviorCounted=true` when they are not collector/producer self-noise.
 - `selfNoise`, `collectorNoise`, `collectorSelfNoise`, `selfProcess`,
   `selfNoiseReason`, `selfNoiseAction`, `collectorNoisePolicy`, and
   `collectorSuppressed` explain collector/KSword infrastructure attribution.

@@ -1,21 +1,14 @@
-# Driver signing and R0 event export
+# Driver signing 与 R0 事件导出
 
-Canonical scope: this page owns signing/test-mode policy and optional real-R0
-validation boundaries. VM-local service install/start/stop/status commands are
-owned by `docs/driver-install.md`; ABI details are owned by
-`docs/r0-driver-core.md`.
+中文优先范围：本页负责 driver signing/test-mode 策略，以及可选 real-R0 验证边界。VM 内 service install/start/stop/status 命令由 `docs/driver-install.md` 维护；ABI 细节由 `docs/r0-driver-core.md` 维护。
 
-## Scope
+English summary: signing is never part of default build/readiness/smoke paths. Real R0 validation is an explicit isolated-VM activity only.
 
-The sandbox repository does not store driver binaries, certificates, private
-keys, PDB files, or WDK build outputs. It only documents the integration point
-for the KSword driver family and the safe validation boundary for local lab
-work.
+## 范围 / Scope
 
-The current default worker/build policy is **compile-only**. Do not add driver
-signing or driver loading to normal builds, smoke checks, or Hyper-V E2E plan
-validation. Real driver loading is an optional, explicit VM-only step after the
-operator has enabled Windows test mode and supplied a local test certificate.
+本仓库不保存 driver binaries、certificates、private keys、PDB 或 WDK build outputs。仓库只记录 KSword driver family 的集成点，以及本地 lab 验证的安全边界。
+
+当前默认 worker/build 策略是 **compile-only**。不要把 driver signing 或 driver loading 加入普通 build、smoke checks 或 Hyper-V E2E plan validation。真实 driver loading 只能作为可选、显式、VM-only 步骤：operator 已启用 Windows test mode，并提供本地测试证书后才执行。
 
 `scripts/Test-R0Readiness.ps1` includes a `Driver .sys git hygiene` check that
 fails if any `.sys` file is tracked, staged, modified, or otherwise visible to
@@ -23,7 +16,7 @@ git as a commit candidate. Keep any generated or signed driver in VM-local
 scratch/payload storage, or in an ignored local path only for the duration of a
 disposable VM test. Never stage it.
 
-## Expected event bridge
+## 预期事件桥接 / Expected event bridge
 
 The guest agent can ingest driver events from JSON Lines:
 
@@ -36,7 +29,7 @@ Each line should deserialize to the shared `SandboxEvent` shape. Invalid lines
 are preserved as `driver.parse_error` events so the report exposes integration
 problems instead of silently losing data.
 
-## Signing policy and guardrails
+## 签名策略与护栏 / Signing policy and guardrails
 
 - Default validation is compile-only: build the native projects and confirm the
   `.sys` output is produced, but do not sign, install, start, or open the driver
@@ -54,15 +47,15 @@ problems instead of silently losing data.
 - Record the driver service name in local config through `Driver.ServiceName`.
 - Record the guest output path through `Driver.EventJsonLinesPath`.
 
-## Compile-only default validation
+## 默认 compile-only 验证
 
-For the default repository validation path, build only:
+默认仓库验证路径只 build，不签名、不加载：
 
 ```powershell
 .\scripts\Invoke-NativeBuild.ps1 -Project .\KSwordSandbox.sln -Configuration Debug -Platform x64
 ```
 
-Expected result:
+预期结果：
 
 - MSBuild/native compilation succeeds.
 - Generated `.sys`, `.exe`, `.pdb`, `x64\...`, `bin\...`, and `obj\...` outputs
@@ -74,7 +67,7 @@ For Hyper-V E2E demonstrations while signing is deferred, prefer mock R0 mode
 (`driver.useMockCollector=true`) so the Guest Agent and R0Collector sidecar path
 is exercised without loading a kernel driver.
 
-## Test-signing runbook for optional VM validation
+## 可选 VM 验证的 test-signing runbook
 
 The repository does not generate committed certificates. If a real R0 driver
 load is explicitly required, build output should be placed under an ignored
@@ -82,7 +75,7 @@ build directory or scratch/payload directory, then test-signed there or inside
 the disposable VM. This path uses Windows test mode and a local test
 certificate; it intentionally avoids `CSignTool.exe` and custom timestamp tools.
 
-Example VM-only workflow:
+VM-only 示例流程：
 
 ```powershell
 $driver = 'C:\KSwordSandbox\driver\KSword.Sandbox.Driver.sys'
@@ -159,7 +152,7 @@ run R0Collector:
   -R0CollectorPath C:\KSwordSandbox\tools\KSword.Sandbox.R0Collector.exe
 ```
 
-Required first-pass rows before loading:
+加载前第一轮必须通过的检查行：
 
 - `Driver .sys git hygiene`: `Passed`; no driver `.sys` is in the commit path.
 - `R0 capability/status IOCTL static contract`: `Passed`; this is a
@@ -176,7 +169,7 @@ Required first-pass rows before loading:
   `-SkipTestSigningRequirement` is deliberately used for a production-signed
   validation path.
 
-## Kernel service install/load/unload
+## Kernel service install/load/unload 边界
 
 Use the readiness script for service actions so each mutating step is explicit.
 The script requires `-AllowServiceMutation` in addition to the requested
@@ -184,7 +177,7 @@ operation. Run these commands only in an isolated VM checkpoint/snapshot after
 the compile-only path has succeeded and the optional test-signed driver is
 trusted by that VM.
 
-Install and start in an isolated test VM:
+仅在隔离 test VM 中 install/start：
 
 ```powershell
 .\scripts\Test-R0Readiness.ps1 `
@@ -203,7 +196,7 @@ sc.exe create KSwordSandboxDriver type= kernel start= demand binPath= C:\KSwordS
 sc.exe start KSwordSandboxDriver
 ```
 
-Unload and remove after validation:
+验证后 unload/remove：
 
 ```powershell
 .\scripts\Test-R0Readiness.ps1 `
@@ -223,7 +216,7 @@ sc.exe delete KSwordSandboxDriver
 The service name should match `Driver.ServiceName` in local configuration. The
 Win32 device path remains `\\.\KSwordSandboxDriver`.
 
-## Device open, collector health, and event drain checks
+## Device open、collector health 与 event drain 检查
 
 After the service is started, the readiness script can issue the public
 `IOCTL_KSWORD_SANDBOX_GET_HEALTH` directly. This proves that
@@ -270,7 +263,7 @@ option:
   -CollectorOutputPath C:\KSwordSandbox\out\driver-events.jsonl
 ```
 
-Expected first-pass evidence:
+第一轮预期证据：
 
 - `Device IOCTL health` returns `Passed`.
 - `R0Collector health` returns exit code `0` and writes a JSONL file with
@@ -287,10 +280,9 @@ Expected first-pass evidence:
 - The first drain normally contains at least the typed `driver.load`
   driver-start heartbeat when the ring has not already been consumed.
 
-## Full VM validation sequence
+## 完整 VM 验证顺序
 
-Run this sequence only inside an isolated VM checkpoint/snapshot, and only when
-real R0 loading was explicitly requested:
+只有在明确要求 real R0 loading 时，才在隔离 VM checkpoint/snapshot 内执行以下顺序：
 
 1. Build the driver and R0Collector, then copy the optional test-signed driver
    and R0Collector into VM-local paths. Do not stage the `.sys` file in git.
@@ -308,7 +300,7 @@ real R0 loading was explicitly requested:
    confirm `r0collector.driverProducerMask`.
 8. Stop/delete the service and restore the VM checkpoint.
 
-## Reuse boundary from KSword5.1
+## KSword5.1 复用边界
 
 Prefer reusing protocol definitions and driver-client boundaries from
 `D:\Projects\Ksword5.1\shared\driver`, `KswordARKDriver`, and `ArkDriverClient`

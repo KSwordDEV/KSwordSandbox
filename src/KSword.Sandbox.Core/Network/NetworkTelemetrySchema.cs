@@ -36,6 +36,8 @@ public static class NetworkTelemetrySchema
             ["schema"] = SchemaVersion,
             ["eventFamily"] = "network",
             ["eventKind"] = eventKind,
+            ["provenance"] = "host-imported-guest-artifact",
+            ["importProvenance"] = "host-imported-network-artifact",
             ["importSource"] = importSource,
             ["protocol"] = normalizedProtocol,
             ["transportProtocol"] = normalizedProtocol,
@@ -108,6 +110,7 @@ public static class NetworkTelemetrySchema
         }
 
         ApplyProtocolSpecificNormalization(data);
+        ApplyProvenanceAndBehaviorMetadata(data);
         ApplyHealthAndLocalization(data);
         return data;
     }
@@ -165,6 +168,12 @@ public static class NetworkTelemetrySchema
             ["schema"] = SchemaVersion,
             ["eventFamily"] = "network",
             ["eventKind"] = "summary",
+            ["provenance"] = "host-imported-guest-artifact",
+            ["importProvenance"] = "host-imported-network-artifact",
+            ["behaviorCounted"] = "false",
+            ["nonbehavior"] = "true",
+            ["behaviorScope"] = "network-import-summary",
+            ["noisePolicy"] = "nonbehavior-evidence-quality",
             ["status"] = materialized.Count == 0 ? "empty" : "imported",
             ["eventCount"] = materialized.Count.ToString(CultureInfo.InvariantCulture),
             ["connectionEventCount"] = CountEvents(materialized, "connection").ToString(CultureInfo.InvariantCulture),
@@ -186,6 +195,7 @@ public static class NetworkTelemetrySchema
             }
         }
 
+        ApplyProvenanceAndBehaviorMetadata(data);
         ApplyHealthAndLocalization(data);
         return new SandboxEvent
         {
@@ -217,6 +227,8 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "collectionName", source.CollectionName);
         AddIfNotEmpty(data, "evidenceRole", source.EvidenceRole);
         AddIfNotEmpty(data, "importMode", source.ImportMode);
+        AddIfNotEmpty(data, "importProvenance", "host-imported-network-artifact");
+        AddIfNotEmpty(data, "provenance", "host-imported-guest-artifact");
         if (IsPacketCaptureSource(source))
         {
             AddIfNotEmpty(data, "pcapSourceArtifactPath", source.FullPath);
@@ -257,6 +269,14 @@ public static class NetworkTelemetrySchema
                 string.Equals(pair.Key, "processId", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "parentProcessId", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "processName", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "collectorProcessName", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "sourceComponent", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "noisePolicy", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "behaviorCounted", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "nonbehavior", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "behaviorScope", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "provenance", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "importProvenance", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "commandLine", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "duplicateGroupKey", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "duplicateGroupCount", StringComparison.OrdinalIgnoreCase) ||
@@ -271,6 +291,7 @@ public static class NetworkTelemetrySchema
         AddMetadataAliases(data, source.Metadata);
         AddSourceArtifactAliases(data);
         AddPcapSourceArtifactIdentity(data, source);
+        ApplyProvenanceAndBehaviorMetadata(data);
 
         try
         {
@@ -306,6 +327,8 @@ public static class NetworkTelemetrySchema
 
     public static void ApplyHealthAndLocalization(Dictionary<string, string> data)
     {
+        ApplyProvenanceAndBehaviorMetadata(data);
+
         if (!data.ContainsKey("collectionHealth"))
         {
             data["collectionHealth"] = InferCollectionHealth(data);
@@ -450,6 +473,73 @@ public static class NetworkTelemetrySchema
         }
 
         return string.Empty;
+    }
+
+    public static void ApplyProvenanceAndBehaviorMetadata(Dictionary<string, string> data)
+    {
+        var eventKind = ValueOrEmpty(data, "eventKind");
+        AddIfNotEmpty(data, "provenance", "host-imported-guest-artifact");
+        AddIfNotEmpty(data, "importProvenance", "host-imported-network-artifact");
+
+        var importSource = ValueOrEmpty(data, "importSource");
+        if (string.IsNullOrWhiteSpace(importSource))
+        {
+            var parser = ValueOrEmpty(data, "parser");
+            if (parser.Contains("pcap", StringComparison.OrdinalIgnoreCase))
+            {
+                data["importSource"] = "pcap-native";
+            }
+            else if (parser.Contains("sidecar", StringComparison.OrdinalIgnoreCase) ||
+                parser.Contains("jsonl", StringComparison.OrdinalIgnoreCase))
+            {
+                data["importSource"] = "sidecar-jsonl";
+            }
+        }
+
+        var collectorProcessName = FirstNonEmpty(
+            FirstDataValue(data, "collectorProcessName"),
+            DetectCollectorProcessName(data));
+        AddIfNotEmpty(data, "collectorProcessName", collectorProcessName);
+
+        var sourceComponent = FirstNonEmpty(
+            ValueOrEmpty(data, "sourceComponent"),
+            InferSourceComponent(data, collectorProcessName));
+        AddIfNotEmpty(data, "sourceComponent", sourceComponent);
+
+        var isNonBehavior = string.Equals(eventKind, "summary", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(eventKind, "parse_error", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(eventKind, "health", StringComparison.OrdinalIgnoreCase);
+
+        if (!data.ContainsKey("behaviorCounted"))
+        {
+            data["behaviorCounted"] = BoolString(!isNonBehavior);
+        }
+
+        if (!data.ContainsKey("nonbehavior"))
+        {
+            data["nonbehavior"] = BoolString(isNonBehavior);
+        }
+
+        if (!data.ContainsKey("behaviorScope"))
+        {
+            data["behaviorScope"] = eventKind.ToLowerInvariant() switch
+            {
+                "summary" => "network-import-summary",
+                "parse_error" => "network-import-parse-error",
+                "health" => "network-collection-health",
+                "dns" or "http" or "tls" or "connection" or "packet" => "network-behavior",
+                _ => "network-telemetry"
+            };
+        }
+
+        if (!data.ContainsKey("noisePolicy"))
+        {
+            data["noisePolicy"] = !string.IsNullOrWhiteSpace(collectorProcessName)
+                ? "collector-self-noise-filterable"
+                : isNonBehavior
+                    ? "nonbehavior-evidence-quality"
+                    : "behavior-countable";
+        }
     }
 
     public static string NormalizeHttpHost(string? value)
@@ -1837,6 +1927,61 @@ public static class NetworkTelemetrySchema
         return value.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
     }
 
+    private static string DetectCollectorProcessName(IReadOnlyDictionary<string, string> data)
+    {
+        var processNames = new[]
+        {
+            FirstDataValue(data, "processName", "imageName", "processImage", "processPath", "process.name"),
+            FirstDataValue(data, "rootProcessName", "rootProcessImage"),
+            FirstDataValue(data, "commandLine", "rootCommandLine")
+        };
+
+        foreach (var value in processNames)
+        {
+            if (value.Contains("KSword.Sandbox.R0Collector", StringComparison.OrdinalIgnoreCase))
+            {
+                return "KSword.Sandbox.R0Collector.exe";
+            }
+
+            if (value.Contains("R0Collector", StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetFileName(value.Trim('"', '\''));
+            }
+        }
+
+        var originalEventType = ValueOrEmpty(data, "originalEventType");
+        return originalEventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase)
+            ? "KSword.Sandbox.R0Collector.exe"
+            : string.Empty;
+    }
+
+    private static string InferSourceComponent(IReadOnlyDictionary<string, string> data, string collectorProcessName)
+    {
+        if (!string.IsNullOrWhiteSpace(collectorProcessName))
+        {
+            return "ksword-r0collector";
+        }
+
+        var originalEventType = ValueOrEmpty(data, "originalEventType");
+        if (originalEventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ksword-r0collector";
+        }
+
+        var importSource = ValueOrEmpty(data, "importSource");
+        if (string.Equals(importSource, "pcap-native", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ksword-host-pcap-importer";
+        }
+
+        if (string.Equals(importSource, "sidecar-jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ksword-host-sidecar-importer";
+        }
+
+        return string.Empty;
+    }
+
     private static string IpFamily(string sourceIp, string destinationIp)
     {
         if (sourceIp.Contains(':', StringComparison.Ordinal) ||
@@ -2068,6 +2213,8 @@ public static class NetworkTelemetrySchema
         var processName = MetadataValue(metadata, "processName", "imageName", "process.name", "process.executable", "proc.name", "application", "app", "image", "exe");
         var imageName = MetadataValue(metadata, "imageName", "processName", "process.name", "process.executable", "process.path", "proc.name", "image", "exe");
         var commandLine = MetadataValue(metadata, "commandLine", "cmdline", "process.command_line", "process.commandLine", "process.cmdline", "process.args");
+        var collectorProcessName = MetadataValue(metadata, "collectorProcessName", "collector.processName", "collector.process.name");
+        var sourceComponent = MetadataValue(metadata, "sourceComponent", "source.component", "telemetrySource", "telemetry.source");
 
         AddIfNotEmpty(data, "processId", processId);
         AddIfNotEmpty(data, "pid", processId);
@@ -2083,6 +2230,8 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "processImage", imageName);
         AddIfNotEmpty(data, "processPath", imageName);
         AddIfNotEmpty(data, "commandLine", commandLine);
+        AddIfNotEmpty(data, "collectorProcessName", collectorProcessName);
+        AddIfNotEmpty(data, "sourceComponent", sourceComponent);
     }
 
     private static string? MetadataValue(IReadOnlyDictionary<string, string> metadata, params string[] keys)
@@ -2260,6 +2409,19 @@ public static class NetworkTelemetrySchema
             return "degraded";
         }
 
+        if (string.Equals(eventKind, "health", StringComparison.OrdinalIgnoreCase))
+        {
+            var available = FirstDataValue(data, "networkStatusAvailable");
+            if (string.Equals(available, "false", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(ValueOrEmpty(data, "readinessState"), "degraded", StringComparison.OrdinalIgnoreCase) ||
+                !string.IsNullOrWhiteSpace(ValueOrEmpty(data, "diagnosticCode")))
+            {
+                return "degraded";
+            }
+
+            return "ok";
+        }
+
         if (string.Equals(status, "empty", StringComparison.OrdinalIgnoreCase) ||
             (string.Equals(eventKind, "summary", StringComparison.OrdinalIgnoreCase) &&
                 data.TryGetValue("eventCount", out var eventCount) &&
@@ -2270,6 +2432,7 @@ public static class NetworkTelemetrySchema
 
         if (!string.Equals(eventKind, "summary", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(eventKind, "parse_error", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(eventKind, "health", StringComparison.OrdinalIgnoreCase) &&
             (string.IsNullOrWhiteSpace(ValueOrEmpty(data, "sourceIp")) ||
                 string.IsNullOrWhiteSpace(ValueOrEmpty(data, "destinationIp"))))
         {
@@ -2303,6 +2466,13 @@ public static class NetworkTelemetrySchema
         if (string.Equals(eventKind, "parse_error", StringComparison.OrdinalIgnoreCase))
         {
             return $"网络证据解析失败：{DisplayValue(ValueOrEmpty(data, "message"), "原因未知")}。";
+        }
+
+        if (string.Equals(eventKind, "health", StringComparison.OrdinalIgnoreCase))
+        {
+            var available = DisplayValue(FirstDataValue(data, "networkStatusAvailable"), "unknown");
+            var readiness = DisplayValue(FirstDataValue(data, "readinessState", "diagnosticCode"), "ok");
+            return $"网络采集健康状态：available={available}，state={readiness}。";
         }
 
         if (string.Equals(eventKind, "dns", StringComparison.OrdinalIgnoreCase))
@@ -2406,6 +2576,11 @@ public static class NetworkTelemetrySchema
         if (string.Equals(eventKind, "summary", StringComparison.OrdinalIgnoreCase))
         {
             return "可筛选 dns.query、http.request、tls.connection、network.flow 查看标准化网络证据。";
+        }
+
+        if (string.Equals(eventKind, "health", StringComparison.OrdinalIgnoreCase))
+        {
+            return "该行描述网络采集能力/导入健康，不属于样本 DNS/HTTP/TLS/连接行为。";
         }
 
         if (string.Equals(eventKind, "dns", StringComparison.OrdinalIgnoreCase))

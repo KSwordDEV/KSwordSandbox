@@ -312,6 +312,34 @@ void AddCollectorAttributionFields(
     data.AddUtf8("processIdSource", "top-level");
 }
 
+// Input: Collector-owned lifecycle/diagnostic JSON builder plus stable policy labels.
+// Processing: Adds explicit host-facing behavior/noise hints so collection health
+// evidence is not confused with behavior produced by the analyzed sample.
+// Return: No return value; data is mutated in-place.
+void AddCollectorNonBehaviorFields(
+    JsonDataObjectBuilder& data,
+    const std::string& evidenceKind,
+    const std::string& noisePolicy) {
+    data.AddBool("behaviorCounted", false);
+    data.AddBool("nonbehavior", true);
+    data.AddUtf8("behaviorCountingPolicy", "collector-health-and-control-plane-rows-are-not-sample-behavior");
+    data.AddUtf8("nonbehaviorReason", evidenceKind);
+    data.AddUtf8("noisePolicy", noisePolicy);
+    data.AddBool("collectorHealthEvidence", true);
+    data.AddUtf8("producerHint", "producer=r0collector; eventOrigin=collector-sidecar");
+    data.AddUtf8("producerProcessHint", "top-level processId/processName identify the collector process");
+    data.AddUtf8("selfProcessHint", "collector-owned row; do not attribute top-level process identity to the sample");
+    data.AddWide(
+        "zhBehaviorHint",
+        L"该行是 Collector 健康、就绪、能力或批次摘要证据；behaviorCounted=false，不能计入样本行为。");
+    data.AddWide(
+        "zhProducerProcessHint",
+        L"producer=r0collector 表示采集器侧证据；顶层 processId/processName 是采集器进程提示，不是样本进程。");
+    data.AddWide(
+        "zhSelfProcessHint",
+        L"selfProcessHint 用于提醒 Host：该行描述采集链路自身，不应把 Collector 进程当作样本行为主体。");
+}
+
 // Input: Fully populated event fields.
 // Processing: Serializes fields in a stable SandboxEvent-compatible order:
 // timestamp/eventType/source/processId/processName/path/commandLine/data.

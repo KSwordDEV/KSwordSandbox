@@ -107,8 +107,11 @@ internal sealed class BehaviorRuleHighSignalWindowsScenario : ISmokeTestScenario
             ContainsGuard(rule.ExcludeDataContains, "source", "virustotal") &&
             ContainsGuard(rule.ExcludeDataContains, "vtStatus", "not_configured") &&
             ContainsGuard(rule.ExcludeDataContains, "healthStatus", "collection-health") &&
-            ContainsGuard(rule.ExcludeDataContains, "collectorSelfNoise", "true"),
-            $"Rule '{rule.Id}' should explicitly guard collection, VirusTotal, and R0/self-noise data.");
+            ContainsGuard(rule.ExcludeDataContains, "collectorSelfNoise", "true") &&
+            ContainsGuard(rule.ExcludeDataContains, "collectorNoise", "true") &&
+            ContainsGuard(rule.ExcludeDataEquals, "behaviorCounted", "false") &&
+            ContainsGuard(rule.ExcludeDataEquals, "nonbehavior", "true"),
+            $"Rule '{rule.Id}' should explicitly guard collection, VirusTotal, behaviorCounted/nonbehavior, and R0/self-noise data.");
     }
 
     private static bool HasStrongPredicate(BehaviorRule rule)

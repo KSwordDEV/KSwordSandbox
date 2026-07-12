@@ -169,7 +169,8 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `heightPixels`, `artifactRelativePath`, `sizeBytes`, `sha256`,
   `artifactSelector` / `downloadSelector`, `processRole`, `rootProcessId`,
   `treeLineage`, `behaviorCounted=false`, `nonbehavior=true`, and
-  `zhMessage`/`zhHint` when those values are available.
+  `notSampleBehavior=true`, plus `zhMessage`/`zhHint` when those values are
+  available.
 - `screenshot.skipped` when screenshot capture was requested but the platform or
   guest session cannot expose a desktop surface. This is non-fatal and includes
   structured `reason`, stable `reasonCode` / `reasonCategory`, `diagnosticStage`,
@@ -177,9 +178,11 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `artifactIntegrityState=skipped` when available, keeping smoke tests usable on
   headless hosts.
 - `screenshot.phase.summary` after each configured screenshot phase. This
-  summary is marked `summaryEvent=true`, `collectionHealth=true`, and
-  `nonbehavior=true`; it records captured/skipped counts, reason-count JSON, and
-  first/last/largest artifact selectors when screenshots were produced.
+  summary is marked `summaryEvent=true`, `collectionHealth=true`,
+  `behaviorCounted=false`, `nonbehavior=true`, and
+  `notSampleBehavior=true`; it records captured/skipped counts, reason-count
+  JSON, and first/last/largest artifact selectors when screenshots were
+  produced.
 - `memory_dump.captured` when `--memory-dump` successfully writes a
   `memory-dumps/*.dmp` minidump for the launched sample process or a visible
   descendant process. The event path points at the `.dmp` file and `Data`
@@ -187,8 +190,8 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `relativePath`, `artifactRelativePath`, `artifactRelativePathStatus`,
   `artifactSelector` / `downloadSelector`, `capturePolicy`, `processRole`,
   `rootProcessId`, `treeDepth`, `treeLineage`, direct-child/deeper-descendant
-  targeting fields, `behaviorCounted=false`, `nonbehavior=true`, and
-  `zhMessage`/`zhHint` when available.
+  targeting fields, `behaviorCounted=false`, `nonbehavior=true`,
+  `notSampleBehavior=true`, and `zhMessage`/`zhHint` when available.
 - `memory_dump.skipped` when memory dump capture was requested but the platform,
   process state, or access rights prevent capture. This is non-fatal and
   includes structured `reason`, stable `reasonCode` / `reasonCategory`,
@@ -204,7 +207,8 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `childProcessCoverageState` / `directChildCoverageState` /
   `deeperDescendantCoverageState` / `descendantCoverageCompleteness` so the
   report can explain why a run has fewer dump files than process-tree nodes.
-  It carries `coverageTaxonomy` and is marked `nonbehavior=true`. Timeout runs can also emit a `cleanup`
+  It carries `coverageTaxonomy` and is marked `behaviorCounted=false`,
+  `nonbehavior=true`, and `notSampleBehavior=true`. Timeout runs can also emit a `cleanup`
   pre-kill sweep before `Kill(entireProcessTree:true)` so live descendants are
   dumped before the agent terminates the process tree.
 - `packet_capture.started`, `packet_capture.stopped`, and
@@ -213,6 +217,7 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `packet-captures/*.pcapng`, and records size/path metadata for host PCAP
   import. Captured PCAPNG events also include `sha256`, `processRole`,
   `rootProcessId`, `treeLineage`, `sourceTool`/`artifactSourceTool`, and
+  `behaviorCounted=false`, `nonbehavior=true`, `notSampleBehavior=true`, and
   `zhMessage`/`zhHint` when available.
 - `packet_capture.skipped` and `packet_capture.failed` when packet capture was
   requested but Windows, rights, an existing capture session, `pktmon start`,
@@ -222,10 +227,12 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
 - `probe.timeout`, `probe.failed`, and `probe.canceled` for per-probe isolation.
   A slow DNS/netstat/service/task query is bounded and converted to an event so
   later probes and final JSON artifact writing can continue. These diagnostic
-  rows are explicitly marked `collectionHealth=true` and `nonbehavior=true`
-  so reports do not treat collection failures as sample behavior.
+  rows are explicitly marked `collectionHealth=true`,
+  `behaviorCounted=false`, `nonbehavior=true`, and `notSampleBehavior=true` so
+  reports do not treat collection failures as sample behavior.
 - `probe.summary` after each probe and `probe.phase.summary` after each phase.
-  These events are marked with `collectionHealth=true` and `nonbehavior=true`;
+  These events are marked with `collectionHealth=true`,
+  `behaviorCounted=false`, `nonbehavior=true`, and `notSampleBehavior=true`;
   they explain which collection channel ran, how long it took, how many events
   it emitted, and whether it completed, failed, timed out, or was canceled.
   They are intentionally health/progress evidence, not sample behavior.
@@ -240,6 +247,13 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   created. This event is emitted by the agent and does not fail the whole run.
 - `r0collector.stop_forced` / `r0collector.stop_failed` only when the agent had
   to terminate the sidecar or could not finish sidecar shutdown cleanly.
+- Agent self-noise and collection-noise rows (`agent.*`, `r0collector.*`,
+  `probe.*`, `screenshot.*`, `memory_dump.*`, `packet_capture.*`, manifest
+  health rows, and capture diagnostics) are normalized with
+  `behaviorCounted=false`, `nonbehavior=true`, `notSampleBehavior=true`, and
+  Chinese operator fields. This does not change sample behavior events such as
+  `process.*`, `file.*`, TCP, service, scheduled task, startup item, or
+  registry behavior diffs.
 
 事件模型仍然是 `KSword.Sandbox.Abstractions.SandboxEvent`；附加细节放在既有字符串
 `Data` dictionary 中，避免修改 Core/Web/Abstractions 共享契约。

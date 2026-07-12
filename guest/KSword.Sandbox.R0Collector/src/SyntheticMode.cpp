@@ -764,6 +764,13 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddUtf8("actorRole", "synthetic-sample-process");
     data.AddUtf8("subjectRole", "synthetic-jsonl-noise");
     data.AddUtf8("processIdSource", "synthetic");
+    data.AddBool("behaviorCounted", false);
+    data.AddBool("nonbehavior", true);
+    data.AddUtf8("behaviorCountingPolicy", "explicit-jsonl-noise-probe-is-not-sample-behavior");
+    data.AddUtf8("noisePolicy", "synthetic-noise-injector");
+    data.AddUtf8("producerHint", "synthetic-r0collector JSONL tolerance row");
+    data.AddUtf8("producerProcessHint", "synthetic process identity is a fixture, not a live sample process");
+    data.AddUtf8("selfProcessHint", "not collector self process; still nonbehavior because this is explicit JSONL noise");
     AddSyntheticSelfNoiseFilterFields(data);
     data.AddUtf8("semanticFamily", "network");
     data.AddUtf8("behaviorLane", "network-flow");
@@ -805,6 +812,7 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddUtf8("operatorInterpretation", "jsonl_noise_tolerance_probe_not_sample_behavior");
     data.AddWide("zhNoiseHint", L"该行是显式 JSONL 噪声注入的合法额外字段行，用于验证导入器容错。");
     data.AddWide("zhNoiseClassificationHint", L"噪声分类为 JSONL 容错探针；用于导入器测试，不应进入样本行为图。");
+    data.AddWide("zhBehaviorHint", L"behaviorCounted=false：这是 JSONL 容错噪声探针，不是样本行为。");
     data.AddUtf8("collectorNoiseReason", "none");
     data.AddUtf8("collectorNoiseAction", "emit");
     data.AddBool("selfNoise", false);
@@ -1108,6 +1116,7 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "synthetic-stress-summary", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(data, "synthetic-stress-summary", "emit-synthetic-batch-summary-not-sample-behavior");
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);

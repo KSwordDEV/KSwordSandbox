@@ -135,6 +135,16 @@ Do not globally exclude `source=r0collector` in rules whose purpose is to
 consume parsed R0 rows; instead, require the semantic fields and suppress known
 collector-health or self-noise markers.
 
+For recent high-signal scoring rules, the v26 guard baseline is:
+`behaviorCounted=false`, `nonbehavior=true`, `collectorSelfNoise=true`,
+`collectorNoise=true`, `source=collection-health`, `source=virustotal`,
+`source=r0collector`, and explicit `KSword.Sandbox.Agent.exe` /
+`KSword.Sandbox.R0Collector.exe` process-name exclusions where those fields are
+not the behavior being intentionally consumed. Treat open-source references
+such as SigmaHQ, Elastic detection-rules, Splunk Security Content, and LOLBAS as
+behavior-family inspiration only; keep KSword predicates expressed over local
+event fields and add source-reference tags only through existing rule `tags`.
+
 ## Artifact-backed correlation handoff
 
 Host artifact import can project safe, one-level fields onto

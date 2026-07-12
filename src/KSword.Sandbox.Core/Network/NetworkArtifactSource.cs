@@ -42,7 +42,7 @@ public sealed record NetworkArtifactSource(
             kind,
             string.IsNullOrWhiteSpace(collectionName) ? InferCollectionName(fullPath, metadata) : collectionName,
             string.IsNullOrWhiteSpace(evidenceRole) ? InferEvidenceRole(fullPath, metadata) : evidenceRole,
-            string.IsNullOrWhiteSpace(importMode) ? "external-artifact" : importMode,
+            string.IsNullOrWhiteSpace(importMode) ? InferImportMode(fullPath) : importMode,
             metadata);
     }
 
@@ -148,7 +148,7 @@ public sealed record NetworkArtifactSource(
     private static string InferImportMode(string path)
     {
         return ArtifactDescriptorFactory.IsPacketCapturePath(path)
-            ? "external-artifact"
+            ? "pcap-artifact"
             : "sidecar-artifact";
     }
 

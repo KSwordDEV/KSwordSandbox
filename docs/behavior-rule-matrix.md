@@ -3,9 +3,15 @@
 This document describes the behavior rules in `rules/behavior-rules.json`.
 The matrix is intentionally conservative: rules classify normalized sandbox
 events for reporting, but they do not by themselves prove malicious intent.
-As of the local v25 R0/file/network semantic-field batch,
+As of the local v26 self-noise guard hardening batch,
 `rules/behavior-rules.json` contains 568 rules
-with no duplicate IDs in the cheap JSON audit. The v25 batch adds 8 constrained
+with no duplicate IDs in the cheap JSON audit. The v26 batch keeps rule volume
+unchanged and hardens recent high-signal scoring rules against KSword
+collection/self-noise by adding explicit `behaviorCounted=false`,
+`nonbehavior=true`, `collectorNoise=true`, `collectorSelfNoise=true`,
+`source=r0collector`, `source=virustotal`, `source=collection-health`, and
+sandbox agent/R0Collector process-name exclusions where those guards reduce
+false positives without suppressing positive sample events. The v25 batch adds 8 constrained
 rules over structured DNS answer scope, HTTP transfer hints, TLS certificate
 CN/validity fields, host artifact evidence matrices and memory/screenshot/PCAP
 selectors, and R0 backpressure/loss quality fields. The v23 batch adds 10 constrained
@@ -320,6 +326,33 @@ text, SPL, KQL, EQL, Sigma YAML, or vendor test samples.
 The release-facing mapping keeps static and reputation-only signals out of the
 primary runtime behavior bucket. High-risk findings still require concrete event
 type plus path, command-line, API, registry, packet, or normalized data context.
+
+## 2026-07-12 v26 self-noise guard hardening
+
+This pass adds no new behavior rules. It hardens the existing v20, v22, v23,
+and v25 recent/high-signal scoring rules after reviewing open-source detection
+directions for inspiration only, including SigmaHQ process-creation patterns,
+Elastic process-injection and lateral-movement concepts, Splunk Security
+Content registry/service/lateral-movement topics, and LOLBAS LOLBin function
+families. No upstream rule text, query syntax, or test data is copied into the
+KSword rules.
+
+The batch adds or completes the following guard families where missing:
+
+- `excludeDataEquals.behaviorCounted = false`
+- `excludeDataEquals.nonbehavior = true`
+- `excludeDataContains.source = collection-health`, `virustotal`,
+  `r0collector`
+- `excludeDataContains.collectorSelfNoise = true`
+- `excludeDataContains.collectorNoise = true`
+- `excludeDataContains.healthStatus = collection-health` / `driver-health`
+- `excludeProcessNames = KSword.Sandbox.Agent.exe` and
+  `KSword.Sandbox.R0Collector.exe`
+
+These are metadata/self-noise exclusions only. Positive predicates for sample
+behavior remain unchanged, so a payload event with the same path, command-line,
+registry, API, R0 semantic, DNS/HTTP/TLS, or artifact evidence still matches
+unless it is explicitly marked as collection health or sandbox collector noise.
 
 ## 2026-07-12 v25 R0/file/network semantic-field batch
 

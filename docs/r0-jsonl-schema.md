@@ -156,6 +156,16 @@ Common attribution fields are additive and string-valued:
   `typedPayload.processId`, `eventHeader`, `top-level`, or `synthetic`.
 - `actorRole` / `subjectRole`: readable origin labels used to separate sample
   or system activity from collector infrastructure diagnostics.
+- `behaviorCounted` / `nonbehavior`: explicit host hints for behavior
+  accounting. Collector health, readiness, capabilities, batch summary, and
+  JSONL tolerance/noise-probe rows emit `behaviorCounted=false` and
+  `nonbehavior=true`. Driver rows that pass collector/producer self-noise
+  filtering emit `behaviorCounted=true`; emitted self-noise audit rows emit
+  `behaviorCounted=false`.
+- `noisePolicy`, `producerHint`, `producerProcessHint`, and `selfProcessHint`:
+  additive text hints explaining whether a row followed suppression,
+  emit-self-noise, collector-diagnostic, or synthetic-noise policy, and whether
+  the top-level process identity is the collector or a subject process.
 - `selfNoise`, `collectorNoise`, `collectorSelfNoise`, `selfProcess`,
   `selfNoiseReason`, `selfNoiseAction`, and `collectorNoisePolicy`:
   collector-side classification for KSword infrastructure rows. With the
@@ -169,7 +179,8 @@ Common attribution fields are additive and string-valued:
 
 这些 attribution/self-noise fields 只用于解释“谁产生了这条证据、它是否来自 KSword
 基础设施、是否被默认策略抑制”。Report 和 rules 可以把它们作为过滤或降权依据，但不能把任一
-单个标签解释为最终行为 verdict。
+单个标签解释为最终行为 verdict。中文 `zhBehaviorHint` / `zhProducerProcessHint` /
+`zhSelfProcessHint` 只帮助人工区分采集器健康和样本行为；机器逻辑仍应使用英文稳定字段。
 
 Stable event-quality aliases are present across live, mock, stress, and schema
 smoke rows:
@@ -220,7 +231,10 @@ Negotiation and queue rows must preserve these event-quality keys:
   `eventMaxPayloadSize`, `eventRingCapacity`, `readEventsReplyHeaderSize`,
   `capabilitiesReplySize`, `statusReplySize`,
   `setProducerEnableMaskRequestSize`, and
-  `setProducerEnableMaskReplySize`.
+  `setProducerEnableMaskReplySize`, plus non-behavior hints
+  `behaviorCounted=false`, `nonbehavior=true`, `noisePolicy`,
+  `producerHint`, `producerProcessHint`, `selfProcessHint`, and zh hints so
+  hosts do not count ABI/capability negotiation as sample behavior.
 - `r0collector.driverStatus.data`: `version`, `versionHex`, `size`,
   `queueCapacity`, `queueDepth`, `QueueHighWatermark` as JSON key
   `queueHighWatermark`, stable alias `highWatermark`,
@@ -260,7 +274,9 @@ Negotiation and queue rows must preserve these event-quality keys:
   `tailSequence`, `emittedHeadSequence`, `emittedTailSequence`,
   `driverEventSampleStride`, `samplingApplied`, `lostCount`, `highWatermark`,
   `lastEnqueueFailureStatus`, `sequence`, and
-  `sequenceMeaning=nextSequence`. Drain continuation uses `recordsProcessed`,
+  `sequenceMeaning=nextSequence`, `behaviorCounted=false`, `nonbehavior=true`,
+  `noisePolicy`, `producerHint`, `producerProcessHint`, and `selfProcessHint`.
+  Drain continuation uses `recordsProcessed`,
   not `eventsEmitted`, so default self-noise suppression or opt-in collector
   sampling cannot stop a batch early.
 

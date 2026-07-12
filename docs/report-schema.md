@@ -141,7 +141,11 @@ model into operator-facing sections:
 
 - cover and table of contents;
 - risk summary metrics for severities, rule hits, MITRE techniques, events,
-  static tags, network, registry, dropped files, and R0/driver telemetry;
+  static tags, network, registry, dropped files, and R0/driver telemetry,
+  plus a compact collection/self-noise policy card that counts rows excluded
+  from the behavior story (`behaviorCounted=false`, `nonbehavior`,
+  collector self-noise, VT quiet states, and R0 health/readiness diagnostics)
+  while keeping those rows visible in dedicated sections and raw events;
 - behavior detections, MITRE detections, and engine/rule hits;
 - static analysis with PE sections, grouped imports, exports, URL/IP
   indicators, registry/path indicators, resources/TLS, tags, warnings, and the

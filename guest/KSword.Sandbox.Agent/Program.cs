@@ -1668,7 +1668,9 @@ internal static class AgentProgram
             events.Add(CreateDroppedFilesDisabledEvent(options, events));
         }
 
+        GuestSelfNoiseMetadata.Apply(events);
         TryWriteArtifactManifest(options, events, artifactWriter, droppedFileMetadataByRelativePath);
+        GuestSelfNoiseMetadata.Apply(events);
 
         artifactWriter.WriteEvents(options.OutputDirectory, events);
         artifactWriter.WriteSummary(options.OutputDirectory, options.SamplePath, events.Count);

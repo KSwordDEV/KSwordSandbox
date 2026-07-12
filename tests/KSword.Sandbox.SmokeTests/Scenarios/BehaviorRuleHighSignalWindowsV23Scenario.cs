@@ -43,8 +43,9 @@ internal sealed class BehaviorRuleHighSignalWindowsV23Scenario : ISmokeTestScena
         var rules = RuleEngine.LoadRuleSet(behaviorRulesPath);
         SmokeAssert.True(
             string.Equals(rules.Version, "2026-07-12-v23-high-signal-behavior-expansion", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(rules.Version, "2026-07-12-v25-r0-file-network-semantic-fields", StringComparison.OrdinalIgnoreCase),
-            "Behavior rules should carry the v23+ high-signal behavior expansion version.");
+            string.Equals(rules.Version, "2026-07-12-v25-r0-file-network-semantic-fields", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(rules.Version, "2026-07-12-v26-self-noise-guard-hardening", StringComparison.OrdinalIgnoreCase),
+            "Behavior rules should carry the v23+ high-signal behavior expansion or newer self-noise hardening version.");
 
         var mitreTechniqueIds = ReadMitreTechniqueIds(mitreMapPath);
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
@@ -99,8 +100,11 @@ internal sealed class BehaviorRuleHighSignalWindowsV23Scenario : ISmokeTestScena
             ContainsGuard(rule.ExcludeDataContains, "source", "r0collector") &&
             ContainsGuard(rule.ExcludeDataContains, "vtStatus", "not_configured") &&
             ContainsGuard(rule.ExcludeDataContains, "healthStatus", "collection-health") &&
-            ContainsGuard(rule.ExcludeDataContains, "collectorSelfNoise", "true"),
-            $"Rule '{rule.Id}' should guard collection, VT, and R0/self-noise data.");
+            ContainsGuard(rule.ExcludeDataContains, "collectorSelfNoise", "true") &&
+            ContainsGuard(rule.ExcludeDataContains, "collectorNoise", "true") &&
+            ContainsGuard(rule.ExcludeDataEquals, "behaviorCounted", "false") &&
+            ContainsGuard(rule.ExcludeDataEquals, "nonbehavior", "true"),
+            $"Rule '{rule.Id}' should guard collection, VT, behaviorCounted/nonbehavior, and R0/self-noise data.");
     }
 
     private static bool HasStrongPredicate(BehaviorRule rule)

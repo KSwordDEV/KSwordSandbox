@@ -1280,6 +1280,24 @@ void AddDriverNoiseClassificationFields(
     data.AddUtf8("noiseClassificationConfidence", "high");
     data.AddUtf8("noiseProbeKind", "none");
     data.AddBool("sampleBehaviorCandidate", sampleBehaviorCandidate);
+    data.AddBool("behaviorCounted", sampleBehaviorCandidate);
+    data.AddBool("nonbehavior", !sampleBehaviorCandidate);
+    data.AddUtf8("noisePolicy", attribution.collectorNoisePolicy);
+    data.AddUtf8(
+        "producerHint",
+        sampleBehaviorCandidate
+            ? "driver producer row remains a sample-or-system behavior candidate"
+            : "self-noise row is emitted only for collection audit and should not be counted as behavior");
+    data.AddUtf8(
+        "producerProcessHint",
+        attribution.selfProcess
+            ? "top-level process identity matched collector/self process criteria"
+            : "top-level process identity comes from driver payload/header attribution");
+    data.AddUtf8(
+        "selfProcessHint",
+        attribution.selfProcess
+            ? "collector process match; host should treat as collector self-noise"
+            : "no collector self-process match");
     data.AddUtf8(
         "sampleBehaviorCandidateReason",
         sampleBehaviorCandidate
@@ -1315,6 +1333,11 @@ void AddDriverNoiseClassificationFields(
             : (attribution.selfNoise
                 ? L"运营提示：producer 自噪声需要和 sampleBehaviorCandidate=false 一起处理，避免误报。"
                 : L"运营提示：该行可进入样本/系统行为候选，但仍需结合进程树、文件、注册表和网络上下文判断。"));
+    data.AddWide(
+        "zhBehaviorHint",
+        sampleBehaviorCandidate
+            ? L"behaviorCounted=true：该 driver 行未命中自噪声，可作为样本/系统行为候选。"
+            : L"behaviorCounted=false：该行是 Collector/producer 自噪声审计，不计入样本行为。");
 }
 
 // Input: Process payload flags.
@@ -3048,6 +3071,7 @@ std::string BuildHealthData(const KSWORD_SANDBOX_HEALTH_REPLY& reply, const DWOR
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "driver-health", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(data, "driver-health", "emit-driver-health-not-sample-behavior");
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
@@ -3174,6 +3198,7 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "driver-capabilities", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(data, "driver-capabilities", "emit-capabilities-not-sample-behavior");
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
@@ -3306,6 +3331,9 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
     data.AddWide(
         "zhProducerRuntimeHint",
         L"该行仅说明驱动声明支持哪些 producer；实际运行状态请查看 r0collector.driverStatus。");
+    data.AddWide(
+        "zhBehaviorCountingHint",
+        L"Capabilities 是采集能力/ABI 证据，behaviorCounted=false，不代表样本触发了 producer 行为。");
     return data.Build();
 }
 
@@ -3331,6 +3359,7 @@ std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWOR
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "driver-status", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(data, "driver-status", "emit-driver-status-not-sample-behavior");
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
@@ -3460,6 +3489,7 @@ std::string BuildNetworkStatusData(const KSWORD_SANDBOX_NETWORK_STATUS_REPLY& re
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "driver-network-status", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(data, "driver-network-status", "emit-driver-network-status-not-sample-behavior");
     data.AddUtf8("diagnosticStage", "networkStatus");
     data.AddUtf8("diagnosticCode", diagnosticCode);
     data.AddUtf8("severity", severity);
@@ -3584,6 +3614,7 @@ std::string BuildSetProducerEnableMaskData(
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "driver-producer-mask", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(data, "driver-producer-mask", "emit-producer-mask-control-plane-not-sample-behavior");
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
@@ -3641,6 +3672,7 @@ std::string BuildPollData(const KSWORD_SANDBOX_POLL_REPLY& reply, const DWORD by
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "driver-poll", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(data, "driver-poll", "emit-driver-poll-not-sample-behavior");
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
@@ -3726,6 +3758,10 @@ std::string BuildReadEventsBatchData(
     const unsigned long long driverNoiseEvents = counters.collectorSuppressedEvents;
     const unsigned long long collectorNoiseEvents =
         counters.collectorSuppressedEvents + counters.collectorSkippedEvents;
+    const std::string collectorNoisePolicy =
+        suppressSelfNoise
+            ? (counters.collectorSuppressedEvents == 0 ? "suppress-self-noise" : "suppress-self-noise:applied")
+            : "emit-self-noise";
 
     data.AddUnsigned("batchSummaryVersion", 2);
     data.AddUtf8("batchKind", "live-read-events");
@@ -3771,6 +3807,7 @@ std::string BuildReadEventsBatchData(
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "driver-read-events-batch", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(data, "driver-read-events-batch", collectorNoisePolicy);
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
@@ -3804,11 +3841,7 @@ std::string BuildReadEventsBatchData(
     data.AddUtf8("emittedHeadSequence", emittedHead);
     data.AddUtf8("emittedTailSequence", emittedTail);
     data.AddBool("hasSequenceRange", counters.hasSequenceRange);
-    data.AddUtf8(
-        "collectorNoisePolicy",
-        suppressSelfNoise
-            ? (counters.collectorSuppressedEvents == 0 ? "suppress-self-noise" : "suppress-self-noise:applied")
-            : "emit-self-noise");
+    data.AddUtf8("collectorNoisePolicy", collectorNoisePolicy);
     data.AddBool("noise", false);
     data.AddBool("lost", lost || sequenceGapObserved);
     data.AddBool("lossObserved", lost || sequenceGapObserved);

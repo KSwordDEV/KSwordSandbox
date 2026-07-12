@@ -64,6 +64,7 @@ public sealed class PcapArtifactEventImporter
                     new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
                         ["importer"] = nameof(PcapArtifactEventImporter),
+                        ["importSource"] = "pcap-native",
                         ["parser"] = "native-pcap",
                         ["pcapParser"] = "native-pcap",
                         ["pcapParserMode"] = "bounded-native",
@@ -93,6 +94,7 @@ public sealed class PcapArtifactEventImporter
                     {
                         ["status"] = "parse_error",
                         ["importer"] = nameof(PcapArtifactEventImporter),
+                        ["importSource"] = "pcap-native",
                         ["parser"] = "native-pcap",
                         ["pcapParser"] = "native-pcap",
                         ["pcapParserMode"] = "bounded-native",

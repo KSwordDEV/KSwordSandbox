@@ -144,6 +144,11 @@ internal static class LiveEventsPage
             .runbook-live-summary span { color:var(--muted); display:block; font-size:12px; font-weight:800; margin-bottom:3px; }
             .step-output-details { border-top:1px solid #e5edf6; margin-top:8px; padding-top:8px; }
             .step-output-details summary, .output-details summary { color:#075985; cursor:pointer; font-weight:800; }
+            .execution-diagnostics { border:1px dashed var(--line); margin:10px 0; padding:10px; }
+            .execution-diagnostics summary { color:#075985; cursor:pointer; font-weight:900; }
+            .diagnostic-list { display:grid; gap:6px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); margin-top:8px; }
+            .diagnostic-list div { background:#ffffff; border:1px dashed #bfdbfe; padding:8px; }
+            .diagnostic-list b { color:#475569; display:block; font-size:12px; margin-bottom:3px; }
             .output-details { border:1px dashed var(--line); margin-top:12px; padding:10px; }
             .output-details pre { background:#0f172a; color:#e5e7eb; max-height:28vh; overflow:auto; padding:10px; white-space:pre-wrap; word-break:break-word; }
             .output-empty { color:var(--muted); font-style:italic; }
@@ -1010,6 +1015,61 @@ internal static class LiveEventsPage
                 : t(`进度新鲜，最后更新 ${age} 前`, `progress fresh; last updated ${age} ago`);
             }
 
+            function progressDurabilityText(snapshot, streamInfo) {
+              const hasDurableShape = Boolean(snapshot && (snapshot.updatedAtUtc || snapshot.UpdatedAtUtc || snapshot.generatedAtUtc || snapshot.GeneratedAtUtc));
+              if (streamInfo) {
+                return t('SSE 实时步骤正在更新；同一快照会写入 durable runbook-progress.json，刷新页面后继续可见。', 'SSE real step is updating; the same snapshot is written to durable runbook-progress.json and remains visible after refresh.');
+              }
+
+              if (progressStreamMode === 'poll' && hasDurableShape) {
+                return t('当前显示轮询/持久化快照：可能来自内存或 durable runbook-progress.json，不是伪造 pending。', 'Currently showing a polling/durable snapshot: it may come from memory or durable runbook-progress.json, not a fake pending view.');
+              }
+
+              if (hasDurableShape) {
+                return t('已显示可持久化进度快照；等待 SSE 或轮询确认最新步骤。', 'Displaying a durable-capable progress snapshot; waiting for SSE or polling to confirm the newest step.');
+              }
+
+              return t('尚未收到 durable 更新时间；保持页面打开等待真实执行器快照。', 'No durable update timestamp yet; keep the page open for a real executor snapshot.');
+            }
+
+            function renderRunbookExecutionDiagnostics(snapshot, currentInfo, sourceText, freshnessText, durabilityText, failedStep) {
+              const steps = Array.isArray(snapshot?.steps) ? snapshot.steps : [];
+              const counts = steps.reduce((acc, step) => {
+                const key = String(step.state || 'pending').toLowerCase();
+                acc[key] = (acc[key] || 0) + 1;
+                return acc;
+              }, {});
+              const currentCopy = currentInfo
+                ? `${currentInfo.ordinalText}; id=${currentInfo.stepId || '-'}; title=${currentInfo.title || '-'}; state=${currentInfo.state || '-'}; exit=${currentInfo.exitCode ?? '-'}`
+                : t('当前步骤尚未确定', 'current step not determined yet');
+              const countsCopy = Object.entries(counts).map(([key, value]) => `${key}=${value}`).join('; ') || 'no-steps';
+              const terminalAdvice = failedStep
+                ? t('失败排障：打开执行流程页查看完整终态输出；实时页仅在折叠区展示必要 stdout/stderr。', 'Failure triage: open Execution flow for full terminal output; the Live page only shows necessary stdout/stderr in collapsed areas.')
+                : t('正常值守：主视图只看真实步骤、新鲜度和证据就绪；命令/stdout/stderr 保持折叠。', 'Normal monitoring: use real step, freshness, and artifact readiness in the main view; commands/stdout/stderr stay collapsed.');
+              const copy = [
+                `source=${sourceText}`,
+                `freshness=${freshnessText}`,
+                `durability=${durabilityText}`,
+                `current=${currentCopy}`,
+                `counts=${countsCopy}`,
+                terminalAdvice
+              ].join(' | ');
+              const rows = [
+                [t('进度来源', 'Progress source'), sourceText],
+                [t('持久化说明', 'Durability note'), durabilityText],
+                [t('新鲜度', 'Freshness'), freshnessText],
+                [t('当前步骤', 'Current step'), currentCopy],
+                [t('步骤状态计数', 'Step state counts'), countsCopy],
+                [t('排障提示', 'Triage hint'), terminalAdvice]
+              ];
+              return `<details class="execution-diagnostics" data-copy="${escapeAttr(copy)}">
+                <summary>${escapeHtml(t('执行诊断（默认折叠，可右键复制）', 'Execution diagnostics (collapsed, right-click copy)'))}</summary>
+                <div class="diagnostic-list">
+                  ${rows.map(row => `<div data-copy="${escapeAttr(`${row[0]}: ${row[1]}`)}"><b>${escapeHtml(row[0])}</b><span>${escapeHtml(row[1])}</span></div>`).join('')}
+                </div>
+              </details>`;
+            }
+
             function formatAgeSeconds(seconds) {
               const value = Math.max(0, Number(seconds) || 0);
               if (value < 60) { return `${value}s`; }
@@ -1234,7 +1294,7 @@ internal static class LiveEventsPage
               const tone = summary.readyCount > 0 ? 'ready' : (summary.indexLoaded ? 'waiting' : 'quiet');
               const headline = t(`${summary.readyCount}/${summary.totalCount} 类证据就绪`, `${summary.readyCount}/${summary.totalCount} evidence lanes ready`);
               const laneSummary = `${t('已就绪', 'ready')}: ${(summary.readyLanes || []).slice(0, 6).join('、') || t('暂无', 'none')}; ${t('等待', 'waiting')}: ${(summary.waitingLanes || []).slice(0, 6).join('、') || t('暂无', 'none')}`;
-              const copy = `${headline}; indexed=${summary.indexLoaded}; downloadable=${summary.downloadableCount}; rejections=${summary.rejectionCount}; ${laneSummary}`;
+              const copy = `${headline}; indexed=${summary.indexLoaded}; freshness=${summary.indexFreshness}; downloadable=${summary.downloadableCount}; rejections=${summary.rejectionCount}; ${laneSummary}`;
               return {
                 copy,
                 html: `<article class="cockpit-card ${tone}" data-copy="${escapeAttr(copy)}">
@@ -1242,11 +1302,12 @@ internal static class LiveEventsPage
                   <p class="cockpit-main">${escapeHtml(headline)}</p>
                   <div class="cockpit-meta">
                     <span class="pill ${summary.indexLoaded ? 'ready' : 'waiting'}">${escapeHtml(summary.indexLoaded ? t('索引已返回', 'index loaded') : t('等待索引', 'waiting index'))}</span>
+                    <span class="pill ${summary.indexLoaded ? 'ready' : 'waiting'}" data-copy="${escapeAttr(summary.indexFreshness)}">${escapeHtml(summary.indexFreshness)}</span>
                     <span class="pill endpoint" data-copy="${escapeAttr(String(summary.downloadableCount))}">${escapeHtml(t(`可下载 ${summary.downloadableCount}`, `${summary.downloadableCount} downloadable`))}</span>
                     <span class="pill ${summary.rejectionCount > 0 ? 'failed' : 'ready'}" data-copy="${escapeAttr(String(summary.rejectionCount))}">${escapeHtml(t(`拒绝 ${summary.rejectionCount}`, `${summary.rejectionCount} rejected`))}</span>
                     ${cockpitCopyButton(copy)}
                   </div>
-                  <p class="muted" data-copy="${escapeAttr(laneSummary)}">${escapeHtml(t('摘要来自 artifact index 与采集信号；详细 selector 在下方卡片展开。', 'Summary comes from artifact index and collection signals; detailed selectors expand in cards below.'))}</p>
+                  <p class="muted" data-copy="${escapeAttr(`${laneSummary}; ${summary.indexFreshness}`)}">${escapeHtml(t('摘要来自 artifact index 与采集信号；详细 selector 在下方卡片展开。', 'Summary comes from artifact index and collection signals; detailed selectors expand in cards below.'))}</p>
                 </article>`
               };
             }
@@ -1276,6 +1337,22 @@ internal static class LiveEventsPage
               return `<button class="secondary" type="button" data-copy="${escapeAttr(copy)}" onclick="copyText(this.getAttribute('data-copy'))">${escapeHtml(t('复制卡片', 'Copy card'))}</button>`;
             }
 
+            function artifactIndexFreshnessText(index) {
+              const generatedAt = artifactField(index || {}, 'generatedAtUtc', 'GeneratedAtUtc') || artifactField(index || {}, 'updatedAtUtc', 'UpdatedAtUtc');
+              if (!generatedAt) {
+                return latestArtifactIndex
+                  ? t('证据索引已返回，但未提供生成时间。', 'Artifact index returned without a generated timestamp.')
+                  : t('证据索引尚未返回。', 'Artifact index has not returned yet.');
+              }
+
+              const parsed = Date.parse(generatedAt);
+              if (!Number.isFinite(parsed)) {
+                return t(`证据索引时间：${generatedAt}`, `Artifact index time: ${generatedAt}`);
+              }
+
+              return t(`证据索引 ${formatAgeSeconds(Math.round((Date.now() - parsed) / 1000))} 前刷新`, `Artifact index refreshed ${formatAgeSeconds(Math.round((Date.now() - parsed) / 1000))} ago`);
+            }
+
             function summarizeArtifactReadiness() {
               const rows = Array.isArray(latestArtifactRows) ? latestArtifactRows : [];
               const index = latestArtifactIndex || {};
@@ -1295,6 +1372,7 @@ internal static class LiveEventsPage
                 totalCount,
                 downloadableCount,
                 rejectionCount,
+                indexFreshness: artifactIndexFreshnessText(index),
                 readyLanes: rows.filter(row => row && row.ready).map(row => row.displayName || row.fileName).filter(Boolean),
                 waitingLanes: rows.filter(row => row && !row.ready).map(row => row.displayName || row.fileName).filter(Boolean)
               };
@@ -1307,7 +1385,7 @@ internal static class LiveEventsPage
               const summary = summarizeArtifactReadiness();
               const readyText = summary.readyLanes.length > 0 ? summary.readyLanes.slice(0, 8).join('、') : t('暂无', 'none');
               const waitingText = summary.waitingLanes.length > 0 ? summary.waitingLanes.slice(0, 8).join('、') : t('暂无', 'none');
-              const copy = `证据就绪=${summary.readyCount}/${summary.totalCount}; 可下载=${summary.downloadableCount}; 拒绝诊断=${summary.rejectionCount}; 已就绪=${readyText}; 等待=${waitingText}`;
+              const copy = `证据就绪=${summary.readyCount}/${summary.totalCount}; 索引新鲜度=${summary.indexFreshness}; 可下载=${summary.downloadableCount}; 拒绝诊断=${summary.rejectionCount}; 已就绪=${readyText}; 等待=${waitingText}`;
               target.className = `report-ready ${summary.readyCount > 0 ? 'ok' : 'muted'}`;
               target.setAttribute('data-copy', copy);
               target.innerHTML = `
@@ -1317,6 +1395,7 @@ internal static class LiveEventsPage
                 </div>
                 <div class="artifact-chip-row">
                   <span class="pill ${summary.indexLoaded ? 'ready' : 'waiting'}" data-copy="${escapeAttr(summary.indexLoaded ? t('证据索引已返回', 'artifact index loaded') : t('等待证据索引', 'waiting for artifact index'))}">${escapeHtml(summary.indexLoaded ? t('索引已返回', 'index loaded') : t('等待索引', 'waiting index'))}</span>
+                  <span class="pill ${summary.indexLoaded ? 'ready' : 'waiting'}" data-copy="${escapeAttr(summary.indexFreshness)}">${escapeHtml(summary.indexFreshness)}</span>
                   <span class="pill ${summary.readyCount > 0 ? 'ready' : 'waiting'}" data-copy="${escapeAttr(`${summary.readyCount}/${summary.totalCount}`)}">${escapeHtml(t(`${summary.readyCount}/${summary.totalCount} 类就绪`, `${summary.readyCount}/${summary.totalCount} lanes ready`))}</span>
                   <span class="pill endpoint" data-copy="${escapeAttr(String(summary.downloadableCount))}">${escapeHtml(t(`可下载 ${summary.downloadableCount}`, `${summary.downloadableCount} downloadable`))}</span>
                   <span class="pill ${summary.rejectionCount > 0 ? 'failed' : 'ready'}" data-copy="${escapeAttr(String(summary.rejectionCount))}">${escapeHtml(t(`拒绝诊断 ${summary.rejectionCount}`, `${summary.rejectionCount} rejections`))}</span>
@@ -1393,6 +1472,7 @@ internal static class LiveEventsPage
               }
 
               const generatedAt = artifactField(index, 'generatedAtUtc', 'GeneratedAtUtc');
+              const indexFreshness = artifactIndexFreshnessText(index);
               const producer = artifactField(index, 'producer', 'Producer');
               const rootPolicy = artifactField(index, 'rootPathPolicy', 'RootPathPolicy') || 'server-owned-not-exposed';
               const rejectionCount = collections.reduce((count, collection) => count + artifactCollectionRejectedCount(collection), 0);
@@ -1402,6 +1482,7 @@ internal static class LiveEventsPage
                 `${t('采集项', 'collections')}=${collections.length}`,
                 `${t('拒绝诊断', 'rejections')}=${rejectionCount}`,
                 `policy=${rootPolicy}`,
+                indexFreshness,
                 generatedAt || ''
               ].filter(Boolean).join(' | ');
               return `<article class="artifact-card ready" data-copy="${escapeAttr(copy)}">
@@ -1411,6 +1492,7 @@ internal static class LiveEventsPage
                 </div>
                 <div class="artifact-chip-row">
                   <span class="pill" data-copy="${escapeAttr(rootPolicy)}">${escapeHtml(t('根路径不暴露', 'root not exposed'))}</span>
+                  <span class="pill ready" data-copy="${escapeAttr(indexFreshness)}">${escapeHtml(indexFreshness)}</span>
                   <span class="pill ${rejectionCount > 0 ? 'failed' : 'ready'}" data-copy="${escapeAttr(String(rejectionCount))}">${escapeHtml(t(`拒绝诊断 ${rejectionCount}`, `rejection diagnostics ${rejectionCount}`))}</span>
                   ${generatedAt ? `<span class="pill quiet" data-copy="${escapeAttr(generatedAt)}">${escapeHtml(generatedAt)}</span>` : ''}
                 </div>
@@ -2198,16 +2280,18 @@ internal static class LiveEventsPage
               const elapsed = formatDuration(snapshot.duration) || '-';
               const freshness = progressFreshnessInfo(progressSnapshotUpdatedAt(snapshot), rawState);
               const freshnessText = progressFreshnessText(freshness);
+              const durabilityText = progressDurabilityText(snapshot, streamInfo);
               const freshnessTone = freshness.stale ? 'failed' : freshness.ageSeconds == null ? 'waiting' : 'ready';
               const failedStep = steps.find(step => ['failed', 'canceled'].includes(String(step.state || '').toLowerCase()));
               const failureReason = buildProgressFailureReason(snapshot, failedStep);
               const message = snapshot.message ? `<p class="muted" data-copy="${escapeAttr(localizeServerMessage(snapshot.message))}">${escapeHtml(localizeServerMessage(snapshot.message))}</p>` : '';
               const failure = failureReason ? `<p class="error" data-copy="${escapeAttr(failureReason)}">${t('失败原因：', 'Failure reason: ')}${escapeHtml(failureReason)}</p>` : '';
               const stageRail = renderMonitorStages(stageIndex, done, failed);
-              const focusCopy = `${state}; ${completed}/${total}; 当前=${current}; 当前状态=${currentState}; 序号=${currentOrdinal}; 来源=${currentSource}; 已执行=${executed}; 已耗时=${elapsed}; 快照=${freshnessText}; 更新时间=${freshness.source || '-'}`;
+              const focusCopy = `${state}; ${completed}/${total}; 当前=${current}; 当前状态=${currentState}; 序号=${currentOrdinal}; 来源=${currentSource}; 持久化=${durabilityText}; 已执行=${executed}; 已耗时=${elapsed}; 快照=${freshnessText}; 更新时间=${freshness.source || '-'}`;
               const stepCards = steps.slice(0, 32).map(step => renderRunbookStepCard(step, currentInfo, total)).join('');
               const hiddenCount = Math.max(0, steps.length - 32);
               const hiddenNotice = hiddenCount > 0 ? `<p class="muted">${escapeHtml(t(`另有 ${hiddenCount} 个步骤已折叠，执行流程页可查看完整列表。`, `${hiddenCount} additional steps are hidden; open Execution flow for the full list.`))}</p>` : '';
+              const executionDiagnostics = renderRunbookExecutionDiagnostics(snapshot, currentInfo, currentSource, freshnessText, durabilityText, failedStep);
               target.innerHTML = `
                 <div class="card-status">
                   <span class="pill ${failed ? 'failed' : done ? 'ready' : 'endpoint'}" data-copy="${escapeAttr(state)}">${escapeHtml(state)}</span>
@@ -2221,12 +2305,14 @@ internal static class LiveEventsPage
                   <div><span>${escapeHtml(t('步骤序号', 'Step ordinal'))}</span><strong>${escapeHtml(currentOrdinal)}</strong></div>
                   <div><span>${escapeHtml(t('进度来源', 'Progress source'))}</span><strong>${escapeHtml(currentSource)}</strong></div>
                   <div><span>${escapeHtml(t('快照新鲜度', 'Snapshot freshness'))}</span><strong class="pill ${freshnessTone}" data-copy="${escapeAttr(freshnessText)}">${escapeHtml(freshnessText)}</strong></div>
+                  <div><span>${escapeHtml(t('持久化进度', 'Durable progress'))}</span><strong data-copy="${escapeAttr(durabilityText)}">${escapeHtml(durabilityText)}</strong></div>
                   <div><span>${escapeHtml(t('更新时间', 'Updated at'))}</span><strong data-copy="${escapeAttr(freshness.source || '-')}">${escapeHtml(freshness.source || '-')}</strong></div>
                   <div><span>${escapeHtml(t('已执行步骤', 'Executed steps'))}</span><strong>${escapeHtml(executed)} / ${escapeHtml(total)}</strong></div>
                   <div><span>${escapeHtml(t('已耗时', 'Elapsed'))}</span><strong>${escapeHtml(elapsed)}</strong></div>
                 </div>
                 ${message}
                 ${failure}
+                ${executionDiagnostics}
                 <div class="monitor-stage-grid" aria-label="${escapeAttr(t('分析阶段进度', 'analysis stage progress'))}">${stageRail}</div>
                 <div class="step-list">${stepCards || `<p class="muted">${t('尚无步骤快照。', 'No step snapshot yet.')}</p>`}</div>
                 ${hiddenNotice}`;
@@ -2251,6 +2337,16 @@ internal static class LiveEventsPage
                 step.mutatesVmState ? t('会改变 VM 状态', 'mutates VM') : '',
                 stepMessage
               ].filter(Boolean).join(' · ');
+              const diagnosticCopy = [
+                `index=${stepNumber}`,
+                `id=${step.stepId || '-'}`,
+                `state=${stepState}`,
+                `exit=${step.exitCode ?? '-'}`,
+                `duration=${duration}`,
+                `requiresElevation=${Boolean(step.requiresElevation)}`,
+                `mutatesVmState=${Boolean(step.mutatesVmState)}`,
+                stepMessage ? `message=${stepMessage}` : ''
+              ].filter(Boolean).join('; ');
               return `<details class="step-card ${escapeAttr(stateClass)} ${isCurrent ? 'current' : ''}" ${isCurrent ? 'open' : ''} data-copy="${escapeAttr(title + ' ' + detail)}">
                 <summary>
                   <strong>${escapeHtml(title)}</strong>
@@ -2262,6 +2358,10 @@ internal static class LiveEventsPage
                 ${step.requiresElevation ? `<p class="muted">${escapeHtml(t('该步骤需要提权。', 'This step requires elevation.'))}</p>` : ''}
                 ${step.mutatesVmState ? `<p class="muted">${escapeHtml(t('该步骤会改变虚拟机状态。', 'This step mutates VM state.'))}</p>` : ''}
                 ${stepMessage ? `<p class="muted">${escapeHtml(stepMessage)}</p>` : ''}
+                <details class="step-output-details">
+                  <summary data-copy="${escapeAttr(diagnosticCopy)}">${escapeHtml(t('步骤诊断摘要（无命令）', 'Step diagnostic summary (no command)'))}</summary>
+                  <p class="muted" data-copy="${escapeAttr(diagnosticCopy)}">${escapeHtml(diagnosticCopy)}</p>
+                </details>
                 <p class="muted">${escapeHtml(t('只显示界面安全状态；不展示命令、标准输出 stdout 或标准错误 stderr。', 'UI-safe status only; commands, stdout, and stderr are not shown.'))}</p>
               </details>`;
             }
@@ -2480,6 +2580,7 @@ internal static class LiveEventsPage
               const quietLabel = (result.isQuietState || result.IsQuietState || workflowState === 'quiet') ? t('静默状态：不阻断分析', 'quiet: non-blocking') : t('可见结果', 'visible result');
               const retryHtml = retry ? `<p class="muted" data-copy="${escapeAttr(retry)}">${escapeHtml(retry)}</p>` : '';
               const isQuiet = Boolean(result.isQuietState || result.IsQuietState || workflowState === 'quiet');
+              const stateSummary = virusTotalStateSummary(vtStatus, result, malicious, suspicious, engineTotal);
               const quietNote = isQuiet
                 ? `<p class="muted">${escapeHtml(t('静默状态卡：未配置、未收录、限速、鉴权失败、超时或查询失败只在页面展示，不写任务/行为日志，也不会中断分析。', 'Quiet status card: not configured, not found, rate limits, auth failures, timeouts, or lookup failures are display-only, do not write job/behavior logs, and do not interrupt analysis.'))}</p>`
                 : '';
@@ -2494,6 +2595,7 @@ internal static class LiveEventsPage
                 </div>
                 <div class="progressbar compact" aria-label="${escapeAttr(t('VirusTotal 查询进度', 'VirusTotal lookup progress'))}"><div class="progressbar-fill ${workflowState === 'failed' ? 'failed' : ''}" style="width:${progress}%"></div></div>
                 <p>${t('当前步骤', 'Current step')}：<strong>${escapeHtml(currentStep)}</strong></p>
+                <p class="vt-state-banner" data-copy="${escapeAttr(stateSummary)}"><strong>${escapeHtml(t('VT 安静/命中摘要', 'VT quiet/found summary'))}：</strong>${escapeHtml(stateSummary)}</p>
                 <p class="vt-state-banner" data-copy="${escapeAttr(operatorState)}"><strong>${escapeHtml(t('操作者状态', 'Operator state'))}：</strong>${escapeHtml(operatorState)}</p>
                 <div class="vt-head">
                   <div>
@@ -2538,7 +2640,7 @@ internal static class LiveEventsPage
                 ${cacheHtml}
                 ${retryHtml}
                 <p class="artifact-action"><span class="pill ${virusTotalStatusPillTone(vtStatus, result)}" data-copy="${escapeAttr(statusCopy)}">${escapeHtml(status || statusLabel)}</span><span class="pill quiet" data-copy="${escapeAttr(vtStatus)}">${escapeHtml(vtStatus)}</span>${link}${reportLink}${settingsLink}</p>`;
-              target.setAttribute('data-copy', `VirusTotal ${workflowLabel}; 进度=${progress}%; 当前=${currentStep}; ${vtStatus}: ${label}; ${operatorState}; 引擎=${engineTotal}; 社区=${virusTotalCommunityCopy(result, communityVotes)} ${shaValue || ''}; ${logPolicy}`);
+              target.setAttribute('data-copy', `VirusTotal ${workflowLabel}; 进度=${progress}%; 当前=${currentStep}; ${stateSummary}; ${vtStatus}: ${label}; ${operatorState}; 引擎=${engineTotal}; 社区=${virusTotalCommunityCopy(result, communityVotes)} ${shaValue || ''}; ${logPolicy}`);
               renderOperatorCockpit();
             }
 
@@ -2666,6 +2768,27 @@ internal static class LiveEventsPage
               }
 
               return t(`静默状态：${virusTotalStatusLabel(status, result)}；不阻断分析，不写任务/行为日志。`, `Quiet state: ${virusTotalStatusLabel(status, result)}; does not block analysis and does not write job/behavior logs.`);
+            }
+
+            function virusTotalStateSummary(status, result, malicious, suspicious, engineTotal) {
+              const persistable = Boolean(vtValue(result, 'canPersistEnrichmentEvent') || vtValue(result, 'CanPersistEnrichmentEvent'));
+              const persisted = Boolean(vtValue(result, 'persistedToEnrichmentEvents') || vtValue(result, 'PersistedToEnrichmentEvents'));
+              const policy = virusTotalPolicyText(vtValue(result, 'persistencePolicy') || vtValue(result, 'liveLogPolicy'));
+              if (status === 'found' || vtBoolValue(result, 'found')) {
+                const hits = Number(malicious || 0) + Number(suspicious || 0);
+                const persistedText = persisted
+                  ? t('已显式写入信誉增强', 'explicitly persisted to reputation enrichment')
+                  : persistable
+                    ? t('可显式写入信誉增强；实时页默认仅展示', 'eligible for explicit reputation persistence; Live page is display-only by default')
+                    : t('实时页仅展示', 'Live page display-only');
+                return t(`Found：官方已收录，${hits}/${engineTotal} 引擎命中；${persistedText}；${policy}。`, `Found: official report exists, ${hits}/${engineTotal} engine hits; ${persistedText}; ${policy}.`);
+              }
+
+              if (status === 'running' || status === 'querying' || status === 'queued') {
+                return t('查询中：仅 SHA-256 hash-only 查询，不上传样本；结果到达前不写任务/行为日志。', 'Querying: SHA-256 hash-only lookup, no sample upload; no job/behavior log is written before a result arrives.');
+              }
+
+              return t(`Quiet：${virusTotalStatusLabel(status, result)}；未配置、未收录、限速、鉴权、超时或失败均只在页面展示，不污染报告行为结论。`, `Quiet: ${virusTotalStatusLabel(status, result)}; not-configured, not-found, rate-limit, auth, timeout, or failure states are page-only and do not pollute behavior conclusions.`);
             }
 
             function vtNumber(...values) {

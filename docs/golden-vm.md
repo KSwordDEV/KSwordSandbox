@@ -1,11 +1,8 @@
-# Golden VM preparation
+# Golden VM 准备
 
-Canonical scope: this page owns baseline golden-VM preparation. Current
-readiness must be checked with `docs/hyperv-readiness.md` /
-`scripts/Test-HyperVReadiness.ps1`; dated host observations below are evidence,
-not a substitute for a fresh preflight.
+中文优先范围：本页负责 baseline golden-VM 准备。当前 readiness 必须以 `docs/hyperv-readiness.md` / `scripts/Test-HyperVReadiness.ps1` 为准；下面带日期的 host observations 只是历史证据，不能替代新的 preflight。
 
-## Required baseline
+## 必需 baseline
 
 - Windows 10 x64 VM on local Hyper-V.
 - VM name matching `config/sandbox.example.json`.
@@ -21,7 +18,7 @@ not a substitute for a fresh preflight.
   `D:\Temp\KSwordSandbox\payload\guest-tools\payload-manifest.json`.
 - Network isolation appropriate for the malware-analysis lab.
 
-## Current host live checklist
+## 当前 host live checklist（历史观察）
 
 Observed on the local Hyper-V host on 2026-07-10 from an elevated shell. Keep
 this section factual and do not paste guest passwords, VM disks, payload
@@ -61,7 +58,7 @@ environment secrets can drift.
     useful checkpoint-refresh check rather than a blocker when host payload
     files are present.
 
-## Suggested guest folders
+## 建议 guest folders
 
 ```text
 C:\KSwordSandbox\agent      Guest collector binaries
@@ -86,7 +83,7 @@ C:\KSwordSandbox\agent\KSword.Sandbox.Agent.exe
 See `docs/guest-payload-staging.md` for the MSBuild staging script and
 PowerShell Direct copy commands.
 
-## Readiness preflight
+## Readiness preflight（只读预检）
 
 Run the non-destructive readiness report before refreshing or using the clean
 checkpoint:
@@ -120,7 +117,7 @@ availability, VM/checkpoint/Guest Service state, credential env var presence,
 host payload paths, and PowerShell Direct status when the VM is already running.
 Live mode refuses to launch child scripts when required checks fail.
 
-## Host credential handling
+## Host credential handling（凭据处理）
 
 Store the guest password outside git. The default runbook reads it from the
 environment variable named by `Guest.PasswordSecretName`, which defaults to
@@ -152,7 +149,7 @@ $env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
 Use a local unprivileged guest account for the agent unless driver install or
 service start requires elevation inside the VM.
 
-## Integration services and PowerShell Direct
+## Integration services 与 PowerShell Direct
 
 Enable the Guest Service Interface from an elevated host shell:
 
@@ -197,7 +194,7 @@ before using the VM as the golden baseline.
 
 Both checks should pass before taking the `Clean` checkpoint.
 
-## Test-signed driver prerequisite
+## Test-signed driver 前置条件
 
 The default golden-VM workflow does not require a signed or loaded driver. Keep
 normal validation compile-only and use mock R0 when the E2E path only needs to

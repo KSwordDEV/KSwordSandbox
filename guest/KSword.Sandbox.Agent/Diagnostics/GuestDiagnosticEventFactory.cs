@@ -1,4 +1,5 @@
 using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Agent.Collection;
 
 namespace KSword.Sandbox.Agent.Diagnostics;
 
@@ -16,7 +17,7 @@ internal static class GuestDiagnosticEventFactory
     /// </summary>
     public static SandboxEvent FromException(string eventType, string? path, Exception exception)
     {
-        return new SandboxEvent
+        var evt = new SandboxEvent
         {
             EventType = eventType,
             Source = "guest",
@@ -29,5 +30,7 @@ internal static class GuestDiagnosticEventFactory
                 ["zhHint"] = "该事件通常表示采集或环境诊断问题，不应直接归类为样本行为。"
             }
         };
+        GuestSelfNoiseMetadata.Apply(evt);
+        return evt;
     }
 }

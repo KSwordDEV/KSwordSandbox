@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v25-r0-file-network-semantic-fields",
+  "version": "2026-07-12-v26-self-noise-guard-hardening",
   "rules": [
     {
       "id": "host-submission",
@@ -28552,6 +28552,12 @@
           "closeKey",
           "read",
           "query"
+        ],
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
         ]
       },
       "excludeDataContains": {
@@ -28597,7 +28603,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -28707,6 +28714,12 @@
           "closeKey",
           "read",
           "query"
+        ],
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
         ]
       },
       "excludeDataContains": {
@@ -28752,7 +28765,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -28872,6 +28886,12 @@
           "closeKey",
           "read",
           "query"
+        ],
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
         ]
       },
       "excludeDataContains": {
@@ -28917,7 +28937,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -29049,7 +29070,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -29101,7 +29123,15 @@
         "early-bird",
         "thread",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "injection-process-herpaderping-delete-pending-image",
@@ -29191,7 +29221,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -29244,7 +29275,15 @@
         "delete-pending",
         "user-writable",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "lateral-winrm-wsman-remote-shell-command",
@@ -29341,7 +29380,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -29395,7 +29435,15 @@
         "remote-shell",
         "http",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "lateral-smb-atsvc-named-pipe-task-registration",
@@ -29476,7 +29524,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -29529,7 +29578,15 @@
         "atsvc",
         "scheduled-task",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "lateral-rdp-tscon-system-session-hijack",
@@ -29612,7 +29669,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -29664,7 +29722,15 @@
         "tscon",
         "session-hijack",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "anti-sandbox-firmware-wmi-vm-gate",
@@ -29747,7 +29813,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -29800,7 +29867,15 @@
         "firmware",
         "vm-check",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "anti-sandbox-short-uptime-exit-gate",
@@ -29887,7 +29962,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -29939,7 +30015,15 @@
         "uptime",
         "time-evasion",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "download-execute-mounted-image-lnk-payload",
@@ -30023,7 +30107,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -30076,7 +30161,15 @@
         "lnk",
         "execution",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "download-execute-script-interpreter-motw",
@@ -30166,7 +30259,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -30218,7 +30312,15 @@
         "motw",
         "execution",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "c2-websocket-upgrade-nonbrowser-user-agent",
@@ -30302,7 +30404,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -30356,7 +30459,15 @@
         "c2",
         "user-agent",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "c2-doh-post-high-entropy-query",
@@ -30449,7 +30560,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -30504,7 +30616,15 @@
         "c2",
         "high-entropy",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "c2-mtls-client-cert-rare-ja3",
@@ -30586,7 +30706,8 @@
           "authentication_failed",
           "timeout",
           "lookup_failed",
-          "missing_hash"
+          "missing_hash",
+          "unset"
         ],
         "healthStatus": [
           "driver-health",
@@ -30641,7 +30762,15 @@
         "c2",
         "encrypted-channel",
         "mitre"
-      ]
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     },
     {
       "id": "persistence-runonceex-depend-dll-value",
@@ -30681,7 +30810,48 @@
         "registry",
         "runonceex",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "persistence-svchost-servicedll-user-writable",
@@ -30722,7 +30892,48 @@
         "service",
         "registry",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "persistence-ifeo-globalflag-silentprocessexit",
@@ -30763,7 +30974,48 @@
         "ifeo",
         "silent-process-exit",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "injection-atom-bombing-api-sequence",
@@ -30797,7 +31049,48 @@
         "apc",
         "atom-bombing",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "injection-writeprocessmemory-followed-by-protect-execute",
@@ -30836,7 +31129,48 @@
         "injection",
         "memory",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "injection-setthreadcontext-suspended-target",
@@ -30869,7 +31203,48 @@
         "injection",
         "process-hollowing",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "lateral-smb-admin-share-executable-write",
@@ -30900,7 +31275,48 @@
         "smb",
         "admin-share",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "lateral-winrm-wsman-create-shell-soap",
@@ -30938,7 +31354,48 @@
         "winrm",
         "wsman",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "lateral-smb-svcctl-pipe-open",
@@ -30973,7 +31430,48 @@
         "smb",
         "service-control",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "anti-sandbox-low-interaction-count-gate",
@@ -31015,7 +31513,48 @@
         "anti-analysis",
         "user-interaction",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "anti-sandbox-vm-mac-oui-check",
@@ -31051,7 +31590,48 @@
         "anti-analysis",
         "vm-check",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "anti-sandbox-resource-threshold-exit",
@@ -31094,7 +31674,48 @@
         "anti-analysis",
         "resource-check",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "download-execute-webdav-lolbin-url",
@@ -31124,7 +31745,48 @@
         "lolbin",
         "webdav",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "download-execute-temp-cab-msi-chain",
@@ -31161,7 +31823,48 @@
         "msiexec",
         "staging",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "download-execute-ads-zoneidentifier-executable-launch",
@@ -31200,7 +31903,48 @@
         "motw",
         "execution",
         "mitre"
-      ]
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     },
     {
       "id": "lolbin-cmstp-remote-inf-proxy-execution",
@@ -31243,10 +31987,12 @@
       "excludeDataContains": {
         "source": [
           "virustotal",
-          "r0collector"
+          "r0collector",
+          "collection-health"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -31261,6 +32007,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -31306,10 +32063,12 @@
       "excludeDataContains": {
         "source": [
           "virustotal",
-          "r0collector"
+          "r0collector",
+          "collection-health"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -31324,6 +32083,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -31371,10 +32141,12 @@
       "excludeDataContains": {
         "source": [
           "virustotal",
-          "r0collector"
+          "r0collector",
+          "collection-health"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -31390,6 +32162,9 @@
         ],
         "selfNoise": [
           "true"
+        ],
+        "collectorNoise": [
+          "true"
         ]
       },
       "allDataContains": {
@@ -31403,6 +32178,14 @@
       "allDataRegex": {
         "value": [
           "(?i)(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|dll|ps1|bat|cmd|vbs|js)\\b"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
         ]
       }
     },
@@ -31445,10 +32228,12 @@
       "excludeDataContains": {
         "source": [
           "virustotal",
-          "r0collector"
+          "r0collector",
+          "collection-health"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -31464,6 +32249,9 @@
         ],
         "selfNoise": [
           "true"
+        ],
+        "collectorNoise": [
+          "true"
         ]
       },
       "allDataContains": {
@@ -31474,6 +32262,14 @@
       "allDataRegex": {
         "handlerPath": [
           "(?i)(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*\\.dll\\b"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
         ]
       }
     },
@@ -31536,10 +32332,12 @@
       "excludeDataContains": {
         "source": [
           "virustotal",
-          "r0collector"
+          "r0collector",
+          "collection-health"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -31554,6 +32352,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -31603,10 +32412,12 @@
       "excludeDataContains": {
         "source": [
           "virustotal",
-          "r0collector"
+          "r0collector",
+          "collection-health"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -31621,6 +32432,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -31687,10 +32509,12 @@
       "excludeDataContains": {
         "source": [
           "virustotal",
-          "r0collector"
+          "r0collector",
+          "collection-health"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -31705,6 +32529,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -31766,10 +32601,12 @@
       "excludeDataContains": {
         "source": [
           "virustotal",
-          "r0collector"
+          "r0collector",
+          "collection-health"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -31784,6 +32621,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -31848,10 +32696,12 @@
       "excludeDataContains": {
         "source": [
           "virustotal",
-          "r0collector"
+          "r0collector",
+          "collection-health"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -31866,6 +32716,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -31920,10 +32781,12 @@
       "excludeDataContains": {
         "source": [
           "virustotal",
-          "r0collector"
+          "r0collector",
+          "collection-health"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -31938,6 +32801,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -31990,7 +32864,8 @@
           "r0collector"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -32005,6 +32880,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -32059,7 +32945,8 @@
           "r0collector"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -32074,6 +32961,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -32122,7 +33020,8 @@
           "r0collector"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -32137,6 +33036,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -32194,7 +33104,8 @@
           "r0collector"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -32209,6 +33120,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -32262,7 +33184,8 @@
           "r0collector"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -32277,6 +33200,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -32328,7 +33262,8 @@
           "r0collector"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -32343,6 +33278,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -32384,7 +33330,8 @@
           "r0collector"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -32400,11 +33347,22 @@
         ],
         "selfNoise": [
           "true"
+        ],
+        "collectorNoise": [
+          "true"
         ]
       },
       "allDataRegex": {
         "pipeName": [
           "(?i)\\\\PIPE\\\\(?:PSEXESVC|svcctl|atsvc)"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
         ]
       }
     },
@@ -32453,7 +33411,8 @@
           "r0collector"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -32468,6 +33427,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -32527,7 +33497,8 @@
           "r0collector"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -32542,6 +33513,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -32595,7 +33577,8 @@
           "r0collector"
         ],
         "healthStatus": [
-          "collection-health"
+          "collection-health",
+          "driver-health"
         ],
         "vtStatus": [
           "not_configured",
@@ -32610,6 +33593,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -32664,7 +33658,8 @@
       "excludeDataContains": {
         "source": [
           "collection-health",
-          "virustotal"
+          "virustotal",
+          "r0collector"
         ],
         "healthStatus": [
           "collection-health",
@@ -32683,6 +33678,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -32737,7 +33743,8 @@
       "excludeDataContains": {
         "source": [
           "collection-health",
-          "virustotal"
+          "virustotal",
+          "r0collector"
         ],
         "healthStatus": [
           "collection-health",
@@ -32757,6 +33764,9 @@
         ],
         "selfNoise": [
           "true"
+        ],
+        "collectorNoise": [
+          "true"
         ]
       },
       "allDataNumericRanges": {
@@ -32769,6 +33779,14 @@
           {
             "max": 120
           }
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
         ]
       }
     },
@@ -32836,7 +33854,8 @@
       "excludeDataContains": {
         "source": [
           "collection-health",
-          "virustotal"
+          "virustotal",
+          "r0collector"
         ],
         "healthStatus": [
           "collection-health",
@@ -32855,6 +33874,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -32934,7 +33964,8 @@
       "excludeDataContains": {
         "source": [
           "collection-health",
-          "virustotal"
+          "virustotal",
+          "r0collector"
         ],
         "healthStatus": [
           "collection-health",
@@ -32953,6 +33984,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -33004,7 +34046,8 @@
       "excludeDataContains": {
         "source": [
           "collection-health",
-          "virustotal"
+          "virustotal",
+          "r0collector"
         ],
         "healthStatus": [
           "collection-health",
@@ -33023,6 +34066,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }
@@ -33080,7 +34134,8 @@
       "excludeDataContains": {
         "source": [
           "collection-health",
-          "virustotal"
+          "virustotal",
+          "r0collector"
         ],
         "healthStatus": [
           "collection-health",
@@ -33099,6 +34154,17 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
           "true"
         ]
       }

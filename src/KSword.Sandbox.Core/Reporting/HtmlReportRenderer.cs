@@ -486,7 +486,52 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString(), "risk-medium");
         Metric(html, "Registry events", report.Events.Count(IsSampleBehaviorRegistryEvent).ToString(), "risk-medium");
         Metric(html, "R0 / driver events", report.Events.Count(IsR0Event).ToString(), "risk-info");
-        html.AppendLine("</div></section>");
+        html.AppendLine("</div>");
+        AppendCollectionSelfNoisePolicySummary(html, report);
+        html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends an early, compact evidence-quality policy card. Inputs are all
+    /// normalized events; processing counts rows intentionally excluded from
+    /// behavior storytelling while preserving raw evidence; return is none.
+    /// </summary>
+    private static void AppendCollectionSelfNoisePolicySummary(StringBuilder html, AnalysisReport report)
+    {
+        var behaviorCountedFalse = report.Events.Count(IsBehaviorCountedFalseEvent);
+        var nonBehavior = report.Events.Count(IsNonBehaviorEvent);
+        var collectorSelfNoise = report.Events.Count(IsCollectorSelfNoiseEvent);
+        var vtQuiet = report.Events.Count(IsVirusTotalQuietStateEvent);
+        var r0Health = report.Events.Count(IsR0CollectionHealthEvent);
+        var excludedUnion = report.Events.Count(IsExcludedFromBehaviorStoryEvent);
+        var sampleBehavior = report.Events.Count(IsSampleBehaviorEvent);
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "Collection/self-noise policy",
+                $"sampleBehaviorEvents={sampleBehavior}",
+                $"excludedFromBehaviorStory={excludedUnion}",
+                $"behaviorCountedFalse={behaviorCountedFalse}",
+                $"nonbehavior={nonBehavior}",
+                $"collectorSelfNoise={collectorSelfNoise}",
+                $"vtQuietStates={vtQuiet}",
+                $"r0HealthRows={r0Health}",
+                "policy=Excluded rows are collection/reputation/health evidence, not sample behavior. Raw normalized events, report.json, and source artifacts remain complete and copyable."
+            ]);
+
+        html.AppendLine("<h3>Collection/self-noise policy</h3>");
+        html.AppendLine("<div class=\"compact-evidence-summary copyable\" data-copy=\"" + A(copy) + "\"><strong>Collection/self-noise policy.</strong><br>");
+        html.AppendLine("Behavior story counts exclude rows marked <code>behaviorCounted=false</code>, <code>nonbehavior</code>, collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.");
+        html.AppendLine("<div class=\"story-metrics\">");
+        html.AppendLine($"<span>sample behavior {E(sampleBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>excluded union {E(excludedUnion.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>behaviorCounted=false {E(behaviorCountedFalse.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>nonbehavior {E(nonBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>collectorSelfNoise {E(collectorSelfNoise.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>VT quiet {E(vtQuiet.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>R0 health {E(r0Health.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine("</div>");
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy collection policy", copy)}</div></div>");
     }
 
     /// <summary>
@@ -5700,6 +5745,32 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     private static bool IsSampleBehaviorProcessEvent(SandboxEvent evt) =>
         IsSampleBehaviorEvent(evt) && evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsExcludedFromBehaviorStoryEvent(SandboxEvent evt)
+    {
+        return IsBehaviorCountedFalseEvent(evt) ||
+            IsNonBehaviorEvent(evt) ||
+            IsCollectorSelfNoiseEvent(evt) ||
+            IsVirusTotalQuietStateEvent(evt) ||
+            IsR0CollectionHealthEvent(evt);
+    }
+
+    private static bool IsBehaviorCountedFalseEvent(SandboxEvent evt)
+    {
+        return EventDataBoolFalse(evt, "behaviorCounted", "behavior_counted", "countsAsBehavior", "countedAsBehavior");
+    }
+
+    private static bool IsNonBehaviorEvent(SandboxEvent evt)
+    {
+        if (EventDataBoolTrue(evt, "nonbehavior", "nonBehavior", "non_behavior", "notBehavior", "not_behavior"))
+        {
+            return true;
+        }
+
+        var eventKind = FirstEventDataValue(evt, "eventKind", "eventRole", "evidenceRole", "classification");
+        return !string.IsNullOrWhiteSpace(eventKind) &&
+            TextEqualsAny(eventKind, "nonbehavior", "non-behavior", "metadata", "diagnostic", "health", "status");
+    }
+
     /// <summary>
     /// Detects rows produced by KSword's own collector/agent plumbing.
     /// Inputs are one event; processing checks process identity, R0Collector
@@ -5709,6 +5780,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static bool IsCollectorSelfNoiseEvent(SandboxEvent evt)
     {
+        if (EventDataBoolTrue(evt, "collectorSelfNoise", "collector_self_noise", "selfNoise", "self_noise"))
+        {
+            return true;
+        }
+
         if (TextContainsAny(evt.ProcessName ?? string.Empty, "KSword.Sandbox.R0Collector", "KSword.Sandbox.Agent"))
         {
             return true;
@@ -5929,6 +6005,41 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         }
 
         return true;
+    }
+
+    private static bool IsVirusTotalQuietStateEvent(SandboxEvent evt)
+    {
+        if (!IsVirusTotalEvent(evt))
+        {
+            return false;
+        }
+
+        var verdict = FirstEventDataValue(evt, "vtVerdict", "virusTotalVerdict", "verdict");
+        if (TextEqualsAny(verdict ?? string.Empty, "malicious", "suspicious"))
+        {
+            return false;
+        }
+
+        var status = FirstEventDataValue(
+            evt,
+            "vtStatus",
+            "virusTotalStatus",
+            "lookupStatus",
+            "status",
+            "resultStatus",
+            "enrichmentStatus");
+        if (TextEqualsAny(status ?? string.Empty, "found", "not_found", "not-found", "notfound", "clean", "ok", "success", "completed"))
+        {
+            return true;
+        }
+
+        if (TextEqualsAny(verdict ?? string.Empty, "clean", "harmless", "undetected", "benign", "not_found", "not-found", "unknown", "none"))
+        {
+            return true;
+        }
+
+        return !IsVirusTotalStatusIssue(evt) &&
+            !EventDataLongGreaterThanZero(evt, "vtMalicious", "malicious", "vtSuspicious", "suspicious", "positives");
     }
 
     /// <summary>
@@ -6228,6 +6339,20 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         {
             if (evt.Data.TryGetValue(key, out var value) &&
                 TextEqualsAny(value, "true", "1", "yes", "y"))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool EventDataBoolFalse(SandboxEvent evt, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (evt.Data.TryGetValue(key, out var value) &&
+                TextEqualsAny(value, "false", "0", "no", "n"))
             {
                 return true;
             }
@@ -6782,6 +6907,17 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("VT lookups", "VT 查询"),
         ("Risk summary", "风险摘要"),
         ("Behavior detections", "行为命中"),
+        ("Collection/self-noise policy", "采集/自噪声策略"),
+        ("Collection/self-noise policy.", "采集/自噪声策略。"),
+        ("Behavior story counts exclude rows marked <code>behaviorCounted=false</code>, <code>nonbehavior</code>, collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.", "行为叙事计数会排除标记为 <code>behaviorCounted=false</code>、<code>nonbehavior</code>、采集器自噪声、VT 安静状态以及 R0 健康/就绪诊断的行。这些行仍会在各自专用章节和原始规范化事件/report.json 中可见；原始分页和折叠证据保持不变。"),
+        ("Copy collection policy", "复制采集策略"),
+        ("sample behavior", "样本行为"),
+        ("excluded union", "排除并集"),
+        ("behaviorCounted=false", "behaviorCounted=false"),
+        ("nonbehavior", "nonbehavior"),
+        ("collectorSelfNoise", "collectorSelfNoise"),
+        ("VT quiet", "VT 安静"),
+        ("R0 health", "R0 健康"),
         ("Static triage", "静态分诊"),
         ("Collection diagnostics", "采集诊断"),
         ("Collection health", "采集健康状态"),

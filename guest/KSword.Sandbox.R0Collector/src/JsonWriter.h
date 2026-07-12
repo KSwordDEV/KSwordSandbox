@@ -76,6 +76,10 @@ void AddCollectorAttributionFields(
     JsonDataObjectBuilder& data,
     const std::string& subjectKind,
     const std::string& subjectRole);
+void AddCollectorNonBehaviorFields(
+    JsonDataObjectBuilder& data,
+    const std::string& evidenceKind,
+    const std::string& noisePolicy);
 
 struct SandboxEventFields {
     std::string eventType;
