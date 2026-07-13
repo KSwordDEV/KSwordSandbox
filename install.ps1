@@ -9,13 +9,13 @@ KSWORDBOX_GUEST_PASSWORD without embedding passwords in config files.
 It can also record the optional VirusTotal API key in the current user's
 environment so the WebUI can perform hash-only lookups without committing a key.
 
-Default mode is interactive:
+Default mode is the guided first-run setup; it asks common settings after launch:
 
   .\install.ps1
 
-Automation examples:
+Automation/advanced examples:
 
-  .\install.ps1 -InstallEntrypoint CreateOrPreparePath -GeneratePassword
+  .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly
   .\install.ps1 -Mode Change -ResetPassword -PromptPassword
   .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName KSwordSandbox-Win10-Golden -CheckpointName Clean
   .\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath D:\Temp\KSwordSandbox\build\r0-driver\Release\KSword.Sandbox.Driver.sys
@@ -169,6 +169,38 @@ function Read-MenuChoice {
     return $choice
 }
 
+function Read-YesNoChoice {
+    param(
+        [Parameter(Mandatory)][string]$Prompt,
+        [bool]$DefaultYes = $true
+    )
+
+    $suffix = if ($DefaultYes) { '[Y/n]' } else { '[y/N]' }
+    while ($true) {
+        $answer = (Read-Host "$Prompt $suffix").Trim()
+        if ([string]::IsNullOrWhiteSpace($answer)) {
+            return $DefaultYes
+        }
+
+        if ($answer -in @('y', 'Y', 'yes', 'YES', 'Yes')) {
+            return $true
+        }
+
+        if ($answer -in @('n', 'N', 'no', 'NO', 'No')) {
+            return $false
+        }
+    }
+}
+
+function Set-ScriptSwitchValue {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [bool]$Value
+    )
+
+    Set-Variable -Name $Name -Scope Script -Value ([System.Management.Automation.SwitchParameter]$Value) -WhatIf:$false
+}
+
 function Read-InstallState {
     if (-not (Test-Path -LiteralPath $script:InstallStatePath -PathType Leaf)) {
         return $null
@@ -179,7 +211,7 @@ function Read-InstallState {
     }
     catch {
         if (-not $Json) {
-            Write-InstallInfo "中文提示：无法读取安装状态文件 '$script:InstallStatePath'，将忽略它并继续。下一步：如状态异常，请重新运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword。英文详情：$($_.Exception.Message)"
+            Write-InstallInfo "中文提示：无法读取安装状态文件 '$script:InstallStatePath'，将忽略它并继续。下一步：如状态异常，普通用户请重新运行 .\install.ps1 并按推荐安装向导修复；自动化可使用 CreateOrPreparePath 参数。英文详情：$($_.Exception.Message)"
         }
         return $null
     }
@@ -382,7 +414,7 @@ function Read-GuestPassword {
     }
 
     if ($Mode -ne 'Interactive') {
-        throw '错误：非交互安装/更改在设置或重置密码时需要 -GeneratePassword 或 -PromptPassword。下一步：普通用户请运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword，或明确使用 -GeneratePassword。'
+        throw '错误：非交互安装/更改在设置或重置密码时需要 -GeneratePassword 或 -PromptPassword。下一步：普通用户请直接运行 .\install.ps1 并按提示输入密码；自动化请明确使用 -PromptPassword 或 -GeneratePassword。'
     }
 
     Write-Host ''
@@ -822,7 +854,7 @@ function Get-InstallEntrypointNextSteps {
         }
         'CreateOrPreparePath' {
             [void]$steps.Add("下一步：首台机器先运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly 查看计划，再运行 -WhatIf 预览；两者都不会写文件、提示 secret、构建 payload 或修改 VM。输出路径：$RuntimeRoot。")
-            [void]$steps.Add('下一步：确认计划后，运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword 创建/刷新仓库外运行目录、sandbox.local.json、secret 和 install-state；仍不会创建 Hyper-V VM。')
+            [void]$steps.Add('下一步：普通用户直接运行 .\install.ps1，按推荐安装向导创建/刷新仓库外运行目录、sandbox.local.json、secret 和 install-state；仍不会创建 Hyper-V VM。')
             [void]$steps.Add("下一步：如果还没有黄金 VM，请先在 Hyper-V 中创建/导入 VM 和干净 checkpoint，然后运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>。")
             [void]$steps.Add('下一步：需要 self-contained Guest Agent/R0Collector payload 时，显式加 -PrepareGuestPayload；PlanOnly/WhatIf 只显示将要执行的准备动作，目标必须是仓库外 GuestPayloadRoot/runtime root。')
         }
@@ -836,7 +868,7 @@ function Get-InstallOperatorModeMatrix {
     $restorePlanCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly'
     $restoreWhatIfCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf'
     $restoreCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm'
-    $createCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
+    $createCommand = '.\install.ps1'
 
     return @(
         [pscustomobject][ordered]@{
@@ -895,7 +927,7 @@ function Get-InstallOperatorModeMatrix {
             CreatesLocalConfig = $true
             NextStepsZh = @(
                 '下一步：首台机器先确认 Windows/Hyper-V/BIOS 虚拟化/SLAT/管理员 shell，再创建或导入 golden VM 并创建 clean checkpoint。',
-                '下一步：运行 CreateOrPreparePath 保存本机配置/secret，再用 -Mode Change -UpdateHyperVConfig 记录真实 VM/checkpoint。'
+                '下一步：普通用户运行 .\install.ps1 推荐安装向导保存本机配置/secret，并在向导中选择或输入真实 VM/checkpoint。'
             )
         }
     )
@@ -1016,7 +1048,7 @@ function New-InstallEntrypointDiagnostics {
         FreshComputerNextActionsZh = @(
             '下一步：首台机器先确认 Windows edition、Hyper-V feature/module、BIOS/UEFI 虚拟化和 SLAT；不满足时只运行 PlanOnly/WhatIf/WebUI/打包检查。',
             '下一步：在 Hyper-V 外部手工创建/导入 Windows golden VM，启用 Guest Service Interface 和 PowerShell Direct，创建 clean checkpoint。',
-            '下一步：用 CreateOrPreparePath -PlanOnly/-WhatIf 预览，再用 -PromptPassword 写仓库外本机配置和 secret；不要修改 config\sandbox.example.json。'
+            '下一步：普通用户直接运行 .\install.ps1 推荐安装向导；自动化可用 CreateOrPreparePath -PlanOnly/-WhatIf 预览，再用 -PromptPassword 写仓库外本机配置和 secret；不要修改 config\sandbox.example.json。'
         )
         InstallStatus = $status
         SecretValuePrinted = $false
@@ -1507,6 +1539,60 @@ function Invoke-HyperVConfigPrompt {
     $script:DriverHostPath = Read-OptionalText -Prompt '宿主机 R0 驱动 .sys 路径（留空=自动检测/不配置） / Host R0 driver .sys path (blank=auto-detect/none)' -CurrentValue (Resolve-DriverHostPath)
     $script:LocalConfigPath = Read-OptionalText -Prompt '本机 sandbox 配置路径 / Local sandbox config path' -CurrentValue (Get-LocalSandboxConfigPath)
     Set-HyperVConfigState
+}
+
+function Invoke-GuidedFirstRunSetup {
+    Write-Host ''
+    Write-Host 'KSwordSandbox 推荐安装向导 / Recommended setup wizard'
+    Write-Host '中文提示：直接运行 install.ps1 会在这里询问常用设置；不需要记命令行参数。'
+    Write-Host '边界：本向导只写本机 runtime/config/secret，不创建 VM、不创建 checkpoint、不还原快照、不签名 driver、不调用 CSignTool。'
+    Write-Host ''
+
+    Select-HyperVVmAndCheckpointInteractive
+    $script:VmName = Read-OptionalText -Prompt 'Hyper-V 黄金 VM 名称（已有可开机 VM） / Existing Hyper-V golden VM name' -CurrentValue $VmName
+    $script:CheckpointName = Read-OptionalText -Prompt '干净快照名称（已有 checkpoint） / Existing clean checkpoint name' -CurrentValue $CheckpointName
+    $script:GuestUserName = Read-OptionalText -Prompt '来宾用户名 / Guest username' -CurrentValue $GuestUserName
+    $script:GuestWorkingDirectory = Read-OptionalText -Prompt '来宾工作目录 / Guest working directory' -CurrentValue $GuestWorkingDirectory
+    $script:RuntimeRoot = Read-OptionalText -Prompt '宿主机运行目录（仓库/包外） / Host runtime root' -CurrentValue $RuntimeRoot
+    $script:GuestPayloadRoot = Read-OptionalText -Prompt 'Guest payload 目录（默认包内 payload） / Guest payload root' -CurrentValue $GuestPayloadRoot
+    $script:LocalConfigPath = Read-OptionalText -Prompt '本机 sandbox 配置路径 / Local sandbox config path' -CurrentValue (Get-LocalSandboxConfigPath)
+    $driverDefault = Resolve-DriverHostPath
+    if ($null -eq $driverDefault) {
+        $driverDefault = ''
+    }
+    $script:DriverHostPath = Read-OptionalText -Prompt 'R0 driver .sys 路径（可留空，真实 R0 后续再配） / R0 driver .sys path (blank OK)' -CurrentValue $driverDefault
+
+    $updateWebEnvironment = Read-YesNoChoice -Prompt "是否设置 '$script:WebConfigPathEnvironmentName' 让 WebUI 自动找到配置？ / Set WebUI config environment variable?" -DefaultYes $true
+    Set-ScriptSwitchValue -Name 'SkipWebConfigEnvironment' -Value (-not $updateWebEnvironment)
+
+    Write-Host ''
+    Write-Host '来宾密码 secret / Guest password secret:'
+    Write-Host '  1) 输入 VM 中现有 guest 密码（推荐） / Enter existing guest password (recommended)'
+    Write-Host '  2) 生成并保存一个新 secret（之后需同步 VM 密码） / Generate new local secret'
+    Write-Host '  3) 暂不设置密码 secret / Skip password secret for now'
+    $passwordChoice = Read-MenuChoice -Prompt '请选择 [1-3] / Choose [1-3]' -Allowed @('1', '2', '3')
+    $setPassword = $passwordChoice -ne '3'
+    Set-ScriptSwitchValue -Name 'PromptPassword' -Value ($passwordChoice -eq '1')
+    Set-ScriptSwitchValue -Name 'GeneratePassword' -Value ($passwordChoice -eq '2')
+
+    if ($setPassword) {
+        $credential = Read-GuestPassword -UseGenerated ([bool]$GeneratePassword) -UsePrompt ([bool]$PromptPassword) -ExistingSecretName $SecretName
+        Set-GuestPasswordSecret -Name $SecretName -Password $credential.Password -PasswordSource $credential.Source
+    }
+
+    Set-HyperVConfigState -Action 'guided-setup-completed'
+
+    if (Read-YesNoChoice -Prompt '是否现在配置可选 VirusTotal hash-only API key？ / Configure optional VirusTotal hash-only API key now?' -DefaultYes $false) {
+        Invoke-VirusTotalKeyConfiguration
+    }
+
+    Write-Host ''
+    Write-InstallInfo '推荐安装向导完成。下面是当前环境检查；如有缺口，请按 RecommendedActions 处理。 / Guided setup completed.'
+    Invoke-KSwordSandboxEnvironmentCheck
+
+    if (Read-YesNoChoice -Prompt '是否现在启动 WebUI？ / Start WebUI now?' -DefaultYes $false) {
+        Invoke-KSwordSandboxWebUi
+    }
 }
 
 function Invoke-GuestVmPasswordReset {
@@ -2232,10 +2318,10 @@ function Show-KSwordSandboxInstallStatus {
         [void]$recommendedActions.Add([string]$profileAction)
     }
     if (-not (Test-Path -LiteralPath $RuntimeRoot -PathType Container)) {
-        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword，在 '$RuntimeRoot' 下创建运行目录。 / Run install to create runtime folders.")
+        [void]$recommendedActions.Add("下一步：普通用户运行 .\install.ps1 并按推荐安装向导，在 '$RuntimeRoot' 下创建运行目录；自动化可使用 CreateOrPreparePath 参数。 / Run guided install to create runtime folders.")
     }
     if (-not (Test-Path -LiteralPath $localConfig -PathType Leaf)) {
-        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword 创建本机配置，或运行 .\install.ps1 -Mode Change -UpdateHyperVConfig 记录 VM/checkpoint 路径。")
+        [void]$recommendedActions.Add("下一步：普通用户运行 .\install.ps1 推荐安装向导创建本机配置并记录 VM/checkpoint；自动化可使用 CreateOrPreparePath 或 -Mode Change -UpdateHyperVConfig。")
     }
     if (-not (Test-Path -LiteralPath $GuestPayloadRoot -PathType Container) -or
         -not (Test-Path -LiteralPath $guestAgentPayload -PathType Leaf) -or
@@ -2244,7 +2330,7 @@ function Show-KSwordSandboxInstallStatus {
         [void]$recommendedActions.Add("下一步：运行 .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$GuestPayloadRoot' -GuestWorkingDirectory '$GuestWorkingDirectory' -SelfContained 准备 Guest Agent/R0Collector payload。")
     }
     if ([string]::IsNullOrWhiteSpace($processValue) -and [string]::IsNullOrWhiteSpace($userValue) -and [string]::IsNullOrWhiteSpace($machineValue)) {
-        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword 保存 guest password secret；如果只做本进程检查，可运行 .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword。")
+        [void]$recommendedActions.Add("下一步：普通用户运行 .\install.ps1 并在推荐安装向导中输入 guest password secret；如果只做本进程检查，可运行 .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword。")
     }
     if ([string]::IsNullOrWhiteSpace($driverHost)) {
         [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <path-to-test-signed-KSword.Sandbox.Driver.sys>；仅验证链路时可在本机配置中设置 driver.useMockCollector=true。")
@@ -2437,7 +2523,7 @@ function Show-KSwordSandboxEnvironmentCheck {
         CreateOrPrepareWhatIfCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -WhatIf'
         CreateOrPrepareConfirmCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -Confirm'
         ConfigureHyperVCommand = '.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <VM> -CheckpointName <Checkpoint>'
-        ConfigureGuestPasswordCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
+        ConfigureGuestPasswordCommand = '.\install.ps1'
         ResetGuestPasswordCommand = '.\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force'
         ConfigureVTKeyCommand = '.\install.ps1 -Mode ConfigureVTKey -PromptVTKey'
         CheckEnvironmentCommand = '.\install.ps1 -Mode CheckEnvironment'
@@ -2473,7 +2559,7 @@ function Show-KSwordSandboxEnvironmentCheck {
         ReadinessPackageExecutesInstallerModes = $false
         LiveVmExecutionRequiresExplicitLive = $true
         SecretValuePrinted = $false
-        ChineseGuidance = '中文提示：先用本命令查看缺口；安装入口先三选一：使用已配置环境、还原已有干净快照、或创建/准备新路径；配置 VM/快照/guest 密码/driver path/test signing 后，再用 run.ps1 的 Analyze 命令。'
+        ChineseGuidance = '中文提示：先用本命令查看缺口；普通用户直接运行 .\install.ps1 推荐安装向导配置 VM/快照/guest 密码/driver path；高级用户仍可显式选择 UseConfiguredEnvironment、RestoreCleanCheckpoint 或 CreateOrPreparePath。'
         InstallStatus = $installStatus
     }
 }
@@ -2762,7 +2848,7 @@ function Invoke-InteractiveInstaller {
     while ($true) {
         Write-Host ''
         Write-Host 'KSwordSandbox local installer / 本地安装向导'
-        Write-Host '  0) Install entrypoint selector / 安装入口选择'
+        Write-Host '  0) Recommended setup wizard / 推荐安装向导'
         Write-Host '  1) Install / prepare local settings / 安装/准备本机设置'
         Write-Host '  2) Change settings / 更改设置'
         Write-Host '  3) Uninstall local settings / 卸载本机设置'
@@ -2772,10 +2858,11 @@ function Invoke-InteractiveInstaller {
         Write-Host '  7) Check environment / 检查环境'
         Write-Host '  8) Start WebUI / 启动 WebUI'
         Write-Host '  9) Status / 状态'
-        Write-Host '  10) Exit / 退出'
-        $choice = Read-MenuChoice -Prompt '请选择 [0-10] / Choose [0-10]' -Allowed @('0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
+        Write-Host '  10) Advanced install entrypoint selector / 高级安装入口选择'
+        Write-Host '  11) Exit / 退出'
+        $choice = Read-MenuChoice -Prompt '请选择 [0-11] / Choose [0-11]' -Allowed @('0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11')
         switch ($choice) {
-            '0' { Invoke-InstallEntrypointMenu }
+            '0' { Invoke-GuidedFirstRunSetup }
             '1' {
                 Write-Host ''
                 Write-Host '安装时密码处理 / Install password handling:'
@@ -2792,7 +2879,8 @@ function Invoke-InteractiveInstaller {
             '7' { Invoke-KSwordSandboxEnvironmentCheck }
             '8' { Invoke-KSwordSandboxWebUi }
             '9' { Show-KSwordSandboxInstallStatus | Format-List }
-            '10' { return }
+            '10' { Invoke-InstallEntrypointMenu }
+            '11' { return }
         }
     }
 }
@@ -2800,6 +2888,11 @@ function Invoke-InteractiveInstaller {
 $script:InitialInstallState = Read-InstallState
 Initialize-EffectiveParameters -State $script:InitialInstallState -BoundParameters $PSBoundParameters
 Initialize-PackagedPayloadDefault -State $script:InitialInstallState -BoundParameters $PSBoundParameters
+
+if ($script:InitialRootBoundParameters.Count -eq 0 -and $Mode -eq 'Interactive') {
+    Invoke-GuidedFirstRunSetup
+    return
+}
 
 if ($PSBoundParameters.ContainsKey('InstallEntrypoint')) {
     Invoke-InstallEntrypoint -SelectedEntrypoint $InstallEntrypoint

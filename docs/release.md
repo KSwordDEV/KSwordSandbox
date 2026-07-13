@@ -222,7 +222,7 @@ Do not collapse these into one ambiguous “install” step:
      -VmName '<existing VM>' `
      -CheckpointName '<clean checkpoint>' `
      -GuestWorkingDirectory 'C:\KSwordSandbox'
-   .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
+   .\install.ps1
    .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -SelfContained
    .\scripts\Test-HyperVReadiness.ps1
    ```
@@ -246,16 +246,26 @@ Do not collapse these into one ambiguous “install” step:
    administrator PowerShell for live, BIOS/UEFI Intel VT-x / AMD-V plus SLAT,
    Windows guest, `SandboxUser` or equivalent account, Guest Service Interface,
    PowerShell Direct, and a clean checkpoint/snapshot. Then configure local
-   state outside git. First-computer setup may be previewed with
+   state outside git. Ordinary operators should run the guided setup with no
+   parameters; it asks for runtime root, existing VM/checkpoint, guest user,
+   guest password, optional driver path, optional VT key, and whether to start
+   WebUI. First-computer setup may still be previewed for automation/review with
    `CreateOrPreparePath -PlanOnly` and `CreateOrPreparePath -WhatIf`; these must
    only report planned repository-external directory/config/secret/payload writes
    and must not create/import a VM, create a checkpoint, start/stop/restore
    Hyper-V, sign drivers, or touch samples.
 
    ```powershell
+   .\install.ps1
+   .\install.ps1 -Mode CheckEnvironment
+   .\run.ps1 -Mode CheckEnvironment
+   ```
+
+   Automation-only equivalent:
+
+   ```powershell
    .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly
    .\install.ps1 -InstallEntrypoint CreateOrPreparePath -WhatIf
-   .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
    .\install.ps1 -Mode Change -UpdateHyperVConfig `
      -VmName 'KSwordSandbox-Win10-Golden' `
      -CheckpointName 'Clean' `
@@ -356,13 +366,11 @@ VT-x / AMD-V or Hyper-V module is a Live host prerequisite failure.
 2. If readiness reports missing local state, configure it outside git:
 
    ```powershell
-   .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
-   .\install.ps1 -Mode Change -UpdateHyperVConfig `
-     -VmName 'KSwordSandbox-Win10-Golden' `
-     -CheckpointName 'Clean' `
-     -GuestWorkingDirectory 'C:\KSwordSandbox'
-   .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -SelfContained
+   .\install.ps1
    ```
+
+   The guided setup asks for the common settings interactively. Use explicit
+   `CreateOrPreparePath` / `UpdateHyperVConfig` parameters only for automation.
 
 3. Optional enrichment only: configure VirusTotal hash-only lookups if desired.
    This never uploads sample bytes.

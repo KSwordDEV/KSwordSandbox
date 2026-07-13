@@ -133,13 +133,13 @@ The menu supports install, change, uninstall, and status. Change includes a
 password reset option. For a quick generated local value:
 
 ```powershell
-.\install.ps1 -InstallEntrypoint CreateOrPreparePath -GeneratePassword
+.\install.ps1
 ```
 
 For an existing VM account password:
 
 ```powershell
-.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
+.\install.ps1
 ```
 
 ```powershell

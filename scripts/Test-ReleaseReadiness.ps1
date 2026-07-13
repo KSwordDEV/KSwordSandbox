@@ -2344,9 +2344,9 @@ function Get-CanonicalOperatorModeMatrix {
             modeId = 'fresh-create-new-computer'
             entrypoint = 'CreateOrPreparePath'
             titleZh = '全新创建/新电脑准备'
-            defaultCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
+            defaultCommand = '.\install.ps1'
             packageReadinessMutation = 'none; installer may write local config/secret only when operator runs it directly'
-            nextActionsZh = @('下一步：首机先确认 Hyper-V/BIOS/SLAT/管理员 shell，手工创建/导入 VM 和 clean checkpoint，再写本机 config/secret/payload。')
+            nextActionsZh = @('下一步：首机先确认 Hyper-V/BIOS/SLAT/管理员 shell，手工创建/导入 VM 和 clean checkpoint，再运行 .\install.ps1 推荐安装向导写本机 config/secret/payload。')
         }
     )
 }
@@ -2514,12 +2514,12 @@ function Get-InstallModeContractSnapshot {
             [ordered]@{
                 id = 'fresh-create-flow'
                 titleZh = '首次/新机器本机配置流程'
-                primaryCommands = @('.\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword', '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>', '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained')
+                primaryCommands = @('.\scripts\install.ps1', '.\install.ps1', '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained')
                 evidenceFields = @('InstallStatus.RuntimeRootExists', 'InstallStatus.LocalConfigExists', 'InstallStatus.SecretValuePrinted=false', 'InstallStatus.GuestPayloadReadyForLiveCopy')
                 createsLocalRuntimeFolders = $true
                 createsVm = $false
                 createsCheckpoint = $false
-                nextActionsZh = @('下一步：新机器先运行 CreateOrPreparePath -PromptPassword 创建本机目录/配置/secret；payload 和 RuntimeRoot 放仓库外。')
+                nextActionsZh = @('下一步：新机器先运行 .\scripts\install.ps1 或 .\install.ps1 推荐安装向导，按提示创建本机目录、配置和 guest secret；payload 和 RuntimeRoot 放仓库外。')
             },
             [ordered]@{
                 id = 'first-computer-prerequisites'

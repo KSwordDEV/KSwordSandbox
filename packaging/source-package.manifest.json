@@ -63,10 +63,10 @@
             "modeId": "fresh-create-new-computer",
             "entrypoint": "CreateOrPreparePath",
             "titleZh": "全新创建/新电脑准备",
-            "defaultCommand": ".\\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword",
+            "defaultCommand": ".\\install.ps1",
             "packageReadinessMutation": "none; installer may write local config/secret only when operator runs it directly",
             "nextActionsZh": [
-              "下一步：首机先确认 Hyper-V/BIOS/SLAT/管理员 shell，手工创建/导入 VM 和 clean checkpoint，再写本机 config/secret/payload。"
+              "下一步：首机先确认 Hyper-V/BIOS/SLAT/管理员 shell，手工创建/导入 VM 和 clean checkpoint，再运行 .\\install.ps1 推荐安装向导写本机 config/secret/payload。"
             ]
           }
         ]
@@ -116,7 +116,8 @@
           "id": "fresh-create-flow",
           "titleZh": "首次/新机器本机配置流程",
           "operatorCommands": [
-            ".\\scripts\\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword",
+            ".\\scripts\\install.ps1",
+            ".\\install.ps1",
             ".\\scripts\\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>",
             ".\\scripts\\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained"
           ],

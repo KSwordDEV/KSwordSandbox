@@ -226,7 +226,7 @@ function Read-ScriptInstallState {
     }
     catch {
         if (-not $Json) {
-            Write-ScriptInstallInfo "中文提示：无法读取安装状态 '$statePath'，将忽略并继续。下一步：如配置异常，请重新运行 .\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword。英文详情：$($_.Exception.Message)"
+            Write-ScriptInstallInfo "中文提示：无法读取安装状态 '$statePath'，将忽略并继续。下一步：如配置异常，普通用户请重新运行 .\scripts\install.ps1 并按推荐安装向导修复；自动化可使用 CreateOrPreparePath 参数。英文详情：$($_.Exception.Message)"
         }
         return $null
     }
@@ -665,6 +665,11 @@ function Invoke-ScriptInstallerMenu {
 
 $scriptInstallState = Read-ScriptInstallState
 Initialize-ScriptEffectiveParameters -State $scriptInstallState -BoundParameters $PSBoundParameters
+
+if ($script:InitialWrapperBoundParameters.Count -eq 0 -and $Mode -eq 'Interactive') {
+    Invoke-RootInstaller -Parameters @{}
+    return
+}
 
 if ($PreparePayload) {
     if (-not $Json) {

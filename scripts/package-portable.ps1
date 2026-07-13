@@ -960,9 +960,9 @@ function Get-CanonicalOperatorModeMatrix {
             modeId = 'fresh-create-new-computer'
             entrypoint = 'CreateOrPreparePath'
             titleZh = '全新创建/新电脑准备'
-            defaultCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
+            defaultCommand = '.\install.ps1'
             packageReadinessMutation = 'none; installer may write local config/secret only when operator runs it directly'
-            nextActionsZh = @('下一步：首机先确认 Hyper-V/BIOS/SLAT/管理员 shell，手工创建/导入 VM 和 clean checkpoint，再写本机 config/secret/payload。')
+            nextActionsZh = @('下一步：首机先确认 Hyper-V/BIOS/SLAT/管理员 shell，手工创建/导入 VM 和 clean checkpoint，再运行 .\install.ps1 推荐安装向导写本机 config/secret/payload。')
         }
     )
 }
@@ -1196,8 +1196,8 @@ function Get-InstallModeContractSnapshot {
                 titleZh = '首次/新机器本机配置流程'
                 operatorScenario = 'Fresh local setup creates runtime folders, local sandbox config, and optional secrets; it does not create a VM, checkpoint, runtime publish payload, or fresh live evidence.'
                 primaryCommands = @(
-                    '.\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword',
-                    '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>',
+                    '.\scripts\install.ps1',
+                    '.\install.ps1',
                     '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained'
                 )
                 evidenceFields = @('InstallStatus.RuntimeRootExists', 'InstallStatus.LocalConfigExists', 'InstallStatus.SecretValuePrinted=false', 'InstallStatus.GuestPayloadReadyForLiveCopy')
@@ -1206,7 +1206,7 @@ function Get-InstallModeContractSnapshot {
                 createsCheckpoint = $false
                 buildsPayload = $false
                 nextActionsZh = @(
-                    '下一步：新机器先运行 .\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword 创建本机目录、配置和 guest secret。',
+                    '下一步：新机器先运行 .\scripts\install.ps1 或 .\install.ps1 推荐安装向导，按提示创建本机目录、配置和 guest secret。',
                     '下一步：payload 输出必须放仓库外；准备完成后再用 CheckEnvironment 确认 freshness。'
                 )
             },
@@ -1601,7 +1601,7 @@ function Update-PackageOperatorDiagnostics {
             installCheckEnvironment = '.\scripts\install.ps1 -Mode CheckEnvironment'
             runCheckEnvironment = '.\scripts\run.ps1 -Mode CheckEnvironment'
             recordExistingEnvironment = '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>'
-            freshLocalInstall = '.\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
+            freshLocalInstall = '.\scripts\install.ps1'
             resetGuestPasswordExplicitVmMutation = '.\scripts\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force'
             prepareGuestPayload = '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained'
             configureVirusTotalKey = '.\scripts\install.ps1 -Mode ConfigureVTKey -PromptVTKey'

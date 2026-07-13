@@ -54,7 +54,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
 仓库文件。可重复部署请优先使用：
 
 ```powershell
-.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
+.\install.ps1
 .\install.ps1 -Mode Change -ResetPassword -PromptPassword
 ```
 
@@ -139,7 +139,7 @@ $env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
 部署/重复使用推荐：
 
 ```powershell
-.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
+.\install.ps1
 ```
 
 readiness/live 脚本读取 Process、User、Machine scope。新 elevated PowerShell 通常继承 User/Machine scope；

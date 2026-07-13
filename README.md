@@ -102,7 +102,7 @@ tests/KSword.Sandbox.SmokeTests 控制台 smoke/contract tests
   -VmName '<existing VM>' `
   -CheckpointName '<clean checkpoint>' `
   -GuestWorkingDirectory 'C:\KSwordSandbox'
-.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
+.\install.ps1
 .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -SelfContained
 .\scripts\Test-HyperVReadiness.ps1
 ```
@@ -116,22 +116,17 @@ Restore-VMSnapshot -VMName '<existing VM>' -Name '<clean checkpoint>' -Confirm:$
 ### 路径 C：新 VM/新环境准备路径
 
 先在 Hyper-V 中准备 Windows guest、guest 账号、Guest Service Interface 和 clean checkpoint，
-再写本机配置：
+再直接运行推荐安装向导；常用设置会在脚本里询问，不需要记推荐参数：
 
 ```powershell
-.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
-.\install.ps1 -Mode Change -UpdateHyperVConfig `
-  -VmName 'KSwordSandbox-Win10-Golden' `
-  -CheckpointName 'Clean' `
-  -GuestWorkingDirectory 'C:\KSwordSandbox'
-.\scripts\Prepare-GuestPayload.ps1 `
-  -RepoRoot . `
-  -PayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
-  -GuestWorkingDirectory 'C:\KSwordSandbox' `
-  -SelfContained
+.\install.ps1
 .\install.ps1 -Mode CheckEnvironment
 .\run.ps1 -Mode CheckEnvironment
 ```
+
+源码仓库运行且缺少 guest payload 时，再按 `CheckEnvironment` 的 “下一步” 提示运行
+`.\scripts\Prepare-GuestPayload.ps1 ... -SelfContained`。runtime 便携包默认使用包内
+`payload\guest-tools`。
 
 `run.ps1` 默认只启动 WebUI 或生成 PlanOnly runbook，不会启动或还原 VM。Live Hyper-V
 执行必须显式使用 CLI `-Live` 或 WebUI/API 中的 live 选项。
@@ -144,21 +139,16 @@ Restore-VMSnapshot -VMName '<existing VM>' -Name '<clean checkpoint>' -Confirm:$
 ```
 
 `install.ps1` 提供交互菜单：安装、修改、卸载、重置 Guest 密码、配置 Hyper-V、配置
-VirusTotal（VT）key、检查环境、启动 WebUI 和查看状态。无交互本地实验室安装可使用：
+VirusTotal（VT）key、检查环境、启动 WebUI 和查看状态。无参数运行会优先进入推荐安装向导，
+逐项询问 runtime root、已有 VM/checkpoint、guest 用户、guest 密码、可选 driver path、
+可选 VT key 和是否启动 WebUI。
 
 配置 Hyper-V 时，交互菜单会只读列出本机 VM 和所选 VM 的 checkpoint/snapshot，支持用
 编号选择并保存本机配置；枚举失败时仍可手动输入。该步骤只调用 `Get-VM` /
 `Get-VMSnapshot`，不会启动、停止、还原或修改 VM。
 
-```powershell
-.\install.ps1 -InstallEntrypoint CreateOrPreparePath -GeneratePassword
-```
-
-已有 golden VM 时推荐使用人工输入的 guest 密码：
-
-```powershell
-.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
-```
+自动化/CI 或无人值守实验室才需要显式参数，例如 `.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly`
+做只读预览，或用 `.\install.ps1 -Mode Change -UpdateHyperVConfig ...` 写入脚本化配置。
 
 安装器会把 `KSWORDBOX_GUEST_PASSWORD` 保存在当前用户环境中（仓库外），可写入
 DPAPI 保护的本地备份，并在 `D:\Temp\KSwordSandbox\config\sandbox.local.json` 写本机

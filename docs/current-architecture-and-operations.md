@@ -110,7 +110,7 @@ flowchart TD
 已有 golden VM 的一次性本地安装：
 
 ```powershell
-.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
+.\install.ps1
 ```
 
 日常 WebUI 启动：
@@ -138,7 +138,7 @@ flowchart TD
 如果提权进程（elevated process）看不到 `KSWORDBOX_GUEST_PASSWORD`，通过以下方式设置：
 
 ```powershell
-.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
+.\install.ps1
 .\install.ps1 -Mode Change -ResetPassword -PromptPassword
 .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword
 ```
@@ -197,7 +197,7 @@ Live API/WebUI E2E 会修改配置的 VM；必须先通过就绪检查（readine
 1. 准备或导入 Windows 10 x64 golden VM。
 2. 创建 clean checkpoint，通常命名为 `Clean`。
 3. 启用 Guest Service Interface，并用配置的本地 guest account 验证 PowerShell Direct。
-4. 运行 `./install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword`，把 local config 和 guest credential state 存在仓库外。
+4. 运行 `./install.ps1`，把 local config 和 guest credential state 存在仓库外。
 5. 需要时更新 VM/checkpoint/path：
 
    ```powershell
