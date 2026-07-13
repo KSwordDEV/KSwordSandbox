@@ -40,6 +40,7 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
             Timeout = TimeSpan.FromSeconds(10)
         };
 
+        await ProbeLocalHostReadinessAsync(httpClient, baseUri, cancellationToken);
         await ProbeLiveEndpointAsync(httpClient, baseUri, jobId, cancellationToken);
         await ProbeLiveRawMonitorPageAsync(httpClient, baseUri, jobId, cancellationToken);
         await ProbeSettingsPageAsync(httpClient, baseUri, cancellationToken);
@@ -75,6 +76,7 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         var script = ReadRepositoryText(context, "scripts", "Test-LiveTelemetryFramework.ps1");
 
         RequireContains(program, "\"/jobs/{jobId:guid}/live-events\"", "Web source should expose the live raw monitor page route.");
+        RequireContains(program, "\"/api/host/readiness\"", "Web source should expose the local host readiness endpoint.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/events/live\"", "Web source should expose the live-event polling endpoint.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/report/html\"", "Web source should expose the served HTML report endpoint.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/artifacts\"", "Web source should expose the Web artifact index endpoint.");
@@ -119,6 +121,8 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "guestImportPath", "Dashboard should render a manual guest import path input.");
         RequireContains(dashboard, "guest-events/import", "Dashboard should call the manual guest import endpoint.");
         RequireContains(dashboard, "JSON.stringify(explicitPath ? { eventsPath: explicitPath } : {})", "Dashboard should send optional manual import path JSON.");
+        RequireContains(dashboard, "/api/host/readiness", "Dashboard should request real local host readiness before showing VM defaults.");
+        RequireContains(dashboard, "NOT_FOUND", "Dashboard should render an explicit missing state instead of a fake configured value.");
 
         RequireContains(liveEventsPage, "Live raw event monitor", "Live raw monitor page should have a stable title.");
         RequireContains(liveEventsPage, "/events/stream", "Live raw monitor page should attempt the SSE stream endpoint.");
@@ -185,6 +189,29 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         jobId = parsedJobId;
         message = string.Empty;
         return true;
+    }
+
+    /// <summary>
+    /// Probes the read-only local host readiness endpoint. Inputs are the live
+    /// Web host URI and cancellation token; processing validates the stable
+    /// non-secret response shape; the method returns no value on success.
+    /// </summary>
+    private static async Task ProbeLocalHostReadinessAsync(HttpClient httpClient, Uri baseUri, CancellationToken cancellationToken)
+    {
+        using var response = await httpClient.GetAsync(BuildUri(baseUri, "/api/host/readiness?refresh=true"), cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        SmokeAssert.True(response.IsSuccessStatusCode, $"Local host readiness returned HTTP {(int)response.StatusCode}: {Truncate(body)}");
+
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        SmokeAssert.True(root.TryGetProperty("readOnly", out var readOnly) && readOnly.GetBoolean(), "Local host readiness should declare readOnly=true.");
+        SmokeAssert.True(root.TryGetProperty("detectedAtUtc", out _), "Local host readiness should include detectedAtUtc.");
+        SmokeAssert.True(root.TryGetProperty("hyperV", out var hyperV) && hyperV.ValueKind == JsonValueKind.Object, "Local host readiness should include Hyper-V facts.");
+        SmokeAssert.True(hyperV.TryGetProperty("querySucceeded", out _), "Hyper-V readiness should report whether inventory succeeded.");
+        SmokeAssert.True(hyperV.TryGetProperty("vmExists", out _), "Hyper-V readiness should distinguish a detected VM from a configured name.");
+        SmokeAssert.True(root.TryGetProperty("paths", out var paths) && paths.ValueKind == JsonValueKind.Object, "Local host readiness should include path existence facts.");
+        SmokeAssert.True(paths.TryGetProperty("guestPayloadRoot", out _), "Local host readiness should include the guest payload root fact.");
+        SmokeAssert.True(!body.Contains("passwordValue", StringComparison.OrdinalIgnoreCase), "Local host readiness must not expose password values.");
     }
 
     /// <summary>

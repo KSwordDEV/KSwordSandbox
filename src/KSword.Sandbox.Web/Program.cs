@@ -28,6 +28,7 @@ builder.Services.AddSingleton<RunbookProgressStore>();
 builder.Services.AddSingleton<RunbookBackgroundExecutionStore>();
 builder.Services.AddSingleton<VirusTotalSettingsStore>();
 builder.Services.AddSingleton<VirusTotalLookupCache>();
+builder.Services.AddSingleton<LocalHostReadinessProbe>();
 builder.Services.AddSingleton<IRunbookExecutor, PowerShellRunbookExecutor>();
 builder.Services.AddHttpClient<VirusTotalLookupService>(client =>
 {
@@ -67,6 +68,11 @@ app.MapGet("/health", () => Results.Ok(new
     time = DateTimeOffset.UtcNow
 }));
 app.MapGet("/api/config", (SandboxConfig currentConfig) => Results.Ok(currentConfig));
+app.MapGet("/api/host/readiness", async Task<IResult> (bool? refresh, LocalHostReadinessProbe readinessProbe, CancellationToken cancellationToken) =>
+{
+    var readiness = await readinessProbe.ProbeAsync(refresh == true, cancellationToken);
+    return Results.Ok(readiness);
+});
 app.MapGet("/api/settings/virustotal", (VirusTotalSettingsStore settingsStore) => Results.Ok(settingsStore.GetState()));
 app.MapPost("/api/settings/virustotal", (VirusTotalSettingsUpdateRequest request, VirusTotalSettingsStore settingsStore, VirusTotalLookupCache virusTotalCache) =>
 {

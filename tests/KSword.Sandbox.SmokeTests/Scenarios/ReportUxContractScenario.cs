@@ -132,8 +132,22 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
             "Report renderer should expose a modern sandbox report layout.");
         RequireContainsNormalized(rendererSource, "max-height:75vh", "Major report sections should be bounded to around 75vh.");
         RequireContainsNormalized(rendererSource, "overflow:auto", "Major report sections should scroll overflowing evidence.");
+        RequireContainsNormalized(rendererSource, "contain:layout paint", "Major report sections should contain descendant painting within their own panel.");
+        RequireContainsNormalized(rendererSource, "isolation:isolate", "Major report sections should isolate sticky descendant stacking from adjacent chapters.");
         RequireContains(rendererSource, "section.card>h2", "Major report sections should expose sticky section headers.");
         RequireContains(rendererSource, "position:sticky", "Major report section headers should remain sticky while scrolling.");
+        RequireContains(rendererSource, ".event-table-wrap th,.raw-events-panel th,.raw-event-page th", "Sticky table headers should be scoped to bounded table containers.");
+        RequireContainsNormalized(rendererSource, "position:static", "Unbounded tables should keep non-sticky headers so they cannot leak across chapters.");
+        RequireContains(rendererSource, "report-layout", "Report renderer should expose a documentation-style sidebar/content shell.");
+        RequireContains(rendererSource, "report-sidebar", "Report renderer should place navigation in a dedicated left sidebar.");
+        RequireContainsNormalized(rendererSource, "grid-template-columns:minmax(248px,280px) minmax(0,1fr)", "Desktop report layout should reserve a stable left navigation column.");
+        RequireContainsNormalized(rendererSource, "max-height:calc(100vh - 32px)", "Desktop report sidebar should stay viewport-bounded.");
+        RequireContains(rendererSource, "IntersectionObserver", "Report navigation should track the currently visible chapter.");
+        RequireContains(rendererSource, "aria-current", "Active report navigation should expose accessible current-location state.");
+        RequireContains(rendererSource, "@media(max-width:1000px){.report-layout{display:block}", "Narrow report viewports should return the sidebar to normal document flow.");
+        RequireContains(rendererSource, "sidebar-toggle", "Mobile report navigation should expose a compact sections toggle.");
+        RequireContains(rendererSource, "aria-expanded", "Mobile navigation toggle should expose accessible expansion state.");
+        RequireContains(rendererSource, "report-js", "Mobile navigation should collapse only when JavaScript enhancement is active.");
         RequireContains(rendererSource, "AppendNoScriptFallback", "Report renderer should include a no-JavaScript fallback note.");
         RequireContains(rendererSource, "Print/no-JS fallback", "Report renderer should label print and no-JS fallback behavior.");
         RequireContains(rendererSource, "@media print", "Report renderer should include print-specific fallback CSS.");
@@ -323,8 +337,19 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "#43A0FF", "Rendered HTML should include the required bright-blue accent color.");
         RequireContainsNormalized(englishHtml, "max-height:75vh", "Rendered major sections should be bounded to around 75vh.");
         RequireContainsNormalized(englishHtml, "overflow:auto", "Rendered major sections should scroll overflowing evidence.");
+        RequireContainsNormalized(englishHtml, "contain:layout paint", "Rendered major sections should clip descendant painting to their own panel.");
+        RequireContainsNormalized(englishHtml, "isolation:isolate", "Rendered major sections should isolate their stacking contexts.");
         RequireContains(englishHtml, "section.card>h2", "Rendered CSS should include sticky section header selectors.");
         RequireContains(englishHtml, "position:sticky", "Rendered major section headers should be sticky.");
+        RequireContains(englishHtml, ".event-table-wrap th,.raw-events-panel th,.raw-event-page th", "Rendered sticky table headers should be limited to bounded table containers.");
+        RequireContains(englishHtml, "<div class=\"report-layout\">", "Rendered report should expose the documentation layout shell.");
+        RequireContains(englishHtml, "<aside class=\"report-sidebar\" aria-label=\"Report navigation\">", "Rendered report should expose the left navigation region.");
+        RequireContains(englishHtml, "<main class=\"report-content\">", "Rendered report should keep chapters in a dedicated reading column.");
+        RequireContainsNormalized(englishHtml, "grid-template-columns:minmax(248px,280px) minmax(0,1fr)", "Rendered desktop report should reserve a stable sidebar column.");
+        RequireContains(englishHtml, "IntersectionObserver", "Rendered report should update navigation from visible chapters.");
+        RequireContains(englishHtml, "@media(max-width:1000px){.report-layout{display:block}", "Rendered narrow viewports should stack navigation above content.");
+        RequireContains(englishHtml, "class=\"sidebar-toggle\"", "Rendered mobile navigation should include a sections toggle.");
+        RequireContains(englishHtml, "aria-controls=\"sidebar-navigation\"", "Rendered mobile toggle should target the navigation container.");
         RequireContains(englishHtml, "href=\"report.zh.html\"", "Rendered HTML should link to report.zh.html.");
         RequireContains(englishHtml, "href=\"report.en.html\"", "Rendered HTML should link to report.en.html.");
         RequireContains(englishHtml, $"Show inline raw events (75/{totalRawEvents}; {hiddenRawEvents} hidden; 3 native pages)", "Rendered raw events should be collapsed and capped.");
@@ -464,6 +489,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "网络与 PCAP 证据", "Chinese HTML should localize network/PCAP story evidence.");
         RequireContains(chineseHtml, "原始证据高度限制", "Chinese HTML should localize raw evidence height guidance.");
         RequireContains(chineseHtml, "默认 report.html 使用简体中文", "Chinese HTML should localize the bilingual default-report hint.");
+        RequireContains(chineseHtml, "报告导航", "Chinese HTML should localize the left report navigation label.");
+        RequireContains(chineseHtml, ">章节<", "Chinese HTML should localize the mobile sections toggle.");
+        RequireContains(chineseHtml, "overflow:auto", "Chinese localization must preserve valid overflow CSS declarations.");
+        RequireContains(chineseHtml, "overflow:hidden", "Chinese localization must preserve valid overflow clipping declarations.");
+        RequireNotContains(chineseHtml, "overf低：", "Chinese localization must not translate the low: token inside overflow CSS properties.");
         RequireContains(chineseHtml, "打开", "Chinese HTML should localize artifact open buttons.");
         RequireContains(chineseHtml, "下载", "Chinese HTML should localize artifact download buttons.");
         RequireContains(chineseHtml, "命令行默认隐藏", "Chinese HTML should localize folded command-line details.");
@@ -494,7 +524,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
     private static IReadOnlyList<string> RequiredEnglishSectionFragments() =>
     [
         "<header id=\"cover\">",
-        "<nav id=\"toc\" class=\"card toc\"><h2>Table of contents</h2>",
+        "<nav id=\"toc\" class=\"sidebar-section toc\" aria-labelledby=\"toc-title\"><h2 id=\"toc-title\">Table of contents</h2>",
         "<section id=\"risk\" class=\"card\"><h2>Risk summary</h2>",
         "<section id=\"behavior\" class=\"card\"><h2>Behavior detections</h2>",
         "<section id=\"mitre\" class=\"card\"><h2>Multi-dimensional / MITRE detections</h2>",

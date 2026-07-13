@@ -29,6 +29,7 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         var virusTotalLookup = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalLookupService.cs");
         var virusTotalModels = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalModels.cs");
         var virusTotalSettings = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalSettingsStore.cs");
+        var localHostReadiness = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "LocalHostReadinessProbe.cs");
         var copyScript = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardClientScripts.cs");
         var executionFlow = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "RunbookExecutionFlowPage.cs");
         var artifactContract = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Contracts", "JobArtifactPathsContract.cs");
@@ -55,6 +56,15 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(program, "\"/api/settings/virustotal\"", "Program.cs should expose VirusTotal settings endpoints.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/virustotal\"", "Program.cs should expose per-job VirusTotal hash lookup.");
         RequireContains(program, "AddHttpClient<VirusTotalLookupService>", "Program.cs should register the VirusTotal lookup HTTP client.");
+        RequireContains(program, "\"/api/host/readiness\"", "Program.cs should expose the read-only local host detection endpoint.");
+        RequireContains(program, "LocalHostReadinessProbe", "Program.cs should register and call the typed local host readiness probe.");
+
+        RequireContains(localHostReadiness, "Get-VM", "Local host detection should enumerate Hyper-V VMs read-only.");
+        RequireContains(localHostReadiness, "Get-VMSnapshot", "Local host detection should enumerate VM checkpoints read-only.");
+        RequireContains(localHostReadiness, "HyperVProbeTimeout", "Local host detection should bound the PowerShell inventory query.");
+        RequireContains(localHostReadiness, "PasswordSecretAvailable", "Local host detection should report secret presence without returning the secret value.");
+        RequireNotContains(localHostReadiness, "Start-VM", "Local host detection must not start a VM.");
+        RequireNotContains(localHostReadiness, "Restore-VMSnapshot", "Local host detection must not restore a checkpoint.");
 
         RequireContains(dashboard, "<html lang=\"zh-CN\">", "Dashboard should default to Chinese.");
         RequireContains(dashboard, "onclick=\"toggleLanguage()\"", "Dashboard should expose the top-right Chinese/English switch.");
@@ -90,6 +100,14 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         {
             RequireContains(dashboard, vmField, $"Dashboard should render and submit VM configuration field '{vmField}'.");
         }
+
+        RequireContains(dashboard, "refreshLocalHostReadiness", "Dashboard should load and manually refresh local host detection.");
+        RequireContains(dashboard, "fetch(`/api/host/readiness${suffix}`)", "Dashboard should populate VM readiness from the host detection endpoint.");
+        RequireContains(dashboard, "不会用 config 或浏览器预设冒充真实状态", "Dashboard should state that presets do not impersonate detected host state.");
+        RequireContains(dashboard, "loadVmPresetExplicitly", "Browser overrides should require an explicit operator action.");
+        RequireNotContains(dashboard, "applyOperatorVmPreset();", "Dashboard should not automatically apply browser VM presets during config load.");
+        RequireContains(dashboard, ".preset-actions { align-items:stretch; display:grid", "VM preset actions should use a stable aligned grid.");
+        RequireContains(dashboard, "min-height:42px", "VM preset buttons and links should share a consistent minimum height.");
 
         RequireAnyContains(
             dashboard,
