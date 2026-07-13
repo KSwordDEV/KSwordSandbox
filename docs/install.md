@@ -71,8 +71,9 @@ release UX 约定 / release UX contract：
   `D:\Temp\KSwordSandbox`。
 - VM 兼容性：Live 路径需要 Windows guest、`SandboxUser` 或等价本地账号、
   PowerShell Direct、Guest Service Interface（来宾服务接口）和一个 clean
-  checkpoint/snapshot。源码仓库运行 WebUI 需要本机 .NET SDK；便携 runtime 包应使用包内
-  `app\host-web` 发布产物或随包要求的 .NET runtime。
+  checkpoint/snapshot。源码仓库运行 WebUI 需要本机 .NET SDK；便携 runtime 包默认使用包内
+  self-contained `app\host-web` 发布产物，不要求目标机预装 .NET runtime（除非发布时显式选择
+  `-FrameworkDependentManaged`）。
 
 ### 路径 A：使用已经配置好的环境 / Use an already configured environment
 
@@ -137,6 +138,10 @@ release UX 约定 / release UX contract：
 然后在 Hyper-V 中创建/导入 Windows guest，建立
 `SandboxUser` 或等价本地账号，启用 Guest Service Interface，确认 PowerShell Direct
 可用，并创建 clean checkpoint/snapshot（常用名 `Clean`）。然后写本机配置：
+
+如果使用 runtime 便携包且包内存在 `payload\guest-tools\payload-manifest.json`，
+`install.ps1` 在没有旧 install-state 且未显式传 `-GuestPayloadRoot` 时会默认记录包内
+payload；源码仓库运行仍默认使用仓库外 `D:\Temp\KSwordSandbox\payload\guest-tools`。
 
 ```powershell
 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
@@ -373,7 +378,9 @@ D:\Temp\KSwordSandbox\config\sandbox.local.json
   或其他仓库外目录，避免 `jobs/`、上传样本、报告、截图、PCAP、dump 被误提交。
 - Guest payload 准备度 / guest-payload readiness：`GuestPayloadStatus` 会检查 `agent/KSword.Sandbox.Agent.exe`、
   `r0collector/KSword.Sandbox.R0Collector.exe` 和 `payload-manifest.json` 是否存在，
-  以及 manifest 是否包含 contract version、`sourceFingerprint` 和 host file hash。
+  以及 manifest 是否包含 contract version、`sourceFingerprint` 和 host file hash；
+  runtime 便携包按 manifest 的 `relativePath` 校验包内实际 `GuestAgent`/`R0Collector`
+  SHA-256，不依赖构建机上的绝对 `payloadRoot`。
 - VirusTotal 静默状态 / VT quiet state：`VirusTotalStatus` 只显示 key 是否存在于
   Process/User/Machine scope，永不打印 key。未配置、未收录或调用失败时，WebUI 应静默跳过
   hash-only enrichment，不写 job/behavior log，不阻断分析。

@@ -54,8 +54,10 @@ excluding generated binaries, VM state, reports, samples, secrets, and signing m
 ```
 
 该脚本把 `host-web`、`guest-tools`、`tools/job-tool`、`tools/postprocess` 发布到仓库外
-`RuntimePublishRoot`，并写入 `runtime-publish-manifest.json`。它不运行 smoke、不启动或还原
-Hyper-V、不签名、不调用 `CSignTool.exe`，也不从仓库 `bin/obj/x64` 复制 runtime payload。
+`RuntimePublishRoot`，managed host tools 默认是 self-contained 且不带 `.pdb`，并写入
+`runtime-publish-manifest.json`。它不运行 smoke、不启动或还原 Hyper-V、不签名、不调用
+`CSignTool.exe`，也不从仓库 `bin/obj/x64` 复制 runtime payload。只有明确接受目标机已安装
+.NET runtime 依赖时，才用 `-FrameworkDependentManaged` 生成瘦包。
 
 在 review handoff 或 source package dry run 前，从仓库根目录运行组合轻量门禁：
 

@@ -349,7 +349,9 @@ config/secrets 和私有签名材料。脚本只做本地 staging/zip，不 push
 release manager 明确执行的独立步骤。详见 `docs/release.md`。
 `Publish-RuntimePayloads.ps1` 只发布到仓库外 `RuntimePublishRoot`，不启动/还原 VM、
 不签名 driver、不调用 `CSignTool.exe`；guest-tools 仍委托现有
-`Prepare-GuestPayload.ps1` 生成 Agent/R0Collector payload。
+`Prepare-GuestPayload.ps1` 生成 Agent/R0Collector payload。Managed host tools
+默认按 self-contained 发布，便携包目标机不需要预装 .NET runtime；只有明确接受瘦包依赖时才用
+`-FrameworkDependentManaged`。
 
 Open-source MVP 发布前使用 `docs/release.md` 的发布就绪清单（readiness checklist）：确认 Hyper-V live
 前置条件、BIOS/UEFI Intel VT-x / AMD-V 设置、可选 VirusTotal 仅哈希（hash-only）配置、artifact（证据/产物）

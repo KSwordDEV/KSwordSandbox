@@ -120,7 +120,8 @@ generated metadata 字段：`gitMetadata`、`executionBoundaries`、`requiredEvi
    ```
 
    It publishes `host-web`, `tools/job-tool`, and `tools/postprocess` with
-   `dotnet publish`, delegates `guest-tools` to `Prepare-GuestPayload.ps1`, and
+   `dotnet publish`, defaults managed host tools to self-contained win-x64 output
+   without `.pdb` symbols, delegates `guest-tools` to `Prepare-GuestPayload.ps1`, and
    writes `runtime-publish-manifest.json` inside the external publish root.
    Runtime portable packages consume these payloads; they do not require
    operators to rerun this publish helper from inside the package.

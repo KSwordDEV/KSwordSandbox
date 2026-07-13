@@ -34,7 +34,14 @@ param(
 
     [string]$RuntimeIdentifier = 'win-x64',
 
+    # Managed host tools are self-contained by default so a runtime package can
+    # start on a clean operator host without a preinstalled .NET runtime. This
+    # switch is retained for explicitness/backward compatibility.
     [switch]$SelfContainedManaged,
+
+    # Opt into smaller host-web/job-tool/postprocess payloads when the target
+    # operator host is known to have the matching .NET runtime installed.
+    [switch]$FrameworkDependentManaged,
 
     [switch]$FrameworkDependentGuest,
 
@@ -111,6 +118,30 @@ function Clear-DirectorySafe {
     Get-ChildItem -LiteralPath $resolved -Force | Remove-Item -Recurse -Force
 }
 
+function Clear-PayloadDirectory {
+    param(
+        [Parameter(Mandatory)][string]$Directory,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    Assert-OutsideRepository -RepoRoot $RepoRoot -Path $Directory -Name $Name
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
+        New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+        return
+    }
+
+    $resolved = (Resolve-Path -LiteralPath $Directory).Path
+    if ([string]::IsNullOrWhiteSpace($resolved) -or $resolved.Length -lt 10) {
+        throw "拒绝清理异常短 runtime payload 路径：$Directory"
+    }
+
+    if ($PSCmdlet.ShouldProcess($resolved, "Clean runtime payload directory $Name")) {
+        Write-PublishStep "Cleaning runtime payload directory $Name at $resolved"
+        Get-ChildItem -LiteralPath $resolved -Force | Remove-Item -Recurse -Force
+    }
+}
+
 function Invoke-DotNetPublish {
     param(
         [Parameter(Mandatory)][string]$ProjectPath,
@@ -130,8 +161,10 @@ function Invoke-DotNetPublish {
         '-c', $Configuration,
         '-o', $OutputDirectory,
         '-r', $RuntimeIdentifier,
-        '--self-contained', ([bool]$SelfContainedManaged).ToString().ToLowerInvariant(),
-        '/p:UseAppHost=true'
+        '--self-contained', $script:ManagedSelfContained.ToString().ToLowerInvariant(),
+        '/p:UseAppHost=true',
+        '/p:DebugType=None',
+        '/p:DebugSymbols=false'
     )
     if ($NoRestore) {
         $arguments += '--no-restore'
@@ -176,6 +209,10 @@ try {
     $repoRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
     $publishRoot = Get-FullPathNoRequire -Path $RuntimePublishRoot
     $buildRootFull = Get-FullPathNoRequire -Path $BuildRoot
+    if ($SelfContainedManaged -and $FrameworkDependentManaged) {
+        throw '错误：-SelfContainedManaged 和 -FrameworkDependentManaged 不能同时指定。默认已发布 self-contained managed payload；只有明确接受目标机 .NET runtime 依赖时才使用 -FrameworkDependentManaged。'
+    }
+    $script:ManagedSelfContained = -not [bool]$FrameworkDependentManaged
 
     Assert-OutsideRepository -RepoRoot $repoRoot -Path $publishRoot -Name 'RuntimePublishRoot'
     Assert-OutsideRepository -RepoRoot $repoRoot -Path $buildRootFull -Name 'BuildRoot'
@@ -192,6 +229,9 @@ try {
     $guestBuild = Join-Path $buildRootFull 'guest-tools'
 
     New-Item -ItemType Directory -Path $hostWeb, $guestTools, $jobTool, $postProcess, $guestBuild -Force | Out-Null
+    Clear-PayloadDirectory -Directory $hostWeb -RepoRoot $repoRoot -Name 'host-web'
+    Clear-PayloadDirectory -Directory $jobTool -RepoRoot $repoRoot -Name 'tools/job-tool'
+    Clear-PayloadDirectory -Directory $postProcess -RepoRoot $repoRoot -Name 'tools/postprocess'
 
     Invoke-DotNetPublish `
         -ProjectPath (Join-Path $repoRoot 'src\KSword.Sandbox.Web\KSword.Sandbox.Web.csproj') `
@@ -264,7 +304,8 @@ try {
         runtimePublishRoot      = $publishRoot
         configuration           = $Configuration
         runtimeIdentifier       = $RuntimeIdentifier
-        selfContainedManaged    = [bool]$SelfContainedManaged
+        selfContainedManaged    = $script:ManagedSelfContained
+        frameworkDependentManaged = -not $script:ManagedSelfContained
         frameworkDependentGuest = [bool]$FrameworkDependentGuest
         skipGuestPayload        = [bool]$SkipGuestPayload
         noVmMutation            = $true

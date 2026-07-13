@@ -202,6 +202,67 @@ function Get-StateString {
     return $DefaultValue
 }
 
+function Get-JsonPropertyValue {
+    param(
+        [AllowNull()]$InputObject,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $InputObject) {
+        return $null
+    }
+
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+
+    return $property.Value
+}
+
+function Get-FileSha256Hex {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        }
+        finally {
+            $sha.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function Get-RelativePayloadPath {
+    param(
+        [Parameter(Mandatory)][string]$PayloadRoot,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $fullRoot = [System.IO.Path]::GetFullPath($PayloadRoot).TrimEnd('\', '/') + '\'
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if ($fullPath.StartsWith($fullRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $fullPath.Substring($fullRoot.Length).Replace('\', '/')
+    }
+
+    return $fullPath.Replace('\', '/')
+}
+
+function Get-PackagedGuestPayloadRoot {
+    $candidate = Join-Path $PSScriptRoot 'payload\guest-tools'
+    $manifest = Join-Path $candidate 'payload-manifest.json'
+    if (Test-Path -LiteralPath $manifest -PathType Leaf) {
+        return [System.IO.Path]::GetFullPath($candidate)
+    }
+
+    return ''
+}
+
 function Initialize-EffectiveParameters {
     param(
         [AllowNull()]$State,
@@ -231,6 +292,29 @@ function Initialize-EffectiveParameters {
         if (-not [string]::IsNullOrWhiteSpace($value)) {
             Set-Variable -Name $entry.Key -Value $value -Scope Script -WhatIf:$false
         }
+    }
+}
+
+function Initialize-PackagedPayloadDefault {
+    param(
+        [AllowNull()]$State,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$BoundParameters
+    )
+
+    if ($BoundParameters.ContainsKey('GuestPayloadRoot')) {
+        return
+    }
+
+    if ($null -ne $State) {
+        $property = $State.PSObject.Properties['guestPayloadRoot']
+        if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+            return
+        }
+    }
+
+    $packagedPayloadRoot = Get-PackagedGuestPayloadRoot
+    if (-not [string]::IsNullOrWhiteSpace($packagedPayloadRoot)) {
+        $script:GuestPayloadRoot = $packagedPayloadRoot
     }
 }
 
@@ -1865,6 +1949,126 @@ function Get-InstallRuntimeRootStatus {
     }
 }
 
+function Test-InstallPayloadManifestFileHash {
+    param(
+        [Parameter(Mandatory)]$Manifest,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$PayloadRoot,
+        [Parameter(Mandatory)][string]$ExpectedPath,
+        [AllowEmptyCollection()]
+        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Actions
+    )
+
+    $entryPresent = $false
+    $sha256Present = $false
+    $relativePathMatches = $false
+    $hashMatches = $false
+    $relativePath = ''
+    $expectedSha256 = ''
+    $actualSha256 = ''
+
+    if (-not (Test-Path -LiteralPath $ExpectedPath -PathType Leaf)) {
+        [void]$Actions.Add("下一步：$Name 文件缺失：$ExpectedPath；重新准备 guest payload。")
+        return [pscustomobject][ordered]@{
+            Name                = $Name
+            EntryPresent        = $entryPresent
+            Sha256Present       = $sha256Present
+            RelativePath        = $relativePath
+            RelativePathMatches = $relativePathMatches
+            ExpectedPath        = $ExpectedPath
+            ExpectedSha256      = $expectedSha256
+            ActualSha256        = $actualSha256
+            HashMatches         = $hashMatches
+        }
+    }
+
+    $requiredHostFiles = @(Get-JsonPropertyValue -InputObject $Manifest -Name 'requiredHostFiles')
+    if ($requiredHostFiles.Count -eq 0) {
+        [void]$Actions.Add('下一步：payload-manifest.json 缺少 requiredHostFiles 元数据；重新准备 guest payload。')
+        return [pscustomobject][ordered]@{
+            Name                = $Name
+            EntryPresent        = $entryPresent
+            Sha256Present       = $sha256Present
+            RelativePath        = $relativePath
+            RelativePathMatches = $relativePathMatches
+            ExpectedPath        = $ExpectedPath
+            ExpectedSha256      = $expectedSha256
+            ActualSha256        = $actualSha256
+            HashMatches         = $hashMatches
+        }
+    }
+
+    $entry = @($requiredHostFiles | Where-Object {
+        $entryName = Get-JsonPropertyValue -InputObject $_ -Name 'name'
+        [System.StringComparer]::OrdinalIgnoreCase.Equals([string]$entryName, $Name)
+    } | Select-Object -First 1)
+    if ($entry.Count -eq 0) {
+        [void]$Actions.Add("下一步：payload-manifest.json 缺少 $Name hash 元数据；重新准备 guest payload。")
+        return [pscustomobject][ordered]@{
+            Name                = $Name
+            EntryPresent        = $entryPresent
+            Sha256Present       = $sha256Present
+            RelativePath        = $relativePath
+            RelativePathMatches = $relativePathMatches
+            ExpectedPath        = $ExpectedPath
+            ExpectedSha256      = $expectedSha256
+            ActualSha256        = $actualSha256
+            HashMatches         = $hashMatches
+        }
+    }
+
+    $entryPresent = $true
+    $relativePath = [string](Get-JsonPropertyValue -InputObject $entry[0] -Name 'relativePath')
+    if (-not [string]::IsNullOrWhiteSpace($relativePath)) {
+        $expectedRelativePath = Get-RelativePayloadPath -PayloadRoot $PayloadRoot -Path $ExpectedPath
+        $relativePathMatches = [System.StringComparer]::OrdinalIgnoreCase.Equals($relativePath.Replace('\', '/'), $expectedRelativePath)
+        if (-not $relativePathMatches) {
+            [void]$Actions.Add("下一步：payload-manifest.json 中 $Name relativePath='$relativePath'，预期 '$expectedRelativePath'；重新发布 runtime payload。")
+        }
+    }
+    else {
+        # Older manifests may contain only absolute build-machine paths. Do not
+        # treat those paths as portable package authority; the explicit
+        # ExpectedPath under the current GuestPayloadRoot plus sha256 is enough.
+        $relativePathMatches = $true
+    }
+
+    $expectedSha256 = [string](Get-JsonPropertyValue -InputObject $entry[0] -Name 'sha256')
+    $sha256Present = -not [string]::IsNullOrWhiteSpace($expectedSha256)
+    if (-not $sha256Present) {
+        [void]$Actions.Add("下一步：payload-manifest.json 缺少 $Name sha256；重新准备 guest payload。")
+        return [pscustomobject][ordered]@{
+            Name                = $Name
+            EntryPresent        = $entryPresent
+            Sha256Present       = $sha256Present
+            RelativePath        = $relativePath
+            RelativePathMatches = $relativePathMatches
+            ExpectedPath        = $ExpectedPath
+            ExpectedSha256      = $expectedSha256
+            ActualSha256        = $actualSha256
+            HashMatches         = $hashMatches
+        }
+    }
+
+    $actualSha256 = Get-FileSha256Hex -Path $ExpectedPath
+    $hashMatches = [System.StringComparer]::OrdinalIgnoreCase.Equals($expectedSha256, $actualSha256)
+    if (-not $hashMatches) {
+        [void]$Actions.Add("下一步：$Name hash 与 payload-manifest.json 不一致；已暂存 payload 可能被部分覆盖，请重新准备 guest payload。")
+    }
+
+    return [pscustomobject][ordered]@{
+        Name                = $Name
+        EntryPresent        = $entryPresent
+        Sha256Present       = $sha256Present
+        RelativePath        = $relativePath
+        RelativePathMatches = $relativePathMatches
+        ExpectedPath        = $ExpectedPath
+        ExpectedSha256      = $expectedSha256
+        ActualSha256        = $actualSha256
+        HashMatches         = $hashMatches
+    }
+}
+
 function Get-InstallGuestPayloadStatus {
     param(
         [Parameter(Mandatory)][string]$AgentPath,
@@ -1878,6 +2082,8 @@ function Get-InstallGuestPayloadStatus {
     $sourceFingerprintPresent = $false
     $requiredHostFileNames = @()
     $requiredHostFilesHaveSha256 = $false
+    $requiredPayloadFileHashesMatch = $false
+    $requiredPayloadFileChecks = @()
     $manifestError = $null
     $manifestReadable = $false
 
@@ -1899,17 +2105,22 @@ function Get-InstallGuestPayloadStatus {
         try {
             $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
             $manifestReadable = $true
-            $manifestContractVersion = $manifest.payloadContractVersion
-            $manifestConfiguration = $manifest.configuration
-            $sourceFingerprintPresent = -not [string]::IsNullOrWhiteSpace([string]$manifest.sourceFingerprint)
-            $requiredHostFiles = @($manifest.requiredHostFiles)
-            $requiredHostFileNames = @($requiredHostFiles | ForEach-Object { [string]$_.name } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-            $requiredHostFilesHaveSha256 = ($requiredHostFiles.Count -gt 0) -and (@($requiredHostFiles | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.sha256) }).Count -eq 0)
+            $manifestContractVersion = Get-JsonPropertyValue -InputObject $manifest -Name 'payloadContractVersion'
+            $manifestConfiguration = Get-JsonPropertyValue -InputObject $manifest -Name 'configuration'
+            $sourceFingerprintPresent = -not [string]::IsNullOrWhiteSpace([string](Get-JsonPropertyValue -InputObject $manifest -Name 'sourceFingerprint'))
+            $requiredHostFiles = @(Get-JsonPropertyValue -InputObject $manifest -Name 'requiredHostFiles')
+            $requiredHostFileNames = @($requiredHostFiles | ForEach-Object { [string](Get-JsonPropertyValue -InputObject $_ -Name 'name') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            $requiredPayloadFileChecks = @(
+                Test-InstallPayloadManifestFileHash -Manifest $manifest -Name 'GuestAgent' -PayloadRoot $GuestPayloadRoot -ExpectedPath $AgentPath -Actions $actions
+                Test-InstallPayloadManifestFileHash -Manifest $manifest -Name 'R0Collector' -PayloadRoot $GuestPayloadRoot -ExpectedPath $CollectorPath -Actions $actions
+            )
+            $requiredHostFilesHaveSha256 = ($requiredPayloadFileChecks.Count -gt 0) -and (@($requiredPayloadFileChecks | Where-Object { -not [bool]$_.Sha256Present }).Count -eq 0)
+            $requiredPayloadFileHashesMatch = ($requiredPayloadFileChecks.Count -gt 0) -and (@($requiredPayloadFileChecks | Where-Object { -not [bool]$_.HashMatches }).Count -eq 0)
             if ([int]$manifestContractVersion -lt 2) {
                 [void]$actions.Add('下一步：payload-manifest.json contract version 过旧；重新准备 guest payload 以获得 freshness/hash 诊断。')
             }
-            if (-not $sourceFingerprintPresent -or -not $requiredHostFilesHaveSha256) {
-                [void]$actions.Add('下一步：payload manifest 缺少 sourceFingerprint 或 requiredHostFiles sha256；重新准备 payload，避免 WebUI Live 使用过期二进制。')
+            if (-not $sourceFingerprintPresent) {
+                [void]$actions.Add('下一步：payload manifest 缺少 sourceFingerprint；重新准备 payload，避免 WebUI Live 使用过期二进制。')
             }
         }
         catch {
@@ -1918,7 +2129,7 @@ function Get-InstallGuestPayloadStatus {
         }
     }
 
-    $ready = $agentExists -and $collectorExists -and $manifestExists -and $manifestReadable -and $sourceFingerprintPresent -and $requiredHostFilesHaveSha256
+    $ready = $agentExists -and $collectorExists -and $manifestExists -and $manifestReadable -and $sourceFingerprintPresent -and $requiredHostFilesHaveSha256 -and $requiredPayloadFileHashesMatch
     [pscustomobject][ordered]@{
         PayloadRoot = [System.IO.Path]::GetFullPath($GuestPayloadRoot)
         ReadyForLiveCopy = $ready
@@ -1934,6 +2145,8 @@ function Get-InstallGuestPayloadStatus {
         SourceFingerprintPresent = $sourceFingerprintPresent
         RequiredHostFileNames = @($requiredHostFileNames)
         RequiredHostFilesHaveSha256 = $requiredHostFilesHaveSha256
+        RequiredPayloadFileHashesMatch = $requiredPayloadFileHashesMatch
+        RequiredPayloadFileChecks = @($requiredPayloadFileChecks)
         ManifestError = $manifestError
         RecommendedActions = @($actions.ToArray())
         ChineseGuidance = '中文提示：payload 状态只检查宿主机文件和 manifest，不复制文件、不启动 VM。'
@@ -2586,6 +2799,7 @@ function Invoke-InteractiveInstaller {
 
 $script:InitialInstallState = Read-InstallState
 Initialize-EffectiveParameters -State $script:InitialInstallState -BoundParameters $PSBoundParameters
+Initialize-PackagedPayloadDefault -State $script:InitialInstallState -BoundParameters $PSBoundParameters
 
 if ($PSBoundParameters.ContainsKey('InstallEntrypoint')) {
     Invoke-InstallEntrypoint -SelectedEntrypoint $InstallEntrypoint

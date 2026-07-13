@@ -143,6 +143,27 @@ function Get-StateString {
     return $DefaultValue
 }
 
+function Get-PackagedGuestPayloadRoot {
+    $candidate = Join-Path $script:RepositoryRoot 'payload\guest-tools'
+    $manifest = Join-Path $candidate 'payload-manifest.json'
+    if (Test-Path -LiteralPath $manifest -PathType Leaf) {
+        return [System.IO.Path]::GetFullPath($candidate)
+    }
+
+    return ''
+}
+
+function Get-DefaultGuestPayloadRoot {
+    param([Parameter(Mandatory)][string]$EffectiveRuntimeRoot)
+
+    $packagedPayloadRoot = Get-PackagedGuestPayloadRoot
+    if (-not [string]::IsNullOrWhiteSpace($packagedPayloadRoot)) {
+        return $packagedPayloadRoot
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $EffectiveRuntimeRoot 'payload\guest-tools'))
+}
+
 function Resolve-FullPathIfPresent {
     param([Parameter(Mandatory)][string]$Path)
 
@@ -1123,7 +1144,7 @@ function Get-GuestPayloadRoot {
     }
 
     if ([string]::IsNullOrWhiteSpace($fromConfig)) {
-        $fromConfig = Get-StateString -State $State -Name 'guestPayloadRoot' -DefaultValue (Join-Path $EffectiveRuntimeRoot 'payload\guest-tools')
+        $fromConfig = Get-StateString -State $State -Name 'guestPayloadRoot' -DefaultValue (Get-DefaultGuestPayloadRoot -EffectiveRuntimeRoot $EffectiveRuntimeRoot)
     }
 
     return [System.IO.Path]::GetFullPath($fromConfig)
@@ -1492,7 +1513,7 @@ function Show-RunStatus {
     $configExists = Test-Path -LiteralPath $EffectiveConfigPath -PathType Leaf
     $hyperVPrerequisites = Get-RunHyperVPrerequisiteStatus
     $runtimeRootUnderRepository = Test-RunPathUnderRoot -Path $EffectiveRuntimeRoot -Root $script:RepositoryRoot
-    $payloadRoot = [System.IO.Path]::GetFullPath((Get-StateString -State $State -Name 'guestPayloadRoot' -DefaultValue (Join-Path $EffectiveRuntimeRoot 'payload\guest-tools')))
+    $payloadRoot = [System.IO.Path]::GetFullPath((Get-StateString -State $State -Name 'guestPayloadRoot' -DefaultValue (Get-DefaultGuestPayloadRoot -EffectiveRuntimeRoot $EffectiveRuntimeRoot)))
     $agentName = 'KSword.Sandbox.Agent.exe'
     $collectorName = 'KSword.Sandbox.R0Collector.exe'
     $statusConfig = $null
