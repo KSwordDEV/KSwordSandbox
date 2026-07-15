@@ -67,6 +67,12 @@ Live 行为：
 - 将第一个非零 exit code、timeout、launch failure 或 cancellation 记录为 primary failure。
 - primary failure 后跳过非 cleanup 工作，并尝试 trailing cleanup steps（如 VM stop/remove）。Cleanup failure
   会附加到 aggregate message 和 step results，但 primary failed step 仍保持为 failure index。
+- 在第一个 provider 命令前独占 runtime root 下的 `locks\live-execution.lock`，并持有到失败清理完成。
+  同一 runtime root 内第二个 Hyper-V、VMware、QEMU live job 或 installer VM maintenance 操作会在
+  VM mutation 前明确失败；dry-run/WhatIf 不获取 lease。
+  锁文件可以持续存在，是否占用只由操作系统的独占文件句柄决定，进程退出会自动释放句柄。
+- 旧的持久化 runbook 若没有 `LiveExecutionLeasePath`，仍可查看状态和重建报告，但 live preflight 会要求
+  重新创建 plan；executor 不会回退到另一个锁目录后继续执行。
 
 ## 提权要求（elevation requirement）
 

@@ -207,10 +207,11 @@ Do not collapse these into one ambiguous “install” step:
    ```
 
    `UseConfiguredEnvironment` is read-only: it reports existing install state,
-   local config, secret presence, VM/checkpoint profile, and payload status; it
-   must not write local state or mutate Hyper-V. It may perform read-only
-   Hyper-V queries (`Get-VM`, checkpoint/profile checks) when the module is
-   available. `Analyze` without `-Live` is PlanOnly and must not mutate Hyper-V.
+   local config, secret presence, VM/baseline profile, and payload status; it
+   must not write local state or mutate the selected provider VM. It may perform
+   read-only Hyper-V, VMware, or QEMU inventory queries when the selected provider
+   management tools are available. `Analyze` without `-Live` is PlanOnly and must
+   not mutate any provider VM.
 
 2. **Restore an existing checkpoint/snapshot / 恢复已有 checkpoint/snapshot。**
    The VM and clean snapshot already exist; the operator records the exact VM
@@ -227,7 +228,8 @@ Do not collapse these into one ambiguous “install” step:
    .\scripts\Test-HyperVReadiness.ps1
    ```
 
-   Actual restore is VM mutation and is never part of package/readiness. Preview
+   An actual Hyper-V checkpoint, VMware snapshot, or QEMU internal-snapshot restore is VM mutation
+   and is never part of package/readiness. Preview
    first; `-WhatIf` with `-AllowVmMutation` must not call `Restore-VMSnapshot`,
    start, stop, or otherwise mutate the VM. Remove `-WhatIf` and use `-Confirm`
    or `-Force` only in an isolated lab session:
@@ -240,6 +242,13 @@ Do not collapse these into one ambiguous “install” step:
 
    `-Force` is only the unattended confirmation path; it must still require
    `-AllowVmMutation` and still pass through `ShouldProcess`.
+
+   QEMU per-job overlay is the non-mutating exception: the base disk remains unchanged and each Live
+   run creates a fresh overlay. The restore entrypoint reports
+   `BaselineRestoreSatisfiedWithoutMutation=true` without invoking provider stop/restore commands.
+   The package and readiness `operatorModeMatrix` preserve both branches: `nonMutatingEquivalentCommand`
+   is the direct JSON result for `QemuOverlay`, while `mutatingCommand` remains restricted to `HyperV`,
+   `VMware`, and `QemuInternalSnapshot` and retains the explicit mutation approval switches.
 
 3. **Create/prep a new VM/environment / 创建或准备新环境。** First-computer
    setup must confirm Windows host compatibility, Hyper-V feature/module,
@@ -320,7 +329,8 @@ VT-x / AMD-V or Hyper-V module is a Live host prerequisite failure.
   verification commands above are the default install UX check.
 - **Known R0 signing limitation:** real R0 remains an optional lab path, not a
   default release promise. The driver can be compiled, but loading it requires a
-  test-signed `.sys`, guest Windows test-signing, and an isolated Hyper-V VM.
+  test-signed `.sys`, guest Windows test-signing, and an isolated Windows VM on
+  the selected Hyper-V, VMware, or QEMU provider.
   Keep `.sys`, `.pdb`, certificates, and private signing material outside git
   and outside source packages.
 - **Hyper-V live 前置条件已文档化 / Hyper-V live prerequisites documented:** operator
@@ -337,7 +347,9 @@ VT-x / AMD-V or Hyper-V module is a Live host prerequisite failure.
   start、restore、stop 或 mutate VM。Live execution 必须显式使用 `-Live` 或 WebUI/API
   live action。
 - **Operator diagnostics 明确 / Operator diagnostics are explicit:** `install.ps1` 和
-  `run.ps1` 会暴露只读的 `HyperVPrerequisites`、`VmProfile`、
+  `run.ps1` 会暴露三个 provider 共用的只读 `ProviderHostPrerequisites`、兼容字段
+  `HyperVPrerequisites`、`VmProfile`，以及 run 侧统一 executor 的
+  `ProviderExecutionToolReady` / `ProviderExecutionToolKind` / `ProviderExecutionToolPath`、
   `GuestPayloadStatus` / `GuestPayloadFreshnessReasons`、
   `VirusTotalMissingKeyBehavior` 和 `RuntimeRootUnderRepository`。Reviewers 应在
   live execution 前检查 `RecommendedActions`，不要等 sample run 过程中才发现缺失前置条件。
@@ -346,9 +358,34 @@ VT-x / AMD-V or Hyper-V module is a Live host prerequisite failure.
   manager 在准备好的 lab host 上重新运行，否则 release note 不得声称有 fresh Notepad run。
   生成的 job/report 保留在 runtime root 下，不进入仓库。
 - **No-fresh-live guardrail:** package/readiness 输出只能证明本地低副作用门禁；
-  它不会启动 Hyper-V live，也不会替 release notes 自动生成 fresh live evidence。
+  它不会启动任何 provider 的 live VM，也不会替 release notes 自动生成 fresh live evidence。
   如果当前候选没有新的 `job id`、运行时间、runtime root 和报告路径，就必须写
   “本候选未刷新 fresh live evidence”。
+- **三 provider 等价声明需要三份独立证据：** HyperV、VMware、Qemu 必须分别在
+  Windows lab 执行相同的 Web API live run，并各自保留宿主硬件加速/Windows feature、
+  provider 查询与 guest transport readiness、provider、有效 VM/干净基线、VMX 或
+  QEMU disk（适用时）、background 终态、`jobId`、`gitCommit`、`gitDirty`、`runtimeRoot`、
+  `generatedAtUtc`/`generatedAtLocal`、`runbookExecutionPath` 和最终中英文报告路径。
+  三份记录必须使用同一个完整 `gitCommit`，均满足 `gitDirty=false`、`gitChangedFileCount=0`、
+  `executionTransport=Background`、`backgroundState=completed`，使用相同 `sampleSha256`、
+  `sampleSizeBytes`、`requestedDurationSeconds`，并使用彼此不同的 `jobId`。
+  发布元数据给出的三条命令均包含 `-RequireCleanSource`；checkout 通过 `.git` 取证，正式 runtime
+  package 通过 `package-manifest.generated.json` 取证。
+  每份记录都要覆盖宿主与 provider 就绪、干净基线恢复、启动与 guest readiness、样本执行、Agent/R0、产物与
+  报告、交互控制台、失败/取消清理、资源身份持久化和 live lease。三份摘要完成后必须运行
+  `scripts/Test-ProviderParityEvidence.ps1`，由它回读执行记录和最终报告并生成
+  `schema=ksword.provider-parity-evidence.v1`、`validated=true` 的
+  `provider-parity-validation.json`；结果还必须保留三份 summary 和全部引用证据文件的 SHA-256。
+  单个 provider job 或三份未经聚合校验的摘要
+  不能提供完整证明；任一记录缺失或校验失败时不得声明三 provider 使用体验等价。
+
+```powershell
+.\scripts\Test-ProviderParityEvidence.ps1 `
+  -HyperVSummaryPath D:\Temp\KSwordSandbox\parity\hyperv-summary.json `
+  -VMwareSummaryPath D:\Temp\KSwordSandbox\parity\vmware-summary.json `
+  -QemuSummaryPath D:\Temp\KSwordSandbox\parity\qemu-summary.json `
+  -OutputPath D:\Temp\KSwordSandbox\parity\provider-parity-validation.json
+```
 
 ## 真实 Notepad 5s 报告 runbook / Real Notepad 5s report runbook
 
@@ -418,12 +455,14 @@ VT-x / AMD-V or Hyper-V module is a Live host prerequisite failure.
    ```text
    runbook-execution.json
    guest\<job-id>\events.json
-   postprocess-result.json
    report.json
    report.html
    report.zh.html
    report.en.html
    ```
+
+   `postprocess-result.json` 只在操作者独立调用 PostProcess 工具时生成，不是
+   `run.ps1 -Mode Analyze -Live` 的必需产物。
 
    If the job id is known later, reports can be regenerated without touching the
    VM:
@@ -480,10 +519,15 @@ package safety guidance. Newer staging output should expose:
 - `gitMetadata`: latest branch, full commit, short commit, dirty boolean,
   `dirtyStatus`, changed-file count, and `git status --porcelain` preview.
 - `executionBoundaries`: explicit booleans showing smoke tests were not run,
-  Hyper-V live was not run, signing was not performed, `CSignTool.exe` was not
+  provider live was not run, signing was not performed, `CSignTool.exe` was not
   invoked, and no push/publish happened.
-- `requiredEvidenceFields`: provenance, source handoff, runtime handoff, and
-  fresh-live claim fields reviewers must record before release handoff.
+- `requiredEvidenceFields`: provenance, source handoff, runtime handoff,
+  fresh-live claim fields, and `providerParityLiveClaim`。后者要求 HyperV、VMware、Qemu
+  三份独立记录、同一 commit/sample/duration、不重复 job id、同一组 acceptance rows，以及
+  `validated=true` 的版本化聚合结果。
+- `gapAudit.providerParityLiveEvidence`: 固定记录 `generated=false`、
+  `claimAllowedWithoutAllProviders=false`、三条 Windows lab 命令、聚合校验命令和不可替代的逐 provider
+  证据字段；package/readiness 输出本身不能满足这道门禁。
 - `runtimePublishSummary`: present/missing counts, missing required vs optional
   runtime payloads, `incompleteCount`, expected leaf-file gaps, forbidden-file
   previews, and whether this is a layout dry-run or complete runtime handoff.
@@ -596,12 +640,16 @@ the package root markers (`config/sandbox.example.json` plus
 - `installModeContract.operatorModeMatrix`: 必须与 `install.ps1` 的三入口实现保持一致：
   `UseConfiguredEnvironment` 只诊断、`RestoreCleanCheckpoint` 的真实恢复必须显式
   `-AllowVmMutation` 且经过 `ShouldProcess` / `-Confirm` 或 `-Force`、`CreateOrPreparePath`
-  只做本机目录/config/secret/payload 准备。`Test-ReleaseReadiness.ps1` 只用 AST/JSON
+  只做本机目录/config/secret/payload 准备；QEMU per-job overlay 的 restore-equivalent 结果
+  必须明确为无需变更。`Test-ReleaseReadiness.ps1` 只用 AST/JSON
   静态检查该 contract，不运行安装入口或 VM mutation。
 - `ReadinessVerdict`（install/run `Status` 和 `CheckEnvironment`）：机器可读
   `ReadinessOverallStatus`、`WebUiReady`、`PlanOnlyReady`、`LiveReady`、
   `BlockingReasons`、`WarningReasons` 和 `RecommendedActions`；不得用
-  formatted text scraping 代替这些字段。
+  formatted text scraping 代替这些字段。`ProviderHostPrerequisites` 还必须记录
+  `RequiredWindowsFeature`、`RequiredWindowsFeatureState` 与 `RequiredWindowsFeatureReady`：
+  Hyper-V 对应 `Microsoft-Hyper-V-All`，QEMU/WHPX 对应 `HypervisorPlatform`；VMware 的
+  feature name 为空且 state 为 `NotRequired`。未确认或未启用时不得声称 Live-ready。
 - `VmMutationPolicy` / `ModeCoercionMetadata`（run status）：必须说明默认 WebUI
   不修改 VM、`Analyze`/`Plan` 不加 `-Live` 不修改 VM、`Analyze -Live` 才可能
   restore/start/stop/copy/run guest；当 `WebUI`/`StartWebUI` 因 `-SamplePath`

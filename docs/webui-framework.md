@@ -115,7 +115,10 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
 - 实时 VM 分析应通过服务端后台路径启动：
   `POST /api/jobs/{jobId}/runbook/start` 接受任务后立即返回；
   `GET /api/jobs/{jobId}/runbook/background` 暴露 queued/running/completed/failed
-  状态以及终端执行/导入结果。legacy blocking `/runbook/execute` endpoint 仍可供工具使用，
+  状态以及终端执行/导入的安全摘要。基础 job list/detail、plan、upload/start、guest import、
+  background 和 legacy blocking `/runbook/execute` 全部使用显式 Web-safe projection：runbook
+  只返回步骤 ID、标题和状态属性，execution 只返回聚合状态、退出码和时间，不序列化
+  PowerShell、`stdout` 或 `stderr`。legacy blocking `/runbook/execute` endpoint 仍可供工具使用，
   但浏览器体验不得依赖一个长 fetch 持续存活；
 - 上传流程应保持一键（one-click）：`.exe` 上传并保存后创建 plan，dashboard 必须把实时
   VM analysis 提交给 Web host background runner，并将当前浏览器页重定向到
@@ -144,8 +147,11 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   Web host 已经接受后台运行，原 dashboard 页不必继续打开。Monitor 页还应轮询
   `GET /api/jobs/{jobId}/runbook/progress`，只展示界面安全的 runbook step 状态、
   当前步骤和进度百分比，不内联命令行、`stdout` 或 `stderr`。
-  如果 `/runbook/background` 上存在终端执行结果，per-step `stdout`/`stderr` 只能放在折叠的
-  排障 `<details>` 中；命令行仍保持隐藏。页面也轮询
+  即使 `/runbook/background` 上存在终端执行结果，Web API 和页面也不得接收或展示
+  per-step PowerShell、`stdout`/`stderr`；这些原始执行证据只保留在宿主机本地受控的
+  `runbook.json`、`runbook-execution.json` 和 `job-metadata.json`。artifact index 可以标记
+  它们存在，但下载 contract 必须为 unavailable；通用 artifact/report-relative 下载入口收到
+  这些 selector 时返回 `403 host-local-sensitive-runbook-evidence`。页面也轮询
   `GET /api/jobs/{jobId}/runbook/background`，以便主 dashboard tab 在后台任务接受后关闭时，
   monitor 仍能显示终态 completed/failed 状态和报告链接。上传启动的 monitor
   会在完成后先显示短“报告已就绪”通知，再自动导航到中文报告

@@ -15,7 +15,7 @@ live progress freshness、Guest artifact event quality、R0/driver JSONL event q
 
 当前 KSwordSandbox 已具备公开 MVP 的主链路形态：
 
-- WebUI/API 可选择或上传 `.exe`，创建 job 并进入 live monitor；显式 live 才会操作 Hyper-V VM。
+- WebUI/API 可选择或上传 `.exe`，为 Hyper-V、VMware 或 QEMU 创建 job 并进入 live monitor；显式 live 才会操作所选 provider VM。
 - Host 侧会做 hash/静态分析，`SandboxJobService` 已接入完整 `static.*` 事件而不是单条 summary。
 - Guest Agent 可采集进程树、文件差异、网络快照，以及显式启用的 dropped files、截图、memory dump、PCAP artifact。
 - Host 可导入 guest events、driver JSONL、PCAP/sidecar/artifacts，生成 `report.json`、`report.html`、`report.zh.html`、`report.en.html`。
@@ -34,7 +34,7 @@ live progress freshness、Guest artifact event quality、R0/driver JSONL event q
 | 组件 | 估计 | 发布前还需补强 |
 | --- | ---: | --- |
 | WebUI 上传/选择、自动启动、live monitor | 96% | 做一次真实样本 UI 走查，确认失败态、artifact 卡片和报告按钮在 live 结束后可读。 |
-| Hyper-V runbook / host orchestration | 91% | 继续收敛 checkpoint 偏差恢复、前置条件提示和失败诊断文案。 |
+| 三 provider runbook / host orchestration | 91% | 在 Windows 实验室完成 Hyper-V、VMware Workstation Pro 和 QEMU WHPX 的同样本 live 等价验收。 |
 | Guest Agent R3 采集 | 93% | artifact manifest、截图/PCAP/dump 等 opt-in 证据 lane 更完整；仍需用更多样本校准 dropped file、child process、PCAP 和 opt-in artifact 质量。 |
 | R0Collector 用户态采集链 | 91% | 已接入可选 `GET_NETWORK_STATUS` 诊断、sequence/backpressure/readiness/noise contract；仍需真实驱动输入和压力样本复验。 |
 | R0 driver / kernel producer | 78% | driver 侧 telemetry/diagnostic 面更完整，Collector 已消费 `GET_NETWORK_STATUS`；默认发布仍不承诺未签名驱动加载，报告/UI 还可继续加强该状态叙事。 |
