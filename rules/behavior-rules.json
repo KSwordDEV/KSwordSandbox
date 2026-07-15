@@ -18,17 +18,19 @@
     },
     {
       "id": "runbook-created",
-      "title": "Hyper-V runbook generated",
-      "titleZh": "已生成 Hyper-V 运行手册",
+      "title": "Virtual machine runbook generated",
+      "titleZh": "已生成虚拟机运行手册",
       "severity": "info",
-      "summary": "The host generated a reproducible Hyper-V execution plan for review.",
-      "summaryZh": "主机生成可复现的 Hyper-V 执行计划供复核。",
+      "summary": "The host generated a reproducible provider-specific execution plan for review.",
+      "summaryZh": "主机生成可复现的特定虚拟化后端执行计划供复核。",
       "eventTypes": [
-        "hyperv.runbook.created"
+        "hyperv.runbook.created",
+        "vmware.runbook.created",
+        "qemu.runbook.created"
       ],
       "tags": [
         "host",
-        "hyperv"
+        "virtualization"
       ]
     },
     {

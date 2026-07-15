@@ -25,6 +25,7 @@ internal static partial class ProgramMain
             return command.ToLowerInvariant() switch
             {
                 "plan" => PlanJob(options),
+                "execute" or "run" => ExecuteJobAsync(options).GetAwaiter().GetResult(),
                 "list" or "list-jobs" => ListJobs(options),
                 "status" or "show-job" => ShowJob(options),
                 "report" or "report-rebuild" or "rebuild-report" => RebuildReport(options, "rebuild-report"),

@@ -31,7 +31,9 @@ public sealed class EventCategoryClassifier
             var value when value.StartsWith("image.", StringComparison.OrdinalIgnoreCase) => EventCategory.Module,
             var value when value.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) => EventCategory.Driver,
             var value when value.StartsWith("agent.", StringComparison.OrdinalIgnoreCase) => EventCategory.GuestAgent,
-            var value when value.StartsWith("hyperv.", StringComparison.OrdinalIgnoreCase) => EventCategory.HostOrchestration,
+            var value when value.StartsWith("hyperv.", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith("vmware.", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith("qemu.", StringComparison.OrdinalIgnoreCase) => EventCategory.HostOrchestration,
             _ => EventCategory.Unknown
         };
 

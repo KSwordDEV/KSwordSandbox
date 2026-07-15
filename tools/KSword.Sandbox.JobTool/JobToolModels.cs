@@ -16,6 +16,17 @@ internal sealed record JobLocator(
     Guid JobId,
     string JobRoot);
 
+internal sealed record ProviderResourceIdentity(
+    string? TargetVmName,
+    string? BaselineName,
+    string? MachineDefinitionPath,
+    string? QemuDiskFormat);
+
+internal sealed class InlineProgress<T>(Action<T> callback) : IProgress<T>
+{
+    public void Report(T value) => callback(value);
+}
+
 internal sealed class JobSummary
 {
     public bool IsCandidate { get; init; }
@@ -25,6 +36,16 @@ internal sealed class JobSummary
     public string JobRoot { get; init; } = string.Empty;
 
     public string Status { get; init; } = string.Empty;
+
+    public string Provider { get; init; } = "unknown";
+
+    public string? TargetVmName { get; init; }
+
+    public string? BaselineName { get; init; }
+
+    public string? MachineDefinitionPath { get; init; }
+
+    public string? QemuDiskFormat { get; init; }
 
     public string SampleName { get; init; } = string.Empty;
 

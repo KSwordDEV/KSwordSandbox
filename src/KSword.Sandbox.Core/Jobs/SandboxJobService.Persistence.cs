@@ -225,16 +225,68 @@ public sealed partial class SandboxJobService
             return false;
         }
 
-        var submission = metadataJob?.Submission ?? new SandboxSubmission
+        var persistedProvider = metadataJob?.Runbook?.Provider ??
+            execution?.Provider ??
+            report?.Provider ??
+            metadataJob?.Submission.Provider ??
+            VirtualizationProvider.HyperV;
+        var recoveredSubmission = metadataJob?.Submission ?? new SandboxSubmission
         {
             SamplePath = sample.FullPath,
             DisplayName = sample.FileName,
             DurationSeconds = config.Analysis.DefaultDurationSeconds,
-            DryRun = true
+            DryRun = execution?.Mode is not SandboxRunbookExecutionMode.Live
+        };
+        var submission = recoveredSubmission with
+        {
+            Provider = persistedProvider,
+            GoldenVmName = FirstPersistedIdentity(
+                metadataJob?.Runbook?.TargetVmName,
+                execution?.TargetVmName,
+                report?.TargetVmName,
+                recoveredSubmission.GoldenVmName),
+            GoldenSnapshotName = FirstPersistedIdentity(
+                metadataJob?.Runbook?.BaselineName,
+                execution?.BaselineName,
+                report?.BaselineName,
+                recoveredSubmission.GoldenSnapshotName),
+            MachineDefinitionPath = FirstPersistedIdentity(
+                metadataJob?.Runbook?.MachineDefinitionPath,
+                execution?.MachineDefinitionPath,
+                report?.MachineDefinitionPath,
+                recoveredSubmission.MachineDefinitionPath),
+            QemuDiskFormat = FirstPersistedIdentity(
+                metadataJob?.Runbook?.QemuDiskFormat,
+                execution?.QemuDiskFormat,
+                report?.QemuDiskFormat,
+                recoveredSubmission.QemuDiskFormat)
         };
         var duration = ResolveDuration(submission);
         var normalizedSubmission = NormalizeSubmission(submission, duration);
         var runbook = metadataJob?.Runbook ?? TryBuildRecoveredRunbook(jobId, sample, normalizedSubmission);
+        if (metadataJob?.Runbook is null && runbook is not null)
+        {
+            runbook = runbook with
+            {
+                Provider = persistedProvider,
+                TargetVmName = FirstPersistedIdentity(
+                    execution?.TargetVmName,
+                    report?.TargetVmName,
+                    runbook.TargetVmName) ?? runbook.TargetVmName,
+                BaselineName = FirstPersistedIdentity(
+                    execution?.BaselineName,
+                    report?.BaselineName,
+                    runbook.BaselineName),
+                MachineDefinitionPath = FirstPersistedIdentity(
+                    execution?.MachineDefinitionPath,
+                    report?.MachineDefinitionPath,
+                    runbook.MachineDefinitionPath),
+                QemuDiskFormat = FirstPersistedIdentity(
+                    execution?.QemuDiskFormat,
+                    report?.QemuDiskFormat,
+                    runbook.QemuDiskFormat)
+            };
+        }
         var status = ResolveRecoveredStatus(metadataJob?.Status, report?.Status, execution, importState);
         var messages = metadataJob?.Messages.ToList() ?? [];
         AddUniqueMessage(messages, $"Recovered job metadata from {jobRoot}.");
@@ -348,8 +400,13 @@ public sealed partial class SandboxJobService
         var completedSteps = steps.Count(step => RunbookProgressFacts.CountsAsCompletedStep(step.State));
         var state = result.Success
             ? SandboxRunbookProgressStates.Completed
-            : SandboxRunbookProgressStates.Failed;
-        var currentStepIndex = RunbookProgressFacts.ResolveCurrentStepIndex(steps, result.FailedStepIndex, state, result.Success);
+            : result.WasCanceled
+                ? SandboxRunbookProgressStates.Canceled
+                : SandboxRunbookProgressStates.Failed;
+        var preflightFailure = result.StepResults.LastOrDefault(RunbookProgressFacts.IsPreflightFailureResult);
+        var currentStepIndex = preflightFailure is null
+            ? RunbookProgressFacts.ResolveCurrentStepIndex(steps, result.FailedStepIndex, state, result.Success)
+            : null;
         var currentStep = currentStepIndex is >= 0
             ? steps.FirstOrDefault(step => step.StepIndex == currentStepIndex.Value)
             : null;
@@ -357,17 +414,21 @@ public sealed partial class SandboxJobService
         return new SandboxRunbookProgressSnapshot
         {
             JobId = runbook.JobId,
+            Provider = runbook.Provider,
             TargetVmName = result.TargetVmName,
+            BaselineName = result.BaselineName ?? runbook.BaselineName,
+            MachineDefinitionPath = result.MachineDefinitionPath ?? runbook.MachineDefinitionPath,
+            QemuDiskFormat = result.QemuDiskFormat ?? runbook.QemuDiskFormat,
             Mode = result.Mode,
             State = state,
             TotalSteps = result.TotalSteps > 0 ? result.TotalSteps : runbook.Steps.Count,
             CompletedSteps = completedSteps,
             ExecutedSteps = result.ExecutedSteps,
             CurrentStepIndex = currentStep?.StepIndex,
-            CurrentStepId = currentStep?.StepId,
-            CurrentStepTitle = currentStep?.Title,
-            CurrentPhase = currentStep?.Phase,
-            CurrentCategory = currentStep?.Category,
+            CurrentStepId = preflightFailure?.StepId ?? currentStep?.StepId,
+            CurrentStepTitle = preflightFailure?.Title ?? currentStep?.Title,
+            CurrentPhase = preflightFailure is null ? currentStep?.Phase : "preflight",
+            CurrentCategory = preflightFailure is null ? currentStep?.Category : RunbookProgressFacts.GetPreflightFailureCategory(preflightFailure.StepId),
             ProgressPercent = RunbookProgressFacts.ComputeProgressPercent(steps, state, result.Success, result.TotalSteps > 0 ? result.TotalSteps : runbook.Steps.Count),
             Success = result.Success,
             Message = RunbookProgressFacts.BuildAggregateProgressMessage(runbook, result, freshnessDiagnostic),
@@ -390,6 +451,9 @@ public sealed partial class SandboxJobService
             return null;
         }
     }
+
+    private static string? FirstPersistedIdentity(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 
     private AnalysisStatus ResolveRecoveredStatus(
         AnalysisStatus? metadataStatus,

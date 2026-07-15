@@ -401,7 +401,9 @@ public sealed class RuleEngine
                     "pcap.parse_error",
                     "driver.parse_error",
                     "driver.read_error",
-                    "hyperv.runbook.*"
+                    "hyperv.runbook.*",
+                    "vmware.runbook.*",
+                    "qemu.runbook.*"
                 ],
                 evt.EventType))
         {

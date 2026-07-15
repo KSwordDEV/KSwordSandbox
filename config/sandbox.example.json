@@ -1,4 +1,7 @@
 {
+  "virtualization": {
+    "provider": "HyperV"
+  },
   "hyperV": {
     "goldenVmName": "KSwordSandbox-Win10-Golden",
     "goldenSnapshotName": "Clean",
@@ -12,16 +15,59 @@
     "rdpTarget": null,
     "memoryStartupBytes": 4294967296
   },
+  "vmware": {
+    "vmName": "KSwordSandbox-Win10-Golden",
+    "vmxPath": "",
+    "snapshotName": "Clean",
+    "vmrunPath": "vmrun.exe",
+    "vmType": "ws",
+    "headless": false,
+    "guestRemoting": {
+      "addressMode": "VMwareTools",
+      "address": null,
+      "authentication": "Negotiate",
+      "useSsl": true,
+      "port": 0,
+      "skipCertificateChecks": true
+    }
+  },
+  "qemu": {
+    "vmName": "KSwordSandbox-Win10-Golden",
+    "qemuSystemPath": "qemu-system-x86_64.exe",
+    "qemuImgPath": "qemu-img.exe",
+    "diskImagePath": "",
+    "diskFormat": "qcow2",
+    "diskInterface": "virtio",
+    "snapshotName": "Clean",
+    "useOverlayDisk": true,
+    "memoryMegabytes": 4096,
+    "headless": false,
+    "additionalArguments": ["-accel", "whpx"],
+    "guestRemoting": {
+      "addressMode": "QemuUserNat",
+      "address": null,
+      "authentication": "Negotiate",
+      "useSsl": true,
+      "port": 0,
+      "skipCertificateChecks": true
+    }
+  },
   "guest": {
     "userName": "SandboxUser",
     "passwordSecretName": "KSWORDBOX_GUEST_PASSWORD",
     "workingDirectory": "C:\\KSwordSandbox",
     "agentExecutableName": "KSword.Sandbox.Agent.exe",
-    "enablePowerShellDirect": true
+    "enablePowerShellDirect": true,
+    "powerShellRemotingAddress": null,
+    "powerShellRemotingAuthentication": "Negotiate",
+    "powerShellRemotingUseSsl": false,
+    "powerShellRemotingPort": 0,
+    "powerShellRemotingSkipCertificateChecks": false
   },
   "analysis": {
     "defaultDurationSeconds": 120,
     "maxDurationSeconds": 900,
+    "guestReadyTimeoutSeconds": 180,
     "maxSampleBytes": 209715200
   },
   "artifactCollection": {

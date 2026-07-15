@@ -69,12 +69,14 @@ internal static partial class ProgramMain
             releaseReviewHints = new[]
             {
                 "该命令仅读取现有 report.json、artifact-index/目录和 runbook-progress.json；不会启动、还原、停止或修改 VM。/ This command only reads existing report, artifact, and progress files; it does not start, restore, stop, or mutate a VM.",
-                "该命令不运行 smoke 测试，不代表 fresh Hyper-V/live evidence。/ This command does not run smoke tests and is not fresh Hyper-V/live evidence.",
+                "该命令不运行 smoke 测试，不代表任一虚拟化后端的 fresh live evidence。/ This command does not run smoke tests and is not fresh live evidence for any virtualization provider.",
                 "审阅重点：sampleBehaviorCandidateCount 应只包含样本/系统候选行为；nonbehavior/self-noise/VT/R0 健康行应进入排除统计。/ Review focus: sampleBehaviorCandidateCount should only contain sample/system behavior candidates; nonbehavior/self-noise/VT/R0 health rows should appear in excluded counts.",
                 "sampleCorrelation=environment/unknown 代表证据已保留但不应升级为样本结论；confirmed/probable 才应进入主行为叙事。/ sampleCorrelation=environment/unknown means retained evidence that should not be promoted to sample conclusions; only confirmed/probable should enter the primary behavior story.",
                 "finding evidence 也必须审计；report.Events 是采样视图，high/medium findings 可能包含未出现在 sampled events 中的 evidence。/ Finding evidence must be audited too; report.Events is a sampled view and high/medium findings may carry evidence not present in sampled events."
             },
             vmAction = "none",
+            providerAction = "none",
+            // Retained for consumers of the original audit contract.
             hyperVAction = "none",
             smokeTestsRun = false,
             liveVmMutatingChecksRun = false,
@@ -92,7 +94,7 @@ internal static partial class ProgramMain
         Console.WriteLine($"任务 ID / Job ID: {locator.JobId:D}");
         Console.WriteLine($"任务目录 / Job root: {Safe(locator.JobRoot)}");
         Console.WriteLine("VM 操作 / VM action: 无 / none");
-        Console.WriteLine("Smoke/Hyper-V: 未运行 / not run");
+        Console.WriteLine("Smoke/Provider live: 未运行 / not run");
         Console.WriteLine($"报告 / Report: {(report is null ? "缺失 / missing" : Safe(reportPath))}");
         Console.WriteLine($"事件总数 / Total events: {reportAudit.TotalEvents}");
         Console.WriteLine($"样本行为候选 / Sample behavior candidates: {reportAudit.SampleBehaviorCandidateCount}");

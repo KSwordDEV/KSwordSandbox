@@ -33,6 +33,8 @@ internal static class PostProcessProgram
             var config = SandboxConfigLoader.Load(options.ConfigPath, repoRoot);
             var jobRoot = ResolveJobRoot(options.JobRoot, config.Paths.RuntimeRoot, options.JobId);
             var jobId = ResolveJobId(options.JobId, jobRoot);
+            var provider = ResolveProvider(options.Provider, jobRoot, config.Virtualization.Provider);
+            var providerIdentity = ResolveProviderResourceIdentity(jobRoot);
             var eventsPath = ResolveEventsPath(options.EventsPath, jobRoot, jobId);
             var samplePath = ResolveSamplePath(options.SamplePath, jobRoot);
 
@@ -63,6 +65,11 @@ internal static class PostProcessProgram
             var report = new AnalysisReport
             {
                 JobId = jobId,
+                Provider = provider,
+                TargetVmName = providerIdentity.TargetVmName,
+                BaselineName = providerIdentity.BaselineName,
+                MachineDefinitionPath = providerIdentity.MachineDefinitionPath,
+                QemuDiskFormat = providerIdentity.QemuDiskFormat,
                 Sample = sample,
                 Status = status,
                 StaticAnalysis = staticAnalysis,
@@ -90,6 +97,11 @@ internal static class PostProcessProgram
                 success = true,
                 jobId,
                 jobRoot,
+                provider = provider.ToString(),
+                targetVmName = providerIdentity.TargetVmName,
+                baselineName = providerIdentity.BaselineName,
+                machineDefinitionPath = providerIdentity.MachineDefinitionPath,
+                qemuDiskFormat = providerIdentity.QemuDiskFormat,
                 samplePath,
                 eventsPath,
                 importedGuestEventCount = guestEvents.Count,
@@ -168,6 +180,9 @@ internal static class PostProcessProgram
                 case "-samplepath":
                     options.SamplePath = Next();
                     break;
+                case "--provider":
+                    options.Provider = Next();
+                    break;
                 default:
                     throw new ArgumentException($"Unknown argument: {arg}");
             }
@@ -178,7 +193,222 @@ internal static class PostProcessProgram
 
     private static void PrintHelp()
     {
-        Console.WriteLine("KSword.Sandbox.PostProcess --job-root <path> --sample-path <exe> [--events-path <events.json>] [--config-path <config>] [--repo-root <repo>]");
+        Console.WriteLine("KSword.Sandbox.PostProcess --job-root <path> --sample-path <exe> [--provider HyperV|VMware|Qemu] [--events-path <events.json>] [--config-path <config>] [--repo-root <repo>]");
+    }
+
+    private static VirtualizationProvider ResolveProvider(
+        string? explicitProvider,
+        string jobRoot,
+        VirtualizationProvider configuredProvider)
+    {
+        VirtualizationProvider? persistedProvider = null;
+        foreach (var fileName in new[] { "job-metadata.json", "runbook-execution.json", "runbook-progress.json", "report.json" })
+        {
+            var provider = TryReadProvider(Path.Combine(jobRoot, fileName));
+            if (provider.HasValue)
+            {
+                persistedProvider = provider.Value;
+                break;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(explicitProvider))
+        {
+            var requestedProvider = ParseProvider(explicitProvider);
+            if (persistedProvider.HasValue && requestedProvider != persistedProvider.Value)
+            {
+                throw new ArgumentException(
+                    $"Existing job provider is {persistedProvider.Value}; --provider {requestedProvider} cannot rewrite its persisted VM/baseline identity. Omit --provider or process a new job root.");
+            }
+
+            return requestedProvider;
+        }
+
+        if (persistedProvider.HasValue)
+        {
+            return persistedProvider.Value;
+        }
+
+        return HasProviderlessLegacyJobArtifacts(jobRoot)
+            ? VirtualizationProvider.HyperV
+            : configuredProvider;
+    }
+
+    private static bool HasProviderlessLegacyJobArtifacts(string jobRoot) =>
+        new[] { "job-metadata.json", "runbook-execution.json", "runbook-progress.json", "report.json" }
+            .Any(fileName => File.Exists(Path.Combine(jobRoot, fileName)));
+
+    private static ProviderResourceIdentity ResolveProviderResourceIdentity(string jobRoot)
+    {
+        var identity = new ProviderResourceIdentity(null, null, null, null);
+        foreach (var fileName in new[] { "runbook-execution.json", "runbook-progress.json", "job-metadata.json", "report.json" })
+        {
+            var candidate = TryReadProviderResourceIdentity(Path.Combine(jobRoot, fileName));
+            if (candidate is null)
+            {
+                continue;
+            }
+
+            identity = new ProviderResourceIdentity(
+                identity.TargetVmName ?? candidate.TargetVmName,
+                identity.BaselineName ?? candidate.BaselineName,
+                identity.MachineDefinitionPath ?? candidate.MachineDefinitionPath,
+                identity.QemuDiskFormat ?? candidate.QemuDiskFormat);
+        }
+
+        return identity;
+    }
+
+    private static ProviderResourceIdentity? TryReadProviderResourceIdentity(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var containers = EnumerateProviderResourceContainers(document.RootElement).ToList();
+            return new ProviderResourceIdentity(
+                ReadFirstString(containers, "targetVmName", "goldenVmName"),
+                ReadFirstString(containers, "baselineName", "goldenSnapshotName"),
+                ReadFirstString(containers, "machineDefinitionPath"),
+                ReadFirstString(containers, "qemuDiskFormat"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static IEnumerable<JsonElement> EnumerateProviderResourceContainers(JsonElement root)
+    {
+        if (TryGetPropertyIgnoreCase(root, "runbook", out var runbook) && runbook.ValueKind == JsonValueKind.Object)
+        {
+            yield return runbook;
+        }
+
+        if (root.ValueKind == JsonValueKind.Object)
+        {
+            yield return root;
+        }
+
+        if (TryGetPropertyIgnoreCase(root, "submission", out var submission) && submission.ValueKind == JsonValueKind.Object)
+        {
+            yield return submission;
+        }
+    }
+
+    private static string? ReadFirstString(IEnumerable<JsonElement> containers, params string[] names)
+    {
+        foreach (var container in containers)
+        {
+            foreach (var name in names)
+            {
+                if (TryGetPropertyIgnoreCase(container, name, out var value) && value.ValueKind == JsonValueKind.String)
+                {
+                    var text = value.GetString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        return text;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static VirtualizationProvider? TryReadProvider(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var root = document.RootElement;
+            foreach (var candidate in EnumerateProviderCandidates(root))
+            {
+                if (candidate.ValueKind == JsonValueKind.String)
+                {
+                    var value = candidate.GetString();
+                    if (!string.IsNullOrWhiteSpace(value) &&
+                        Enum.TryParse<VirtualizationProvider>(value, ignoreCase: true, out var provider) &&
+                        Enum.IsDefined(provider))
+                    {
+                        return provider;
+                    }
+                }
+                else if (candidate.ValueKind == JsonValueKind.Number &&
+                         candidate.TryGetInt32(out var numeric) &&
+                         Enum.IsDefined(typeof(VirtualizationProvider), numeric))
+                {
+                    return (VirtualizationProvider)numeric;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // Partial job folders fall back to the next durable artifact.
+        }
+
+        return null;
+    }
+
+    private sealed record ProviderResourceIdentity(
+        string? TargetVmName,
+        string? BaselineName,
+        string? MachineDefinitionPath,
+        string? QemuDiskFormat);
+
+    private static IEnumerable<JsonElement> EnumerateProviderCandidates(JsonElement root)
+    {
+        if (TryGetPropertyIgnoreCase(root, "provider", out var direct))
+        {
+            yield return direct;
+        }
+
+        foreach (var containerName in new[] { "runbook", "submission" })
+        {
+            if (TryGetPropertyIgnoreCase(root, containerName, out var container) &&
+                container.ValueKind == JsonValueKind.Object &&
+                TryGetPropertyIgnoreCase(container, "provider", out var nested))
+            {
+                yield return nested;
+            }
+        }
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string name, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static VirtualizationProvider ParseProvider(string value)
+    {
+        if (Enum.TryParse<VirtualizationProvider>(value, ignoreCase: true, out var provider) && Enum.IsDefined(provider))
+        {
+            return provider;
+        }
+
+        throw new ArgumentException($"Unsupported provider '{value}'; expected HyperV, VMware, or Qemu.");
     }
 
     private static string ResolveRepositoryRoot(string? explicitRoot)
@@ -310,6 +540,26 @@ internal static class PostProcessProgram
             return full;
         }
 
+        var metadataPath = Path.Combine(jobRoot, "job-metadata.json");
+        if (File.Exists(metadataPath))
+        {
+            try
+            {
+                var job = JsonSerializer.Deserialize<AnalysisJob>(File.ReadAllText(metadataPath), JsonOptions);
+                var metadataSamplePath = !string.IsNullOrWhiteSpace(job?.Sample?.FullPath)
+                    ? job.Sample.FullPath
+                    : job?.Submission?.SamplePath;
+                if (!string.IsNullOrWhiteSpace(metadataSamplePath) && File.Exists(metadataSamplePath))
+                {
+                    return Path.GetFullPath(metadataSamplePath);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                // Continue to legacy plan inference for older job folders.
+            }
+        }
+
         var planPath = Directory.EnumerateFiles(Path.Combine(Directory.GetParent(jobRoot)?.Parent?.FullName ?? jobRoot, "plans"), "hyperv-e2e-*.json", SearchOption.TopDirectoryOnly)
             .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
@@ -326,7 +576,7 @@ internal static class PostProcessProgram
             }
         }
 
-        throw new ArgumentException("--sample-path is required when the sample cannot be inferred.");
+        throw new ArgumentException("--sample-path is required when the sample cannot be inferred from job metadata or a compatible legacy plan.");
     }
 
     private static List<SandboxEvent> LoadEventsWithSiblingDriverJsonl(string eventsPath)
@@ -531,5 +781,6 @@ internal static class PostProcessProgram
         public string? JobId { get; set; }
         public string? EventsPath { get; set; }
         public string? SamplePath { get; set; }
+        public string? Provider { get; set; }
     }
 }
