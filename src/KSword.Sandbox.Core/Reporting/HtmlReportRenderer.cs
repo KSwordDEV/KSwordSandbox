@@ -397,6 +397,34 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         Row(html, "SHA-256", report.Sample.Sha256);
         Row(html, "Size", FormatBytes(report.Sample.SizeBytes));
         Row(html, "Status", report.Status.ToString());
+        Row(html, "Virtualization provider", report.Provider?.ToString() ?? "Unknown");
+        if (!string.IsNullOrWhiteSpace(report.TargetVmName))
+        {
+            Row(html, "Target VM", report.TargetVmName);
+        }
+
+        if (!string.IsNullOrWhiteSpace(report.BaselineName))
+        {
+            Row(html, "Clean baseline", report.BaselineName);
+        }
+
+        if (!string.IsNullOrWhiteSpace(report.MachineDefinitionPath))
+        {
+            var resourceLabel = report.Provider switch
+            {
+                VirtualizationProvider.VMware => "VMX path",
+                VirtualizationProvider.Qemu => "QEMU base disk",
+                _ => "Provider machine definition"
+            };
+            Row(html, resourceLabel, report.MachineDefinitionPath);
+        }
+
+        if (report.Provider is VirtualizationProvider.Qemu &&
+            !string.IsNullOrWhiteSpace(report.QemuDiskFormat))
+        {
+            Row(html, "QEMU disk format", report.QemuDiskFormat);
+        }
+
         html.AppendLine("</tbody></table>");
         html.AppendLine("</header>");
     }
@@ -9063,6 +9091,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Sample", "样本"),
         ("Size", "大小"),
         ("Status", "状态"),
+        ("Virtualization provider", "虚拟化后端"),
+        ("Target VM", "目标虚拟机"),
+        ("Clean baseline", "干净基线"),
+        ("VMX path", "VMX 路径"),
+        ("QEMU base disk", "QEMU 基础磁盘"),
+        ("Provider machine definition", "虚拟机定义"),
+        ("QEMU disk format", "QEMU 磁盘格式"),
         ("Right-click timeline entries, table cells, or evidence blocks to copy their contents.", "右键时间线条目、表格单元格或证据块即可复制内容。"),
         ("Safe links are relative to the report artifact root; unsafe or guest-local paths are shown as copyable text only.", "安全链接相对于报告证据根目录；不安全或来宾本地路径仅显示为可复制文本。"),
         ("Imports, exports, resources, TLS, and indicators are grouped from <code>StaticAnalysisResult.Tags</code>, <code>Urls</code>, and prefixed <code>InterestingStrings</code> evidence so report JSON stays backward-compatible.", "导入、导出、资源、TLS 和指标会从 <code>StaticAnalysisResult.Tags</code>、<code>Urls</code> 以及带前缀的 <code>InterestingStrings</code> 证据中分组，以保持 report JSON 向后兼容。"),
@@ -9593,7 +9628,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("HTTP/PCAP metadata shows a WSMan POST to a WinRM port with CreateShell or Command SOAP action evidence.", "HTTP/PCAP 元数据显示发往 WinRM 端口的 WSMan POST，并包含 CreateShell 或 Command SOAP action 证据。"),
         ("Human interaction checks gate execution or exit", "人机交互检查控制执行或退出"),
         ("Human interaction gate API observed", "观察到人机交互门控 API"),
-        ("Hyper-V runbook generated", "已生成 Hyper-V 运行手册"),
+        ("Virtual machine runbook generated", "已生成虚拟机运行手册"),
         ("IE Browser Helper Object user-writable payload", "IE BHO 用户可写载荷"),
         ("IFEO debugger persistence path", "IFEO 调试器持久化路径"),
         ("IFEO GlobalFlag enables SilentProcessExit persistence", "IFEO GlobalFlag 启用 SilentProcessExit 持久化"),
@@ -9993,7 +10028,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("The guest screenshot probe was enabled but could not capture the desktop; reason and diagnostic fields are surfaced for collection quality review.", "来宾截图探针已启用但无法捕获桌面；原因和诊断字段会展示给采集质量复核。"),
         ("The host accepted a local sample path and created a planning artifact.", "主机接受本地样本路径并创建规划证据。"),
         ("The host artifact-import summary reports ready screenshots, memory dumps, and packet captures together with safe primary relative selectors, preserving evidence availability without treating collection status as malicious behavior.", "Host artifact-import 摘要同时报告截图、内存转储和抓包已就绪，并带有安全主相对选择器；它保留证据可用性，但不把采集状态当作恶意行为。"),
-        ("The host generated a reproducible Hyper-V execution plan for review.", "主机生成可复现的 Hyper-V 执行计划供复核。"),
+        ("The host generated a reproducible provider-specific execution plan for review.", "主机生成可复现的 provider-specific 执行计划供复核。"),
         ("The kernel driver emitted a startup heartbeat through the R0 event drain path; current builds use a reserved self-test event and later builds may emit driver.load.", "内核驱动通过 R0 事件排空路径输出启动心跳；当前版本使用保留自测事件，后续版本可能输出 driver.load。"),
         ("The opt-in guest memory dump probe captured a minidump artifact for the launched sample process.", "按需启用的来宾内存转储探针为启动的样本进程捕获了 minidump 证据。"),
         ("The opt-in memory dump probe was enabled but could not produce a dump; diagnostics explain whether the root PID, platform, or API call failed.", "按需启用的内存转储探针无法生成 dump；诊断会说明根 PID、平台或 API 调用是否失败。"),

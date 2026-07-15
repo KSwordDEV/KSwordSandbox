@@ -36,6 +36,21 @@ internal static partial class ProgramMain
             config = config with { Paths = config.Paths with { RuntimeRoot = Path.GetFullPath(runtimeRoot) } };
         }
 
+        if (GetBool(options, "no-r0-collector"))
+        {
+            config = config with { Driver = config.Driver with { Enabled = false } };
+        }
+
+        if (GetBool(options, "no-open-vm-console"))
+        {
+            config = config with
+            {
+                HyperV = config.HyperV with { OpenVmConsoleOnLiveStart = false },
+                VMware = config.VMware with { Headless = true },
+                Qemu = config.Qemu with { Headless = true }
+            };
+        }
+
         return new ToolContext(repositoryRoot, configPath, config);
     }
 
@@ -89,6 +104,19 @@ internal static partial class ProgramMain
     {
         var runtimeRoot = GetOption(options, "runtime-root", config.Paths.RuntimeRoot);
         return Path.GetFullPath(string.IsNullOrWhiteSpace(runtimeRoot) ? DefaultRuntimeRoot : runtimeRoot);
+    }
+
+    private static string ResolvePlanOutputPath(JobToolOptions options, string repositoryRoot)
+    {
+        var planPath = GetOption(options, "plan-path", string.Empty);
+        if (string.IsNullOrWhiteSpace(planPath))
+        {
+            return string.Empty;
+        }
+
+        return Path.IsPathRooted(planPath)
+            ? Path.GetFullPath(planPath)
+            : Path.GetFullPath(Path.Combine(repositoryRoot, planPath));
     }
 
     private static JobLocator ResolveJobLocator(JobToolOptions options, SandboxConfig config, bool requireExisting)
@@ -181,13 +209,40 @@ internal static partial class ProgramMain
             return Path.GetFullPath(reportSamplePath);
         }
 
+        var metadataSamplePath = TryReadJobSamplePath(jobRoot);
+        if (!string.IsNullOrWhiteSpace(metadataSamplePath) && File.Exists(metadataSamplePath))
+        {
+            return Path.GetFullPath(metadataSamplePath);
+        }
+
         var planSamplePath = TryResolveSamplePathFromPlan(jobRoot, TryResolveJobId(jobRoot));
         if (!string.IsNullOrWhiteSpace(planSamplePath) && File.Exists(planSamplePath))
         {
             return Path.GetFullPath(planSamplePath);
         }
 
-        throw new ArgumentException("缺少 --sample；无法从 report.json 或 Hyper-V plan 文件推断原始样本路径。/ Missing --sample. The original sample path could not be inferred from report.json or Hyper-V plan files.");
+        throw new ArgumentException("缺少 --sample；无法从 report.json、job-metadata.json 或兼容 plan 文件推断原始样本路径。/ Missing --sample. The original sample path could not be inferred from report, job metadata, or a compatible plan file.");
+    }
+
+    private static string? TryReadJobSamplePath(string jobRoot)
+    {
+        var metadataPath = Path.Combine(jobRoot, "job-metadata.json");
+        if (!File.Exists(metadataPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var job = JsonSerializer.Deserialize<AnalysisJob>(File.ReadAllText(metadataPath), JsonOptions);
+            return !string.IsNullOrWhiteSpace(job?.Sample?.FullPath)
+                ? job.Sample.FullPath
+                : job?.Submission?.SamplePath;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
     }
 
     private static string? TryResolveSamplePathFromPlan(string jobRoot, Guid? expectedJobId)
@@ -474,6 +529,8 @@ internal static partial class ProgramMain
         var fullJobRoot = Path.GetFullPath(jobRoot);
         var reportPath = Path.Combine(fullJobRoot, "report.json");
         var report = TryLoadReport(reportPath);
+        var provider = TryReadJobProvider(fullJobRoot);
+        var providerIdentity = ReadPersistedProviderResourceIdentity(fullJobRoot);
         var jobId = report?.JobId is { } reportJobId && reportJobId != Guid.Empty
             ? reportJobId
             : TryResolveJobId(fullJobRoot);
@@ -534,6 +591,11 @@ internal static partial class ProgramMain
             JobId = jobId,
             JobRoot = fullJobRoot,
             Status = report?.Status.ToString() ?? (Directory.Exists(fullJobRoot) ? "unknown" : "missing"),
+            Provider = provider,
+            TargetVmName = providerIdentity.TargetVmName,
+            BaselineName = providerIdentity.BaselineName,
+            MachineDefinitionPath = providerIdentity.MachineDefinitionPath,
+            QemuDiskFormat = providerIdentity.QemuDiskFormat,
             SampleName = report?.Sample?.FileName ?? "unknown",
             SamplePath = report?.Sample?.FullPath,
             SampleSha256 = report?.Sample?.Sha256,
@@ -554,6 +616,300 @@ internal static partial class ProgramMain
             MissingKeyArtifacts = missingKeyArtifacts,
             Metrics = report?.Metrics ?? []
         };
+    }
+
+    private static string TryReadJobProvider(string jobRoot)
+    {
+        var metadataPath = Path.Combine(jobRoot, "job-metadata.json");
+        if (File.Exists(metadataPath))
+        {
+            try
+            {
+                var job = JsonSerializer.Deserialize<AnalysisJob>(File.ReadAllText(metadataPath), JsonOptions);
+                var provider = job?.Runbook?.Provider ?? job?.Submission?.Provider;
+                if (provider.HasValue)
+                {
+                    return provider.Value.ToString();
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                // Fall through to the compact progress/execution artifacts.
+            }
+        }
+
+        foreach (var fileName in new[] { "runbook-progress.json", "runbook-execution.json", "report.json" })
+        {
+            var path = Path.Combine(jobRoot, fileName);
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(path));
+                var value = TryReadJsonString(document.RootElement, "provider", "Provider");
+                if (Enum.TryParse<VirtualizationProvider>(value, ignoreCase: true, out var provider) && Enum.IsDefined(provider))
+                {
+                    return provider.ToString();
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                // Keep looking; summaries must tolerate partial job folders.
+            }
+        }
+
+        return "unknown";
+    }
+
+    private static VirtualizationProvider ResolvePersistedOrConfiguredProvider(
+        JobToolOptions options,
+        SandboxConfig config,
+        string jobRoot)
+    {
+        var persistedProviderText = TryReadJobProvider(jobRoot);
+        var hasPersistedProvider = Enum.TryParse<VirtualizationProvider>(
+                persistedProviderText,
+                ignoreCase: true,
+                out var persistedProvider) &&
+            Enum.IsDefined(persistedProvider);
+        var explicitProvider = GetOption(options, "provider", string.Empty);
+        if (!string.IsNullOrWhiteSpace(explicitProvider))
+        {
+            var requestedProvider = ParseVirtualizationProvider(explicitProvider);
+            if (hasPersistedProvider && requestedProvider != persistedProvider)
+            {
+                throw new ArgumentException(
+                    $"已有作业的 provider 为 {persistedProvider}，不能用 --provider {requestedProvider} 改写其 VM/基线身份。请省略 --provider，或为目标 provider 创建新作业。/ " +
+                    $"The existing job is persisted as {persistedProvider}; --provider {requestedProvider} cannot rewrite its VM/baseline identity. Omit --provider or create a new job for that provider.");
+            }
+
+            return requestedProvider;
+        }
+
+        if (hasPersistedProvider)
+        {
+            return persistedProvider;
+        }
+
+        return HasProviderlessLegacyJobArtifacts(jobRoot)
+            ? VirtualizationProvider.HyperV
+            : config.Virtualization.Provider;
+    }
+
+    private static bool HasProviderlessLegacyJobArtifacts(string jobRoot) =>
+        new[] { "job-metadata.json", "runbook-execution.json", "runbook-progress.json", "report.json" }
+            .Any(fileName => File.Exists(Path.Combine(jobRoot, fileName)));
+
+    private static string ResolvePersistedOrConfiguredVmName(
+        JobToolOptions options,
+        SandboxConfig config,
+        string jobRoot,
+        VirtualizationProvider provider)
+    {
+        var persisted = ReadPersistedProviderResourceIdentity(jobRoot).TargetVmName;
+        var explicitVmName = GetOption(options, "vm", string.Empty);
+        if (!string.IsNullOrWhiteSpace(explicitVmName))
+        {
+            EnsurePersistedResourceIdentityMatches("VM", explicitVmName, persisted);
+            return explicitVmName;
+        }
+
+        return !string.IsNullOrWhiteSpace(persisted)
+            ? persisted
+            : GetConfiguredVmName(config, provider);
+    }
+
+    private static string ResolvePersistedOrConfiguredSnapshotName(
+        JobToolOptions options,
+        SandboxConfig config,
+        string jobRoot,
+        VirtualizationProvider provider)
+    {
+        var persisted = ReadPersistedProviderResourceIdentity(jobRoot).BaselineName;
+        var explicitSnapshotName = GetOption(options, "baseline", GetOption(options, "checkpoint", string.Empty));
+        if (!string.IsNullOrWhiteSpace(explicitSnapshotName))
+        {
+            EnsurePersistedResourceIdentityMatches("clean baseline", explicitSnapshotName, persisted);
+            return explicitSnapshotName;
+        }
+
+        return !string.IsNullOrWhiteSpace(persisted)
+            ? persisted
+            : GetConfiguredSnapshotName(config, provider);
+    }
+
+    private static string? ResolvePersistedOrConfiguredMachineDefinitionPath(
+        JobToolOptions options,
+        SandboxConfig config,
+        string jobRoot,
+        VirtualizationProvider provider)
+    {
+        var explicitPath = provider switch
+        {
+            VirtualizationProvider.VMware => GetOption(
+                options,
+                "vmx-path",
+                GetOption(options, "machine-definition-path", string.Empty)),
+            VirtualizationProvider.Qemu => GetOption(
+                options,
+                "disk-image-path",
+                GetOption(options, "machine-definition-path", string.Empty)),
+            _ => string.Empty
+        };
+        var persisted = ReadPersistedProviderResourceIdentity(jobRoot).MachineDefinitionPath;
+        if (!string.IsNullOrWhiteSpace(explicitPath))
+        {
+            EnsurePersistedResourceIdentityMatches("machine definition", explicitPath, persisted, compareAsPath: true);
+            return explicitPath;
+        }
+
+        if (!string.IsNullOrWhiteSpace(persisted))
+        {
+            return persisted;
+        }
+
+        return provider switch
+        {
+            VirtualizationProvider.VMware => config.VMware.VmxPath,
+            VirtualizationProvider.Qemu => config.Qemu.DiskImagePath,
+            _ => null
+        };
+    }
+
+    private static string? ResolvePersistedOrConfiguredQemuDiskFormat(
+        JobToolOptions options,
+        SandboxConfig config,
+        string jobRoot,
+        VirtualizationProvider provider)
+    {
+        if (provider is not VirtualizationProvider.Qemu)
+        {
+            return null;
+        }
+
+        var persisted = ReadPersistedProviderResourceIdentity(jobRoot).QemuDiskFormat;
+        var explicitFormat = GetOption(options, "qemu-disk-format", string.Empty);
+        if (!string.IsNullOrWhiteSpace(explicitFormat))
+        {
+            EnsurePersistedResourceIdentityMatches("QEMU disk format", explicitFormat, persisted);
+            return explicitFormat;
+        }
+
+        return !string.IsNullOrWhiteSpace(persisted) ? persisted : config.Qemu.DiskFormat;
+    }
+
+    private static void EnsurePersistedResourceIdentityMatches(
+        string resourceName,
+        string requestedValue,
+        string? persistedValue,
+        bool compareAsPath = false)
+    {
+        if (string.IsNullOrWhiteSpace(persistedValue))
+        {
+            return;
+        }
+
+        var requestedIdentity = requestedValue.Trim();
+        var persistedIdentity = persistedValue.Trim();
+        if (compareAsPath)
+        {
+            try
+            {
+                requestedIdentity = Path.GetFullPath(requestedIdentity);
+                persistedIdentity = Path.GetFullPath(persistedIdentity);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // Invalid path syntax remains unequal and receives the same
+                // provider-resource conflict diagnostic below.
+            }
+        }
+
+        if (!string.Equals(requestedIdentity, persistedIdentity, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                $"已有作业已持久化 {resourceName}，离线报告重建不能改写该资源身份。请省略对应覆盖参数，或为新资源创建新作业。/ " +
+                $"The existing job already persists its {resourceName}; offline report rebuild cannot rewrite that resource identity. Omit the override or create a new job for the new resource.");
+        }
+    }
+
+    private static ProviderResourceIdentity ReadPersistedProviderResourceIdentity(string jobRoot)
+    {
+        var identity = new ProviderResourceIdentity(null, null, null, null);
+        foreach (var fileName in new[] { "runbook-execution.json", "runbook-progress.json", "job-metadata.json", "report.json" })
+        {
+            var candidate = TryReadProviderResourceIdentity(Path.Combine(jobRoot, fileName));
+            if (candidate is null)
+            {
+                continue;
+            }
+
+            identity = new ProviderResourceIdentity(
+                identity.TargetVmName ?? candidate.TargetVmName,
+                identity.BaselineName ?? candidate.BaselineName,
+                identity.MachineDefinitionPath ?? candidate.MachineDefinitionPath,
+                identity.QemuDiskFormat ?? candidate.QemuDiskFormat);
+        }
+
+        return identity;
+    }
+
+    private static ProviderResourceIdentity? TryReadProviderResourceIdentity(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var containers = EnumerateProviderResourceContainers(document.RootElement).ToList();
+            return new ProviderResourceIdentity(
+                ReadFirstProviderResourceValue(containers, "targetVmName", "goldenVmName"),
+                ReadFirstProviderResourceValue(containers, "baselineName", "goldenSnapshotName"),
+                ReadFirstProviderResourceValue(containers, "machineDefinitionPath"),
+                ReadFirstProviderResourceValue(containers, "qemuDiskFormat"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static IEnumerable<JsonElement> EnumerateProviderResourceContainers(JsonElement root)
+    {
+        if (TryGetPropertyIgnoreCase(root, "runbook", out var runbook) && runbook.ValueKind == JsonValueKind.Object)
+        {
+            yield return runbook;
+        }
+
+        if (root.ValueKind == JsonValueKind.Object)
+        {
+            yield return root;
+        }
+
+        if (TryGetPropertyIgnoreCase(root, "submission", out var submission) && submission.ValueKind == JsonValueKind.Object)
+        {
+            yield return submission;
+        }
+    }
+
+    private static string? ReadFirstProviderResourceValue(IEnumerable<JsonElement> containers, params string[] names)
+    {
+        foreach (var container in containers)
+        {
+            var value = TryReadJsonString(container, names).Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static string? TryFindGuestOutputSkeletonPath(string jobRoot)
@@ -795,6 +1151,16 @@ internal static partial class ProgramMain
         return parsed;
     }
 
+    private static int ParsePositiveInt(string value, string name)
+    {
+        if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0)
+        {
+            throw new ArgumentException($"--{name} 必须是正整数；当前值: {value} / --{name} must be a positive integer. Value: {value}");
+        }
+
+        return parsed;
+    }
+
     private static Guid ParseGuid(string value, string name)
     {
         if (!Guid.TryParse(value, out var parsed) || parsed == Guid.Empty)
@@ -824,10 +1190,40 @@ internal static partial class ProgramMain
 
     private static void WriteJson(object value)
     {
+        Console.WriteLine(SerializeRedactedJson(value));
+    }
+
+    private static void WriteJsonFile(string path, object value)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var temporaryPath = Path.Combine(
+            directory ?? Directory.GetCurrentDirectory(),
+            $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllText(temporaryPath, SerializeRedactedJson(value));
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static string SerializeRedactedJson(object value)
+    {
         var serialized = JsonSerializer.Serialize(value, JsonOptions);
         var node = JsonNode.Parse(serialized);
         var redacted = RedactNode(node, propertyName: null);
-        Console.WriteLine(redacted?.ToJsonString(JsonOptions) ?? "{}");
+        return redacted?.ToJsonString(JsonOptions) ?? "{}";
     }
 
     private static JsonNode? RedactNode(JsonNode? node, string? propertyName)
@@ -1214,7 +1610,12 @@ internal static partial class ProgramMain
         string? runbookExecutionPath,
         bool success,
         string message,
-        AnalysisJob? rebuiltJob = null)
+        AnalysisJob? rebuiltJob = null,
+        VirtualizationProvider? provider = null,
+        string? vmName = null,
+        string? baselineName = null,
+        string? machineDefinitionPath = null,
+        string? qemuDiskFormat = null)
     {
         Directory.CreateDirectory(locator.JobRoot);
         var diagnosticsPath = Path.Combine(locator.JobRoot, "report-rebuild-diagnostics.json");
@@ -1242,6 +1643,11 @@ internal static partial class ProgramMain
             failureReason = success ? string.Empty : message,
             jobId = locator.JobId,
             jobRoot = locator.JobRoot,
+            provider = rebuiltJob?.Runbook?.Provider.ToString() ?? provider?.ToString(),
+            targetVmName = rebuiltJob?.Runbook?.TargetVmName ?? vmName,
+            baselineName = rebuiltJob?.Runbook?.BaselineName ?? baselineName,
+            machineDefinitionPath = rebuiltJob?.Runbook?.MachineDefinitionPath ?? machineDefinitionPath,
+            qemuDiskFormat = rebuiltJob?.Runbook?.QemuDiskFormat ?? qemuDiskFormat,
             samplePath,
             eventInput,
             runbookExecutionPath,
@@ -1421,19 +1827,21 @@ internal static partial class ProgramMain
         Console.WriteLine("任务工具 / KSword Sandbox JobTool");
         Console.WriteLine("用法 / Usage:");
         Console.WriteLine("  生成干跑计划 / Create dry-run plan:");
-        Console.WriteLine("    KSword.Sandbox.JobTool plan --sample <exe> [--display-name <name>] [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--duration <seconds>] [--json]");
+        Console.WriteLine("    KSword.Sandbox.JobTool plan --sample <exe> [--provider HyperV|VMware|Qemu] [--vm <name>] [--baseline <name>|--checkpoint <name>] [--machine-definition-path <path>|--vmx-path <path>|--disk-image-path <path>] [--qemu-disk-format qcow2|raw|vhdx|vmdk] [--display-name <name>] [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--duration <seconds>] [--guest-ready-timeout-seconds <n>] [--plan-path <json>] [--json]");
+        Console.WriteLine("  执行统一 VM runbook / Execute provider runbook (dry-run by default):");
+        Console.WriteLine("    KSword.Sandbox.JobTool execute --sample <exe> [--provider HyperV|VMware|Qemu] [--vm <name>] [--baseline <name>|--checkpoint <name>] [--machine-definition-path <path>|--vmx-path <path>|--disk-image-path <path>] [--qemu-disk-format qcow2|raw|vhdx|vmdk] [--live] [--guest-ready-timeout-seconds <n>] [--step-timeout-seconds <n>] [--no-r0-collector] [--no-open-vm-console] [--skip-guest-import] [--json]");
         Console.WriteLine("  列出任务 / List jobs:");
         Console.WriteLine("    KSword.Sandbox.JobTool list [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--limit <n>] [--json]");
         Console.WriteLine("  查看任务详情 / Show job details:");
         Console.WriteLine("    KSword.Sandbox.JobTool status --job-id <guid>|--job-root <path> [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--json]");
         Console.WriteLine("  重建报告 / Rebuild report:");
-        Console.WriteLine("    KSword.Sandbox.JobTool report [rebuild] --job-id <guid>|--job-root <path> [--sample <exe>] [--events <events.json|jsonl>] [--runbook-execution <runbook-execution.json>] [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--duration <seconds>] [--json]");
+        Console.WriteLine("    KSword.Sandbox.JobTool report [rebuild] --job-id <guid>|--job-root <path> [--provider HyperV|VMware|Qemu] [--vm <name>] [--baseline <name>|--checkpoint <name>] [--machine-definition-path <path>] [--qemu-disk-format <format>] [--sample <exe>] [--events <events.json|jsonl>] [--runbook-execution <runbook-execution.json>] [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--duration <seconds>] [--json]");
         Console.WriteLine("  导入已有 Live 运行 / Import live run:");
-        Console.WriteLine("    KSword.Sandbox.JobTool import [live] --job-id <guid> --sample <exe> [--events <events.json|jsonl>] [--runbook-execution <runbook-execution.json>] [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--duration <seconds>]");
+        Console.WriteLine("    KSword.Sandbox.JobTool import [live] --job-id <guid> --sample <exe> [--provider HyperV|VMware|Qemu] [--vm <name>] [--baseline <name>|--checkpoint <name>] [--machine-definition-path <path>] [--qemu-disk-format <format>] [--events <events.json|jsonl>] [--runbook-execution <runbook-execution.json>] [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--duration <seconds>]");
         Console.WriteLine("  检查产物 / Inspect artifacts:");
         Console.WriteLine("    KSword.Sandbox.JobTool artifacts [inspect] --job-id <guid>|--job-root <path> [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--write-index] [--include-metadata] [--limit <n>] [--json]");
         Console.WriteLine("  恢复检查 / Recover:");
-        Console.WriteLine("    KSword.Sandbox.JobTool recover --job-id <guid>|--job-root <path> [--write-state] [--write-index] [--rebuild-report] [--sample <exe>] [--events <events.json|jsonl>] [--json]");
+        Console.WriteLine("    KSword.Sandbox.JobTool recover --job-id <guid>|--job-root <path> [--provider HyperV|VMware|Qemu] [--vm <name>] [--baseline <name>|--checkpoint <name>] [--machine-definition-path <path>] [--qemu-disk-format <format>] [--write-state] [--write-index] [--rebuild-report] [--sample <exe>] [--events <events.json|jsonl>] [--json]");
         Console.WriteLine("  就绪检查 / Readiness:");
         Console.WriteLine("    KSword.Sandbox.JobTool readiness [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--job-id <guid>|--job-root <path>] [--sample <exe>] [--json]");
         Console.WriteLine("  离线审计 / Self-noise audit:");
@@ -1441,6 +1849,7 @@ internal static partial class ProgramMain
         Console.WriteLine();
         Console.WriteLine("别名 / Aliases: list-jobs=list, show-job=status, rebuild-report=report, import-live=import, inspect-artifacts=artifacts, self-noise-audit/review=audit.");
         Console.WriteLine("说明 / Notes:");
+        Console.WriteLine("  execute 默认 dry-run；只有显式 --live 才会启动、还原或停止所选 provider 的 VM。/ execute defaults to dry-run; only explicit --live mutates the selected provider VM.");
         Console.WriteLine("  plan/report/import/artifacts/recover/readiness/audit 只复用本地文件；不会启动、还原、停止或修改 VM。/ these commands reuse local files only and do not start, restore, stop, or mutate VMs.");
         Console.WriteLine("  report/import 会在任务运行目录下写入 report.json/report.html/report.zh.html/report.en.html 和 artifact-index.json。/ report/import write report and artifact-index files under the job runtime folder.");
         Console.WriteLine("  artifacts 仅在 --write-index 时写 artifact-index.json；recover 仅在 --write-state/--write-index/--rebuild-report 时写文件。/ artifacts/recover writes are explicit opt-in.");

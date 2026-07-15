@@ -1,4 +1,31 @@
+using System.Text.Json.Serialization;
+
 namespace KSword.Sandbox.Abstractions;
+
+/// <summary>
+/// Host hypervisor used to execute sandbox runbooks.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<VirtualizationProvider>))]
+public enum VirtualizationProvider
+{
+    HyperV,
+    VMware,
+    Qemu
+}
+
+/// <summary>
+/// Resolves the Windows guest endpoint used by VMware and QEMU runbooks.
+/// Configured preserves explicit DNS/IP behavior, VMwareTools discovers the
+/// restored guest IP through vmrun, and QemuUserNat uses a provider-owned
+/// localhost WinRM forwarding rule.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<GuestRemotingAddressMode>))]
+public enum GuestRemotingAddressMode
+{
+    Configured,
+    VMwareTools,
+    QemuUserNat
+}
 
 /// <summary>
 /// Root configuration for the sandbox host.
@@ -8,7 +35,13 @@ namespace KSword.Sandbox.Abstractions;
 /// </summary>
 public sealed record SandboxConfig
 {
+    public VirtualizationConfig Virtualization { get; init; } = new();
+
     public HyperVConfig HyperV { get; init; } = new();
+
+    public VMwareConfig VMware { get; init; } = new();
+
+    public QemuConfig Qemu { get; init; } = new();
 
     public GuestConfig Guest { get; init; } = new();
 
@@ -19,6 +52,15 @@ public sealed record SandboxConfig
     public SandboxPaths Paths { get; init; } = new();
 
     public DriverConfig Driver { get; init; } = new();
+}
+
+/// <summary>
+/// Selects the host virtualization implementation. Hyper-V remains the default
+/// so existing local configuration files keep their original behavior.
+/// </summary>
+public sealed record VirtualizationConfig
+{
+    public VirtualizationProvider Provider { get; init; } = VirtualizationProvider.HyperV;
 }
 
 /// <summary>
@@ -55,6 +97,88 @@ public sealed record HyperVConfig
 }
 
 /// <summary>
+/// VMware Workstation Pro vmrun settings on a Windows host. Guest operations
+/// use the provider remoting profile with legacy <see cref="GuestConfig"/> fallback.
+/// </summary>
+public sealed record VMwareConfig
+{
+    public string VmName { get; init; } = "KSwordSandbox-Win10-Golden";
+
+    public string VmxPath { get; init; } = string.Empty;
+
+    public string SnapshotName { get; init; } = "Clean";
+
+    public string VmrunPath { get; init; } = "vmrun.exe";
+
+    public string VmType { get; init; } = "ws";
+
+    public bool Headless { get; init; }
+
+    public GuestRemotingConfig GuestRemoting { get; init; } = new()
+    {
+        AddressMode = GuestRemotingAddressMode.VMwareTools,
+        UseSsl = true,
+        SkipCertificateChecks = true
+    };
+}
+
+/// <summary>
+/// QEMU settings for a Windows guest backed by a qcow2/raw/vhdx/vmdk disk. Overlay mode
+/// creates one disposable qcow2 disk per job; snapshot mode restores an
+/// existing internal snapshot before boot.
+/// </summary>
+public sealed record QemuConfig
+{
+    public string VmName { get; init; } = "KSwordSandbox-Win10-Golden";
+
+    public string QemuSystemPath { get; init; } = "qemu-system-x86_64.exe";
+
+    public string QemuImgPath { get; init; } = "qemu-img.exe";
+
+    public string DiskImagePath { get; init; } = string.Empty;
+
+    public string DiskFormat { get; init; } = "qcow2";
+
+    public string DiskInterface { get; init; } = "virtio";
+
+    public string SnapshotName { get; init; } = "Clean";
+
+    public bool UseOverlayDisk { get; init; } = true;
+
+    public int MemoryMegabytes { get; init; } = 4096;
+
+    public bool Headless { get; init; }
+
+    public List<string> AdditionalArguments { get; init; } = ["-accel", "whpx"];
+
+    public GuestRemotingConfig GuestRemoting { get; init; } = new()
+    {
+        AddressMode = GuestRemotingAddressMode.QemuUserNat,
+        UseSsl = true,
+        SkipCertificateChecks = true
+    };
+}
+
+/// <summary>
+/// Provider-specific Windows PowerShell remoting endpoint. Configured mode can
+/// fall back to the legacy shared fields in <see cref="GuestConfig"/>.
+/// </summary>
+public sealed record GuestRemotingConfig
+{
+    public GuestRemotingAddressMode AddressMode { get; init; } = GuestRemotingAddressMode.Configured;
+
+    public string? Address { get; init; }
+
+    public string Authentication { get; init; } = "Negotiate";
+
+    public bool UseSsl { get; init; }
+
+    public int Port { get; init; }
+
+    public bool SkipCertificateChecks { get; init; }
+}
+
+/// <summary>
 /// Guest operating system settings used by PowerShell Direct and the agent.
 /// Inputs intentionally reference a secret name instead of a password,
 /// processing avoids storing credentials in git, and the values are returned
@@ -71,6 +195,20 @@ public sealed record GuestConfig
     public string AgentExecutableName { get; init; } = "KSword.Sandbox.Agent.exe";
 
     public bool EnablePowerShellDirect { get; init; } = true;
+
+    /// <summary>
+    /// DNS name or IP used by VMware and QEMU guests for Windows PowerShell
+    /// remoting. Hyper-V ignores this field and uses PowerShell Direct.
+    /// </summary>
+    public string? PowerShellRemotingAddress { get; init; }
+
+    public string PowerShellRemotingAuthentication { get; init; } = "Negotiate";
+
+    public bool PowerShellRemotingUseSsl { get; init; }
+
+    public int PowerShellRemotingPort { get; init; }
+
+    public bool PowerShellRemotingSkipCertificateChecks { get; init; }
 }
 
 /// <summary>
@@ -83,6 +221,8 @@ public sealed record AnalysisConfig
     public int DefaultDurationSeconds { get; init; } = 120;
 
     public int MaxDurationSeconds { get; init; } = 900;
+
+    public int GuestReadyTimeoutSeconds { get; init; } = 180;
 
     public bool DurationUnlimited { get; init; }
 

@@ -2,6 +2,7 @@ using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Core.Artifacts;
 using KSword.Sandbox.Core.Configuration;
+using KSword.Sandbox.Core.Execution;
 using System.Text.Json;
 
 internal static partial class ProgramMain
@@ -19,16 +20,30 @@ internal static partial class ProgramMain
         var duration = ParseNonNegativeInt(
             GetOption(options, "duration", GetOption(options, "duration-seconds", context.Config.Analysis.DefaultDurationSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture))),
             "duration");
+        var guestReadyTimeoutSeconds = ParsePositiveInt(
+            GetOption(options, "guest-ready-timeout-seconds", context.Config.Analysis.GuestReadyTimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            "guest-ready-timeout-seconds");
         var displayName = GetOption(options, "display-name", Path.GetFileName(samplePath));
+        var provider = ParseVirtualizationProvider(GetOption(options, "provider", context.Config.Virtualization.Provider.ToString()));
+        ValidateProviderResourceOverrides(options, context.Config, provider);
+        var configuredVmName = GetConfiguredVmName(context.Config, provider);
+        var configuredSnapshotName = GetConfiguredSnapshotName(context.Config, provider);
+        var machineDefinitionPath = GetProviderMachineDefinitionPath(options, context.Config, provider);
         var service = CreateService(context);
         var job = service.Plan(new SandboxSubmission
         {
             SamplePath = samplePath,
             DisplayName = displayName,
             DurationSeconds = duration,
+            GuestReadyTimeoutSeconds = guestReadyTimeoutSeconds,
             DryRun = true,
-            GoldenVmName = GetOption(options, "vm", context.Config.HyperV.GoldenVmName),
-            GoldenSnapshotName = GetOption(options, "checkpoint", context.Config.HyperV.GoldenSnapshotName),
+            Provider = provider,
+            GoldenVmName = GetOption(options, "vm", configuredVmName),
+            GoldenSnapshotName = GetOption(options, "baseline", GetOption(options, "checkpoint", configuredSnapshotName)),
+            MachineDefinitionPath = machineDefinitionPath,
+            QemuDiskFormat = provider is VirtualizationProvider.Qemu
+                ? GetOption(options, "qemu-disk-format", context.Config.Qemu.DiskFormat)
+                : null,
             GuestUserName = GetOption(options, "guest-user", context.Config.Guest.UserName),
             GuestWorkingDirectory = GetOption(options, "guest-root", context.Config.Guest.WorkingDirectory),
             GuestPayloadRoot = GetOption(options, "guest-payload-root", context.Config.Paths.GuestPayloadRoot),
@@ -37,6 +52,12 @@ internal static partial class ProgramMain
 
         var jobRoot = Path.Combine(ResolveRuntimeRoot(options, context.Config), "jobs", job.JobId.ToString("N"));
         var artifactIndexPath = Path.Combine(jobRoot, HostArtifactIndexBuilder.IndexFileName);
+        var planPath = ResolvePlanOutputPath(options, context.RepositoryRoot);
+        var effectiveProvider = job.Runbook?.Provider ?? provider;
+        var effectiveVmName = job.Runbook?.TargetVmName ?? job.Submission.GoldenVmName;
+        var effectiveBaselineName = job.Runbook?.BaselineName ?? job.Submission.GoldenSnapshotName;
+        var effectiveMachineDefinitionPath = job.Runbook?.MachineDefinitionPath ?? job.Submission.MachineDefinitionPath;
+        var effectiveQemuDiskFormat = job.Runbook?.QemuDiskFormat ?? job.Submission.QemuDiskFormat;
         var result = new
         {
             contractVersion = 1,
@@ -48,17 +69,30 @@ internal static partial class ProgramMain
             samplePath,
             displayName,
             durationSeconds = duration,
+            guestReadyTimeoutSeconds,
+            provider = effectiveProvider.ToString(),
+            vmName = effectiveVmName,
+            baselineName = effectiveBaselineName,
+            checkpointName = effectiveBaselineName,
+            machineDefinitionPath = effectiveMachineDefinitionPath,
+            qemuDiskFormat = effectiveQemuDiskFormat,
             runbookStepCount = job.Runbook?.Steps.Count,
             jsonReportPath = job.JsonReportPath,
             htmlReportPath = job.HtmlReportPath,
             htmlReportZhPath = job.HtmlReportZhPath,
             htmlReportEnPath = job.HtmlReportEnPath,
             artifactIndexPath,
+            planPath,
             vmAction = "none",
             operatorMessage = "已生成干跑计划产物，未启动或修改 VM。/ Dry-run plan artifacts were generated without starting or mutating a VM.",
             messages = job.Messages,
             secretValuePrinted = false
         };
+
+        if (!string.IsNullOrWhiteSpace(planPath))
+        {
+            WriteJsonFile(planPath, result);
+        }
 
         if (GetBool(options, "json"))
         {
@@ -71,11 +105,430 @@ internal static partial class ProgramMain
         Console.WriteLine($"状态 / Status: {FormatStatusForHuman(job.Status.ToString())}");
         Console.WriteLine("VM 操作 / VM action: 无 / none");
         Console.WriteLine($"样本 / Sample: {Safe(samplePath)}");
+        Console.WriteLine($"虚拟化后端 / Provider: {effectiveProvider}");
+        Console.WriteLine($"VM: {Safe(effectiveVmName)}");
+        Console.WriteLine($"干净基线 / Clean baseline: {Safe(effectiveBaselineName)}");
+        if (effectiveProvider is not VirtualizationProvider.HyperV)
+        {
+            Console.WriteLine($"虚拟机定义 / Machine definition: {Safe(effectiveMachineDefinitionPath)}");
+        }
+        if (effectiveProvider is VirtualizationProvider.Qemu)
+        {
+            Console.WriteLine($"QEMU 磁盘格式 / Disk format: {Safe(effectiveQemuDiskFormat)}");
+        }
         Console.WriteLine($"任务目录 / Job root: {Safe(jobRoot)}");
+        if (!string.IsNullOrWhiteSpace(planPath))
+        {
+            Console.WriteLine($"计划结果 / Plan result: {FormatPathForHuman(planPath)}");
+        }
         Console.WriteLine($"JSON 报告 / Report JSON: {FormatPathForHuman(job.JsonReportPath)}");
         Console.WriteLine($"HTML 报告 / Report HTML: {FormatPathForHuman(job.HtmlReportPath)}");
         Console.WriteLine($"运行步骤 / Runbook steps: {job.Runbook?.Steps.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "未知 / unknown"}");
         return 0;
+    }
+
+    private static async Task<int> ExecuteJobAsync(JobToolOptions options)
+    {
+        var context = CreateContext(options);
+        var sampleOption = GetOption(options, "sample", GetOption(options, "sample-path", string.Empty));
+        if (string.IsNullOrWhiteSpace(sampleOption))
+        {
+            throw new ArgumentException("execute 缺少必需参数 --sample <path>。/ Missing required --sample <path> for execute.");
+        }
+
+        var samplePath = RequireExistingFile(sampleOption, "sample");
+        var duration = ParseNonNegativeInt(
+            GetOption(options, "duration", GetOption(options, "duration-seconds", context.Config.Analysis.DefaultDurationSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture))),
+            "duration");
+        var guestReadyTimeoutSeconds = ParsePositiveInt(
+            GetOption(options, "guest-ready-timeout-seconds", context.Config.Analysis.GuestReadyTimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            "guest-ready-timeout-seconds");
+        var stepTimeoutSeconds = ParseNonNegativeInt(GetOption(options, "step-timeout-seconds", "1800"), "step-timeout-seconds");
+        var displayName = GetOption(options, "display-name", Path.GetFileName(samplePath));
+        var provider = ParseVirtualizationProvider(GetOption(options, "provider", context.Config.Virtualization.Provider.ToString()));
+        ValidateProviderResourceOverrides(options, context.Config, provider);
+        var live = GetBool(options, "live");
+        if (live && stepTimeoutSeconds > 0 && stepTimeoutSeconds < guestReadyTimeoutSeconds)
+        {
+            throw new ArgumentException(
+                $"--step-timeout-seconds ({stepTimeoutSeconds}) 不能小于 --guest-ready-timeout-seconds ({guestReadyTimeoutSeconds})；否则 guest transport 等待会被提前终止。/ Step timeout must be zero (unlimited) or at least the guest readiness timeout.");
+        }
+        var importGuestEvents = !GetBool(options, "skip-guest-import") && !GetBool(options, "no-import-guest-events");
+        var configuredVmName = GetConfiguredVmName(context.Config, provider);
+        var configuredSnapshotName = GetConfiguredSnapshotName(context.Config, provider);
+        var machineDefinitionPath = GetProviderMachineDefinitionPath(options, context.Config, provider);
+        var service = CreateService(context);
+        var job = service.Plan(new SandboxSubmission
+        {
+            SamplePath = samplePath,
+            DisplayName = displayName,
+            DurationSeconds = duration,
+            GuestReadyTimeoutSeconds = guestReadyTimeoutSeconds,
+            DryRun = !live,
+            Provider = provider,
+            GoldenVmName = GetOption(options, "vm", configuredVmName),
+            GoldenSnapshotName = GetOption(options, "baseline", GetOption(options, "checkpoint", configuredSnapshotName)),
+            MachineDefinitionPath = machineDefinitionPath,
+            QemuDiskFormat = provider is VirtualizationProvider.Qemu
+                ? GetOption(options, "qemu-disk-format", context.Config.Qemu.DiskFormat)
+                : null,
+            GuestUserName = GetOption(options, "guest-user", context.Config.Guest.UserName),
+            GuestWorkingDirectory = GetOption(options, "guest-root", context.Config.Guest.WorkingDirectory),
+            GuestPayloadRoot = GetOption(options, "guest-payload-root", context.Config.Paths.GuestPayloadRoot),
+            UseMockCollector = GetNullableBool(options, "use-mock-collector"),
+            CollectDroppedFiles = GetNullableBool(options, "collect-dropped-files"),
+            CaptureScreenshots = GetNullableBool(options, "capture-screenshots"),
+            CaptureMemoryDumps = GetNullableBool(options, "capture-memory-dumps"),
+            CapturePacketCapture = GetNullableBool(options, "capture-packet-capture")
+        });
+
+        if (job.Runbook is null)
+        {
+            throw new InvalidOperationException($"任务 {job.JobId:D} 没有可执行流程。/ Job does not have an executable runbook.");
+        }
+
+        var runbookEnvironment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        if (live)
+        {
+            var secretName = string.IsNullOrWhiteSpace(context.Config.Guest.PasswordSecretName)
+                ? "KSWORDBOX_GUEST_PASSWORD"
+                : context.Config.Guest.PasswordSecretName.Trim();
+            if (!TryLoadGuestSecretIntoProcess(secretName))
+            {
+                throw new InvalidOperationException($"实时分析需要环境变量 '{secretName}'；变量值不会被输出。/ Live execution requires environment variable '{secretName}'; its value is never printed.");
+            }
+            runbookEnvironment[secretName] = Environment.GetEnvironmentVariable(secretName, EnvironmentVariableTarget.Process);
+        }
+
+        string? lastProgressKey = null;
+        var progressSink = new InlineProgress<SandboxRunbookProgressSnapshot>(snapshot =>
+        {
+            service.SaveRunbookProgressSnapshot(snapshot);
+            if (GetBool(options, "json"))
+            {
+                return;
+            }
+
+            var progressKey = $"{snapshot.State}|{snapshot.CurrentStepIndex}|{snapshot.CompletedSteps}|{snapshot.ProgressPercent}";
+            if (string.Equals(progressKey, lastProgressKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            lastProgressKey = progressKey;
+            var current = string.IsNullOrWhiteSpace(snapshot.CurrentStepTitle)
+                ? snapshot.Message
+                : snapshot.CurrentStepTitle;
+            Console.WriteLine($"[{snapshot.ProgressPercent,3}%] {Safe(snapshot.State)} | {Safe(current)}");
+        });
+
+        using var cancellation = new CancellationTokenSource();
+        ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            cancellation.Cancel();
+        };
+        Console.CancelKeyPress += cancelHandler;
+
+        SandboxRunbookExecutionResult execution;
+        AnalysisJob updatedJob;
+        var guestImportSucceeded = false;
+        var guestImportSkipped = false;
+        var guestImportFailed = false;
+        string? guestImportMessage = null;
+        try
+        {
+            execution = await new PowerShellRunbookExecutor().ExecuteAsync(
+                job.Runbook,
+                new SandboxRunbookExecutionOptions
+                {
+                    Mode = live ? SandboxRunbookExecutionMode.Live : SandboxRunbookExecutionMode.DryRun,
+                    PowerShellExecutablePath = GetOption(options, "powershell", "powershell.exe"),
+                    StepTimeout = stepTimeoutSeconds == 0 ? TimeSpan.Zero : TimeSpan.FromSeconds(stepTimeoutSeconds),
+                    WorkingDirectory = context.RepositoryRoot,
+                    RequireElevatedPowerShell = true,
+                    EnvironmentVariables = runbookEnvironment,
+                    ProgressSink = progressSink
+                },
+                cancellation.Token).ConfigureAwait(false);
+            updatedJob = service.SaveRunbookExecutionResult(job.JobId, execution);
+
+            if (live && execution.Success)
+            {
+                if (!importGuestEvents)
+                {
+                    guestImportSkipped = true;
+                    guestImportMessage = "来宾事件自动导入已按请求跳过。/ Guest event auto-import was skipped by request.";
+                    updatedJob = service.RecordGuestImportSkipped(job.JobId, guestImportMessage);
+                }
+                else
+                {
+                    try
+                    {
+                        updatedJob = service.ImportGuestEvents(job.JobId);
+                        guestImportSucceeded = updatedJob.Status == AnalysisStatus.Completed;
+                        guestImportFailed = !guestImportSucceeded;
+                        guestImportMessage = updatedJob.Messages.LastOrDefault();
+                    }
+                    catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException or InvalidDataException or IOException or UnauthorizedAccessException or JsonException)
+                    {
+                        guestImportFailed = true;
+                        guestImportMessage = $"来宾事件自动导入失败：{ex.Message} / Guest event auto-import failed.";
+                        updatedJob = service.RecordGuestImportFailure(job.JobId, guestImportMessage);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            Console.CancelKeyPress -= cancelHandler;
+        }
+
+        var jobRoot = Path.Combine(ResolveRuntimeRoot(options, context.Config), "jobs", job.JobId.ToString("N"));
+        var failedStep = execution.WasCanceled
+            ? execution.StepResults.FirstOrDefault(step =>
+                !step.Success &&
+                ((step.Message?.Contains("canceled", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                 (step.Message?.Contains("cancelled", StringComparison.OrdinalIgnoreCase) ?? false)))
+            : execution.FailedStepIndex is int failedIndex
+                ? execution.StepResults.FirstOrDefault(step => step.StepIndex == failedIndex)
+                : execution.StepResults.LastOrDefault(step => !step.Success);
+        var safeSteps = execution.StepResults.Select(step => new
+        {
+            step.StepIndex,
+            step.StepId,
+            step.Title,
+            step.Success,
+            step.Skipped,
+            step.ExitCode,
+            step.Duration,
+            step.Message
+        }).ToArray();
+        var effectiveProvider = execution.Provider;
+        var effectiveVmName = execution.TargetVmName;
+        var effectiveBaselineName = execution.BaselineName ?? job.Runbook.BaselineName ?? job.Submission.GoldenSnapshotName;
+        var effectiveMachineDefinitionPath = execution.MachineDefinitionPath ?? job.Runbook.MachineDefinitionPath ?? job.Submission.MachineDefinitionPath;
+        var effectiveQemuDiskFormat = execution.QemuDiskFormat ?? job.Runbook.QemuDiskFormat ?? job.Submission.QemuDiskFormat;
+        var result = new
+        {
+            contractVersion = 1,
+            kind = "KSwordSandbox.ExecutionResult",
+            command = "execute",
+            status = updatedJob.Status.ToString(),
+            jobId = job.JobId,
+            jobRoot,
+            provider = effectiveProvider.ToString(),
+            vmName = effectiveVmName,
+            baselineName = effectiveBaselineName,
+            checkpointName = effectiveBaselineName,
+            machineDefinitionPath = effectiveMachineDefinitionPath,
+            qemuDiskFormat = effectiveQemuDiskFormat,
+            mode = execution.Mode.ToString(),
+            executionState = execution.Success ? "Completed" : execution.WasCanceled ? "Canceled" : "Failed",
+            execution.WasCanceled,
+            guestReadyTimeoutSeconds,
+            stepTimeoutSeconds,
+            execution.Success,
+            execution.TotalSteps,
+            execution.ExecutedSteps,
+            execution.FailedStepIndex,
+            failedStepId = failedStep?.StepId,
+            failedStepTitle = failedStep?.Title,
+            execution.Message,
+            runbookExecutionPath = updatedJob.RunbookExecutionResultPath,
+            guestEventsPath = updatedJob.GuestEventsPath,
+            guestImportSucceeded,
+            guestImportSkipped,
+            guestImportFailed,
+            guestImportMessage,
+            jsonReportPath = updatedJob.JsonReportPath,
+            htmlReportPath = updatedJob.HtmlReportPath,
+            htmlReportZhPath = updatedJob.HtmlReportZhPath,
+            htmlReportEnPath = updatedJob.HtmlReportEnPath,
+            steps = safeSteps,
+            secretValuePrinted = false
+        };
+
+        if (GetBool(options, "json"))
+        {
+            WriteJson(result);
+        }
+        else
+        {
+            Console.WriteLine("执行结果 / KSword Sandbox execution");
+            Console.WriteLine($"JobId : {job.JobId:D}");
+            Console.WriteLine($"Provider : {effectiveProvider}");
+            Console.WriteLine($"VM : {Safe(effectiveVmName)}");
+            Console.WriteLine($"Baseline : {Safe(effectiveBaselineName)}");
+            if (effectiveProvider is not VirtualizationProvider.HyperV)
+            {
+                Console.WriteLine($"MachineDefinition : {Safe(effectiveMachineDefinitionPath)}");
+            }
+            if (effectiveProvider is VirtualizationProvider.Qemu)
+            {
+                Console.WriteLine($"QemuDiskFormat : {Safe(effectiveQemuDiskFormat)}");
+            }
+            Console.WriteLine($"Mode : {execution.Mode}");
+            Console.WriteLine($"ExecutionState : {(execution.Success ? "Completed" : execution.WasCanceled ? "Canceled" : "Failed")}");
+            Console.WriteLine($"Success : {execution.Success && !guestImportFailed}");
+            Console.WriteLine($"Status : {updatedJob.Status}");
+            if (!string.IsNullOrWhiteSpace(execution.Message))
+            {
+                Console.WriteLine($"Message : {Safe(execution.Message)}");
+            }
+            Console.WriteLine($"JobRoot : {Safe(jobRoot)}");
+            Console.WriteLine($"RunbookExecutionPath : {FormatPathForHuman(updatedJob.RunbookExecutionResultPath)}");
+            Console.WriteLine($"ReportJsonPath : {FormatPathForHuman(updatedJob.JsonReportPath)}");
+            Console.WriteLine($"ReportHtmlPath : {FormatPathForHuman(updatedJob.HtmlReportPath)}");
+            if (failedStep is not null)
+            {
+                Console.WriteLine($"FailedStep : {Safe(failedStep.StepId)} | {Safe(failedStep.Title)}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(guestImportMessage))
+            {
+                Console.WriteLine($"GuestImport : {Safe(guestImportMessage)}");
+            }
+        }
+
+        return execution.Success && !guestImportFailed ? 0 : 1;
+    }
+
+    private static bool TryLoadGuestSecretIntoProcess(string secretName)
+    {
+        var processValue = Environment.GetEnvironmentVariable(secretName, EnvironmentVariableTarget.Process);
+        if (!string.IsNullOrWhiteSpace(processValue))
+        {
+            return true;
+        }
+
+        foreach (var scope in new[] { EnvironmentVariableTarget.User, EnvironmentVariableTarget.Machine })
+        {
+            try
+            {
+                var value = Environment.GetEnvironmentVariable(secretName, scope);
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                Environment.SetEnvironmentVariable(secretName, value, EnvironmentVariableTarget.Process);
+                return true;
+            }
+            catch (System.Security.SecurityException)
+            {
+                // Continue to the next scope without exposing a secret value.
+            }
+        }
+
+        return false;
+    }
+
+    private static VirtualizationProvider ParseVirtualizationProvider(string value)
+    {
+        if (Enum.TryParse<VirtualizationProvider>(value, ignoreCase: true, out var provider) && Enum.IsDefined(provider))
+        {
+            return provider;
+        }
+
+        throw new ArgumentException($"不支持虚拟化后端 '{value}'；应为 HyperV、VMware 或 Qemu。/ Unsupported provider '{value}'; expected HyperV, VMware, or Qemu.");
+    }
+
+    private static void ValidateProviderResourceOverrides(
+        JobToolOptions options,
+        SandboxConfig config,
+        VirtualizationProvider provider)
+    {
+        var baseline = GetOption(options, "baseline", GetOption(options, "checkpoint", string.Empty));
+        var genericMachinePath = GetOption(options, "machine-definition-path", string.Empty);
+        var vmxPath = GetOption(options, "vmx-path", string.Empty);
+        var diskImagePath = GetOption(options, "disk-image-path", string.Empty);
+        var qemuDiskFormat = GetOption(options, "qemu-disk-format", string.Empty);
+        var hasMachinePath = !string.IsNullOrWhiteSpace(genericMachinePath) ||
+            !string.IsNullOrWhiteSpace(vmxPath) ||
+            !string.IsNullOrWhiteSpace(diskImagePath);
+
+        if (options.Values.ContainsKey("baseline") &&
+            options.Values.ContainsKey("checkpoint") &&
+            !string.Equals(
+                GetOption(options, "baseline", string.Empty).Trim(),
+                GetOption(options, "checkpoint", string.Empty).Trim(),
+                StringComparison.Ordinal))
+        {
+            throw new ArgumentException("--baseline 与 legacy --checkpoint 不能指定不同值。/ --baseline and legacy --checkpoint cannot specify different values.");
+        }
+
+        if (provider is VirtualizationProvider.HyperV && hasMachinePath)
+        {
+            throw new ArgumentException("HyperV 不接受 machine-definition/vmx/disk-image 路径覆盖；请使用 --vm 选择 Hyper-V VM。/ HyperV does not accept a machine-definition path override.");
+        }
+        if (provider is VirtualizationProvider.VMware && !string.IsNullOrWhiteSpace(diskImagePath))
+        {
+            throw new ArgumentException("VMware 不接受 --disk-image-path；请使用 --machine-definition-path 或 --vmx-path。/ VMware requires a VMX path override.");
+        }
+        if (provider is VirtualizationProvider.Qemu && !string.IsNullOrWhiteSpace(vmxPath))
+        {
+            throw new ArgumentException("Qemu 不接受 --vmx-path；请使用 --machine-definition-path 或 --disk-image-path。/ Qemu requires a disk image path override.");
+        }
+        if (provider is not VirtualizationProvider.Qemu && !string.IsNullOrWhiteSpace(qemuDiskFormat))
+        {
+            throw new ArgumentException($"--qemu-disk-format 只适用于 Qemu，当前 provider 为 {provider}。/ --qemu-disk-format is valid only for Qemu.");
+        }
+
+        var providerSpecificPath = provider is VirtualizationProvider.VMware ? vmxPath : diskImagePath;
+        if (!string.IsNullOrWhiteSpace(genericMachinePath) &&
+            !string.IsNullOrWhiteSpace(providerSpecificPath) &&
+            !string.Equals(genericMachinePath.Trim(), providerSpecificPath.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("通用 machine-definition 路径与 provider 专属路径不能指定不同值。/ Generic and provider-specific machine paths cannot disagree.");
+        }
+
+        if (provider is VirtualizationProvider.Qemu &&
+            config.Qemu.UseOverlayDisk &&
+            !string.IsNullOrWhiteSpace(baseline) &&
+            !string.Equals(baseline.Trim(), "per-job-overlay", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("当前 QEMU profile 使用 per-job overlay；不能把 --baseline 当作内部 snapshot。请省略该参数、使用 per-job-overlay，或先关闭 qemu.useOverlayDisk。/ QEMU overlay mode does not accept an internal snapshot baseline override.");
+        }
+    }
+
+    private static string GetConfiguredVmName(SandboxConfig config, VirtualizationProvider provider)
+    {
+        return provider switch
+        {
+            VirtualizationProvider.VMware => config.VMware.VmName,
+            VirtualizationProvider.Qemu => config.Qemu.VmName,
+            _ => config.HyperV.GoldenVmName
+        };
+    }
+
+    private static string GetConfiguredSnapshotName(SandboxConfig config, VirtualizationProvider provider)
+    {
+        return provider switch
+        {
+            VirtualizationProvider.VMware => config.VMware.SnapshotName,
+            VirtualizationProvider.Qemu => config.Qemu.UseOverlayDisk ? string.Empty : config.Qemu.SnapshotName,
+            _ => config.HyperV.GoldenSnapshotName
+        };
+    }
+
+    private static string? GetProviderMachineDefinitionPath(
+        JobToolOptions options,
+        SandboxConfig config,
+        VirtualizationProvider provider)
+    {
+        return provider switch
+        {
+            VirtualizationProvider.VMware => GetOption(
+                options,
+                "vmx-path",
+                GetOption(options, "machine-definition-path", config.VMware.VmxPath)),
+            VirtualizationProvider.Qemu => GetOption(
+                options,
+                "disk-image-path",
+                GetOption(options, "machine-definition-path", config.Qemu.DiskImagePath)),
+            _ => null
+        };
     }
 
     private static int RecoverJob(JobToolOptions options)
@@ -113,6 +566,12 @@ internal static partial class ProgramMain
             rebuildEventInput = ResolveEventInput(options, locator.JobRoot, locator.JobId, allowFailureSkeleton: true);
             var runbookExecutionPath = ResolveRunbookExecutionPath(options, locator.JobRoot);
             var duration = ParseNonNegativeInt(GetOption(options, "duration", GetOption(options, "duration-seconds", "120")), "duration");
+            var provider = ResolvePersistedOrConfiguredProvider(options, serviceContext.Config, locator.JobRoot);
+            ValidateProviderResourceOverrides(options, serviceContext.Config, provider);
+            var vmName = ResolvePersistedOrConfiguredVmName(options, serviceContext.Config, locator.JobRoot, provider);
+            var snapshotName = ResolvePersistedOrConfiguredSnapshotName(options, serviceContext.Config, locator.JobRoot, provider);
+            var machineDefinitionPath = ResolvePersistedOrConfiguredMachineDefinitionPath(options, serviceContext.Config, locator.JobRoot, provider);
+            var qemuDiskFormat = ResolvePersistedOrConfiguredQemuDiskFormat(options, serviceContext.Config, locator.JobRoot, provider);
             try
             {
                 rebuiltJob = CreateService(serviceContext).ImportExternalRun(
@@ -123,8 +582,11 @@ internal static partial class ProgramMain
                         DisplayName = GetOption(options, "display-name", Path.GetFileName(samplePath)),
                         DurationSeconds = duration,
                         DryRun = false,
-                        GoldenVmName = GetOption(options, "vm", string.Empty),
-                        GoldenSnapshotName = GetOption(options, "checkpoint", string.Empty)
+                        Provider = provider,
+                        GoldenVmName = vmName,
+                        GoldenSnapshotName = snapshotName,
+                        MachineDefinitionPath = machineDefinitionPath,
+                        QemuDiskFormat = qemuDiskFormat
                     },
                     rebuildEventInput.Path,
                     runbookExecutionPath);
@@ -136,7 +598,12 @@ internal static partial class ProgramMain
                     runbookExecutionPath,
                     success: true,
                     message: "recover --rebuild-report regenerated report artifacts from existing files only.",
-                    rebuiltJob);
+                    rebuiltJob: rebuiltJob,
+                    provider: provider,
+                    vmName: vmName,
+                    baselineName: snapshotName,
+                    machineDefinitionPath: machineDefinitionPath,
+                    qemuDiskFormat: qemuDiskFormat);
             }
             catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or DirectoryNotFoundException or InvalidOperationException or JsonException or IOException or UnauthorizedAccessException or KeyNotFoundException or FormatException)
             {
@@ -147,7 +614,12 @@ internal static partial class ProgramMain
                     rebuildEventInput,
                     runbookExecutionPath,
                     success: false,
-                    message: ex.Message);
+                    message: ex.Message,
+                    provider: provider,
+                    vmName: vmName,
+                    baselineName: snapshotName,
+                    machineDefinitionPath: machineDefinitionPath,
+                    qemuDiskFormat: qemuDiskFormat);
                 throw new InvalidOperationException($"恢复报告重建失败，诊断已写入 {reportRebuildDiagnosticsPath}。/ Recover report rebuild failed; diagnostics were written to {reportRebuildDiagnosticsPath}. {ex.Message}", ex);
             }
             summary = BuildJobSummary(locator.JobRoot, buildArtifactIndex: true);
@@ -208,6 +680,18 @@ internal static partial class ProgramMain
         Console.WriteLine($"任务 ID / Job ID: {locator.JobId:D}");
         Console.WriteLine($"任务目录 / Job root: {Safe(locator.JobRoot)}");
         Console.WriteLine("VM 操作 / VM action: 无 / none");
+        Console.WriteLine($"虚拟化后端 / Provider: {Safe(summary.Provider)}");
+        Console.WriteLine($"VM: {FormatTextOrNone(summary.TargetVmName)} | Baseline: {FormatTextOrNone(summary.BaselineName)}");
+        if (!string.IsNullOrWhiteSpace(summary.MachineDefinitionPath))
+        {
+            Console.WriteLine($"虚拟机定义 / Machine definition: {Safe(summary.MachineDefinitionPath)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(summary.QemuDiskFormat))
+        {
+            Console.WriteLine($"QEMU 磁盘格式 / Disk format: {Safe(summary.QemuDiskFormat)}");
+        }
+
         Console.WriteLine($"恢复状态 / Recovered state: {FormatRecoveryStateForHuman(recoveryAssessment.State)}");
         Console.WriteLine($"失败原因 / Failure reason: {FormatTextOrNone(recoveryAssessment.FailureReason)}");
         Console.WriteLine("建议操作 / Recommended actions:");
@@ -385,7 +869,8 @@ internal static partial class ProgramMain
         foreach (var summary in summaries)
         {
             var id = summary.JobId?.ToString("D") ?? "未知 / unknown";
-            Console.WriteLine($"- {id} | {FormatStatusForHuman(summary.Status)} | {FormatNameForHuman(summary.SampleName)}");
+            Console.WriteLine($"- {id} | {Safe(summary.Provider)} | {FormatStatusForHuman(summary.Status)} | {FormatNameForHuman(summary.SampleName)}");
+            Console.WriteLine($"  VM: {FormatTextOrNone(summary.TargetVmName)} | Baseline: {FormatTextOrNone(summary.BaselineName)}");
             Console.WriteLine($"  目录 / Root: {Safe(summary.JobRoot)}");
             Console.WriteLine($"  更新时间 / Updated: {FormatDate(summary.LastWriteUtc)} | 事件 / Events: {FormatNullable(summary.ReportEventCount)} | 命中 / Findings: {FormatNullable(summary.FindingCount)} | 已索引产物 / Indexed artifacts: {FormatNullable(summary.ArtifactCount)}");
         }
@@ -424,6 +909,19 @@ internal static partial class ProgramMain
         Console.WriteLine("任务详情 / KSword Sandbox job");
         Console.WriteLine($"任务 ID / Job ID: {locator.JobId:D}");
         Console.WriteLine($"状态 / Status: {FormatStatusForHuman(summary.Status)}");
+        Console.WriteLine($"虚拟化后端 / Provider: {Safe(summary.Provider)}");
+        Console.WriteLine($"VM: {FormatTextOrNone(summary.TargetVmName)}");
+        Console.WriteLine($"干净基线 / Clean baseline: {FormatTextOrNone(summary.BaselineName)}");
+        if (!string.IsNullOrWhiteSpace(summary.MachineDefinitionPath))
+        {
+            Console.WriteLine($"虚拟机定义 / Machine definition: {Safe(summary.MachineDefinitionPath)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(summary.QemuDiskFormat))
+        {
+            Console.WriteLine($"QEMU 磁盘格式 / Disk format: {Safe(summary.QemuDiskFormat)}");
+        }
+
         Console.WriteLine($"样本 / Sample: {FormatNameForHuman(summary.SampleName)}");
         if (!string.IsNullOrWhiteSpace(summary.SampleSha256))
         {
@@ -475,6 +973,12 @@ internal static partial class ProgramMain
         var runbookExecutionPath = ResolveRunbookExecutionPath(options, locator.JobRoot);
         var duration = ParseNonNegativeInt(GetOption(options, "duration", GetOption(options, "duration-seconds", "120")), "duration");
         var displayName = GetOption(options, "display-name", Path.GetFileName(samplePath));
+        var provider = ResolvePersistedOrConfiguredProvider(options, context.Config, locator.JobRoot);
+        ValidateProviderResourceOverrides(options, context.Config, provider);
+        var vmName = ResolvePersistedOrConfiguredVmName(options, context.Config, locator.JobRoot, provider);
+        var snapshotName = ResolvePersistedOrConfiguredSnapshotName(options, context.Config, locator.JobRoot, provider);
+        var machineDefinitionPath = ResolvePersistedOrConfiguredMachineDefinitionPath(options, context.Config, locator.JobRoot, provider);
+        var qemuDiskFormat = ResolvePersistedOrConfiguredQemuDiskFormat(options, context.Config, locator.JobRoot, provider);
         var service = CreateService(context);
         AnalysisJob job;
         string reportRebuildDiagnosticsPath;
@@ -488,8 +992,11 @@ internal static partial class ProgramMain
                     DisplayName = displayName,
                     DurationSeconds = duration,
                     DryRun = false,
-                    GoldenVmName = GetOption(options, "vm", string.Empty),
-                    GoldenSnapshotName = GetOption(options, "checkpoint", string.Empty)
+                    Provider = provider,
+                    GoldenVmName = vmName,
+                    GoldenSnapshotName = snapshotName,
+                    MachineDefinitionPath = machineDefinitionPath,
+                    QemuDiskFormat = qemuDiskFormat
                 },
                 eventInput.Path,
                 runbookExecutionPath);
@@ -501,7 +1008,12 @@ internal static partial class ProgramMain
                 runbookExecutionPath,
                 success: true,
                 message: "Report rebuilt without starting or mutating the VM.",
-                job);
+                rebuiltJob: job,
+                provider: provider,
+                vmName: vmName,
+                baselineName: snapshotName,
+                machineDefinitionPath: machineDefinitionPath,
+                qemuDiskFormat: qemuDiskFormat);
         }
         catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or DirectoryNotFoundException or InvalidOperationException or JsonException or IOException or UnauthorizedAccessException or KeyNotFoundException or FormatException)
         {
@@ -512,7 +1024,12 @@ internal static partial class ProgramMain
                 eventInput,
                 runbookExecutionPath,
                 success: false,
-                message: ex.Message);
+                message: ex.Message,
+                provider: provider,
+                vmName: vmName,
+                baselineName: snapshotName,
+                machineDefinitionPath: machineDefinitionPath,
+                qemuDiskFormat: qemuDiskFormat);
             throw new InvalidOperationException($"报告重建失败，诊断已写入 {reportRebuildDiagnosticsPath}。/ Report rebuild failed; diagnostics were written to {reportRebuildDiagnosticsPath}. {ex.Message}", ex);
         }
 
@@ -526,6 +1043,11 @@ internal static partial class ProgramMain
             status = job.Status.ToString(),
             jobId = job.JobId,
             jobRoot = locator.JobRoot,
+            provider = job.Runbook?.Provider.ToString() ?? provider.ToString(),
+            vmName = job.Runbook?.TargetVmName ?? vmName,
+            baselineName = job.Runbook?.BaselineName ?? snapshotName,
+            machineDefinitionPath = job.Runbook?.MachineDefinitionPath ?? machineDefinitionPath,
+            qemuDiskFormat = job.Runbook?.QemuDiskFormat ?? qemuDiskFormat,
             samplePath,
             guestEventsPath = job.GuestEventsPath,
             runbookExecutionResultPath = job.RunbookExecutionResultPath,
@@ -552,6 +1074,19 @@ internal static partial class ProgramMain
         Console.WriteLine("报告重建 / KSword Sandbox report rebuild");
         Console.WriteLine($"任务 ID / Job ID: {job.JobId:D}");
         Console.WriteLine($"状态 / Status: {FormatStatusForHuman(job.Status.ToString())}");
+        Console.WriteLine($"虚拟化后端 / Provider: {job.Runbook?.Provider.ToString() ?? provider.ToString()}");
+        Console.WriteLine($"VM: {Safe(job.Runbook?.TargetVmName ?? vmName)}");
+        Console.WriteLine($"干净基线 / Clean baseline: {Safe(job.Runbook?.BaselineName ?? snapshotName)}");
+        if (!string.IsNullOrWhiteSpace(job.Runbook?.MachineDefinitionPath ?? machineDefinitionPath))
+        {
+            Console.WriteLine($"虚拟机定义 / Machine definition: {Safe(job.Runbook?.MachineDefinitionPath ?? machineDefinitionPath)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.Runbook?.QemuDiskFormat ?? qemuDiskFormat))
+        {
+            Console.WriteLine($"QEMU 磁盘格式 / Disk format: {Safe(job.Runbook?.QemuDiskFormat ?? qemuDiskFormat)}");
+        }
+
         Console.WriteLine("VM 操作 / VM action: 无 / none");
         Console.WriteLine($"事件源 / Events: {Safe(job.GuestEventsPath ?? eventInput.Path)}");
         if (eventInput.CreatedFailureSkeleton)

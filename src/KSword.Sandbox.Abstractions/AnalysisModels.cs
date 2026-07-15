@@ -42,11 +42,32 @@ public sealed record SandboxSubmission
     /// </summary>
     public bool DurationUnlimited { get; init; }
 
+    /// <summary>
+    /// Optional per-job timeout for establishing the guest PowerShell session
+    /// after VM startup. Applies equally to PowerShell Direct and WinRM.
+    /// </summary>
+    public int? GuestReadyTimeoutSeconds { get; init; }
+
     public bool DryRun { get; init; } = true;
+
+    public VirtualizationProvider? Provider { get; init; }
 
     public string? GoldenVmName { get; init; }
 
     public string? GoldenSnapshotName { get; init; }
+
+    /// <summary>
+    /// Optional provider machine definition for this job. VMware interprets
+    /// this as a VMX path and QEMU as a disk image path; Hyper-V continues to
+    /// identify the target through <see cref="GoldenVmName"/>.
+    /// </summary>
+    public string? MachineDefinitionPath { get; init; }
+
+    /// <summary>
+    /// Optional QEMU disk format paired with <see cref="MachineDefinitionPath"/>.
+    /// Ignored by the Hyper-V and VMware providers.
+    /// </summary>
+    public string? QemuDiskFormat { get; init; }
 
     public string? GuestUserName { get; init; }
 
@@ -179,6 +200,35 @@ public sealed record BehaviorFinding
 public sealed record AnalysisReport
 {
     public required Guid JobId { get; init; }
+
+    public VirtualizationProvider? Provider { get; init; }
+
+    /// <summary>
+    /// Effective provider VM target used for this analysis. Older reports leave
+    /// this null because they predate provider resource identity persistence.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TargetVmName { get; init; }
+
+    /// <summary>
+    /// Effective clean checkpoint, snapshot, or overlay baseline selected by the
+    /// provider for this analysis.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BaselineName { get; init; }
+
+    /// <summary>
+    /// Effective VMware VMX or QEMU base-disk path. Hyper-V reports normally
+    /// leave this null because the VM name identifies the managed resource.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineDefinitionPath { get; init; }
+
+    /// <summary>
+    /// Effective QEMU base-disk format, or null for other providers.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? QemuDiskFormat { get; init; }
 
     public required SampleIdentity Sample { get; init; }
 

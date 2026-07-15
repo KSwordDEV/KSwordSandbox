@@ -29,13 +29,13 @@ public sealed record SandboxRunbookExecutionOptions
 {
     /// <summary>
     /// Chooses dry-run or live execution. Dry-run is the default so constructing
-    /// this record never executes Hyper-V commands by accident.
+    /// this record never executes provider VM commands by accident.
     /// </summary>
     public SandboxRunbookExecutionMode Mode { get; init; } = SandboxRunbookExecutionMode.DryRun;
 
     /// <summary>
-    /// PowerShell host to launch in live mode. Hyper-V cmdlets are normally
-    /// available from elevated Windows PowerShell, so the default is powershell.exe.
+    /// PowerShell host to launch in live mode. Provider orchestration targets
+    /// Windows hosts, so the default is powershell.exe.
     /// </summary>
     public string PowerShellExecutablePath { get; init; } = "powershell.exe";
 
@@ -53,7 +53,8 @@ public sealed record SandboxRunbookExecutionOptions
 
     /// <summary>
     /// Requires the hosting process to be elevated before live steps that need
-    /// elevation are launched. Keep this enabled for Hyper-V runbooks.
+    /// elevation are launched. Steps that do not require elevation are not
+    /// blocked by this option.
     /// </summary>
     public bool RequireElevatedPowerShell { get; init; } = true;
 
@@ -157,7 +158,18 @@ public sealed record SandboxRunbookProgressSnapshot
 {
     public required Guid JobId { get; init; }
 
+    /// <summary>
+    /// Virtualization provider copied from the source runbook.
+    /// </summary>
+    public VirtualizationProvider Provider { get; init; } = VirtualizationProvider.HyperV;
+
     public required string TargetVmName { get; init; }
+
+    public string? BaselineName { get; init; }
+
+    public string? MachineDefinitionPath { get; init; }
+
+    public string? QemuDiskFormat { get; init; }
 
     public required SandboxRunbookExecutionMode Mode { get; init; }
 
@@ -299,9 +311,21 @@ public sealed record SandboxRunbookExecutionResult
     public required Guid JobId { get; init; }
 
     /// <summary>
+    /// Virtualization provider copied from the source runbook. The Hyper-V
+    /// default preserves deserialization compatibility with older result files.
+    /// </summary>
+    public VirtualizationProvider Provider { get; init; } = VirtualizationProvider.HyperV;
+
+    /// <summary>
     /// Target VM name copied from the source runbook.
     /// </summary>
     public required string TargetVmName { get; init; }
+
+    public string? BaselineName { get; init; }
+
+    public string? MachineDefinitionPath { get; init; }
+
+    public string? QemuDiskFormat { get; init; }
 
     /// <summary>
     /// Mode used for this attempt.
@@ -313,6 +337,18 @@ public sealed record SandboxRunbookExecutionResult
     /// code 0.
     /// </summary>
     public bool Success { get; init; }
+
+    /// <summary>
+    /// True when execution stopped because an operator cancellation was
+    /// recorded. This is derived from step evidence so older persisted results
+    /// remain compatible and successful cleanup cannot overwrite the terminal
+    /// cancellation fact.
+    /// </summary>
+    public bool WasCanceled => StepResults.Any(step =>
+        !step.Success &&
+        (string.Equals(step.StepId, "cancellation-before-cleanup", StringComparison.OrdinalIgnoreCase) ||
+         (step.Message?.Contains("canceled", StringComparison.OrdinalIgnoreCase) ?? false) ||
+         (step.Message?.Contains("cancelled", StringComparison.OrdinalIgnoreCase) ?? false)));
 
     /// <summary>
     /// Total number of source runbook steps.
@@ -348,8 +384,9 @@ public sealed record SandboxRunbookExecutionResult
     public bool RequiresElevation { get; init; }
 
     /// <summary>
-    /// Captured per-step results. Live mode stops adding source step results
-    /// after the first failure.
+    /// Captured per-step results. After the first failure or cancellation,
+    /// non-cleanup steps are skipped while required cleanup results continue to
+    /// be appended.
     /// </summary>
     public IReadOnlyList<SandboxRunbookStepExecutionResult> StepResults { get; init; } = [];
 
