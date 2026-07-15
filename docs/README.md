@@ -5,7 +5,7 @@
 
 ## 当前 MVP 一段话 / Current MVP in one paragraph
 
-当前 MVP 是本地 Hyper-V 沙箱流程：操作者在 WebUI/API 中选择或本地上传 `.exe`，
+当前 MVP 是本地 Windows 沙箱流程，宿主编排可选择 Hyper-V、VMware 或 QEMU：操作者在 WebUI/API 中选择或本地上传 `.exe`，
 宿主创建 job 计划并执行哈希/静态分析；显式 live 模式会还原/启动准备好的
 Windows 10 golden VM；Guest Agent 和可选 R0Collector 采集 guest/R0 行为；
 WebUI 展示实时进度和原始事件；可选 VirusTotal 只做 hash-only 查询；宿主导入
@@ -50,7 +50,7 @@ runtime job 目录、生成的报告、guest payload 二进制、抓包、内存
 | 项目概览与边界 / Project overview and guardrails | [`../README.md`](../README.md), [`current-architecture-and-operations.md`](current-architecture-and-operations.md) | 根 README 是入口；`current-architecture-and-operations.md` 是 MVP 状态和操作者地图的权威说明。 |
 | 安装、本地配置和密钥 / Install, local config, secrets | [`install.md`](install.md) | 集中说明 guest 密码、VT key 和 VM 配置。 |
 | 日常 WebUI / CLI 入口 / Daily WebUI / CLI entry point | [`run.md`](run.md) | 覆盖 WebUI 启动、Analyze 快捷入口、PlanOnly vs Live、报告重建和 artifact 检查。 |
-| Hyper-V live 操作者流程 / Hyper-V live operator flow | [`hyperv-e2e-runbook.md`](hyperv-e2e-runbook.md), [`hyperv-readiness.md`](hyperv-readiness.md) | 脚本化 PlanOnly/WhatIf/Live 流程和只读预检。 |
+| 虚拟化后端 / Virtualization providers | [`vmware-qemu.md`](vmware-qemu.md), [`hyperv-e2e-runbook.md`](hyperv-e2e-runbook.md), [`hyperv-readiness.md`](hyperv-readiness.md) | VMware/QEMU 配置与通用 Web/API runbook；Hyper-V 专用脚本化 PlanOnly/WhatIf/Live 流程。 |
 | Golden VM 与 payload 暂存 / Golden VM and payload staging | [`golden-vm.md`](golden-vm.md), [`guest-payload-staging.md`](guest-payload-staging.md) | VM baseline 和 guest 工具发布；输出保持在 git 仓库外。 |
 | WebUI/API 验证证据 / WebUI/API validation evidence | [`webui-real-r0-e2e.md`](webui-real-r0-e2e.md), [`verification.md`](verification.md), [`testing.md`](testing.md) | `webui-real-r0-e2e.md` 是当前本地 live 证据记录；verification/testing 用于可重复门禁。 |
 | 证据与报告 / Artifacts and reports | [`artifacts.md`](artifacts.md), [`artifact-manifest.md`](artifact-manifest.md), [`report-schema.md`](report-schema.md), [`report-ux.md`](report-ux.md) | Artifact 存储/索引、报告 JSON/HTML 形状、双语报告 UX 和证据链接。 |

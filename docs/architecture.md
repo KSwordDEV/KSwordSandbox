@@ -1,20 +1,22 @@
 # 架构 / Architecture
 
-KSwordSandbox 是本地 Windows 恶意行为分析沙箱骨架。当前 v1 链路围绕已准备的 Hyper-V Windows 10 guest、host 侧规划与报告、guest 侧采集、可选 R0 遥测，以及仅保存在本机的证据文件构建。
+KSwordSandbox 是本地 Windows 恶意行为分析沙箱骨架。当前 v1 链路围绕已准备的 Hyper-V、VMware 或 QEMU Windows 10 guest、host 侧规划与报告、guest 侧采集、可选 R0 遥测，以及仅保存在本机的证据文件构建。
 
 English summary: KSwordSandbox is a local Windows malware-analysis sandbox scaffold with host planning/reporting, guest collection, optional R0 telemetry, and local-only artifacts.
 
-需要同时覆盖 install/run、module ownership、driver test signing 和 Hyper-V live execution 的简明操作者地图，请参见 `docs/current-architecture-and-operations.md`。
+需要同时覆盖 install/run、module ownership、driver test signing 和三种 provider live execution 的简明操作者地图，请参见 `docs/current-architecture-and-operations.md`。
 
-English summary: see `docs/current-architecture-and-operations.md` for the concise operator map covering install/run, ownership, test signing, and Hyper-V live execution.
+English summary: see `docs/current-architecture-and-operations.md` for the concise operator map covering install/run, ownership, test signing, and live execution across all three providers.
 
 ## 设计目标 / Design goals
 
 - Keep normal planning safe and reviewable: dry-run/PlanOnly must not mutate VM
   state or execute a sample.
-- Make live execution explicit: Hyper-V mutation requires an elevated host
-  process, configured golden VM/checkpoint, guest credentials, and staged guest
-  payload.
+- Make live execution explicit: VM mutation always requires an explicit live
+  action; an elevated host process is required only by providers/steps that
+  need it, plus a configured golden VM/baseline, guest credentials, staged
+  guest payload, and a working guest
+  transport.
 - Normalize all telemetry as `SandboxEvent` so host, guest, driver, PCAP,
   enrichment, and static-analysis signals can share the same rule/report path.
 - Keep samples, VM disks, reports, payloads, build output, signed drivers,
@@ -28,10 +30,10 @@ English summary: see `docs/current-architecture-and-operations.md` for the conci
 flowchart TD
     A["Local .exe path, scan result, or local WebUI upload"] --> B["Web/API creates job plan"]
     B --> C["Core hashes sample and runs static analysis"]
-    C --> D["Core builds Hyper-V runbook"]
+    C --> D["Core builds provider-specific VM runbook"]
     D --> E{"Execution mode"}
     E -->|DryRun / PlanOnly default| F["Persist reviewable runbook result"]
-    E -->|Explicit Live| G["Restore/start Hyper-V guest"]
+    E -->|Explicit Live| G["Restore/start Hyper-V, VMware, or QEMU guest"]
     G --> H["Stage Guest Agent and R0Collector payload"]
     H --> I["Copy sample into guest"]
     I --> J["Guest Agent runs bounded analysis"]
@@ -50,7 +52,8 @@ Host（主机）:
 
 - owns WebUI/API, job planning, runbook generation, runbook execution records,
   local upload storage, artifact import, rule classification, and reports;
-- needs Administrator rights only for live Hyper-V operations;
+- needs Administrator rights for live Hyper-V operations; VMware/QEMU steps do
+  not require elevation unconditionally, although local networking may;
 - writes runtime data under `paths.runtimeRoot`, normally
   `D:\Temp\KSwordSandbox`.
 
@@ -110,14 +113,14 @@ Plan/DryRun:
 
 - validates the sample path and size;
 - computes hashes and static analysis;
-- builds a deterministic Hyper-V runbook;
+- builds a deterministic provider-specific VM runbook;
 - writes reports and/or `runbook-execution.json`;
 - does not start, restore, stop, or mutate any VM.
 
 Live:
 
 - requires explicit `-Live` or a live WebUI/API start action;
-- runs only from an elevated host process;
+- runs from an elevated host process when the selected provider/step requires it;
 - restores or creates the analysis VM, stages payloads, copies the sample, runs
   Guest Agent/R0Collector, syncs outputs, stops the VM, and restores cleanup
   state;

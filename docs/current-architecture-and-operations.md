@@ -1,19 +1,20 @@
 # 当前架构与运维指南（architecture and operations）
 
 本文是贡献者和操作者的中文总览：连接当前模块边界、最小可用链路、驱动测试签名策略，以及
-Hyper-V 安装/运行流程。更细的操作步骤保留在链接的 runbook 中。
+Hyper-V、VMware、QEMU 安装/运行流程。新后端的详细配置和 Windows 等价验收矩阵见
+`docs/vmware-qemu.md`；Hyper-V 专项维护/E2E 步骤仍保留在链接的 runbook 中。
 
 本文是当前 MVP 状态和操作者链路（operator chain）的权威文档；文档库存、主次关系和历史/背景文档说明见
 `docs/README.md`。
 
 ## 当前 MVP 状态（current MVP status）
 
-当前最小可用链路已经围绕本地 WebUI/API 和准备好的 Windows 10 Hyper-V golden VM 成形：
+当前最小可用链路已经围绕本地 WebUI/API 和准备好的 Windows 10 golden VM 成形，宿主 provider 可选 Hyper-V、VMware Workstation Pro（`vmType=ws`）或 QEMU WHPX：
 
 1. 操作者在 WebUI/API 中选择或本地上传 `.exe`，文件保存在仓库外 runtime root。
 2. Host 生成 job、SHA-256/静态分析事件（含 `static.pe.resource`）、
-   PlanOnly/DryRun 或 Live Hyper-V 运行手册（runbook）。
-3. 默认 PlanOnly/DryRun 只记录意图；显式 Live 才会还原/启动配置的 VM、stage Guest Agent/R0Collector
+   PlanOnly/DryRun 或 Live provider-specific 运行手册（runbook）。
+3. 默认 PlanOnly/DryRun 只记录意图；显式 Live 才会还原/启动本机配置或 per-job override 选定的 VM、stage Guest Agent/R0Collector
    payload、复制样本并运行 Guest Agent。
 4. Guest Agent 采集 guest 行为，R0Collector 可在 mock 或 real R0 模式输出 `driver-events.jsonl`；
    新版 Collector 还会在可用时写出 `r0collector.driverNetworkStatus`，把 WFP/ALE layer mask、
@@ -51,7 +52,7 @@ secrets 都不得提交。
   host/guest 副作用。
 - `src/KSword.Sandbox.Core/`：宿主侧业务逻辑。负责加载 config/rules、hash 与静态分析样本（含
   `static.pe.resource` 等结构化事件）、构建
-  Hyper-V runbook、通过 executor boundary 执行或记录 runbook、导入 guest/R0 事件、分类行为、
+  provider-specific runbook、通过 executor boundary 执行或记录 runbook、导入 guest/R0 事件、分类行为、
   索引 artifacts、渲染 reports。
 - `src/KSword.Sandbox.Web/`：ASP.NET WebUI/API。负责 dashboard、本地可执行文件上传/扫描（executable upload/scan）、job
   planning、后台 runbook 启动、progress SSE/polling、live-event endpoints、artifact index/download
@@ -67,7 +68,7 @@ secrets 都不得提交。
   lab artifacts。
 - `rules/`：Core 使用的 behavior rules、MITRE mapping 和 static-analysis notes。除非明确需要改 engine，
   规则变更应尽量保持 data-oriented。
-- `scripts/`、`install.ps1`、`run.ps1`：操作者入口、readiness checks、payload staging、Hyper-V E2E、
+- `scripts/`、`install.ps1`、`run.ps1`：操作者入口、provider readiness checks、payload staging、Hyper-V 兼容 E2E、
   native build helper、repository policy、本地 install/run 状态管理。
 - `tests/KSword.Sandbox.SmokeTests/`：repository shape、policy、runbook、report、rules、WebUI contracts
   和 R0/collector expectations 的 contract/smoke checks。
@@ -82,7 +83,7 @@ host/VM 环境。driver 和 guest 项目不依赖 WebUI 代码。
 flowchart TD
     A["选择、扫描或本地上传 .exe"] --> B["规划 job"]
     B --> C["Hash + 静态分析"]
-    C --> D["生成 Hyper-V runbook"]
+    C --> D["生成 provider-specific runbook"]
     D --> E{"Dry-run 还是 Live?"}
     E -->|"默认 Dry-run"| F["持久化 runbook-execution.json，step 标记 skipped"]
     E -->|"显式 Live"| G["还原/启动 VM 并 stage payload"]
@@ -99,8 +100,8 @@ flowchart TD
 关键边界：
 
 - Planning 和 dry-run 不修改 VM。
-- Live 模式需要提权的 host process、已准备的 golden VM/checkpoint、guest credentials，以及已暂存的
-  guest payload files。
+- Live 模式需要已准备的 golden VM/baseline、guest credentials、已暂存的 guest payload
+  files 和可用 guest transport；只有 provider/步骤声明需要时才要求提权 host process。
 - 可选真实 R0 需要本地 build 且 test-signed 的 `.sys`；mock R0 可在不加载 kernel driver 的情况下验证
   Guest Agent/R0Collector JSONL 通路。
 - Reports 和 artifacts 写到 runtime root，不写到仓库。
@@ -128,10 +129,10 @@ flowchart TD
 
 这些 `Analyze` 命令在没有 `-Live` 时是 PlanOnly，不启动、不还原、不停止、不修改 VM。
 
-从提权 shell（elevated shell）运行 live Hyper-V 分析：
+从提权 shell（elevated shell）运行当前已配置 provider 的 live 分析；先执行统一的环境/提供程序就绪检查：
 
 ```powershell
-.\scripts\Test-HyperVReadiness.ps1
+.\run.ps1 -Mode CheckEnvironment
 .\run.ps1 -Mode Analyze -SamplePreset HarmlessSample -Live
 ```
 
@@ -176,7 +177,7 @@ Live API/WebUI E2E 会修改配置的 VM；必须先通过就绪检查（readine
 5. 通过本地 config 记录 host-side `.sys`：
 
    ```powershell
-   .\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>
+   .\install.ps1 -Mode Change -UpdateVirtualizationConfig -DriverHostPath <test-signed .sys>
    ```
 
 6. 查询或开启 guest test-signing：
@@ -249,11 +250,11 @@ Live API/WebUI E2E 会修改配置的 VM；必须先通过就绪检查（readine
 
 ## 部署产品化检查点（deployment checklist）
 
-- 明确运行模式：PlanOnly 演示、Live Hyper-V lab、真实 R0 lab 分开配置和授权。
+- 明确运行模式：PlanOnly 演示、Live provider lab、真实 R0 lab 分开配置和授权。
 - WebUI/API 默认建议只在本机或受控内网使用；团队化部署前补访问控制、审计、下载权限和防火墙策略。
 - Runtime root 要放在仓库外，并规划容量、保留期、清理和导出策略。
 - 样本、报告、payload、VM disk、driver build output、test certificates、DPAPI backups 和 keys 不入库。
-- Golden VM 更新要有 owner；更新 baseline 后重新创建 `Clean` checkpoint 并记录验证日期。
+- Golden VM 更新要有 owner；更新后重新创建 provider 对应的 `Clean` baseline（Hyper-V 检查点、VMware 快照或 QEMU 基盘/内部快照）并记录验证日期。
 - VirusTotal（VT）只是信誉富化（reputation enrichment）；缺 key、rate limit、not found 不应制造噪音行为告警。
 
 ## 仓库卫生检查（repository hygiene）

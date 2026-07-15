@@ -1,6 +1,6 @@
 # 验证指南（verification）
 
-验证默认应保持离线、可重复、低副作用：不启动 Hyper-V VM，不还原 checkpoint，不加载或安装驱动，
+验证默认应保持离线、可重复、低副作用：不启动任何 provider VM，不还原 clean baseline，不加载或安装驱动，
 不调用 `CSignTool.exe`，也不提交任何构建/运行产物。
 
 ## 快速离线质量门（fast synthetic gates）
@@ -79,7 +79,7 @@ Native/R0 默认只做 compile-only：
 - 不要提交 `x64/`、`.sys`、`.pdb`、`.obj`、native `.exe` 或任何签名材料。
 - 真实 driver load 只属于隔离 VM test-signing 分支，不属于默认 CI/smoke。
 
-## Hyper-V 和 WebUI/API 验证
+## Provider 和 WebUI/API 验证
 
 只读 Hyper-V readiness：
 
@@ -91,6 +91,21 @@ Native/R0 默认只做 compile-only：
 `ReadinessSummary.LiveReady`、`FailedCheckIds`、`WarningCheckIds` 和 `ReadOnlyAssertions`。
 
 WebUI/API safe E2E：
+
+默认通过 WebUI 实际使用的后台 runner 执行（`/runbook/start` 后轮询
+`/runbook/background`），summary 中的 `executionTransport=Background` 用于证明没有退回
+legacy blocking endpoint；`backgroundState`、guest import 三态及终态 provider/VM/基线/VMX/磁盘
+身份共同保留实际后台链路证据。脚本还会在 plan 前调用所选 provider 的只读
+`/api/host/readiness?refresh=true&provider=...`：Live 要求 Windows 与硬件加速明确就绪，并把
+Windows feature、管理工具、查询、VM/baseline、guest transport 和 diagnostic 字段写入 summary。
+Live 还会在 plan 前解析完整 `gitCommit`，并记录 `gitDirty`、`gitChangedFileCount`、
+`gitCommitSource`、`gitProvenancePath`、`runtimeRoot`、`generatedAtUtc` 与带时区偏移的
+`generatedAtLocal`，以及 `sampleSha256`、`sampleSizeBytes`、`requestedDurationSeconds`。从不含 `.git` 的正式 runtime package 执行时会读取
+`package-manifest.generated.json`；手工复制且没有 manifest 的目录必须显式传入完整的
+`-GitCommit <40-or-64-hex>`，但其 dirty 状态无法证明，不能用于最终等价声明。若当前目录同时存在
+checkout，其 HEAD 必须与参数一致。来源或 runtime root 无法确认时，不会进入 VM 变更阶段。
+发布级三 provider 验收必须加 `-RequireCleanSource`，让 dirty、状态未知或非零变更数在 VM 变更前失败。
+只有兼容旧调用链时才显式传 `-ExecutionTransport Blocking`。
 
 ```powershell
 .\scripts\Invoke-WebUIApiE2E.ps1 `
@@ -106,10 +121,59 @@ password 和 readiness 都满足后执行：
 $env:KSWORDBOX_GUEST_PASSWORD = '<SandboxUser password>'
 .\scripts\Invoke-WebUIApiE2E.ps1 `
   -BaseUrl 'http://127.0.0.1:18082' `
+  -Provider HyperV `
   -Live `
   -DurationSeconds 3 `
   -StepTimeoutSeconds 900
 ```
+
+同一入口也可显式验收 VMware 或 QEMU：
+
+```powershell
+.\scripts\Invoke-WebUIApiE2E.ps1 `
+  -BaseUrl 'http://127.0.0.1:18082' `
+  -Provider VMware `
+  -VmName 'KSword-VMware' `
+  -BaselineName 'Clean' `
+  -MachineDefinitionPath 'D:\VMs\KSword\KSword.vmx' `
+  -Live `
+  -DurationSeconds 3 `
+  -StepTimeoutSeconds 900
+
+.\scripts\Invoke-WebUIApiE2E.ps1 `
+  -BaseUrl 'http://127.0.0.1:18082' `
+  -Provider Qemu `
+  -VmName 'KSword-QEMU' `
+  -BaselineName 'per-job-overlay' `
+  -MachineDefinitionPath 'D:\VMs\KSword\base.qcow2' `
+  -QemuDiskFormat qcow2 `
+  -Live `
+  -DurationSeconds 3 `
+  -StepTimeoutSeconds 900
+```
+
+输出 summary 会记录 provider、逻辑 VM、实际运行 VM、baseline、VMX/基础磁盘和 QEMU 格式，
+并校验 execution 仍使用 plan 中的 provider/VM 身份。未传资源覆盖时，Live readiness 还必须确认
+配置 profile 的 provider 查询、VM 与 baseline；传入 VM/VMX/磁盘等 per-job 覆盖时，summary 会记录
+`providerResourceOverrideUsed=true`，宿主加速与 guest transport 仍必须就绪，具体覆盖资源由 runbook
+preflight 在任何 VM 变更前验证。
+
+发布级三 provider 等价验收必须让三次命令使用同一份样本文件和时长，并分别写入
+`hyperv-summary.json`、`vmware-summary.json`、`qemu-summary.json`。三次都成功后运行只读聚合校验；它不会启动、停止或恢复 VM：
+
+```powershell
+.\scripts\Test-ProviderParityEvidence.ps1 `
+  -HyperVSummaryPath 'D:\Temp\KSwordSandbox\parity\hyperv-summary.json' `
+  -VMwareSummaryPath 'D:\Temp\KSwordSandbox\parity\vmware-summary.json' `
+  -QemuSummaryPath 'D:\Temp\KSwordSandbox\parity\qemu-summary.json' `
+  -OutputPath 'D:\Temp\KSwordSandbox\parity\provider-parity-validation.json'
+```
+
+校验器要求相同完整 commit、clean source、相同 SHA-256/字节数/请求时长、三个不同 job id、
+`Background`/`completed` 终态，并回读每个 `runbook-execution.json` 与 `report.json` 核对
+provider、VM、baseline、VMX/磁盘身份、执行成功、Completed 报告和样本身份。最终交付物必须是
+`schema=ksword.provider-parity-evidence.v1` 且 `validated=true` 的 JSON，并保留每份 summary 与所引用
+执行/guest/report 文件的 SHA-256；三份摘要本身不能替代该聚合结果。
 
 脚本式 Hyper-V E2E 的安全 review：
 
