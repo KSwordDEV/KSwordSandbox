@@ -78,7 +78,8 @@ internal sealed class WebRunbookCredentialContractScenario : ISmokeTestScenario
                 step.PowerShell.Contains("[System.Environment]::GetEnvironmentVariable('KSWORDBOX_GUEST_PASSWORD', 'Machine')", StringComparison.Ordinal) &&
                 step.PowerShell.Contains("[System.Security.SecureString]::new()", StringComparison.Ordinal) &&
                 step.PowerShell.Contains("$guestPassword.AppendChar($guestPasswordChar)", StringComparison.Ordinal) &&
-                step.PowerShell.Contains("[pscredential]::new('SandboxUser'", StringComparison.Ordinal),
+                step.PowerShell.Contains("[pscredential]::new('SandboxUser'", StringComparison.Ordinal) &&
+                step.PowerShell.Contains("$guestPasswordText = $null; $guestPasswordChar = $null;", StringComparison.Ordinal),
                 $"Runbook step {step.Id} references $guestCredential but does not recreate it in the same PowerShell command.");
 
             SmokeAssert.True(
@@ -93,7 +94,8 @@ internal sealed class WebRunbookCredentialContractScenario : ISmokeTestScenario
         SmokeAssert.True(
             runbook.Steps.Any(step =>
                 step.Id.Equals("wait-powershell-direct", StringComparison.OrdinalIgnoreCase) &&
-                step.PowerShell.Contains("PowerShell Direct did not become ready", StringComparison.Ordinal)),
+                step.PowerShell.Contains("Guest endpoint did not become ready", StringComparison.Ordinal) &&
+                step.PowerShell.Contains("transport=PowerShell Direct", StringComparison.Ordinal)),
             "Runbook should wait for PowerShell Direct after VM start before staging payload or running the sample.");
 
         return Task.FromResult(new SmokeTestResult

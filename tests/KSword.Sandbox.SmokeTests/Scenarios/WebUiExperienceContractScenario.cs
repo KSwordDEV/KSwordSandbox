@@ -30,6 +30,7 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         var virusTotalModels = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalModels.cs");
         var virusTotalSettings = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalSettingsStore.cs");
         var localHostReadiness = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "LocalHostReadinessProbe.cs");
+        var localHostReadinessContract = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Contracts", "LocalHostReadinessContract.cs");
         var copyScript = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardClientScripts.cs");
         var executionFlow = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "RunbookExecutionFlowPage.cs");
         var artifactContract = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Contracts", "JobArtifactPathsContract.cs");
@@ -48,7 +49,23 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(program, "RunbookExecutionFlowPage.Render", "Program.cs should expose a separate execution-flow page for runbook details.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/progress\"", "Program.cs should expose a UI-safe real runbook progress endpoint.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/start\"", "Program.cs should expose a background runbook start endpoint.");
+        RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/cancel\"", "Program.cs should expose a background runbook cancellation endpoint.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/background\"", "Program.cs should expose a background runbook status endpoint.");
+        RequireContains(program, "BuildSafeWebJobSnapshot", "Every Web job response should use one explicit safe projection.");
+        RequireContains(program, "BuildSafeWebRunbookExecutionSnapshot", "Web execution responses should use a status-only projection.");
+        RequireContains(program, "BuildSafeWebRunbookExecutionOutcome(outcome)", "The blocking compatibility endpoint should not serialize its raw execution outcome.");
+        RequireContains(program, "RunbookStart = BuildSafeWebRunbookStartAttempt(runbookStart)", "Upload-and-start should sanitize its nested background snapshot.");
+        RequireContains(program, "Execution = BuildSafeWebRunbookExecutionSnapshot(snapshot.Execution)", "Background responses should expose only safe execution metadata.");
+        RequireContains(program, "IsHostLocalSensitiveRunbookArtifact", "Web artifact responses should enforce a host-local boundary for raw runbook evidence.");
+        RequireContains(program, "host-local-sensitive-runbook-evidence", "Sensitive runbook artifact rejection should use one stable API code.");
+        RequireContains(program, "fileName.Equals(\"job-metadata.json\"", "Web artifact downloads should block persisted AnalysisJob metadata that contains full runbook commands.");
+        RequireContains(program, "StatusCodes.Status403Forbidden", "Direct sensitive artifact selectors should be rejected server-side, not only hidden in the UI.");
+        RequireNotContains(program, "Results.Ok(service.ListJobs())", "Job list responses must not serialize AnalysisJob directly.");
+        RequireNotContains(program, "Results.Ok(job)", "Plan, get-job, and guest-import responses must not serialize AnalysisJob directly.");
+        RequireNotContains(program, "Job = job,", "Nested upload responses must not serialize AnalysisJob directly.");
+        RequireNotContains(program, "step.PowerShell", "Web response projections must never copy runbook PowerShell.");
+        RequireNotContains(program, "execution.StandardOutput", "Web response projections must never copy runbook stdout.");
+        RequireNotContains(program, "execution.StandardError", "Web response projections must never copy runbook stderr.");
         RequireContains(program, "RunbookProgressStore", "Program.cs should store executor progress snapshots for live WebUI polling.");
         RequireContains(program, "RunbookBackgroundExecutionStore", "Program.cs should store WebUI background runbook execution state.");
         RequireContains(program, "ProgressSink = new Progress<SandboxRunbookProgressSnapshot>", "Runbook execute endpoint should pass a real progress sink into the executor.");
@@ -63,6 +80,24 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(localHostReadiness, "Get-VMSnapshot", "Local host detection should enumerate VM checkpoints read-only.");
         RequireContains(localHostReadiness, "HyperVProbeTimeout", "Local host detection should bound the PowerShell inventory query.");
         RequireContains(localHostReadiness, "PasswordSecretAvailable", "Local host detection should report secret presence without returning the secret value.");
+        RequireContains(localHostReadiness, "ProbeHostVirtualizationAsync", "Local host detection should expose provider-neutral Windows hardware acceleration facts.");
+        RequireContains(localHostReadiness, "HOST_REQUIRED_WINDOWS_FEATURE_DISABLED", "Local host detection should identify a disabled provider-specific Windows feature.");
+        RequireContains(localHostReadiness, "HypervisorPlatform", "QEMU WHPX readiness should require Windows Hypervisor Platform.");
+        RequireContains(localHostReadiness, "QEMU_CONFIGURATION_INVALID", "Local host detection should reject invalid QEMU provider arguments.");
+        RequireContains(localHostReadiness, "ValidateQemuProviderArguments", "Local host detection should share QEMU argument validation with Core planning.");
+        RequireContains(localHostReadiness, "GuestEndpointReady", "Local host detection should expose guest endpoint readiness for automatic and configured modes.");
+        RequireContains(localHostReadiness, "automatic endpoint mode requires WinRM HTTPS", "Local host detection should explain insecure automatic guest endpoints.");
+        RequireContains(localHostReadinessContract, "ConfiguredBaselineName => ConfiguredSnapshotName", "Web readiness should expose a provider-neutral configured baseline alias while preserving snapshot compatibility.");
+        RequireContains(localHostReadinessContract, "BaselineName => SnapshotName", "Web readiness should expose the detected clean baseline without provider-specific API terminology.");
+        RequireContains(localHostReadinessContract, "QEMU per-job overlay or internal snapshot", "Web readiness should explain the QEMU clean-baseline mapping.");
+        RequireContains(dashboard, "virtualization?.baselineExists ?? virtualization?.snapshotExists", "Dashboard readiness should prefer provider-neutral baseline facts and retain legacy fallback.");
+        RequireContains(dashboard, "guestEndpointReady", "Dashboard readiness should not require a literal address for provider automatic modes.");
+        RequireContains(dashboard, "Host acceleration", "Dashboard should render host acceleration readiness for all providers.");
+        RequireContains(dashboard, "requiredWindowsFeatureState", "Dashboard should render the concrete Windows feature state behind host readiness.");
+        RequireRegex(
+            dashboard,
+            @"(?s)function buildVmRunSummary\(job\).*?const provider = submission\.provider.*?const configuredVmName = provider === 'HyperV'.*?const configuredSnapshotName = provider === 'HyperV'",
+            "VM run summaries should resolve provider-specific VM and snapshot defaults inside their own function scope.");
         RequireNotContains(localHostReadiness, "Start-VM", "Local host detection must not start a VM.");
         RequireNotContains(localHostReadiness, "Restore-VMSnapshot", "Local host detection must not restore a checkpoint.");
 
@@ -173,11 +208,15 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
             "Dashboard should render operator-facing progress stages.");
         RequireContains(dashboard, "/runbook/progress", "Dashboard should poll the real runbook progress endpoint.");
         RequireContains(dashboard, "/runbook/start", "Dashboard should start VM analysis through the background runbook endpoint.");
+        RequireContains(dashboard, "/runbook/cancel", "Dashboard should request background cancellation through the shared endpoint.");
+        RequireContains(dashboard, "id=\"cancelRunbookButton\"", "Dashboard should expose a cancel-and-clean-up control only while execution is active.");
         RequireContains(dashboard, "/runbook/background", "Dashboard should poll background runbook terminal state.");
         RequireContains(dashboard, "startRunbookProgressPolling", "Dashboard should start real runbook progress polling during execution.");
         RequireContains(dashboard, "startBackgroundExecutionPolling", "Dashboard should start background execution status polling during execution.");
         RequireContains(dashboard, "renderBackgroundExecutionSnapshot", "Dashboard should render background runbook terminal state and report readiness.");
         RequireContains(dashboard, "renderRunbookProgress", "Dashboard should render exact executor runbook step progress.");
+        RequireContains(liveEventsPage, "/runbook/cancel", "The standalone live monitor should expose the same background cancellation action.");
+        RequireContains(liveEventsPage, "cancelRequested", "The standalone live monitor should distinguish cancellation requested from cleanup-complete cancellation.");
         foreach (var operatorStage in new[] { "启动 VM", "部署 Payload", "执行样本", "收集结果", "生成报告" })
         {
             RequireContains(dashboard, operatorStage, $"Dashboard progress should use operator-facing stage '{operatorStage}'.");
@@ -243,6 +282,12 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(copyScript, "[data-copy], code, pre, td, th", "Shared dashboard copy script should support right-click table/path copying.");
 
         RequireContains(liveEventsPage, "/virustotal", "Live monitor should fetch the per-job VirusTotal lookup endpoint.");
+        RequireContains(liveEventsPage, "Web API 只接收安全状态摘要", "Live monitor should explain the host-local execution evidence boundary.");
+        RequireNotContains(liveEventsPage, "renderExecutionOutputDetails", "Live monitor must not render captured runbook output from API responses.");
+        RequireNotContains(liveEventsPage, "result.standardOutput", "Live monitor must not read runbook stdout fields.");
+        RequireNotContains(liveEventsPage, "result.standardError", "Live monitor must not read runbook stderr fields.");
+        RequireContains(liveEventsPage, "Web 下载已禁用", "Live monitor should mark raw runbook execution evidence as host-local only.");
+        RequireNotContains(liveEventsPage, "runbookArtifact ? artifactDetail(runbookArtifact, t('已索引，可下载'", "Live monitor must not label runbook-execution.json as Web-downloadable.");
         RequireContains(liveEventsPage, "VirusTotal 官方结果", "Live monitor should display a VirusTotal result card.");
         RequireContains(liveEventsPage, "不上传样本", "Live monitor should state that VirusTotal integration does not upload samples.");
         RequireContains(liveEventsPage, "/runbook/progress", "Live monitor should poll the real runbook progress endpoint.");
@@ -332,6 +377,8 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         {
             "GoldenVmName",
             "GoldenSnapshotName",
+            "MachineDefinitionPath",
+            "QemuDiskFormat",
             "GuestUserName",
             "GuestWorkingDirectory",
             "GuestPayloadRoot",

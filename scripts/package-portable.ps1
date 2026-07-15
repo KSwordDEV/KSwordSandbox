@@ -8,7 +8,7 @@ output directory. Processing reads the matching packaging/*.manifest.json file,
 copies allowed files into a staging tree outside the repository, writes generated
 package metadata, and creates a local zip unless -StageOnly is specified.
 
-The script is local-only: it does not run smoke tests, run Hyper-V live, push,
+The script is local-only: it does not run smoke tests, run provider live, push,
 publish, sign, call CSignTool.exe, or build payloads. Runtime binaries must be
 supplied through an external RuntimePublishRoot; use
 -RequireCompleteRuntimePayloads for handoff packages and omit it only for
@@ -872,7 +872,7 @@ function Get-PackageOperatorRecommendedActions {
     }
 
     [void]$actions.Add('发布前只读检查：.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource；该命令默认执行 source package StageOnly dry-run，不启动/还原 VM，不签名，不调用 CSignTool.exe。')
-    [void]$actions.Add('Hyper-V/VM profile/guest payload/VT key 缺口请用 .\scripts\install.ps1 -Mode CheckEnvironment 或 .\scripts\run.ps1 -Mode CheckEnvironment 查看；这些状态检查不打印 secret，不执行 live。')
+    [void]$actions.Add('虚拟化 provider/VM profile/guest payload/VT key 缺口请用 .\scripts\install.ps1 -Mode CheckEnvironment 或 .\scripts\run.ps1 -Mode CheckEnvironment 查看；这些状态检查不打印 secret，不执行 live。')
     [void]$actions.Add('fresh live 证据护栏：package/readiness 不会生成新的 Notepad 5s job；release notes 若要声明当前候选已有 fresh live evidence，必须在实验室主机显式运行 live 并记录 commit、job id、runtime root 和报告路径。')
     [void]$actions.Add('缺少 guest payload 时运行 .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained；输出必须在仓库外。')
     [void]$actions.Add('可选 VirusTotal key 用 .\scripts\install.ps1 -Mode ConfigureVTKey -PromptVTKey 配置；未配置或查询失败应静默跳过 hash-only enrichment。')
@@ -886,6 +886,7 @@ function Get-PackageExecutionBoundaries {
         generatedBy = 'scripts/package-portable.ps1'
         validationProfile = 'package-portable-local-only-no-smoke-no-live'
         smokeTestsExecuted = $false
+        providerLiveExecuted = $false
         hyperVLiveExecuted = $false
         vmStartRestoreStopExecuted = $false
         vmMutationExecuted = $false
@@ -897,8 +898,8 @@ function Get-PackageExecutionBoundaries {
         payloadBuildExecuted = $false
         repositoryBinaryFallbackUsed = $false
         allowedActions = @('local staging', 'optional local zip creation', 'manifest parsing', 'file copy from repository allowlist', 'file copy from external RuntimePublishRoot when supplied', 'metadata generation')
-        forbiddenActions = @('smoke test execution', 'Hyper-V live execution', 'VM start/restore/stop/mutation', 'driver signing', 'GUI signing fallback', 'CSignTool.exe invocation', 'git push', 'network publish', 'repository bin/obj/x64 runtime fallback')
-        chinese = '中文：package-portable.ps1 只做本机 staging/zip/metadata；不跑 smoke、不跑 Hyper-V live、不签名、不调用 CSignTool.exe、不 push/publish、不从仓库 bin/obj/x64 兜底 runtime。'
+        forbiddenActions = @('smoke test execution', 'virtualization provider live execution', 'VM start/restore/stop/mutation', 'driver signing', 'GUI signing fallback', 'CSignTool.exe invocation', 'git push', 'network publish', 'repository bin/obj/x64 runtime fallback')
+        chinese = '中文：package-portable.ps1 只做本机 staging/zip/metadata；不跑 smoke、不跑任何 provider live、不签名、不调用 CSignTool.exe、不 push/publish、不从仓库 bin/obj/x64 兜底 runtime。'
     }
 }
 
@@ -910,7 +911,15 @@ function Get-PackageRequiredEvidenceFields {
         runtimeHandoff = @('runtimePublishRoot', 'operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed', 'operatorDiagnostics.runtimePublishSummary.missingCount=0', 'operatorDiagnostics.runtimePublishSummary.incompleteCount=0', 'operatorDiagnostics.runtimePublishSummary.forbiddenFileCount=0', 'operatorDiagnostics.runtimeCompletenessDiagnostics.entries', 'archivePath', 'archiveSha256')
         installModeHandoff = @('installModeContract.schema', 'installModeContract.operatorModeMatrix.modes[].entrypoint', 'installModeContract.modes[].id', 'installModeContract.readinessPackageNonMutation', 'installContractGaps', 'installContractGapNextActionsZh')
         freshLiveClaim = @('gitMetadata.commit', 'gitMetadata.branch', 'gitMetadata.dirtyStatus', 'job id', 'runtime root', 'generatedAtUtc/local time', 'report.json path', 'report.zh.html path', 'report.en.html path')
+        providerParityLiveClaim = [ordered]@{
+            requiredProviders = @('HyperV', 'VMware', 'Qemu')
+            evidencePerProvider = @('provider', 'mode=Live', 'success=true', 'jobId', 'gitCommit', 'gitCommitSource', 'gitProvenancePath', 'gitDirty', 'gitChangedFileCount', 'runtimeRoot', 'generatedAtUtc', 'generatedAtLocal', 'sampleSha256', 'sampleSizeBytes', 'requestedDurationSeconds', 'readinessProvider', 'readinessReadOnly=true', 'hostAccelerationReady', 'requiredWindowsFeature', 'requiredWindowsFeatureReady', 'providerManagementAvailable', 'providerQuerySucceeded', 'providerVmExists', 'providerBaselineExists', 'providerGuestTransportSecure', 'providerGuestEndpointReady', 'providerDiagnosticCode', 'providerResourceOverrideUsed', 'executionTransport', 'backgroundState', 'targetVmName', 'baselineName', 'machineDefinitionPath when applicable', 'qemuDiskFormat when applicable', 'guestImportSucceeded', 'guestImportSkipped', 'guestImportFailed', 'executedSteps', 'totalSteps', 'liveTotalEvents', 'reportEndpointChecks[default/zh/en]=HTTP 200', 'runbookExecutionPath', 'guestEventsPath', 'reportJsonPath', 'reportHtmlPath', 'reportZhHtmlPath', 'reportEnHtmlPath', 'cSignToolUsed=false')
+            crossProviderInvariants = @('same full gitCommit across HyperV, VMware, and Qemu', 'gitDirty=false for every provider record', 'gitChangedFileCount=0 for every provider record', 'same sampleSha256 and sampleSizeBytes across all providers', 'same requestedDurationSeconds across all providers', 'distinct jobId per provider', 'executionTransport=Background', 'backgroundState=completed')
+            aggregateValidation = @('Test-ProviderParityEvidence.ps1 succeeds', 'schema=ksword.provider-parity-evidence.v1', 'validated=true', 'validationPath', 'gitCommit', 'sampleSha256', 'sampleSizeBytes', 'requestedDurationSeconds', 'requiredProviders', 'records[].summarySha256', 'records[].evidencePaths', 'records[].evidenceSha256')
+            sharedAcceptanceRows = @('Windows host and provider hardware acceleration readiness', 'clean baseline restore', 'VM start and stable running state', 'guest address discovery and WinRM readiness', 'sample copy and execution', 'Agent/R0 collection', 'artifact retrieval and report generation', 'interactive console behavior', 'failure cleanup', 'cancellation cleanup and durable canceled state', 'resource identity persistence', 'cross-process live execution lease')
+        }
         fallbackWhenMissingFreshLiveJobZh = '没有实验室 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
+        fallbackWhenProviderParityIncompleteZh = 'HyperV、VMware、Qemu 任一 provider 缺少独立 live 证据时，不得声明三 provider 使用体验等价。'
     }
 }
 
@@ -950,11 +959,15 @@ function Get-CanonicalOperatorModeMatrix {
         [ordered]@{
             modeId = 'rollback-restore-snapshot'
             entrypoint = 'RestoreCleanCheckpoint'
-            titleZh = '回退/恢复已有干净快照'
+            titleZh = '恢复或确认已有干净基线'
             defaultCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly'
+            nonMutatingEquivalentCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -Json'
             mutatingCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm'
-            packageReadinessMutation = 'forbidden; package/readiness only records metadata and diagnostics'
-            nextActionsZh = @('下一步：readiness/package 不恢复快照；只有隔离 lab 操作者显式 -AllowVmMutation -Confirm/-Force 才能恢复已有 checkpoint。')
+            mutatingProviders = @('HyperV', 'VMware', 'QemuInternalSnapshot')
+            nonMutatingProfiles = @('QemuOverlay')
+            mutationCondition = 'Hyper-V checkpoint, VMware snapshot, and QEMU internal snapshot require provider mutation; QEMU per-job overlay satisfies the clean-baseline request without in-place mutation.'
+            packageReadinessMutation = 'provider restore forbidden; package/readiness only records QEMU overlay equivalence metadata and diagnostics'
+            nextActionsZh = @('下一步：readiness/package 不执行 provider restore；QEMU per-job overlay 可用无变更 JSON 命令确认干净基线，其他快照路径只有隔离 lab 操作者显式 -AllowVmMutation -Confirm/-Force 才能真实恢复。')
         },
         [ordered]@{
             modeId = 'fresh-create-new-computer'
@@ -962,7 +975,7 @@ function Get-CanonicalOperatorModeMatrix {
             titleZh = '全新创建/新电脑准备'
             defaultCommand = '.\install.ps1'
             packageReadinessMutation = 'none; installer may write local config/secret only when operator runs it directly'
-            nextActionsZh = @('下一步：首机先确认 Hyper-V/BIOS/SLAT/管理员 shell，手工创建/导入 VM 和 clean checkpoint，再运行 .\install.ps1 推荐安装向导写本机 config/secret/payload。')
+            nextActionsZh = @('下一步：首机先确认 Windows、所选 provider 管理工具和硬件虚拟化能力，手工创建/导入 VM 和 clean baseline，再运行 .\install.ps1 推荐安装向导写本机 config/secret/payload。')
         }
     )
 }
@@ -1058,6 +1071,32 @@ function Get-OperatorModeMatrixContractIssues {
                 [void]$issues.Add("operatorModeMatrix restore mode mutatingCommand must include -AllowVmMutation plus -Confirm or -Force in $Context.")
             }
 
+            $nonMutatingEquivalentCommand = Normalize-ContractCommand -Command ([string](Get-ObjectPropertyValue -InputObject $mode -Name 'nonMutatingEquivalentCommand' -DefaultValue ''))
+            $expectedNonMutatingEquivalentCommand = Normalize-ContractCommand -Command ([string](Get-ObjectPropertyValue -InputObject ([pscustomobject]$canonical) -Name 'nonMutatingEquivalentCommand' -DefaultValue ''))
+            if ($nonMutatingEquivalentCommand -ine $expectedNonMutatingEquivalentCommand) {
+                [void]$issues.Add("operatorModeMatrix restore mode nonMutatingEquivalentCommand '$nonMutatingEquivalentCommand' must match '$expectedNonMutatingEquivalentCommand' in $Context.")
+            }
+            if ($nonMutatingEquivalentCommand -notmatch '(?i)-Json' -or $nonMutatingEquivalentCommand -match '(?i)-AllowVmMutation|-(Confirm|Force)') {
+                [void]$issues.Add("operatorModeMatrix restore mode nonMutatingEquivalentCommand must be the QEMU overlay JSON path without mutation approval switches in $Context.")
+            }
+
+            foreach ($setContract in @(
+                    [pscustomobject]@{ name = 'mutatingProviders'; expected = @($canonical.mutatingProviders) },
+                    [pscustomobject]@{ name = 'nonMutatingProfiles'; expected = @($canonical.nonMutatingProfiles) }
+                )) {
+                $actualValues = @(Get-ObjectPropertyValue -InputObject $mode -Name $setContract.name -DefaultValue @())
+                $setComparison = Compare-StringSet -Actual @($actualValues | ForEach-Object { [string]$_ }) -Expected @($setContract.expected | ForEach-Object { [string]$_ })
+                if (@($setComparison.missing).Count -gt 0 -or @($setComparison.extra).Count -gt 0) {
+                    $expectedSetText = @($setContract.expected) -join ', '
+                    [void]$issues.Add("operatorModeMatrix restore mode $($setContract.name) must match '$expectedSetText' in $Context.")
+                }
+            }
+
+            $mutationCondition = [string](Get-ObjectPropertyValue -InputObject $mode -Name 'mutationCondition' -DefaultValue '')
+            if ($mutationCondition -cne [string]$canonical.mutationCondition) {
+                [void]$issues.Add("operatorModeMatrix restore mode mutationCondition must distinguish provider snapshots from QEMU per-job overlay in $Context.")
+            }
+
             $packageReadinessMutation = [string](Get-ObjectPropertyValue -InputObject $mode -Name 'packageReadinessMutation' -DefaultValue '')
             if ($packageReadinessMutation -notmatch '(?i)forbidden') {
                 [void]$issues.Add("operatorModeMatrix restore mode must mark package/readiness mutation as forbidden in $Context.")
@@ -1077,9 +1116,9 @@ function Get-InstallContractGapNextActionsZh {
 
     $actions = New-Object System.Collections.Generic.List[string]
     [void]$actions.Add("检测到 install contract 缺口：$(@($Gaps) -join '；')。")
-    [void]$actions.Add('下一步：只修改 package/readiness/packaging manifest 的机器可读 contract；不要在 release/package 阶段运行 install、smoke、Hyper-V live、签名或 VM mutation。')
+    [void]$actions.Add('下一步：只修改 package/readiness/packaging manifest 的机器可读 contract；不要在 release/package 阶段运行 install、smoke、任何 provider live、签名或 VM mutation。')
     [void]$actions.Add("下一步：在 packaging/*.manifest.json 的 releaseContract.installModeContract.modeIds 中补齐：$((Get-InstallModeRequiredIds) -join ', ')。")
-    [void]$actions.Add("下一步：确认 releaseContract.installModeContract.operatorModeMatrix.modes 与安装器三入口一致：$((Get-InstallEntrypointRequiredValues) -join ', ')；RestoreCleanCheckpoint 的 mutatingCommand 必须含 -AllowVmMutation 和 -Confirm/-Force。")
+    [void]$actions.Add("下一步：确认 releaseContract.installModeContract.operatorModeMatrix.modes 与安装器三入口一致：$((Get-InstallEntrypointRequiredValues) -join ', ')；RestoreCleanCheckpoint 必须同时声明 QEMU overlay 的 nonMutatingEquivalentCommand 和其他 baseline 路径受保护的 mutatingCommand。")
     [void]$actions.Add('下一步：重新生成 package-manifest.generated.json，并确认 installModeContract、installContractGaps、installContractGapNextActionsZh 和 executionBoundaries 同时存在。')
     return @($actions.ToArray())
 }
@@ -1125,7 +1164,7 @@ function Get-InstallModeContractSnapshot {
                 }
             }
 
-            foreach ($flagName in @('noVmMutationByPackageScript', 'noSmokeByPackageOrReadiness', 'noHyperVLiveByPackageOrReadiness', 'noDriverSigningByPackageScript', 'noCSignToolInvocationByPackageOrReadiness')) {
+            foreach ($flagName in @('noVmMutationByPackageScript', 'noSmokeByPackageOrReadiness', 'noProviderLiveByPackageOrReadiness', 'noHyperVLiveByPackageOrReadiness', 'noDriverSigningByPackageScript', 'noCSignToolInvocationByPackageOrReadiness')) {
                 if (-not [bool](Get-ObjectPropertyValue -InputObject $releaseContract -Name $flagName -DefaultValue $false)) {
                     [void]$gaps.Add("releaseContract.$flagName must be true.")
                 }
@@ -1156,39 +1195,43 @@ function Get-InstallModeContractSnapshot {
             [ordered]@{
                 id = 'existing-environment'
                 titleZh = '已有环境接入'
-                operatorScenario = 'Use an already-created/imported Hyper-V golden VM and clean checkpoint; installer records local profile values and CheckEnvironment reads them.'
+                operatorScenario = 'Use an already-created/imported Hyper-V, VMware, or QEMU golden VM and clean baseline; installer records provider-local profile values and CheckEnvironment reads them.'
                 primaryCommands = @(
                     '.\scripts\install.ps1 -Mode CheckEnvironment',
-                    '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>',
+                    '.\scripts\install.ps1 -Mode Change -UpdateVirtualizationConfig -VirtualizationProvider <HyperV|VMware|Qemu> -VmName <existing VM> -CheckpointName <snapshot>',
                     '.\scripts\run.ps1 -Mode CheckEnvironment'
                 )
                 evidenceFields = @('InstallStatus.VmExists', 'InstallStatus.CheckpointExists', 'InstallStatus.VmProfile', 'InstallStatus.GuestPayloadStatus', 'InstallStatus.RecommendedActions')
                 checkEnvironmentStartsOrMutatesVm = $false
                 createsVm = $false
                 restoresCheckpoint = $false
-                writesLocalState = 'Change -UpdateHyperVConfig writes local config/install-state only; it does not write git-tracked files.'
+                writesLocalState = 'Change -UpdateVirtualizationConfig writes local config/install-state only; it does not write git-tracked files.'
                 nextActionsZh = @(
                     '下一步：先运行 .\scripts\install.ps1 -Mode CheckEnvironment 读取 VM/checkpoint/payload/secret 缺口。',
-                    '下一步：已有 VM 时运行 .\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint> 记录本机 profile。'
+                    '下一步：已有 VM 时运行 .\scripts\install.ps1 -Mode Change -UpdateVirtualizationConfig -VirtualizationProvider <HyperV|VMware|Qemu> 记录本机 provider profile。'
                 )
             },
             [ordered]@{
                 id = 'restore-checkpoint-snapshot'
-                titleZh = '还原 checkpoint/snapshot 边界'
-                operatorScenario = 'Checkpoint restore/refresh is a live VM operation and is never performed by package/readiness; it is reserved for explicit lab actions such as guest password reset or run.ps1 -Live.'
+                titleZh = '恢复或确认 clean baseline 边界'
+                operatorScenario = 'Provider snapshot restore is a live VM operation reserved for explicit lab actions; QEMU per-job overlay satisfies the next-run clean-baseline request without an in-place provider mutation. Package/readiness executes neither path.'
                 primaryCommands = @(
                     '.\scripts\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly',
+                    '.\scripts\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -Json',
                     '.\scripts\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf',
                     '.\scripts\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm'
                 )
-                evidenceFields = @('InstallStatus.CheckpointExists', 'InstallStatus.CheckpointGuidance', 'VmProfile.ExpectedCheckpointName', 'ResetGuestPasswordCommand')
+                evidenceFields = @('InstallStatus.BaselineRestoreRequiresVmMutation', 'InstallStatus.BaselineRestoreSatisfiedWithoutMutation', 'InstallStatus.BaselineIsolationMode', 'ProviderSnapshotRestoreRequested', 'VmProfile.ExpectedCheckpointName', 'ResetGuestPasswordCommand')
                 readinessPackageCanExecute = $false
                 mayRestoreCheckpointOnlyWhenExplicit = $true
+                qemuOverlaySatisfiesWithoutMutation = $true
                 requiresAdministrator = $true
+                requiresAdministratorScope = 'HyperV'
+                providerPrivilegePolicy = 'Hyper-V restore requires elevation; VMware/QEMU follow their management-tool permissions.'
                 skipFlags = @('-SkipCheckpointRestore', '-SkipCheckpointRefresh')
                 nextActionsZh = @(
-                    '下一步：缺少 checkpoint 时先创建或选择 clean checkpoint，再用 -UpdateHyperVConfig 记录名称。',
-                    '下一步：先用 RestoreCleanCheckpoint -PlanOnly/-WhatIf 查看 rollback 计划；只有隔离 lab 操作者显式 -AllowVmMutation -Confirm/-Force 才可真实还原快照。'
+                    '下一步：缺少 baseline 时先创建或选择 clean checkpoint/snapshot，再用 -UpdateVirtualizationConfig 记录名称。',
+                    '下一步：先用 RestoreCleanCheckpoint -PlanOnly 查看基线策略；QEMU per-job overlay 可直接用 -Json 确认无变更等价结果，其他快照路径只有隔离 lab 操作者显式 -AllowVmMutation -Confirm/-Force 才可真实恢复。'
                 )
             },
             [ordered]@{
@@ -1214,20 +1257,20 @@ function Get-InstallModeContractSnapshot {
                 id = 'first-computer-prerequisites'
                 titleZh = '首台电脑前置条件'
                 operatorScenario = 'Read-only environment checks identify host prerequisites before any live VM execution.'
-                evidenceFields = @('HyperVPrerequisites.OsIsWindows', 'HyperVPrerequisites.PowerShellModuleAvailable', 'HyperVPrerequisites.VirtualizationFirmwareEnabled', 'HyperVPrerequisites.SecondLevelAddressTranslationSupported', 'InstallStatus.IsAdministrator', 'InstallStatus.RuntimeRootUnderRepository', 'InstallStatus.VirusTotalStatus')
-                requiredForLive = @('Windows host', 'Hyper-V feature and PowerShell module', 'hardware virtualization enabled', 'SLAT/EPT/NPT support', 'existing/imported golden VM', 'clean checkpoint', 'guest password secret', 'external runtime/payload roots')
+                evidenceFields = @('InstallStatus.VirtualizationProvider', 'InstallStatus.ProviderManagementAvailable', 'InstallStatus.VmExists', 'InstallStatus.CheckpointExists', 'InstallStatus.VmProfile.GuestTransportReady', 'InstallStatus.VmProfile.GuestTransportSecure', 'HyperVPrerequisites', 'InstallStatus.RuntimeRootUnderRepository', 'InstallStatus.VirusTotalStatus')
+                requiredForLive = @('Windows host', 'selected provider management tool', 'hardware virtualization enabled', 'existing/imported golden VM', 'clean checkpoint/snapshot or QEMU overlay base', 'guest transport', 'guest password secret', 'external runtime/payload roots')
                 optional = @('VirusTotal API key for hash-only enrichment', 'test-signed R0 driver path for isolated advanced lab runs')
                 nextActionsZh = @(
-                    '下一步：在首台电脑上先跑 CheckEnvironment；按 RecommendedActions 启用 Hyper-V、BIOS 虚拟化、SLAT 支持、VM/checkpoint、payload、secret。',
+                    '下一步：在首台电脑上先跑 CheckEnvironment；按 RecommendedActions 修复所选 provider 管理工具、硬件虚拟化、VM/baseline、guest transport、payload 和 secret。',
                     '下一步：RuntimeRoot/RuntimePublishRoot/PayloadRoot 均应放仓库外，避免把本机状态或证据打进包。'
                 )
             },
             [ordered]@{
                 id = 'compatibility-boundaries'
                 titleZh = '兼容性边界'
-                operatorScenario = 'Source/readiness/package paths are low-side-effect and can run without live Hyper-V; live analysis requires an explicitly prepared Windows Hyper-V lab host.'
+                operatorScenario = 'Source/readiness/package paths are low-side-effect and can run without live virtualization; live analysis requires an explicitly prepared Windows lab host for the selected provider.'
                 boundaries = @(
-                    'Non-Windows hosts are source/package/readiness/report-viewing only; Hyper-V live requires Windows_NT.',
+                    'Non-Windows hosts are source/package/readiness/report-viewing only; supported Hyper-V, VMware, and QEMU live paths target Windows_NT.',
                     'CheckEnvironment/Status are read-only and do not print secret values.',
                     'StartWebUI starts the UI wrapper only; live VM execution requires explicit run.ps1 -Live.',
                     'Runtime packages copy binaries only from external RuntimePublishRoot.',
@@ -1236,7 +1279,7 @@ function Get-InstallModeContractSnapshot {
                 )
                 evidenceFields = @('executionBoundaries', 'externalStateDiagnostics', 'freshLiveEvidenceGuardrail', 'requiredEvidenceFields.installModeHandoff')
                 nextActionsZh = @(
-                    '下一步：若目标机器不满足 Hyper-V live 条件，只交付 source/runtime 包并保留 release notes 的 no-fresh-live fallback。',
+                    '下一步：若目标机器不满足所选 provider live 条件，只交付 source/runtime 包并保留 release notes 的 no-fresh-live fallback。',
                     '下一步：需要真实 live/R0 时由 release manager 在隔离 lab host 显式运行并记录 job id。'
                 )
             },
@@ -1244,7 +1287,7 @@ function Get-InstallModeContractSnapshot {
                 id = 'readiness-package-non-mutation'
                 titleZh = 'readiness/package 明确不变更'
                 operatorScenario = 'This generated metadata is evidence that package/readiness did not execute install modes, mutate VM state, sign drivers, push, publish, or create fresh live evidence.'
-                evidenceFields = @('executionBoundaries.smokeTestsExecuted=false', 'executionBoundaries.hyperVLiveExecuted=false', 'executionBoundaries.vmMutationExecuted=false', 'executionBoundaries.driverSigningExecuted=false', 'executionBoundaries.csignToolInvoked=false', 'executionBoundaries.gitPushExecuted=false')
+                evidenceFields = @('executionBoundaries.smokeTestsExecuted=false', 'executionBoundaries.providerLiveExecuted=false', 'executionBoundaries.hyperVLiveExecuted=false', 'executionBoundaries.vmMutationExecuted=false', 'executionBoundaries.driverSigningExecuted=false', 'executionBoundaries.csignToolInvoked=false', 'executionBoundaries.gitPushExecuted=false')
                 installerModesExecutedByReadinessPackage = @()
                 nonMutating = $true
                 nextActionsZh = @(
@@ -1385,6 +1428,14 @@ function Get-ReleaseComponentProgressSnapshot {
                 remediationZh = '没有实验室 job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
             },
             [ordered]@{
+                id = 'provider-parity-live-evidence'
+                titleZh = '三 provider 独立 live 证据'
+                state = 'guarded-not-generated'
+                evidence = @('requiredEvidenceFields.providerParityLiveClaim', 'providerParityLiveEvidenceGuardrail', 'gapAudit.providerParityLiveEvidence')
+                handoffGate = 'provider parity requires independent HyperV, VMware, and Qemu Windows lab jobs from the same clean full commit covering the same acceptance rows'
+                remediationZh = '从同一个干净 commit 对同一份样本字节分别运行 HyperV、VMware、Qemu live acceptance，再运行 Test-ProviderParityEvidence.ps1；任一 provider 证据缺失或聚合校验失败时，不得声明三 provider 使用体验等价。'
+            },
+            [ordered]@{
                 id = 'self-noise-guard-readiness'
                 titleZh = '自噪声护栏就绪'
                 state = 'static-audit-documented'
@@ -1450,6 +1501,25 @@ function Get-PackageGapAuditSnapshot {
             rejectedSubstitutes = @('package-manifest.generated.json', 'source package StageOnly dry-run', 'runtime layout dry-run', 'release-readiness.json')
             remediationZh = '打包只生成 staging/zip/metadata；没有实验室 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
         }
+        providerParityLiveEvidence = [ordered]@{
+            required = $true
+            generated = $false
+            claimAllowedWithoutAllProviders = $false
+            requiredProviders = @($script:operatorDiagnostics.requiredEvidenceFields.providerParityLiveClaim.requiredProviders)
+            evidencePerProvider = @($script:operatorDiagnostics.requiredEvidenceFields.providerParityLiveClaim.evidencePerProvider)
+            crossProviderInvariants = @($script:operatorDiagnostics.requiredEvidenceFields.providerParityLiveClaim.crossProviderInvariants)
+            aggregateValidation = @($script:operatorDiagnostics.requiredEvidenceFields.providerParityLiveClaim.aggregateValidation)
+            sharedAcceptanceRows = @($script:operatorDiagnostics.requiredEvidenceFields.providerParityLiveClaim.sharedAcceptanceRows)
+            labCommands = [ordered]@{
+                HyperV = '.\scripts\Invoke-WebUIApiE2E.ps1 -BaseUrl http://127.0.0.1:18082 -StartWebUI -StopWebUIOnExit -Provider HyperV -SamplePath C:\Windows\System32\notepad.exe -Live -RequireCleanSource -DurationSeconds 5 -StepTimeoutSeconds 900 -SummaryPath D:\Temp\KSwordSandbox\parity\hyperv-summary.json'
+                VMware = '.\scripts\Invoke-WebUIApiE2E.ps1 -BaseUrl http://127.0.0.1:18082 -StartWebUI -StopWebUIOnExit -Provider VMware -SamplePath C:\Windows\System32\notepad.exe -Live -RequireCleanSource -DurationSeconds 5 -StepTimeoutSeconds 900 -SummaryPath D:\Temp\KSwordSandbox\parity\vmware-summary.json'
+                Qemu = '.\scripts\Invoke-WebUIApiE2E.ps1 -BaseUrl http://127.0.0.1:18082 -StartWebUI -StopWebUIOnExit -Provider Qemu -SamplePath C:\Windows\System32\notepad.exe -Live -RequireCleanSource -DurationSeconds 5 -StepTimeoutSeconds 900 -SummaryPath D:\Temp\KSwordSandbox\parity\qemu-summary.json'
+            }
+            validatorCommand = '.\scripts\Test-ProviderParityEvidence.ps1 -HyperVSummaryPath D:\Temp\KSwordSandbox\parity\hyperv-summary.json -VMwareSummaryPath D:\Temp\KSwordSandbox\parity\vmware-summary.json -QemuSummaryPath D:\Temp\KSwordSandbox\parity\qemu-summary.json -OutputPath D:\Temp\KSwordSandbox\parity\provider-parity-validation.json'
+            rejectedSubstitutes = @('a job from only one provider', 'package-manifest.generated.json', 'release-readiness.json', 'PlanOnly output', 'runtime layout dry-run')
+            releaseNotesFallbackZh = '三 provider 等价声明尚未完成'
+            remediationZh = '从同一个干净 commit 对同一份样本字节分别在 Windows lab 运行 HyperV、VMware、Qemu Web API live acceptance，再生成 validated=true 的 provider-parity-validation.json；任一 provider 或聚合证据缺失时，不得声明三 provider 使用体验等价。'
+        }
         runtimePublishRootCompleteness = [ordered]@{
             appliesTo = if ($PackageKind -eq 'runtime') { 'runtime handoff' } else { 'not applicable to source package' }
             runtimePublishRoot = if ($runtimeRootProvided) { $RuntimePublishRoot } else { $null }
@@ -1472,7 +1542,7 @@ function Get-PackageGapAuditSnapshot {
             behaviorConclusionAllowed = $false
             requiredBoundaries = @('self-noise excluded from sample behavior', 'collection-health remains evidence-quality only', 'VT quiet state is not behavior', 'behaviorCounted=false rows remain non-behavioral')
             evidence = @('componentProgress:self-noise-guard-readiness', 'docs/release.md', 'docs/run.md', 'rules/behavior-rules.json')
-            remediationZh = '若需要证明自噪声护栏，使用允许的静态/readiness 审计；package-portable.ps1 不运行 smoke、Hyper-V live 或报告生成。'
+            remediationZh = '若需要证明自噪声护栏，使用允许的静态/readiness 审计；package-portable.ps1 不运行 smoke、任何 provider live 或报告生成。'
         }
         componentProgressStatus = [ordered]@{
             present = $true
@@ -1533,6 +1603,7 @@ function Update-PackageOperatorDiagnostics {
         installContractGapNextActionsZh = @($installModeContract.gapNextActionsZh)
         validationScope = [ordered]@{
             noSmokeTests = $true
+            noProviderLive = $true
             noHyperVLive = $true
             noDriverSigning = $true
             noCSignTool = $true
@@ -1600,7 +1671,7 @@ function Update-PackageOperatorDiagnostics {
             completeRuntimeReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage'
             installCheckEnvironment = '.\scripts\install.ps1 -Mode CheckEnvironment'
             runCheckEnvironment = '.\scripts\run.ps1 -Mode CheckEnvironment'
-            recordExistingEnvironment = '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>'
+            recordExistingEnvironment = '.\scripts\install.ps1 -Mode Change -UpdateVirtualizationConfig -VirtualizationProvider <HyperV|VMware|Qemu> -VmName <existing VM> -CheckpointName <snapshot>'
             freshLocalInstall = '.\scripts\install.ps1'
             resetGuestPasswordExplicitVmMutation = '.\scripts\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force'
             prepareGuestPayload = '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained'
@@ -1608,6 +1679,7 @@ function Update-PackageOperatorDiagnostics {
             runtimePackage = '.\scripts\package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePayloads -OutputRoot <external-output-root> -Force'
         }
         externalStateDiagnostics = [ordered]@{
+            VirtualizationProvider = 'not checked or mutated by packaging; run install/run CheckEnvironment for read-only selected-provider management tool, VM definition, baseline, guest transport, and host capability diagnostics'
             HyperV = 'not checked or mutated by packaging; run install/run CheckEnvironment for read-only prerequisite diagnostics including Hyper-V module, elevation, hardware virtualization hints, VM/checkpoint presence, and Guest Service Interface'
             VmProfile = 'local VM name, checkpoint, guest working directory, driver host path, and runtime roots are operator-local profile values; they are diagnosed by install/run status and are not packaged as sandbox.local.json'
             GuestPayload = 'runtime payload is copied only from RuntimePublishRoot or prepared explicitly under an external PayloadRoot; packaging records present/missing/incomplete payload folders, expected exe/dll/manifest leaves, and forbidden file previews but does not build them'
@@ -1620,12 +1692,13 @@ function Update-PackageOperatorDiagnostics {
             'install-state and DPAPI backups',
             'submitted samples and generated harmless samples',
             'runtime job outputs, reports, events, screenshots, PCAP/captures, dumps, traces, and databases',
-            'Hyper-V disks, checkpoints, snapshots, and VM export/state files',
+            'Hyper-V, VMware, and QEMU disks, checkpoints, snapshots, overlays, and VM export/state files',
             'repository build outputs, symbols, packages, archives, and native intermediates',
             'driver binaries, certificates, private keys, signing material, GUI signing fallback, and CSignTool'
         )
         nonMutating = [ordered]@{
             smokeTests = $false
+            providerLive = $false
             hyperVLive = $false
             vmMutation = $false
             installerModes = $false
@@ -1649,7 +1722,23 @@ function Update-PackageOperatorDiagnostics {
             releaseNotesMustUseFallbackWhenNoJobId = $true
             liveCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live'
             requiredReleaseNoteFields = @('commit', 'jobId', 'runtimeRoot', 'generatedAtUtc/localTime', 'report.json/report.zh.html/report.en.html paths')
-            chinese = '中文提示：本脚本只做本机 staging/zip，不启动 Hyper-V live；没有记录 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
+            chinese = '中文提示：本脚本只做本机 staging/zip，不启动任何 provider live；没有记录 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
+        }
+        providerParityLiveEvidenceGuardrail = [ordered]@{
+            required = $true
+            generated = $false
+            claimAllowedWithoutAllProviders = $false
+            requiredProviders = @('HyperV', 'VMware', 'Qemu')
+            evidencePerProvider = @($script:operatorDiagnostics.requiredEvidenceFields.providerParityLiveClaim.evidencePerProvider)
+            crossProviderInvariants = @($script:operatorDiagnostics.requiredEvidenceFields.providerParityLiveClaim.crossProviderInvariants)
+            aggregateValidation = @($script:operatorDiagnostics.requiredEvidenceFields.providerParityLiveClaim.aggregateValidation)
+            liveCommands = [ordered]@{
+                HyperV = '.\scripts\Invoke-WebUIApiE2E.ps1 -BaseUrl http://127.0.0.1:18082 -StartWebUI -StopWebUIOnExit -Provider HyperV -SamplePath C:\Windows\System32\notepad.exe -Live -RequireCleanSource -DurationSeconds 5 -StepTimeoutSeconds 900 -SummaryPath D:\Temp\KSwordSandbox\parity\hyperv-summary.json'
+                VMware = '.\scripts\Invoke-WebUIApiE2E.ps1 -BaseUrl http://127.0.0.1:18082 -StartWebUI -StopWebUIOnExit -Provider VMware -SamplePath C:\Windows\System32\notepad.exe -Live -RequireCleanSource -DurationSeconds 5 -StepTimeoutSeconds 900 -SummaryPath D:\Temp\KSwordSandbox\parity\vmware-summary.json'
+                Qemu = '.\scripts\Invoke-WebUIApiE2E.ps1 -BaseUrl http://127.0.0.1:18082 -StartWebUI -StopWebUIOnExit -Provider Qemu -SamplePath C:\Windows\System32\notepad.exe -Live -RequireCleanSource -DurationSeconds 5 -StepTimeoutSeconds 900 -SummaryPath D:\Temp\KSwordSandbox\parity\qemu-summary.json'
+            }
+            validatorCommand = '.\scripts\Test-ProviderParityEvidence.ps1 -HyperVSummaryPath D:\Temp\KSwordSandbox\parity\hyperv-summary.json -VMwareSummaryPath D:\Temp\KSwordSandbox\parity\vmware-summary.json -QemuSummaryPath D:\Temp\KSwordSandbox\parity\qemu-summary.json -OutputPath D:\Temp\KSwordSandbox\parity\provider-parity-validation.json'
+            chinese = '中文提示：单个 provider 的 job 不能证明另外两个；三 provider 等价声明必须有来自同一完整 commit、同一样本字节的 HyperV、VMware、Qemu 独立 Windows lab 证据，以及 validated=true 的聚合结果。'
         }
         reviewerChecklist = [ordered]@{
             chinese = '中文审阅速查：先确认 handoffAllowed；再核对 RuntimePublishRoot 在仓库外、runtime payload 完整、source/runtime safety metadata 无红灯；最后确认 release notes 没有冒充 fresh live。'
@@ -1670,6 +1759,7 @@ function Update-PackageOperatorDiagnostics {
             releaseNotesMustState = @(
                 '是否有 fresh live job id；没有则写“本候选未刷新 fresh live evidence”',
                 'runtimeRoot、RuntimePublishRoot、commit、生成时间、report.json/report.zh.html/report.en.html 路径',
+                '若声明三 provider 等价，附同一完整 commit、同一样本 SHA-256/字节数/时长的 HyperV、VMware、Qemu 三份独立 evidence record，并附 validated=true 的聚合结果；任一缺失时写“三 provider 等价声明尚未完成”',
                 '默认不签名、不加载真实 R0 driver；真实 R0 是隔离 lab 高级路径'
             )
             rejectIfPresent = @(
@@ -1685,7 +1775,7 @@ function Update-PackageOperatorDiagnostics {
             '中文：完整 runtime handoff 必须提供仓库外 RuntimePublishRoot、传入 -RequireCompleteRuntimePayloads，并确保所有 runtime publish entries 存在。',
             'RuntimePublishRoot must point to external published payloads such as host-web, guest-tools, tools/job-tool, and tools/postprocess.',
             'Use -RequireCompleteRuntimePayloads for handoff builds; omit it only for explicit layout/safety dry-runs.',
-            'The package script stages and zips locally only; it does not build, sign, push, publish, start Hyper-V, or copy files into a VM.',
+            'The package script stages and zips locally only; it does not build, sign, push, publish, start any virtualization provider, or copy files into a VM.',
             'Inspect package-manifest.generated.json before handoff; verify fileInventory sha256/sizeBytes and packageDiagnostics.'
         )
         chineseGuidance = '中文提示：runtime 便携包如果没有 RuntimePublishRoot 也可做 layout dry-run；完整交付必须传入仓库外 RuntimePublishRoot 并使用 -RequireCompleteRuntimePayloads。package/readiness 不会生成 fresh live evidence。'
@@ -2052,12 +2142,13 @@ function Write-GeneratedPackageManifest {
             runtimeCompleteness = if ($PackageKind -ne 'runtime') { 'not applicable' } elseif ($RequireCompleteRuntimePayloads.IsPresent) { 'required' } else { 'layout dry-run allowed' }
         }
         safetyContract = [ordered]@{
-            Chinese = '中文提示：package-portable.ps1 已按 manifest 和硬性扩展/路径规则排除 secrets、本机状态、VM 磁盘/快照、样本、报告、截图、PCAP、dump、仓库二进制、legacy signing tool 和 GUI signing fallback；脚本不跑 smoke、不跑 Hyper-V live、不发布、不推送、不签名、不调用 CSignTool.exe、不操作 VM。'
+            Chinese = '中文提示：package-portable.ps1 已按 manifest 和硬性扩展/路径规则排除 secrets、本机状态、VM 磁盘/快照/overlay、样本、报告、截图、PCAP、dump、仓库二进制、legacy signing tool 和 GUI signing fallback；脚本不跑 smoke、不跑任何 provider live、不发布、不推送、不签名、不调用 CSignTool.exe、不操作 VM。'
             SensitiveMaterial = 'not packaged'
             VmState = 'not packaged'
             VmMutation = 'not performed'
             InstallerModeExecution = 'not performed by packaging/readiness; installModeContract documents operator-only modes'
             SmokeTests = 'not executed'
+            ProviderLive = 'not executed'
             HyperVLive = 'not executed'
             RepositoryBuildOutput = 'not packaged'
             RuntimeBinariesSource = if ($PackageKind -eq 'runtime') { 'external RuntimePublishRoot only' } else { 'not packaged' }
@@ -2197,7 +2288,7 @@ if ($PackageKind -eq 'runtime') {
 Write-PackageOperatorDiagnostic -Chinese '中文提示：已排除本机 secret、install-state、DPAPI 备份、样本、报告、VM 磁盘/快照、仓库二进制、签名材料和 GUI signing fallback。'
 Write-PackageOperatorDiagnostic -Chinese 'fresh live 证据：未生成；若发布说明要声称当前候选已刷新真实 Notepad 5s，请先在实验室主机运行 live 并记录 job id。' -English 'Fresh live evidence: not generated by packaging.'
 Write-PackageOperatorDiagnostic -Chinese '安装模式契约：已在 package-manifest.generated.json 写入 installModeContract；package/readiness 不运行 Install/Change/CheckEnvironment/ResetGuestVmPassword。'
-Write-PackageOperatorDiagnostic -Chinese '安全合约：不跑 smoke、不跑 Hyper-V live、不修改 VM、不签名 driver、不使用 GUI signing fallback、不调用 CSignTool、不 git push/publish。' -English 'Safety: no smoke tests, no Hyper-V live, no VM mutation, no driver signing, no GUI signing fallback, no CSignTool, no git push/publish.'
+Write-PackageOperatorDiagnostic -Chinese '安全合约：不跑 smoke、不跑任何 provider live、不修改 VM、不签名 driver、不使用 GUI signing fallback、不调用 CSignTool、不 git push/publish。' -English 'Safety: no smoke tests, no provider live execution, no VM mutation, no driver signing, no GUI signing fallback, no CSignTool, no git push/publish.'
 if ($StageOnly.IsPresent) {
     Write-PackageOperatorDiagnostic -Chinese '压缩包：已跳过（-StageOnly，仅 layout/safety dry-run）' -English 'Archive: skipped (-StageOnly)'
 }

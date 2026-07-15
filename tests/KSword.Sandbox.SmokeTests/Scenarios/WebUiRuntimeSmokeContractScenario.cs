@@ -206,6 +206,18 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         var root = document.RootElement;
         SmokeAssert.True(root.TryGetProperty("readOnly", out var readOnly) && readOnly.GetBoolean(), "Local host readiness should declare readOnly=true.");
         SmokeAssert.True(root.TryGetProperty("detectedAtUtc", out _), "Local host readiness should include detectedAtUtc.");
+        SmokeAssert.True(root.TryGetProperty("hostVirtualization", out var hostVirtualization) && hostVirtualization.ValueKind == JsonValueKind.Object, "Local host readiness should include provider-neutral host virtualization facts.");
+        SmokeAssert.True(hostVirtualization.TryGetProperty("provider", out _), "Host virtualization readiness should identify the selected provider.");
+        SmokeAssert.True(hostVirtualization.TryGetProperty("operatingSystemSupported", out _), "Host virtualization readiness should report Windows support.");
+        SmokeAssert.True(hostVirtualization.TryGetProperty("hardwareAccelerationReady", out _), "Host virtualization readiness should report hardware acceleration readiness without assuming success.");
+        SmokeAssert.True(root.TryGetProperty("virtualization", out var virtualization) && virtualization.ValueKind == JsonValueKind.Object, "Local host readiness should include selected-provider virtualization facts.");
+        SmokeAssert.True(virtualization.TryGetProperty("provider", out _), "Selected-provider readiness should identify its provider.");
+        SmokeAssert.True(virtualization.TryGetProperty("querySucceeded", out _), "Selected-provider readiness should distinguish a successful provider query.");
+        SmokeAssert.True(virtualization.TryGetProperty("vmExists", out _), "Selected-provider readiness should report whether the configured VM resource exists.");
+        SmokeAssert.True(virtualization.TryGetProperty("baselineExists", out _), "Selected-provider readiness should expose the provider-neutral clean-baseline result.");
+        SmokeAssert.True(virtualization.TryGetProperty("guestTransportSecure", out _), "Selected-provider readiness should expose guest transport security.");
+        SmokeAssert.True(virtualization.TryGetProperty("primaryTool", out _), "Selected-provider readiness should expose its primary management tool fact.");
+        SmokeAssert.True(virtualization.TryGetProperty("machineDefinition", out _), "Selected-provider readiness should expose its VM, VMX, or disk resource fact.");
         SmokeAssert.True(root.TryGetProperty("hyperV", out var hyperV) && hyperV.ValueKind == JsonValueKind.Object, "Local host readiness should include Hyper-V facts.");
         SmokeAssert.True(hyperV.TryGetProperty("querySucceeded", out _), "Hyper-V readiness should report whether inventory succeeded.");
         SmokeAssert.True(hyperV.TryGetProperty("vmExists", out _), "Hyper-V readiness should distinguish a detected VM from a configured name.");
@@ -345,7 +357,6 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
             AssertSafeSelector("artifact downloadSelector", selector.GetString() ?? string.Empty);
             SmokeAssert.True(artifact.TryGetProperty("downloadHref", out var href), "Web artifact descriptors should expose downloadHref.");
             var hrefText = href.GetString() ?? string.Empty;
-            SmokeAssert.True(hrefText.StartsWith($"/api/jobs/{jobId:D}/artifacts/download?path=", StringComparison.Ordinal), "Artifact download href should target the guarded download endpoint.");
             SmokeAssert.True(!LooksLikeLocalAbsolutePath(hrefText), "Artifact download href should not embed an absolute host path.");
             SmokeAssert.True(artifact.TryGetProperty("download", out var download) && download.ValueKind == JsonValueKind.Object, "Web artifact descriptors should expose the typed download contract.");
             SmokeAssert.True(download.TryGetProperty("available", out var available) && available.ValueKind is JsonValueKind.True or JsonValueKind.False, "Artifact download contract should expose boolean availability.");
@@ -353,7 +364,17 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
             SmokeAssert.True(string.Equals(contractSelector.GetString(), selector.GetString(), StringComparison.Ordinal), "Artifact download contract selector should match the top-level downloadSelector.");
             SmokeAssert.True(download.TryGetProperty("href", out var contractHref), "Artifact download contract should expose href.");
             SmokeAssert.True(string.Equals(contractHref.GetString(), hrefText, StringComparison.Ordinal), "Artifact download contract href should match the top-level downloadHref.");
-            SmokeAssert.True(download.TryGetProperty("rejectionCode", out _), "Artifact download contract should expose a stable rejectionCode field.");
+            SmokeAssert.True(download.TryGetProperty("rejectionCode", out var rejectionCode), "Artifact download contract should expose a stable rejectionCode field.");
+            if (available.GetBoolean())
+            {
+                SmokeAssert.True(hrefText.StartsWith($"/api/jobs/{jobId:D}/artifacts/download?path=", StringComparison.Ordinal), "Available artifact download href should target the guarded download endpoint.");
+                SmokeAssert.True(string.IsNullOrWhiteSpace(rejectionCode.GetString()), "Available artifacts should not carry a rejection code.");
+            }
+            else
+            {
+                SmokeAssert.True(string.IsNullOrWhiteSpace(hrefText), "Unavailable artifacts must not expose a download href.");
+                SmokeAssert.True(!string.IsNullOrWhiteSpace(rejectionCode.GetString()), "Unavailable artifacts should explain why Web download was rejected.");
+            }
             if (artifact.TryGetProperty("metadata", out var metadata))
             {
                 AssertNoAbsolutePathMetadata(metadata, "artifact metadata");

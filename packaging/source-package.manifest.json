@@ -10,19 +10,21 @@
     "noGitPushByPackageScript": true,
     "noDriverSigningByPackageScript": true,
     "noSmokeByPackageOrReadiness": true,
+    "noProviderLiveByPackageOrReadiness": true,
     "noHyperVLiveByPackageOrReadiness": true,
     "noCSignToolInvocationByPackageOrReadiness": true,
     "guiSigningFallback": "forbidden",
     "legacyCSignToolDefaultPath": "forbidden",
     "runtimePayloadSource": "not applicable; source package is source-only",
-    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; package-portable.ps1 writes generated metadata including reviewerChecklist and sourceRuntimeSafetyMetadata, and prints stage/archive/safety diagnostics without VM, driver signing, GUI signing fallback, or CSignTool side effects. Machine-readable installModeContract documents existing environment, checkpoint/snapshot restore boundaries, fresh/create local setup, first-computer prerequisites, compatibility boundaries, and explicit package/readiness non-mutation with Chinese gap next actions.",
+    "operatorDiagnostics": "install/run expose read-only selected-provider prerequisites, VM profile, guest transport, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; package-portable.ps1 writes generated metadata including reviewerChecklist and sourceRuntimeSafetyMetadata, and prints stage/archive/safety diagnostics without VM, driver signing, GUI signing fallback, or CSignTool side effects. Machine-readable installModeContract documents existing environment, checkpoint/snapshot restore boundaries, fresh/create local setup, first-computer prerequisites, compatibility boundaries, and explicit package/readiness non-mutation with Chinese gap next actions.",
     "machineReadableComponentProgress": "package-manifest.generated.json:componentProgress and release-readiness.json:componentProgress",
-    "machineReadableGapAudit": "package-manifest.generated.json:gapAudit and release-readiness.json:gapAudit use ksword.release.gap-audit.v28 and cover no fresh live evidence, RuntimePublishRoot completeness, self-noise guard readiness, no VM mutation/no signing guardrails, and component progress",
+    "machineReadableGapAudit": "package-manifest.generated.json:gapAudit and release-readiness.json:gapAudit use ksword.release.gap-audit.v28 and cover no fresh live evidence, three-provider parity live evidence, RuntimePublishRoot completeness, self-noise guard readiness, no VM mutation/no signing guardrails, and component progress",
     "runtimeCompletenessDiagnostics": "source package metadata still records RuntimePublishRoot as not applicable while release-readiness.json:gapAudit.runtimePublishRootCompleteness explains that runtime handoff must be verified separately with an external RuntimePublishRoot",
     "reviewerChecklistJson": "package-manifest.generated.json:reviewerChecklist and release-readiness.json:reviewerChecklist",
     "noFreshLiveGuardrail": "package/readiness do not generate fresh live evidence; release notes must say 本候选未刷新 fresh live evidence unless a lab job id is recorded",
-    "machineReadableExecutionBoundaries": "package-manifest.generated.json:executionBoundaries and release-readiness.json:executionBoundaries explicitly list no smoke, no Hyper-V live, no signing, no CSignTool, no push/publish",
-    "machineReadableRequiredEvidenceFields": "package-manifest.generated.json:requiredEvidenceFields and release-readiness.json:requiredEvidenceFields list branch, commit, dirty status, runtime handoff fields, and fresh-live claim fields",
+    "providerParityLiveEvidenceGuardrail": "a three-provider parity claim requires independent HyperV, VMware, and Qemu Windows lab jobs from the same full gitCommit with gitDirty=false and gitChangedFileCount=0, the same sampleSha256/sampleSizeBytes/requestedDurationSeconds, host acceleration and selected-provider readiness, provider resource identity, completed background execution, runbookExecutionPath, final report paths, and a ksword.provider-parity-evidence.v1 artifact with validated=true; one provider job cannot prove the other two",
+    "machineReadableExecutionBoundaries": "package-manifest.generated.json:executionBoundaries and release-readiness.json:executionBoundaries explicitly list no smoke, no provider live, no signing, no CSignTool, no push/publish",
+    "machineReadableRequiredEvidenceFields": "package-manifest.generated.json:requiredEvidenceFields and release-readiness.json:requiredEvidenceFields list branch, commit, dirty status, runtime handoff fields, fresh-live claim fields, and independent HyperV/VMware/Qemu provider-parity claim fields",
     "gitProvenanceFields": "package-manifest.generated.json:gitMetadata and release-readiness.json:gitMetadata include branch, full commit, short commit, dirtyStatus, statusCount, and statusPreview",
     "installModeContract": {
       "schema": "ksword.release.install-mode-contract.v1",
@@ -51,12 +53,22 @@
           {
             "modeId": "rollback-restore-snapshot",
             "entrypoint": "RestoreCleanCheckpoint",
-            "titleZh": "回退/恢复已有干净快照",
+            "titleZh": "恢复或确认已有干净基线",
             "defaultCommand": ".\\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly",
+            "nonMutatingEquivalentCommand": ".\\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -Json",
             "mutatingCommand": ".\\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm",
-            "packageReadinessMutation": "forbidden; package/readiness only records metadata and diagnostics",
+            "mutatingProviders": [
+              "HyperV",
+              "VMware",
+              "QemuInternalSnapshot"
+            ],
+            "nonMutatingProfiles": [
+              "QemuOverlay"
+            ],
+            "mutationCondition": "Hyper-V checkpoint, VMware snapshot, and QEMU internal snapshot require provider mutation; QEMU per-job overlay satisfies the clean-baseline request without in-place mutation.",
+            "packageReadinessMutation": "provider restore forbidden; package/readiness only records QEMU overlay equivalence metadata and diagnostics",
             "nextActionsZh": [
-              "下一步：readiness/package 不恢复快照；只有隔离 lab 操作者显式 -AllowVmMutation -Confirm/-Force 才能恢复已有 checkpoint。"
+              "下一步：readiness/package 不执行 provider restore；QEMU per-job overlay 可用无变更 JSON 命令确认干净基线，其他快照路径只有隔离 lab 操作者显式 -AllowVmMutation -Confirm/-Force 才能真实恢复。"
             ]
           },
           {
@@ -66,7 +78,7 @@
             "defaultCommand": ".\\install.ps1",
             "packageReadinessMutation": "none; installer may write local config/secret only when operator runs it directly",
             "nextActionsZh": [
-              "下一步：首机先确认 Hyper-V/BIOS/SLAT/管理员 shell，手工创建/导入 VM 和 clean checkpoint，再运行 .\\install.ps1 推荐安装向导写本机 config/secret/payload。"
+              "下一步：首机先确认 Windows、所选 provider 管理工具和硬件虚拟化能力，手工创建/导入 VM 和 clean baseline，再运行 .\\install.ps1 推荐安装向导写本机 config/secret/payload。"
             ]
           }
         ]
@@ -85,7 +97,7 @@
           "titleZh": "已有环境接入",
           "operatorCommands": [
             ".\\scripts\\install.ps1 -Mode CheckEnvironment",
-            ".\\scripts\\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>",
+            ".\\scripts\\install.ps1 -Mode Change -UpdateVirtualizationConfig -VirtualizationProvider <HyperV|VMware|Qemu> -VmName <existing VM> -CheckpointName <snapshot>",
             ".\\scripts\\run.ps1 -Mode CheckEnvironment"
           ],
           "machineEvidence": [
@@ -99,18 +111,23 @@
         },
         {
           "id": "restore-checkpoint-snapshot",
-          "titleZh": "还原 checkpoint/snapshot 边界",
+          "titleZh": "恢复或确认 clean baseline 边界",
           "operatorCommands": [
             ".\\scripts\\install.ps1 -Mode CheckEnvironment",
-            ".\\scripts\\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force",
+            ".\\scripts\\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly",
+            ".\\scripts\\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -Json",
+            ".\\scripts\\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm",
             ".\\scripts\\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live"
           ],
           "machineEvidence": [
-            "CheckpointExists",
-            "CheckpointGuidance",
+            "BaselineRestoreRequiresVmMutation",
+            "BaselineRestoreSatisfiedWithoutMutation",
+            "BaselineIsolationMode",
+            "ProviderSnapshotRestoreRequested",
             "VmProfile.ExpectedCheckpointName"
           ],
-          "packageReadinessMutation": "forbidden; restore/refresh is explicit lab/live only"
+          "qemuOverlaySatisfiesWithoutMutation": true,
+          "packageReadinessMutation": "provider restore forbidden; QEMU overlay equivalence is metadata-only during package/readiness"
         },
         {
           "id": "fresh-create-flow",
@@ -118,7 +135,7 @@
           "operatorCommands": [
             ".\\scripts\\install.ps1",
             ".\\install.ps1",
-            ".\\scripts\\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>",
+            ".\\scripts\\install.ps1 -Mode Change -UpdateVirtualizationConfig -VirtualizationProvider <HyperV|VMware|Qemu> -VmName <existing VM> -CheckpointName <snapshot>",
             ".\\scripts\\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained"
           ],
           "machineEvidence": [
@@ -137,9 +154,10 @@
             ".\\scripts\\run.ps1 -Mode CheckEnvironment"
           ],
           "machineEvidence": [
-            "HyperVPrerequisites",
-            "VirtualizationFirmwareEnabled",
-            "SecondLevelAddressTranslationSupported",
+            "VirtualizationProvider",
+            "ProviderManagementAvailable",
+            "VmProfile.GuestTransportReady",
+            "VmProfile.GuestTransportSecure",
             "RuntimeRootUnderRepository",
             "VirusTotalStatus"
           ],
@@ -154,8 +172,8 @@
             "freshLiveEvidenceGuardrail"
           ],
           "boundaries": [
-            "source/package/readiness are low-side-effect and do not require live Hyper-V",
-            "Hyper-V live requires Windows_NT, Hyper-V features/module, hardware virtualization, existing VM, and clean checkpoint",
+            "source/package/readiness are low-side-effect and do not require live virtualization",
+            "supported Hyper-V, VMware Workstation Pro (vmType=ws), and QEMU WHPX live paths require Windows_NT, the selected provider management tool, hardware virtualization, an existing VM, a clean baseline, and guest transport",
             "Runtime payloads must come from an external RuntimePublishRoot",
             "VirusTotal is optional hash-only enrichment and is unrelated to Intel VT-x/AMD-V"
           ],
@@ -179,7 +197,7 @@
         "nextActionsZhWhenMissing": [
           "下一步：补齐 releaseContract.installModeContract.modeIds 中缺失的安装模式。",
           "下一步：重新生成 package-manifest.generated.json/release-readiness.json，确认 installContractGaps 为空。",
-          "下一步：不要通过 readiness/package 运行 install、Hyper-V live、VM mutation、签名或 push/publish。"
+          "下一步：不要通过 readiness/package 运行 install、任何 provider live、VM mutation、签名或 push/publish。"
         ]
       },
       "readinessPackageNonMutation": {
@@ -210,11 +228,11 @@
       "safety contract for secrets, VM state, runtime evidence, signing, GUI signing fallback, push/publish, and CSignTool",
       "manifest required checks and optional packaging diagnostics",
       "machine-readable componentProgress snapshot for deployment/productization review",
-      "machine-readable gapAudit v28 snapshot for no fresh live evidence, RuntimePublishRoot completeness, no VM mutation/no signing guardrails, self-noise guard readiness, and component progress",
+      "machine-readable gapAudit v28 snapshot for no fresh live evidence, three-provider parity live evidence, RuntimePublishRoot completeness, no VM mutation/no signing guardrails, self-noise guard readiness, and component progress",
       "operatorDiagnostics.runtimePublishRootDiagnostics and runtimeCompletenessDiagnostics showing source package runtime handoff is not verified here",
       "executionBoundaries declaring smoke/live/signing/CSignTool/push were not executed",
       "gitMetadata with branch, full commit, short commit, dirty status, status count, and preview",
-      "requiredEvidenceFields for source handoff, runtime handoff, and fresh live claims",
+      "requiredEvidenceFields for source handoff, runtime handoff, fresh live claims, and independent HyperV/VMware/Qemu parity claims",
       "runtimeHandoffMissingNextActionsZh with Chinese next actions when complete RuntimePublishRoot handoff is missing",
       "reviewerChecklist JSON and no-fresh-live guardrail fields",
       "installModeContract for existing environment, restore checkpoint/snapshot boundary, fresh/create flow, first-computer prerequisites, compatibility boundaries, and readiness/package non-mutation",
@@ -228,7 +246,7 @@
       "runtimeHandoffMissingNextActionsZhRequired": true,
       "forbiddenExecution": [
         "smoke",
-        "Hyper-V live",
+        "virtualization provider live",
         "driver signing",
         "CSignTool.exe",
         "GUI signing fallback",
@@ -495,8 +513,9 @@
     "Run scripts/Test-RepositoryPolicy.ps1 before cutting a source package.",
     "Cut source packages from a clean git worktree unless AllowDirtySource is explicitly documented.",
     "Do not include runtime-root folders, submitted samples, VM disks/checkpoints, local state/secrets, build intermediates, signed driver binaries, or private signing material.",
-    "package-manifest.generated.json and release-readiness.json must expose executionBoundaries: no smoke, no Hyper-V live, no signing, no CSignTool, no push/publish.",
+    "package-manifest.generated.json and release-readiness.json must expose executionBoundaries: no smoke, no provider live, no signing, no CSignTool, no push/publish.",
     "Machine-readable handoff evidence must include branch, commit, dirty status, requiredEvidenceFields, and Chinese next actions when complete RuntimePublishRoot handoff is missing.",
+    "A three-provider parity claim must include independent HyperV, VMware, and Qemu evidence records from the same full gitCommit with gitDirty=false and gitChangedFileCount=0, the same sample SHA-256/byte size/requested duration, host acceleration and selected-provider readiness, provider resource identity, completed background execution, distinct jobId, runbookExecutionPath, final report paths, and a ksword.provider-parity-evidence.v1 artifact with validated=true; one provider job cannot substitute for another.",
     "Generated package/readiness metadata must include installModeContract, installContractGaps, and installContractGapNextActionsZh covering existing environment, restore checkpoint/snapshot, fresh/create flow, first-computer prerequisites, compatibility boundaries, and package/readiness non-mutation."
   ],
   "componentProgressTemplate": {
@@ -519,11 +538,15 @@
       },
       {
         "id": "release-smoke-scenarios",
-        "handoffGate": "PowerShell parse, repository policy, source StageOnly dry-run; no Hyper-V/live/heavy E2E"
+        "handoffGate": "PowerShell parse, repository policy, source StageOnly dry-run; no provider live/heavy E2E"
       },
       {
         "id": "fresh-live-guardrail",
         "handoffGate": "fresh live claims require explicit lab job id, commit, runtime root, timestamp, and report paths"
+      },
+      {
+        "id": "provider-parity-live-evidence",
+        "handoffGate": "three-provider parity requires independent HyperV, VMware, and Qemu Windows lab evidence from the same clean full commit and sample, covering the same acceptance rows, plus validated aggregate evidence"
       },
       {
         "id": "self-noise-guard-readiness",
