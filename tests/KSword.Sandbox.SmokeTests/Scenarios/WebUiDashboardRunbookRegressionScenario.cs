@@ -31,6 +31,10 @@ internal sealed class WebUiDashboardRunbookRegressionScenario : ISmokeTestScenar
             "Dashboard main-page progress chips should be capped to a small focused set.");
         RequireContains(
             dashboard,
+            "state === 'completed' || state === 'failed' || state === 'canceled'",
+            "Dashboard background polling should treat cancellation as a terminal state.");
+        RequireContains(
+            dashboard,
             "/jobs/${encodeURIComponent(jobId)}/execution-flow",
             "Dashboard should route full runbook review to the dedicated execution-flow page.");
         RequireContains(

@@ -4,7 +4,7 @@ using KSword.Sandbox.SmokeTests.Framework;
 namespace KSword.Sandbox.SmokeTests.Scenarios;
 
 /// <summary>
-/// Verifies the local installer contract for Hyper-V guest credential setup.
+/// Verifies the local installer contract for provider and guest credential setup.
 /// Inputs are repository paths; processing reads scripts/docs only; the
 /// scenario returns pass/fail metadata without executing the installer.
 /// </summary>
@@ -35,7 +35,7 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(installer, "Change settings", "Interactive installer should offer change.");
         RequireContains(installer, "Uninstall local settings", "Interactive installer should offer uninstall.");
         RequireContains(installer, "Reset Guest password", "Interactive installer should offer direct Guest password reset options.");
-        RequireContains(installer, "Configure Hyper-V", "Interactive installer should offer direct Hyper-V configuration.");
+        RequireContains(installer, "Configure virtualization", "Interactive installer should offer direct provider configuration.");
         RequireContains(installer, "Configure VT key", "Interactive installer should offer direct VirusTotal key configuration.");
         RequireContains(installer, "Check environment", "Interactive installer should offer environment checks.");
         RequireContains(installer, "Start WebUI", "Interactive installer should offer direct WebUI startup.");
@@ -45,22 +45,25 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(installer, "Change options:", "Installer should label the change menu.");
         RequireContains(installer, "Reset password secret", "Installer change menu should include password reset.");
         RequireContains(installer, "Reset actual VM guest password", "Installer change menu should include actual VM password reset.");
-        RequireContains(installer, "Change Hyper-V VM/checkpoint/guest paths", "Installer change menu should include Hyper-V config.");
+        RequireContains(installer, "Change provider/VM/snapshot/guest paths", "Installer change menu should include provider configuration.");
         RequireContains(installer, "Change recorded guest username", "Installer change menu should include more than password reset.");
         RequireContains(installer, "Recreate runtime folders and local config", "Installer change menu should include runtime folder and config refresh.");
-        RequireContains(installer, "Show Hyper-V readiness/status", "Installer change menu should include Hyper-V status.");
+        RequireContains(installer, "Show provider readiness/status", "Installer change menu should include provider status.");
         RequireContains(installer, "Configure optional VirusTotal API key", "Installer change menu should include VT key configuration.");
         RequireContains(installer, "Invoke-KSwordSandboxEnvironmentCheck", "Installer should include a read-only environment check path.");
         RequireContains(installer, "Invoke-KSwordSandboxWebUi", "Installer should expose a WebUI startup wrapper.");
         RequireContains(installer, "Set-GuestPasswordSecret", "Installer should centralize secret writes.");
         RequireContains(installer, "Set-VirusTotalApiKeySecret", "Installer should centralize VT key writes.");
-        RequireContains(installer, "Set-HyperVConfigState", "Installer should centralize Hyper-V config writes.");
+        RequireContains(installer, "Set-VirtualizationConfigState", "Installer should centralize provider config writes.");
         RequireContains(installer, "Invoke-GuestVmPasswordReset", "Installer should expose actual VM password reset integration.");
+        RequireContains(installer, "Enter-InstallLiveExecutionLease", "Installer VM maintenance should serialize with Web/CLI live jobs.");
+        RequireContains(installer, "Exit-InstallLiveExecutionLease", "Installer VM maintenance should release its live lease in finally blocks.");
+        RequireContains(installer, "LiveExecutionLeaseFilePresenceMeansHeld = $false", "Installer status should document persistent lease-file semantics.");
         RequireContains(installer, "Reset-SandboxGuestPassword.ps1", "Installer should call the offline actual VM password reset script.");
-        RequireContains(installer, "KSWORDBOX_GUEST_PASSWORD", "Installer should default to the expected Hyper-V guest password secret.");
+        RequireContains(installer, "KSWORDBOX_GUEST_PASSWORD", "Installer should default to the expected guest password secret.");
         RequireContains(installer, "Sandbox__ConfigPath", "Installer should set the ASP.NET config path environment variable.");
         RequireContains(installer, "KSWORDBOX_VIRUSTOTAL_API_KEY", "Installer should support the optional VirusTotal API key environment variable.");
-        RequireContains(installer, "vmName = $Vm", "Install state should record the Hyper-V VM name.");
+        RequireContains(installer, "vmName = $Vm", "Install state should record the selected provider VM name.");
         RequireContains(installer, "checkpointName = $Checkpoint", "Install state should record the clean checkpoint name.");
         RequireContains(installer, "guestWorkingDirectory = $GuestWorking", "Install state should record the guest working directory.");
         RequireContains(installer, "localConfigPath = $LocalConfig", "Install state should record the generated local config path.");
@@ -70,7 +73,10 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(installer, "RecommendedActions", "Installer status should emit human-readable setup repair actions.");
         RequireContains(installer, "GuestAgentPayloadExists", "Installer status should show Guest Agent payload readiness.");
         RequireContains(installer, "R0CollectorPayloadExists", "Installer status should show R0Collector payload readiness.");
-        RequireContains(installer, "ReadinessCommand", "Installer environment check should point to the read-only Hyper-V readiness command.");
+        RequireContains(installer, "ProviderReadinessCommand", "Installer environment check should point to selected-provider readiness.");
+        RequireContains(installer, "ProviderReadinessCommand = '.\\run.ps1 -Mode CheckEnvironment'", "Installer provider readiness should use the provider-neutral run entrypoint.");
+        RequireContains(installer, "ProviderReadinessEntrypointExists", "Installer environment check should report whether provider-neutral readiness is available.");
+        RequireContains(installer, "HyperVReadinessScriptExists", "Installer should retain an explicitly Hyper-V-only readiness field for backward compatibility.");
         RequireContains(installer, "PlanOnlyStartsVm", "Installer environment check should explicitly state PlanOnly does not start a VM.");
         RequireNotContains(installer, "Write-Host $Password", "Installer should not print the password value.");
         RequireNotContains(installer, "Write-Output $Password", "Installer should not output the password value.");
@@ -83,7 +89,9 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(installer, "[switch]$PromptPassword", "Installer should support prompted passwords in non-interactive modes.");
         RequireContains(installer, "[switch]$ResetPassword", "Installer should support non-interactive password reset.");
         RequireContains(installer, "[switch]$ResetGuestVmPassword", "Installer should support non-interactive actual VM password reset.");
+        RequireContains(installer, "[switch]$RecoverGuestVmPasswordWithoutCurrentSecret", "Installer should expose QEMU offline recovery when the current guest password is unknown.");
         RequireContains(installer, "[switch]$UpdateHyperVConfig", "Installer should support non-interactive Hyper-V config updates.");
+        RequireContains(installer, "[switch]$UpdateVirtualizationConfig", "Installer should support non-interactive provider config updates.");
         RequireContains(installer, "[switch]$ShowTestSigningGuidance", "Installer should support non-interactive host/guest test-signing guidance.");
         RequireContains(installer, "[switch]$ConfigureVTKey", "Installer should support non-interactive VT key updates.");
         RequireContains(installer, "[switch]$PromptVTKey", "Installer should support prompted VT key setup.");
@@ -92,14 +100,15 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(installer, "[switch]$StartWebUI", "Installer should support direct WebUI startup.");
         RequireContains(installer, "$shouldSetPassword = [bool]$GeneratePassword -or [bool]$PromptPassword -or [bool]$ResetPassword", "Non-interactive install should support prompt/generate password setup.");
         RequireContains(installer, "if ($StartWebUI)", "Non-interactive change should support direct WebUI startup.");
-        RequireContains(installer, "elseif ($CheckEnvironment)", "Non-interactive change should support environment checks.");
+        RequireContains(installer, "elseif ($CheckEnvironment -or $RunHyperVReadiness)", "Non-interactive change should support provider checks while retaining the Hyper-V compatibility switch.");
+        RequireContains(installer, "$RunHyperVReadiness -and $VirtualizationProvider -ne 'HyperV'", "The Hyper-V deep readiness compatibility switch should reject VMware/QEMU profiles with provider-neutral guidance.");
         RequireContains(installer, "elseif ($ConfigureVTKey -or $PromptVTKey -or $ClearVTKey)", "Non-interactive change should support VT key configuration.");
         RequireContains(installer, "if ($ResetGuestVmPassword)", "Non-interactive change should prioritize actual VM password reset.");
         RequireContains(installer, "elseif ($ShowTestSigningGuidance)", "Non-interactive change should expose host/guest test-signing guidance.");
         RequireContains(installer, "Show-TestSigningGuidance", "Installer should provide host/guest test-signing guidance.");
         RequireContains(installer, "HostTestSigningGuidance", "Installer status should include host test-signing guidance.");
         RequireContains(installer, "signtool.exe helper", "Installer guidance should point to the ordinary signtool test-certificate helper.");
-        RequireContains(installer, "elseif ($UpdateHyperVConfig)", "Non-interactive change should support Hyper-V config updates.");
+        RequireContains(installer, "elseif ($UpdateHyperVConfig -or $UpdateVirtualizationConfig)", "Non-interactive change should support provider config updates.");
         RequireContains(installer, "if ($ResetPassword -or $GeneratePassword -or $PromptPassword)", "Non-interactive change should support reset password prompt/generate.");
         RequireNotContains(installer, "CSignTool", "Installer must not call or reference CSignTool.");
         RequireNotContains(installer, "Sign-SandboxDriverWithKswordCSignTool", "Installer must not call the legacy KSword signing wrapper.");
@@ -108,12 +117,12 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(doc, "Change menu", "Install doc should describe the change menu.");
         RequireContains(doc, "reset password secret", "Install doc should describe password reset.");
         RequireContains(doc, "reset the actual VM guest password", "Install doc should describe actual VM password reset.");
-        RequireContains(doc, "change Hyper-V VM/checkpoint/guest paths", "Install doc should describe Hyper-V config changes.");
+        RequireContains(doc, "修改 provider / VM / checkpoint/snapshot / guest 路径", "Install doc should describe provider config changes.");
         RequireContains(doc, "change the recorded guest username", "Install doc should describe multiple change options.");
         RequireContains(doc, "recreate runtime folders and local config", "Install doc should describe multiple change options.");
         RequireContains(doc, "DPAPI", "Install doc should describe DPAPI storage.");
         RequireContains(doc, "Sandbox__ConfigPath", "Install doc should describe Web/API local config wiring.");
-        RequireContains(doc, ".\\install.ps1 -Mode Change -UpdateHyperVConfig", "Install doc should describe non-interactive Hyper-V config.");
+        RequireContains(doc, ".\\install.ps1 -Mode Change -UpdateVirtualizationConfig", "Install doc should describe non-interactive provider config.");
         RequireContains(doc, ".\\install.ps1 -Mode ConfigureVTKey -PromptVTKey", "Install doc should describe non-interactive VT key setup.");
         RequireContains(doc, "KSWORDBOX_VIRUSTOTAL_API_KEY", "Install doc should document the VT key environment variable.");
         RequireContains(doc, ".\\install.ps1 -Mode CheckEnvironment", "Install doc should describe non-interactive environment checks.");

@@ -63,11 +63,13 @@ Run inside the disposable VM, or against a VM-local driver path:
 The JSON result includes `CSignToolUsed=false`, the certificate thumbprint,
 `SignatureStatus`, `LocalTestSigningRequested`, and `RequiresReboot`.
 
-If toggling test-signing inside the configured Hyper-V guest from the host, use
-PowerShell Direct:
+If toggling test-signing inside the configured guest from the host, the
+installer automatically uses Hyper-V PowerShell Direct or the selected
+VMware/QEMU WinRM profile. A direct Hyper-V invocation is:
 
 ```powershell
 .\scripts\Set-GuestTestSigning.ps1 `
+  -VirtualizationProvider HyperV `
   -VmName KSwordSandbox-Win10-Golden `
   -GuestUserName SandboxUser `
   -Mode Enable `

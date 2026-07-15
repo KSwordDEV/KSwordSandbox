@@ -9,10 +9,10 @@ in the same PowerShell process so WebUI startup, one-shot Plan/Analyze modes,
 environment import, payload checks, -WhatIf behavior, and exit-code behavior
 remain identical to the primary root runtime wrapper.
 
-Default behavior is still a single WebUI launch path. Live Hyper-V execution is
-never implicit; it requires an explicit -Live option passed through to the root
+Default behavior is still a single WebUI launch path. Live provider execution
+is never implicit; it requires an explicit -Live option passed through to the root
 runtime wrapper. The runtime wrapper consumes one of the three install-side
-operator paths (configured environment, rollback/restore snapshot, or
+operator paths (configured environment, rollback/restore clean baseline, or
 fresh/new-computer preparation) but does not create or restore VMs by default.
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
@@ -32,6 +32,19 @@ param(
     [string]$ConfigPath = '',
 
     [string]$RuntimeRoot = '',
+
+    [ValidateSet('', 'HyperV', 'VMware', 'Qemu')]
+    [string]$Provider = '',
+
+    [string]$VmName = '',
+
+    [Alias('SnapshotName', 'CheckpointName')]
+    [string]$BaselineName = '',
+
+    [string]$MachineDefinitionPath = '',
+
+    [ValidateSet('', 'qcow2', 'raw', 'vhdx', 'vmdk')]
+    [string]$QemuDiskFormat = '',
 
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',

@@ -164,13 +164,20 @@ public sealed partial class SandboxJobService
     /// <summary>
     /// Creates a planned job and writes JSON/HTML planning artifacts.
     /// Inputs are a SandboxSubmission, processing validates the sample, builds
-    /// a Hyper-V runbook, classifies seed events, and writes reports; the
+    /// a provider-specific runbook, classifies seed events, and writes reports; the
     /// method returns the completed planning job.
     /// </summary>
     public AnalysisJob Plan(SandboxSubmission submission)
     {
         var duration = ResolveDuration(submission);
         var normalizedSubmission = NormalizeSubmission(submission, duration);
+        var provider = normalizedSubmission.Provider ?? config.Virtualization.Provider;
+        VirtualizationProviderResourceValidator.Validate(
+            config,
+            provider,
+            normalizedSubmission.GoldenSnapshotName,
+            normalizedSubmission.MachineDefinitionPath,
+            normalizedSubmission.QemuDiskFormat);
         var jobId = Guid.NewGuid();
         var jobRoot = GetJobRoot(jobId);
         Directory.CreateDirectory(jobRoot);
@@ -185,6 +192,11 @@ public sealed partial class SandboxJobService
         var report = new AnalysisReport
         {
             JobId = jobId,
+            Provider = runbook.Provider,
+            TargetVmName = runbook.TargetVmName,
+            BaselineName = runbook.BaselineName,
+            MachineDefinitionPath = runbook.MachineDefinitionPath,
+            QemuDiskFormat = runbook.QemuDiskFormat,
             Sample = sample,
             Status = AnalysisStatus.Planned,
             StaticAnalysis = staticAnalysis,
@@ -214,7 +226,7 @@ public sealed partial class SandboxJobService
             Messages =
             [
                 "Dry-run planning completed.",
-                "Review the runbook before enabling privileged Hyper-V execution.",
+                $"Review the runbook before enabling live {runbook.Provider} execution.",
                 $"Artifacts written to {jobRoot}."
             ]
         };
@@ -236,6 +248,25 @@ public sealed partial class SandboxJobService
         {
             throw new KeyNotFoundException($"Job {jobId} was not found.");
         }
+
+        if (job.Runbook is not null)
+        {
+            EnsureRunbookExecutionIdentityMatches(job.Runbook, result);
+        }
+        else if (result.JobId != jobId)
+        {
+            throw new InvalidDataException($"Runbook execution result job id {result.JobId:D} does not match target job {jobId:D}.");
+        }
+
+        var expectedProvider = job.Runbook?.Provider ?? job.Submission.Provider ?? config.Virtualization.Provider;
+        result = result with
+        {
+            Provider = expectedProvider,
+            TargetVmName = job.Runbook?.TargetVmName ?? result.TargetVmName,
+            BaselineName = job.Runbook?.BaselineName ?? result.BaselineName,
+            MachineDefinitionPath = job.Runbook?.MachineDefinitionPath ?? result.MachineDefinitionPath,
+            QemuDiskFormat = job.Runbook?.QemuDiskFormat ?? result.QemuDiskFormat
+        };
 
         var jobRoot = GetJobRoot(jobId);
         Directory.CreateDirectory(jobRoot);
@@ -400,7 +431,7 @@ public sealed partial class SandboxJobService
     }
 
     /// <summary>
-    /// Imports an already executed Hyper-V job that was produced outside the
+    /// Imports an already executed provider runbook that was produced outside the
     /// in-memory WebUI process. Inputs are the deterministic job id, original
     /// sample submission, collected guest events path, and optional
     /// runbook-execution record; processing reconstructs the same runbook,
@@ -426,23 +457,43 @@ public sealed partial class SandboxJobService
 
         var duration = ResolveDuration(submission);
         var normalizedSubmission = NormalizeSubmission(submission, duration);
+        var existingJob = GetJob(jobId);
+        if (existingJob?.Runbook is null)
+        {
+            var provider = normalizedSubmission.Provider ?? config.Virtualization.Provider;
+            VirtualizationProviderResourceValidator.Validate(
+                config,
+                provider,
+                normalizedSubmission.GoldenSnapshotName,
+                normalizedSubmission.MachineDefinitionPath,
+                normalizedSubmission.QemuDiskFormat);
+        }
+
         var jobRoot = GetJobRoot(jobId);
         Directory.CreateDirectory(jobRoot);
 
         var sample = SampleHasher.Compute(normalizedSubmission.SamplePath, config.Analysis.MaxSampleBytes);
         var staticAnalysis = AnalyzeSample(sample);
         var jobConfig = BuildJobConfig(normalizedSubmission, duration);
-        var runbook = runbookBuilder.Build(jobConfig, jobId, sample);
+        EnsureExternalImportPreservesPersistedIdentity(existingJob, normalizedSubmission);
+        var runbook = existingJob?.Runbook ?? runbookBuilder.Build(jobConfig, jobId, sample);
+        var persistedSubmission = existingJob?.Runbook is not null
+            ? existingJob.Submission
+            : normalizedSubmission;
         var jsonPath = Path.Combine(jobRoot, "report.json");
         var htmlPath = Path.Combine(jobRoot, "report.html");
         var zhHtmlPath = Path.Combine(jobRoot, "report.zh.html");
         var enHtmlPath = Path.Combine(jobRoot, "report.en.html");
-        var resultPath = NormalizeExternalRunbookExecutionPath(jobRoot, runbookExecutionResultPath);
+        var resultPath = NormalizeExternalRunbookExecutionPath(jobRoot, runbookExecutionResultPath, runbook);
 
+        var messages = existingJob?.Messages.ToList() ?? [];
+        AddUniqueMessage(messages, $"Imported external {runbook.Provider} execution.");
+        AddUniqueMessage(messages, $"Guest event import source: {eventsPath}.");
         var job = new AnalysisJob
         {
             JobId = jobId,
-            Submission = normalizedSubmission,
+            CreatedAt = existingJob?.CreatedAt ?? DateTimeOffset.UtcNow,
+            Submission = persistedSubmission,
             Status = AnalysisStatus.Running,
             Sample = sample,
             Runbook = runbook,
@@ -451,11 +502,7 @@ public sealed partial class SandboxJobService
             HtmlReportZhPath = zhHtmlPath,
             HtmlReportEnPath = enHtmlPath,
             RunbookExecutionResultPath = resultPath,
-            Messages =
-            [
-                "Imported external Hyper-V execution.",
-                $"Guest event import source: {eventsPath}."
-            ]
+            Messages = messages
         };
 
         StoreJob(job);
@@ -474,6 +521,67 @@ public sealed partial class SandboxJobService
         PersistGuestImportState(updated, Path.GetFullPath(eventsPath), guestEvents.Count, status, message);
         StoreJob(updated);
         return updated;
+    }
+
+    private static void EnsureExternalImportPreservesPersistedIdentity(AnalysisJob? existingJob, SandboxSubmission submission)
+    {
+        var runbook = existingJob?.Runbook;
+        if (runbook is null)
+        {
+            return;
+        }
+
+        var identityMatches =
+            (!submission.Provider.HasValue || submission.Provider.Value == runbook.Provider) &&
+            MatchesPersistedIdentity(
+                submission.SamplePath,
+                existingJob?.Sample?.FullPath,
+                existingJob?.Submission.SamplePath) &&
+            MatchesPersistedIdentity(
+                submission.GoldenVmName,
+                runbook.TargetVmName,
+                existingJob?.Submission.GoldenVmName) &&
+            MatchesPersistedIdentity(
+                submission.GoldenSnapshotName,
+                runbook.BaselineName,
+                existingJob?.Submission.GoldenSnapshotName) &&
+            MatchesPersistedIdentity(submission.MachineDefinitionPath, runbook.MachineDefinitionPath) &&
+            MatchesPersistedIdentity(submission.QemuDiskFormat, runbook.QemuDiskFormat);
+
+        if (!identityMatches)
+        {
+            throw new InvalidOperationException(
+                $"Job {existingJob!.JobId:D} already persists its {runbook.Provider} runbook identity; external import cannot rewrite its sample, provider, VM, clean baseline, or machine definition.");
+        }
+    }
+
+    private static bool MatchesPersistedIdentity(string? requested, params string?[] persistedValues)
+    {
+        return string.IsNullOrWhiteSpace(requested) || persistedValues.Any(value =>
+            !string.IsNullOrWhiteSpace(value) &&
+            string.Equals(requested.Trim(), value.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void EnsureRunbookExecutionIdentityMatches(
+        SandboxRunbook runbook,
+        SandboxRunbookExecutionResult result)
+    {
+        if (result.JobId != runbook.JobId)
+        {
+            throw new InvalidDataException(
+                $"Runbook execution result job id {result.JobId:D} does not match persisted runbook {runbook.JobId:D}.");
+        }
+
+        var identityMatches = result.Provider == runbook.Provider &&
+            MatchesPersistedIdentity(result.TargetVmName, runbook.TargetVmName) &&
+            MatchesPersistedIdentity(result.BaselineName, runbook.BaselineName) &&
+            MatchesPersistedIdentity(result.MachineDefinitionPath, runbook.MachineDefinitionPath) &&
+            MatchesPersistedIdentity(result.QemuDiskFormat, runbook.QemuDiskFormat);
+        if (!identityMatches)
+        {
+            throw new InvalidDataException(
+                $"Runbook execution result conflicts with the persisted {runbook.Provider} provider, VM, clean baseline, or machine definition identity.");
+        }
     }
 
     /// <summary>
@@ -654,7 +762,7 @@ public sealed partial class SandboxJobService
         var staticAnalysis = LoadExistingReport(job.JsonReportPath)?.StaticAnalysis ?? AnalyzeSample(sample);
         var jobConfig = BuildJobConfig(job.Submission, ResolveDuration(job.Submission));
         var events = CreatePlanningEvents(sample, job.Submission, runbook, staticAnalysis, jobConfig.ArtifactCollection);
-        AppendRunbookExecutionEvent(events, job.RunbookExecutionResultPath);
+        AppendRunbookExecutionEvent(events, job.RunbookExecutionResultPath, runbook.Provider);
         events.AddRange(LoadEnrichmentEvents(job.JobId));
         events.AddRange(guestEvents.Select(NormalizeEvent));
         AppendGuestImportEvent(events, guestEventsPath, guestEvents.Count);
@@ -671,6 +779,11 @@ public sealed partial class SandboxJobService
         var report = new AnalysisReport
         {
             JobId = job.JobId,
+            Provider = runbook.Provider,
+            TargetVmName = runbook.TargetVmName,
+            BaselineName = runbook.BaselineName,
+            MachineDefinitionPath = runbook.MachineDefinitionPath,
+            QemuDiskFormat = runbook.QemuDiskFormat,
             Sample = sample,
             Status = status,
             StaticAnalysis = staticAnalysis,
@@ -731,7 +844,10 @@ public sealed partial class SandboxJobService
         return Path.Combine(GetJobRoot(jobId), EnrichmentEventsFileName);
     }
 
-    private static string? NormalizeExternalRunbookExecutionPath(string jobRoot, string? runbookExecutionResultPath)
+    private static string? NormalizeExternalRunbookExecutionPath(
+        string jobRoot,
+        string? runbookExecutionResultPath,
+        SandboxRunbook runbook)
     {
         if (string.IsNullOrWhiteSpace(runbookExecutionResultPath))
         {
@@ -743,6 +859,18 @@ public sealed partial class SandboxJobService
         {
             throw new FileNotFoundException("Runbook execution record was not found.", fullPath);
         }
+
+        SandboxRunbookExecutionResult execution;
+        try
+        {
+            execution = JsonSerializer.Deserialize<SandboxRunbookExecutionResult>(File.ReadAllText(fullPath), JsonOptions)
+                ?? throw new InvalidDataException("Runbook execution record was empty.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException("Runbook execution record is not valid JSON.", ex);
+        }
+        EnsureRunbookExecutionIdentityMatches(runbook, execution);
 
         if (IsSameOrUnderDirectory(jobRoot, fullPath))
         {
@@ -1191,7 +1319,10 @@ public sealed partial class SandboxJobService
     /// Inputs are event output and optional execution-result path; processing
     /// reads the persisted result when present, and the method returns no value.
     /// </summary>
-    private static void AppendRunbookExecutionEvent(List<SandboxEvent> events, string? resultPath)
+    private static void AppendRunbookExecutionEvent(
+        List<SandboxEvent> events,
+        string? resultPath,
+        VirtualizationProvider provider)
     {
         if (string.IsNullOrWhiteSpace(resultPath) || !File.Exists(resultPath))
         {
@@ -1206,17 +1337,19 @@ public sealed partial class SandboxJobService
                 return;
             }
 
+            var providerPrefix = provider.ToString().ToLowerInvariant();
             events.Add(new SandboxEvent
             {
-                EventType = "hyperv.runbook.executed",
+                EventType = $"{providerPrefix}.runbook.executed",
                 Source = "host",
                 Path = result.TargetVmName,
                 Data = CreateHostOperationalEventData(
-                    "hyperv-runbook-executed",
+                    $"{providerPrefix}-runbook-executed",
                     "runbook-execution-summary-is-host-control-plane-not-sample-behavior",
-                    "Hyper-V runbook execution summary describes host orchestration, not sample behavior.",
+                    $"{provider} runbook execution summary describes host orchestration, not sample behavior.",
                     new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
+                    ["provider"] = provider.ToString(),
                     ["mode"] = result.Mode.ToString(),
                     ["success"] = result.Success.ToString(),
                     ["totalSteps"] = result.TotalSteps.ToString(),
@@ -1230,17 +1363,19 @@ public sealed partial class SandboxJobService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
+            var providerPrefix = provider.ToString().ToLowerInvariant();
             events.Add(new SandboxEvent
             {
-                EventType = "hyperv.runbook.execution_result_error",
+                EventType = $"{providerPrefix}.runbook.execution_result_error",
                 Source = "host",
                 Path = resultPath,
                 Data = CreateHostOperationalEventData(
-                    "hyperv-runbook-execution-result-error",
+                    $"{providerPrefix}-runbook-execution-result-error",
                     "runbook-result-read-error-is-host-diagnostic-not-sample-behavior",
                     "Host failed to read runbook execution result; this diagnostic is not sample behavior.",
                     new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
+                    ["provider"] = provider.ToString(),
                     ["error"] = ex.Message
                 })
             });
@@ -1447,9 +1582,14 @@ public sealed partial class SandboxJobService
         {
             DurationSeconds = submission.DurationUnlimited ? 0 : duration,
             DurationUnlimited = submission.DurationUnlimited,
+            GuestReadyTimeoutSeconds = submission.GuestReadyTimeoutSeconds is > 0
+                ? Math.Clamp(submission.GuestReadyTimeoutSeconds.Value, 1, 7200)
+                : null,
             DryRun = true,
             GoldenVmName = CleanOptional(submission.GoldenVmName),
             GoldenSnapshotName = CleanOptional(submission.GoldenSnapshotName),
+            MachineDefinitionPath = CleanOptional(submission.MachineDefinitionPath),
+            QemuDiskFormat = CleanOptional(submission.QemuDiskFormat)?.ToLowerInvariant(),
             GuestUserName = CleanOptional(submission.GuestUserName),
             GuestWorkingDirectory = CleanOptional(submission.GuestWorkingDirectory),
             GuestPayloadRoot = CleanOptional(submission.GuestPayloadRoot)
@@ -1459,17 +1599,38 @@ public sealed partial class SandboxJobService
     /// <summary>
     /// Creates a per-job sandbox configuration from optional WebUI overrides.
     /// Inputs are the normalized submission and clamped analysis duration;
-    /// processing overlays safe Hyper-V/guest/path/driver fields; the method
+    /// processing overlays safe provider/guest/path/driver fields; the method
     /// returns the config used to build the concrete runbook.
     /// </summary>
     private SandboxConfig BuildJobConfig(SandboxSubmission submission, int duration)
     {
+        var provider = submission.Provider ?? config.Virtualization.Provider;
         return config with
         {
+            Virtualization = config.Virtualization with { Provider = provider },
             HyperV = config.HyperV with
             {
                 GoldenVmName = submission.GoldenVmName ?? config.HyperV.GoldenVmName,
                 GoldenSnapshotName = submission.GoldenSnapshotName ?? config.HyperV.GoldenSnapshotName
+            },
+            VMware = config.VMware with
+            {
+                VmName = submission.GoldenVmName ?? config.VMware.VmName,
+                SnapshotName = submission.GoldenSnapshotName ?? config.VMware.SnapshotName,
+                VmxPath = provider is VirtualizationProvider.VMware
+                    ? submission.MachineDefinitionPath ?? config.VMware.VmxPath
+                    : config.VMware.VmxPath
+            },
+            Qemu = config.Qemu with
+            {
+                VmName = submission.GoldenVmName ?? config.Qemu.VmName,
+                SnapshotName = submission.GoldenSnapshotName ?? config.Qemu.SnapshotName,
+                DiskImagePath = provider is VirtualizationProvider.Qemu
+                    ? submission.MachineDefinitionPath ?? config.Qemu.DiskImagePath
+                    : config.Qemu.DiskImagePath,
+                DiskFormat = provider is VirtualizationProvider.Qemu
+                    ? submission.QemuDiskFormat ?? config.Qemu.DiskFormat
+                    : config.Qemu.DiskFormat
             },
             Guest = config.Guest with
             {
@@ -1491,7 +1652,12 @@ public sealed partial class SandboxJobService
                 CaptureMemoryDumps = submission.CaptureMemoryDumps ?? config.ArtifactCollection.CaptureMemoryDumps,
                 CapturePacketCapture = submission.CapturePacketCapture ?? config.ArtifactCollection.CapturePacketCapture
             },
-            Analysis = config.Analysis with { DefaultDurationSeconds = duration, DurationUnlimited = submission.DurationUnlimited }
+            Analysis = config.Analysis with
+            {
+                DefaultDurationSeconds = duration,
+                DurationUnlimited = submission.DurationUnlimited,
+                GuestReadyTimeoutSeconds = submission.GuestReadyTimeoutSeconds ?? config.Analysis.GuestReadyTimeoutSeconds
+            }
         };
     }
 
@@ -1541,15 +1707,16 @@ public sealed partial class SandboxJobService
             },
             new SandboxEvent
             {
-                EventType = "hyperv.runbook.created",
+                EventType = $"{runbook.Provider.ToString().ToLowerInvariant()}.runbook.created",
                 Source = "host",
                 Path = runbook.TargetVmName,
                 Data = CreateHostOperationalEventData(
-                    "hyperv-runbook-created",
+                    "virtualization-runbook-created",
                     "runbook-plan-is-host-control-plane-not-sample-behavior",
                     "Runbook planning describes host orchestration and must not be counted as sample behavior.",
                     new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
+                    ["provider"] = runbook.Provider.ToString(),
                     ["steps"] = runbook.Steps.Count.ToString(),
                     ["usesTemporaryVm"] = runbook.UsesTemporaryVm.ToString()
                 })

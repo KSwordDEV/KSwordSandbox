@@ -7,7 +7,7 @@ namespace KSword.Sandbox.Core.Execution;
 
 /// <summary>
 /// Executes sandbox runbook steps by launching PowerShell.
-/// Inputs are a prepared Hyper-V runbook and execution options; processing
+/// Inputs are a prepared provider runbook and execution options; processing
 /// records every step in dry-run mode or starts one elevated PowerShell child
 /// process per step in live mode; the returned result captures stdout, stderr,
 /// exit code, duration, and first-failure status.
@@ -15,15 +15,21 @@ namespace KSword.Sandbox.Core.Execution;
 public sealed class PowerShellRunbookExecutor : IRunbookExecutor
 {
     private const string DryRunMessage = "Dry-run mode recorded the command without launching PowerShell.";
-    private const string ElevationFailureMessage = "Live Hyper-V runbook execution requires the host process to run from an elevated PowerShell session. 修复建议：请使用“以管理员身份运行”的 PowerShell/服务进程重新启动后再执行 live 模式。";
+    private const string ElevationFailureMessage = "This live runbook contains host operations that require an elevated PowerShell session. 修复建议：请使用“以管理员身份运行”的 PowerShell/服务进程重新启动后再执行 live 模式。";
+    private const string LiveExecutionLeaseFailureMessage = "The exclusive live execution lease could not be acquired. Another live job may be running, or the runtime lock directory is unavailable. No provider command was executed. 修复建议：等待当前 live job 完成；若没有任务运行，请检查 runtime root 的 locks 目录权限后重试。";
     private static readonly TimeSpan StepHeartbeatInterval = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan StreamReadTimeout = TimeSpan.FromSeconds(5);
+    private static readonly System.Text.RegularExpressions.Regex SensitiveEnvironmentNamePattern = new(
+        "(PASSWORD|SECRET|TOKEN|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant |
+        System.Text.RegularExpressions.RegexOptions.Compiled);
 
     /// <summary>
     /// Executes or records the supplied runbook.
     /// Inputs are the runbook plan, execution options, and cancellation token;
     /// processing defaults to dry-run safety, validates elevation for live
-    /// Hyper-V steps, then executes each PowerShell command in order; the method
+    /// steps that require it, then executes each PowerShell command in order; the method
     /// returns aggregate status and per-step captured output.
     /// </summary>
     public async Task<SandboxRunbookExecutionResult> ExecuteAsync(
@@ -98,7 +104,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             [],
             currentStepIndex: null,
             success: null,
-            message: $"Starting live Hyper-V runbook for VM '{runbook.TargetVmName}'.");
+            message: $"Starting live {runbook.Provider} runbook for VM '{runbook.TargetVmName}'.");
 
         if (options.RequireElevatedPowerShell && requiresElevation && !IsCurrentProcessElevated())
         {
@@ -128,6 +134,41 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 requiresElevation: requiresElevation);
         }
 
+        FileStream liveExecutionLease;
+        try
+        {
+            liveExecutionLease = AcquireLiveExecutionLease(runbook);
+        }
+        catch (Exception ex) when (IsLiveExecutionLeaseFailure(ex))
+        {
+            var leaseFailure = CreateLiveExecutionLeaseFailureStepResult(startedAtUtc, ex);
+
+            attemptTimer.Stop();
+            PublishProgress(
+                runbook,
+                options,
+                SandboxRunbookProgressStates.Failed,
+                startedAtUtc,
+                attemptTimer.Elapsed,
+                [leaseFailure],
+                currentStepIndex: null,
+                success: false,
+                message: leaseFailure.Message ?? LiveExecutionLeaseFailureMessage);
+
+            return CreateAggregateResult(
+                runbook,
+                options,
+                [leaseFailure],
+                success: false,
+                failedStepIndex: null,
+                startedAtUtc: startedAtUtc,
+                duration: attemptTimer.Elapsed,
+                message: leaseFailure.Message ?? LiveExecutionLeaseFailureMessage,
+                requiresElevation: requiresElevation);
+        }
+
+        using var ownedLiveExecutionLease = liveExecutionLease;
+
         var liveResults = new List<SandboxRunbookStepExecutionResult>();
         int? failedStepIndex = null;
         SandboxRunbookStepExecutionResult? primaryFailureResult = null;
@@ -149,11 +190,16 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             {
                 failedStepIndex = index;
                 wasCanceled = true;
-                var canceledResult = CreateCanceledStepResult(step, index, DateTimeOffset.UtcNow, TimeSpan.Zero);
+                var currentStepIsCleanup = IsCleanupStep(step);
+                var cleanupAvailable = vmMutationAttempted &&
+                    (currentStepIsCleanup || HasRemainingCleanupSteps(runbook, index + 1));
+                var canceledResult = currentStepIsCleanup && cleanupAvailable
+                    ? CreateCancellationBeforeCleanupStepResult(step, DateTimeOffset.UtcNow)
+                    : CreateCanceledStepResult(step, index, DateTimeOffset.UtcNow, TimeSpan.Zero);
                 primaryFailureResult = canceledResult;
                 liveResults.Add(canceledResult);
 
-                if (vmMutationAttempted && HasRemainingCleanupSteps(runbook, index + 1))
+                if (cleanupAvailable)
                 {
                     cleanupMode = true;
                     PublishProgress(
@@ -166,20 +212,25 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                         index,
                         success: null,
                         message: "Runbook cancellation was recorded; attempting VM cleanup before returning the canceled result.");
-                    continue;
+                    if (!currentStepIsCleanup)
+                    {
+                        continue;
+                    }
                 }
-
-                PublishProgress(
-                    runbook,
-                    options,
-                    SandboxRunbookProgressStates.Canceled,
-                    startedAtUtc,
-                    attemptTimer.Elapsed,
-                    liveResults,
-                    index,
-                    success: false,
-                    message: "Runbook execution was canceled before this step started.");
-                break;
+                else
+                {
+                    PublishProgress(
+                        runbook,
+                        options,
+                        SandboxRunbookProgressStates.Canceled,
+                        startedAtUtc,
+                        attemptTimer.Elapsed,
+                        liveResults,
+                        index,
+                        success: false,
+                        message: "Runbook execution was canceled before this step started.");
+                    break;
+                }
             }
 
             PublishProgress(
@@ -224,10 +275,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 {
                     failedStepIndex = index;
                     primaryFailureResult = stepResult;
-                    wasCanceled = string.Equals(
-                        stepResult.Message,
-                        "PowerShell step was canceled before completion.",
-                        StringComparison.Ordinal);
+                    wasCanceled = RunbookProgressFacts.IsCanceledStepResult(stepResult);
 
                     if (!IsCleanupStep(step) &&
                         vmMutationAttempted &&
@@ -550,7 +598,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     /// <summary>
     /// Builds the first live-progress sentence for a step.
     /// Inputs are step metadata, position, total count, and timeout; processing
-    /// adds short operator context for long Hyper-V/PowerShell Direct phases;
+    /// adds short operator context for long provider startup and guest-session phases;
     /// the returned message is safe for dashboard progress.
     /// </summary>
     private static string BuildRunningStepMessage(
@@ -626,9 +674,11 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         return step.Id switch
         {
             "start-temp-vm" or "start-golden" or "start-vm" =>
-                $"{step.Title}; waiting for Hyper-V to report the VM is running",
+                $"{step.Title}; waiting for the selected virtualization provider to finish VM startup",
             "wait-powershell-direct" =>
                 $"{step.Title}; waiting for the guest OS to accept PowerShell Direct logon",
+            "wait-guest-remoting" =>
+                $"{step.Title}; waiting for the guest OS to accept WinRM logon",
             "sync-live-output" =>
                 $"{step.Title}; copying partial guest output while the Guest Agent runs",
             "collect-output" =>
@@ -641,7 +691,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
 
     /// <summary>
     /// Builds context shown in heartbeat messages for slow phases.
-    /// Input is a runbook step; processing maps known Hyper-V waits to practical
+    /// Input is a runbook step; processing maps known provider waits to practical
     /// operator expectations; the method returns a short sentence.
     /// </summary>
     private static string BuildLongStepHint(SandboxRunbookStep step)
@@ -649,13 +699,15 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         return step.Id switch
         {
             "start-temp-vm" or "start-golden" or "start-vm" =>
-                "VM boot can take a few minutes after checkpoint restore. 修复建议：若持续超时，请检查 VM 状态、检查点和 Hyper-V 服务。",
+                "VM boot can take a few minutes after baseline restore. 修复建议：若持续超时，请检查所选 provider 管理工具、VM 状态、干净基线和启动参数。",
             "wait-powershell-direct" =>
                 "The VM may already be running while the guest service and credentials are still becoming ready. 修复建议：检查来宾服务接口、账号密码和系统登录初始化。",
+            "wait-guest-remoting" =>
+                "The VM may already be running while WinRM is still becoming ready. 修复建议：检查地址、端口、SSL、认证、TrustedHosts/证书和来宾账号密码；VMwareTools/QemuUserNat 自动端点要求 baseline 已配置 HTTPS listener。",
             "sync-live-output" =>
                 "Output copy failures are throttled; the final copy will report the first actionable error. 修复建议：检查 agent 标记文件、会话稳定性和宿主输出目录权限。",
             "collect-output" =>
-                "If this fails, check the guest output directory, PowerShell Direct session, and required marker files. 修复建议：确认 events.json、agent.pid、agent.exit 均已生成。",
+                "If this fails, check the guest output directory, guest PowerShell session, and required marker files. 修复建议：确认 events.json、agent.pid、agent.exit 均已生成。",
             _ => "No command output is streamed here; full stdout/stderr remains in the execution record. 修复建议：如步骤卡住，请检查宿主权限、VM 状态和完整执行记录。"
         };
     }
@@ -760,6 +812,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         startInfo.ArgumentList.Add("-EncodedCommand");
         startInfo.ArgumentList.Add(encodedCommand);
 
+        SanitizeInheritedSecretEnvironment(startInfo);
         foreach (var item in options.EnvironmentVariables)
         {
             if (string.IsNullOrWhiteSpace(item.Key))
@@ -778,6 +831,18 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         }
 
         return startInfo;
+    }
+
+    private static void SanitizeInheritedSecretEnvironment(ProcessStartInfo startInfo)
+    {
+        foreach (var name in startInfo.Environment.Keys.ToArray())
+        {
+            if (name.StartsWith("KSWORDBOX_", StringComparison.OrdinalIgnoreCase) ||
+                SensitiveEnvironmentNamePattern.IsMatch(name))
+            {
+                startInfo.Environment.Remove(name);
+            }
+        }
     }
 
     /// <summary>
@@ -890,6 +955,35 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     }
 
     /// <summary>
+    /// Records cancellation observed exactly at the cleanup boundary without
+    /// consuming the cleanup step's source index. The current cleanup step can
+    /// then execute with a non-cancelable token while aggregate state remains
+    /// canceled.
+    /// </summary>
+    private static SandboxRunbookStepExecutionResult CreateCancellationBeforeCleanupStepResult(
+        SandboxRunbookStep cleanupStep,
+        DateTimeOffset startedAtUtc)
+    {
+        return new SandboxRunbookStepExecutionResult
+        {
+            StepIndex = -1,
+            StepId = "cancellation-before-cleanup",
+            Title = $"Cancellation before cleanup: {cleanupStep.Title}",
+            PowerShell = string.Empty,
+            Skipped = false,
+            Success = false,
+            ExitCode = null,
+            StandardOutput = string.Empty,
+            StandardError = string.Empty,
+            StartedAtUtc = startedAtUtc,
+            Duration = TimeSpan.Zero,
+            RequiresElevation = false,
+            MutatesVmState = false,
+            Message = "Runbook execution was canceled at the cleanup boundary; the current and remaining cleanup steps continue without cancellation."
+        };
+    }
+
+    /// <summary>
     /// Creates a skipped result for a non-cleanup step after a primary failure.
     /// Inputs are the source step, index, and primary failure; processing keeps
     /// the skipped step visible in progress without converting it into another
@@ -940,6 +1034,70 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             RequiresElevation = true,
             MutatesVmState = false,
             Message = ElevationFailureMessage
+        };
+    }
+
+    /// <summary>
+    /// Acquires the runtime-root-wide live execution lease. The returned stream
+    /// remains open for the complete provider run, including failure cleanup;
+    /// FileShare.None supplies cross-process exclusion and process termination
+    /// releases the operating-system handle automatically.
+    /// </summary>
+    private static FileStream AcquireLiveExecutionLease(SandboxRunbook runbook)
+    {
+        if (string.IsNullOrWhiteSpace(runbook.LiveExecutionLeasePath))
+        {
+            throw new InvalidOperationException("The persisted runbook does not contain a live execution lease path.");
+        }
+
+        var leasePath = runbook.LiveExecutionLeasePath;
+        leasePath = Path.GetFullPath(leasePath);
+        var leaseDirectory = Path.GetDirectoryName(leasePath);
+        if (string.IsNullOrWhiteSpace(leaseDirectory))
+        {
+            throw new IOException("The live execution lease path does not have a parent directory.");
+        }
+
+        Directory.CreateDirectory(leaseDirectory);
+        return new FileStream(
+            leasePath,
+            FileMode.OpenOrCreate,
+            FileAccess.ReadWrite,
+            FileShare.None,
+            bufferSize: 1,
+            FileOptions.None);
+    }
+
+    private static bool IsLiveExecutionLeaseFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException or InvalidOperationException;
+
+    /// <summary>
+    /// Records a live preflight failure without exposing host exception details
+    /// or pretending that a source runbook step was launched.
+    /// </summary>
+    private static SandboxRunbookStepExecutionResult CreateLiveExecutionLeaseFailureStepResult(
+        DateTimeOffset startedAtUtc,
+        Exception exception)
+    {
+        var message = exception is InvalidOperationException
+            ? "This persisted runbook predates the live execution lease contract. No provider command was executed. 修复建议：为该样本重新创建 plan 后再执行 live；旧任务仍可用于 status、report 和 artifact recovery。"
+            : $"{LiveExecutionLeaseFailureMessage} {(exception is IOException ? "The lease is already held or the lock file cannot be opened." : "The runtime lock path is not accessible.")}";
+        return new SandboxRunbookStepExecutionResult
+        {
+            StepIndex = -1,
+            StepId = "live-execution-lease",
+            Title = "Acquire exclusive live execution lease",
+            PowerShell = string.Empty,
+            Skipped = false,
+            Success = false,
+            ExitCode = null,
+            StandardOutput = string.Empty,
+            StandardError = string.Empty,
+            StartedAtUtc = startedAtUtc,
+            Duration = TimeSpan.Zero,
+            RequiresElevation = false,
+            MutatesVmState = false,
+            Message = message
         };
     }
 
@@ -1000,7 +1158,11 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         return new SandboxRunbookExecutionResult
         {
             JobId = runbook.JobId,
+            Provider = runbook.Provider,
             TargetVmName = runbook.TargetVmName,
+            BaselineName = runbook.BaselineName,
+            MachineDefinitionPath = runbook.MachineDefinitionPath,
+            QemuDiskFormat = runbook.QemuDiskFormat,
             Mode = options.Mode,
             Success = success,
             TotalSteps = runbook.Steps.Count,
@@ -1051,7 +1213,9 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             return wasCanceled ? "Live runbook execution was canceled." : null;
         }
 
-        var failedResult = results.LastOrDefault(result => result.StepIndex == failedStepIndex.Value);
+        var failedResult = wasCanceled
+            ? results.FirstOrDefault(RunbookProgressFacts.IsCanceledStepResult)
+            : results.LastOrDefault(result => result.StepIndex == failedStepIndex.Value);
         var stepTitle = failedResult?.Title;
         if (string.IsNullOrWhiteSpace(stepTitle) &&
             failedStepIndex.Value >= 0 &&
@@ -1073,9 +1237,9 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             ? $"{prefix}."
             : $"{prefix}. Failure reason: {reason}";
         var cleanupFailures = results
-            .Where(result => result.StepIndex != failedStepIndex.Value &&
-                !result.Success &&
-                IsCleanupStepId(result.StepId))
+            .Where(result => !result.Success &&
+                IsCleanupStepId(result.StepId) &&
+                (wasCanceled || result.StepIndex != failedStepIndex.Value))
             .Select(result => $"{result.Title}: {BuildSafeFailureReason(result)}")
             .Take(3)
             .ToList();
@@ -1157,7 +1321,10 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         var steps = runbook.Steps
             .Select((step, index) => CreateStepProgressSnapshot(step, index, runbook.Steps.Count, resultByIndex, state, currentStepIndex))
             .ToList();
-        var resolvedCurrentStepIndex = RunbookProgressFacts.ResolveCurrentStepIndex(steps, currentStepIndex, state, success);
+        var preflightFailure = results.LastOrDefault(RunbookProgressFacts.IsPreflightFailureResult);
+        var resolvedCurrentStepIndex = preflightFailure is null
+            ? RunbookProgressFacts.ResolveCurrentStepIndex(steps, currentStepIndex, state, success)
+            : null;
         var currentStep = resolvedCurrentStepIndex is >= 0
             ? steps.FirstOrDefault(step => step.StepIndex == resolvedCurrentStepIndex.Value)
             : null;
@@ -1165,17 +1332,21 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         return new SandboxRunbookProgressSnapshot
         {
             JobId = runbook.JobId,
+            Provider = runbook.Provider,
             TargetVmName = runbook.TargetVmName,
+            BaselineName = runbook.BaselineName,
+            MachineDefinitionPath = runbook.MachineDefinitionPath,
+            QemuDiskFormat = runbook.QemuDiskFormat,
             Mode = options.Mode,
             State = state,
             TotalSteps = runbook.Steps.Count,
             CompletedSteps = steps.Count(step => RunbookProgressFacts.CountsAsCompletedStep(step.State)),
             ExecutedSteps = results.Count(step => !step.Skipped && step.StepIndex >= 0),
             CurrentStepIndex = currentStep is null ? null : resolvedCurrentStepIndex,
-            CurrentStepId = currentStep?.StepId,
-            CurrentStepTitle = currentStep?.Title,
-            CurrentPhase = currentStep?.Phase,
-            CurrentCategory = currentStep?.Category,
+            CurrentStepId = preflightFailure?.StepId ?? currentStep?.StepId,
+            CurrentStepTitle = preflightFailure?.Title ?? currentStep?.Title,
+            CurrentPhase = preflightFailure is null ? currentStep?.Phase : "preflight",
+            CurrentCategory = preflightFailure is null ? currentStep?.Category : RunbookProgressFacts.GetPreflightFailureCategory(preflightFailure.StepId),
             ProgressPercent = RunbookProgressFacts.ComputeProgressPercent(steps, state, success, runbook.Steps.Count),
             Success = success,
             Message = message,

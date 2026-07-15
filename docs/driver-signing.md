@@ -117,21 +117,46 @@ Host/guest lab helper for the same non-CSignTool path:
   -EnableLocalTestSigning
 ```
 
-If you need to toggle test-signing inside the configured Hyper-V guest from the
-host, use the installer or direct helper. Both read the guest credential from
-`KSWORDBOX_GUEST_PASSWORD` and do not call CSignTool:
+If you need to toggle test-signing inside the configured guest from the host,
+use the installer or direct helper. The installer selects Hyper-V PowerShell
+Direct or the VMware/QEMU provider WinRM profile automatically. Both read the
+guest credential from `KSWORDBOX_GUEST_PASSWORD` and do not call CSignTool:
 
 ```powershell
 .\install.ps1 -Mode Change -QueryGuestTestSigning
 .\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force
 
 .\scripts\Set-GuestTestSigning.ps1 `
+  -VirtualizationProvider HyperV `
   -VmName KSwordSandbox-Win10-Golden `
   -GuestUserName SandboxUser `
   -Mode Enable `
   -RestartGuest `
   -Force
+
+.\scripts\Set-GuestTestSigning.ps1 `
+  -VirtualizationProvider Qemu `
+  -GuestRemotingAddressMode QemuUserNat `
+  -GuestRemotingUseSsl `
+  -GuestRemotingSkipCertificateChecks `
+  -GuestUserName SandboxUser `
+  -Mode Query
 ```
+
+The direct QEMU helper assumes the running VM was started with the same
+provider-managed user-NAT profile and that the baseline has a WinRM HTTPS
+listener. Automatic VMware/QEMU endpoints require HTTPS and never depend on a
+host-wide `TrustedHosts` change. Use `Configured` plus address/port only for a
+custom network profile.
+
+When `-RestartGuest` is requested after a real Enable/Disable change, the helper
+first returns the change result, then dispatches a separate guest restart. It
+does not report success until PowerShell Direct or WinRM is reachable again,
+`BootTimeUtc` has changed, and the post-restart `bcdedit` value matches the
+requested mode. VMware Tools endpoints are rediscovered after restart; QEMU
+user-NAT keeps the provider-managed loopback endpoint. Machine-readable output
+includes `RestartAttempted`, `RestartCompleted`, `PostRestartBootTimeUtc`,
+`PostRestartTestSigningEnabled`, and `PostRestartProbeAttempts`.
 
 Enable Windows test-signing inside the disposable VM, then reboot the VM:
 

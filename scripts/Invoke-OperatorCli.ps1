@@ -3,16 +3,16 @@
 Unified operator CLI wrapper for KSword Sandbox jobs.
 
 .DESCRIPTION
-Provides JSON-friendly plan/import/report/artifacts/list/status/recover/readiness
+Provides JSON-friendly plan/execute/import/report/artifacts/list/status/recover/readiness
 entry points for debugging the minimal host-side chain without WebUI. The
-default operations do not start, restore, stop, or mutate Hyper-V VMs. The
-plan command wraps Invoke-HyperVE2E.ps1 in PlanOnly mode; other commands call
-KSword.Sandbox.JobTool.
+default operations do not start, restore, stop, or mutate VMs. Plan and execute
+use the same provider-neutral KSword.Sandbox.JobTool path as run.ps1 and WebUI;
+only execute -Live may mutate the selected provider VM.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('plan', 'import', 'report', 'artifacts', 'list', 'status', 'recover', 'readiness')]
+    [ValidateSet('plan', 'execute', 'run', 'import', 'report', 'artifacts', 'list', 'status', 'recover', 'readiness')]
     [string]$Command,
 
     [string]$RepoRoot = '',
@@ -25,13 +25,25 @@ param(
     [string]$RunbookExecutionPath = '',
     [string]$PlanPath = '',
     [int]$DurationSeconds = 120,
+    [ValidateRange(1, 7200)][int]$GuestReadyTimeoutSeconds = 180,
+    [int]$StepTimeoutSeconds = 1800,
+    [ValidateSet('', 'HyperV', 'VMware', 'Qemu')][string]$Provider = '',
+    [string]$VmName = '',
+    [Alias('BaselineName')][string]$SnapshotName = '',
+    [string]$MachineDefinitionPath = '',
+    [ValidateSet('', 'qcow2', 'raw', 'vhdx', 'vmdk')][string]$QemuDiskFormat = '',
     [ValidateRange(1, 1000)][int]$Limit = 100,
     [switch]$WriteIndex,
     [switch]$WriteState,
     [switch]$RebuildReport,
     [switch]$IncludeMetadata,
+    [switch]$Live,
+    [switch]$NoR0Collector,
+    [switch]$NoOpenVmConsole,
+    [switch]$SkipGuestImport,
     [switch]$Json,
     [switch]$NoBuild,
+    [switch]$ProviderReadiness,
     [switch]$HyperVReadiness
 )
 
@@ -259,14 +271,14 @@ function Invoke-JobToolCommand {
             runtimeRoot = $script:ResolvedRuntimeRoot
             jobId = $JobId
             jobRoot = $JobRoot
-            vmAction = 'none'
-            willMutateVm = $false
+            vmAction = if ($JobToolCommand -eq 'execute' -and $Live) { 'provider-runbook' } else { 'none' }
+            willMutateVm = $JobToolCommand -eq 'execute' -and [bool]$Live
             noBuild = [bool]$NoBuild
             rawOutput = @($output)
             remediationHints = @(
                 '下一步：查看 rawOutput 的第一条错误；若是 build/SDK 问题，先运行 dotnet --info 并确认安装 net9.0 SDK。',
                 '下一步：若是缺少 events/report/job 产物，运行 plan/status/recover 或传入 -EventsPath/-JobRoot 后重试。',
-                '下一步：本 wrapper 不启动或修改 VM；Live Hyper-V 仍只能通过显式 -Live 的 E2E/run 路径触发。'
+                '下一步：plan/readiness 默认不修改 VM；只有 execute -Live 会运行所选 provider 的 VM runbook。'
             )
             secretValuePrinted = $false
         } | ConvertTo-Json -Depth 24
@@ -287,80 +299,35 @@ function Invoke-JobToolCommand {
     exit $exitCode
 }
 
-function Invoke-OperatorPlan {
-    $scriptPath = Join-Path $script:ResolvedRepoRoot 'scripts\Invoke-HyperVE2E.ps1'
-    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
-        throw "Invoke-HyperVE2E.ps1 was not found: $scriptPath"
-    }
-
-    $effectiveJobId = if ([string]::IsNullOrWhiteSpace($JobId)) { [Guid]::NewGuid().ToString('D') } else { [Guid]::Parse($JobId).ToString('D') }
-    $jobIdN = ([Guid]::Parse($effectiveJobId)).ToString('N')
-    $effectivePlanPath = $PlanPath
-    if ([string]::IsNullOrWhiteSpace($effectivePlanPath)) {
-        $effectivePlanPath = Join-Path (Join-Path $script:ResolvedRuntimeRoot 'plans') "hyperv-e2e-$jobIdN.json"
-    }
-    elseif (-not [System.IO.Path]::IsPathRooted($effectivePlanPath)) {
-        $effectivePlanPath = [System.IO.Path]::GetFullPath((Join-Path $script:ResolvedRepoRoot $effectivePlanPath))
-    }
-
-    $childArgs = @(
-        '-NoLogo',
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', $scriptPath,
-        '-RepoRoot', $script:ResolvedRepoRoot,
-        '-ConfigPath', $script:ResolvedConfigPath,
-        '-RuntimeRoot', $script:ResolvedRuntimeRoot,
-        '-JobId', $effectiveJobId,
-        '-PlanPath', $effectivePlanPath,
-        '-DurationSeconds', ([string]$DurationSeconds),
-        '-PlanOnly'
-    )
-    if (-not [string]::IsNullOrWhiteSpace($SamplePath)) {
-        $childArgs += @('-SamplePath', $SamplePath)
-    }
-
-    $powerShell = Get-OperatorPowerShellExecutable
-    $childOutput = @(& $powerShell @childArgs 2>&1 | ForEach-Object { [string]$_ })
-    $exitCode = $LASTEXITCODE
-    $plan = Read-OperatorJsonFile -Path $effectivePlanPath
-    $runbookExecutionPath = if ($null -ne $plan) { Get-ObjectPropertyString -Object $plan.host -Name 'runbookExecutionPath' } else { '' }
-    $runbook = Read-OperatorJsonFile -Path $runbookExecutionPath
-    $jobRoot = if ($null -ne $plan) { Get-ObjectPropertyString -Object $plan.host -Name 'jobRoot' } else { Join-Path (Join-Path $script:ResolvedRuntimeRoot 'jobs') $jobIdN }
-
-    $result = [pscustomobject][ordered]@{
-        contractVersion = 1
-        kind = 'KSwordSandbox.OperatorCliResult'
-        command = 'plan'
-        success = ($exitCode -eq 0)
-        exitCode = $exitCode
-        jobId = $effectiveJobId
-        jobRoot = $jobRoot
-        planPath = $effectivePlanPath
-        runbookExecutionPath = $runbookExecutionPath
-        willMutateVm = if ($null -ne $plan) { [bool]$plan.willMutateVm } else { $false }
-        vmAction = 'none'
-        mode = if ($null -ne $plan) { [string]$plan.effectiveMode } else { 'PlanOnly' }
-        preflightSummary = if ($null -ne $plan) { $plan.preflightSummary } else { $null }
-        runbookExecution = $runbook
-        childOutput = if ($exitCode -eq 0) { @() } else { @($childOutput) }
-        secretValuePrinted = $false
-    }
-
-    if ((-not $Json) -and $childOutput.Count -gt 0) {
-        $childOutput | ForEach-Object { Write-Host $_ }
-    }
-    Write-OperatorObject -Object $result -AsJson ([bool]$Json)
-    exit $exitCode
-}
-
 $script:ResolvedRepoRoot = Resolve-OperatorRepoRoot -Value $RepoRoot
 $script:ResolvedConfigPath = Resolve-OperatorConfigPath -RepoRoot $script:ResolvedRepoRoot -Value $ConfigPath
 $script:ResolvedRuntimeRoot = Resolve-OperatorRuntimeRoot -RepoRoot $script:ResolvedRepoRoot -ConfigPath $script:ResolvedConfigPath -Value $RuntimeRoot
 
 switch ($Command) {
     'plan' {
-        Invoke-OperatorPlan
+        $extra = @('--duration', ([string]$DurationSeconds), '--guest-ready-timeout-seconds', ([string]$GuestReadyTimeoutSeconds))
+        if (-not [string]::IsNullOrWhiteSpace($SamplePath)) { $extra += @('--sample', $SamplePath) }
+        if (-not [string]::IsNullOrWhiteSpace($Provider)) { $extra += @('--provider', $Provider) }
+        if (-not [string]::IsNullOrWhiteSpace($VmName)) { $extra += @('--vm', $VmName) }
+        if (-not [string]::IsNullOrWhiteSpace($SnapshotName)) { $extra += @('--checkpoint', $SnapshotName) }
+        if (-not [string]::IsNullOrWhiteSpace($MachineDefinitionPath)) { $extra += @('--machine-definition-path', $MachineDefinitionPath) }
+        if (-not [string]::IsNullOrWhiteSpace($QemuDiskFormat)) { $extra += @('--qemu-disk-format', $QemuDiskFormat) }
+        if (-not [string]::IsNullOrWhiteSpace($PlanPath)) { $extra += @('--plan-path', $PlanPath) }
+        Invoke-JobToolCommand -JobToolCommand 'plan' -ExtraArgs $extra
+    }
+    { $_ -in @('execute', 'run') } {
+        $extra = @('--duration', ([string]$DurationSeconds), '--guest-ready-timeout-seconds', ([string]$GuestReadyTimeoutSeconds), '--step-timeout-seconds', ([string]$StepTimeoutSeconds))
+        if (-not [string]::IsNullOrWhiteSpace($SamplePath)) { $extra += @('--sample', $SamplePath) }
+        if (-not [string]::IsNullOrWhiteSpace($Provider)) { $extra += @('--provider', $Provider) }
+        if (-not [string]::IsNullOrWhiteSpace($VmName)) { $extra += @('--vm', $VmName) }
+        if (-not [string]::IsNullOrWhiteSpace($SnapshotName)) { $extra += @('--checkpoint', $SnapshotName) }
+        if (-not [string]::IsNullOrWhiteSpace($MachineDefinitionPath)) { $extra += @('--machine-definition-path', $MachineDefinitionPath) }
+        if (-not [string]::IsNullOrWhiteSpace($QemuDiskFormat)) { $extra += @('--qemu-disk-format', $QemuDiskFormat) }
+        if ($Live) { $extra += '--live' }
+        if ($NoR0Collector) { $extra += '--no-r0-collector' }
+        if ($NoOpenVmConsole) { $extra += '--no-open-vm-console' }
+        if ($SkipGuestImport) { $extra += '--skip-guest-import' }
+        Invoke-JobToolCommand -JobToolCommand 'execute' -ExtraArgs $extra
     }
     'list' {
         Invoke-JobToolCommand -JobToolCommand 'list' -ExtraArgs @('--limit', ([string]$Limit))
@@ -376,6 +343,11 @@ switch ($Command) {
         if (-not [string]::IsNullOrWhiteSpace($JobId)) { $extra += @('--job-id', $JobId) }
         if (-not [string]::IsNullOrWhiteSpace($JobRoot)) { $extra += @('--job-root', $JobRoot) }
         if (-not [string]::IsNullOrWhiteSpace($SamplePath)) { $extra += @('--sample', $SamplePath) }
+        if (-not [string]::IsNullOrWhiteSpace($Provider)) { $extra += @('--provider', $Provider) }
+        if (-not [string]::IsNullOrWhiteSpace($VmName)) { $extra += @('--vm', $VmName) }
+        if (-not [string]::IsNullOrWhiteSpace($SnapshotName)) { $extra += @('--checkpoint', $SnapshotName) }
+        if (-not [string]::IsNullOrWhiteSpace($MachineDefinitionPath)) { $extra += @('--machine-definition-path', $MachineDefinitionPath) }
+        if (-not [string]::IsNullOrWhiteSpace($QemuDiskFormat)) { $extra += @('--qemu-disk-format', $QemuDiskFormat) }
         if (-not [string]::IsNullOrWhiteSpace($EventsPath)) { $extra += @('--events', $EventsPath) }
         if (-not [string]::IsNullOrWhiteSpace($RunbookExecutionPath)) { $extra += @('--runbook-execution', $RunbookExecutionPath) }
         Invoke-JobToolCommand -JobToolCommand 'report' -ExtraArgs $extra
@@ -385,6 +357,11 @@ switch ($Command) {
         if (-not [string]::IsNullOrWhiteSpace($JobId)) { $extra += @('--job-id', $JobId) }
         if (-not [string]::IsNullOrWhiteSpace($JobRoot)) { $extra += @('--job-root', $JobRoot) }
         if (-not [string]::IsNullOrWhiteSpace($SamplePath)) { $extra += @('--sample', $SamplePath) }
+        if (-not [string]::IsNullOrWhiteSpace($Provider)) { $extra += @('--provider', $Provider) }
+        if (-not [string]::IsNullOrWhiteSpace($VmName)) { $extra += @('--vm', $VmName) }
+        if (-not [string]::IsNullOrWhiteSpace($SnapshotName)) { $extra += @('--checkpoint', $SnapshotName) }
+        if (-not [string]::IsNullOrWhiteSpace($MachineDefinitionPath)) { $extra += @('--machine-definition-path', $MachineDefinitionPath) }
+        if (-not [string]::IsNullOrWhiteSpace($QemuDiskFormat)) { $extra += @('--qemu-disk-format', $QemuDiskFormat) }
         if (-not [string]::IsNullOrWhiteSpace($EventsPath)) { $extra += @('--events', $EventsPath) }
         if (-not [string]::IsNullOrWhiteSpace($RunbookExecutionPath)) { $extra += @('--runbook-execution', $RunbookExecutionPath) }
         Invoke-JobToolCommand -JobToolCommand 'import' -ExtraArgs $extra
@@ -402,6 +379,11 @@ switch ($Command) {
         if (-not [string]::IsNullOrWhiteSpace($JobId)) { $extra += @('--job-id', $JobId) }
         if (-not [string]::IsNullOrWhiteSpace($JobRoot)) { $extra += @('--job-root', $JobRoot) }
         if (-not [string]::IsNullOrWhiteSpace($SamplePath)) { $extra += @('--sample', $SamplePath) }
+        if (-not [string]::IsNullOrWhiteSpace($Provider)) { $extra += @('--provider', $Provider) }
+        if (-not [string]::IsNullOrWhiteSpace($VmName)) { $extra += @('--vm', $VmName) }
+        if (-not [string]::IsNullOrWhiteSpace($SnapshotName)) { $extra += @('--checkpoint', $SnapshotName) }
+        if (-not [string]::IsNullOrWhiteSpace($MachineDefinitionPath)) { $extra += @('--machine-definition-path', $MachineDefinitionPath) }
+        if (-not [string]::IsNullOrWhiteSpace($QemuDiskFormat)) { $extra += @('--qemu-disk-format', $QemuDiskFormat) }
         if (-not [string]::IsNullOrWhiteSpace($EventsPath)) { $extra += @('--events', $EventsPath) }
         if (-not [string]::IsNullOrWhiteSpace($RunbookExecutionPath)) { $extra += @('--runbook-execution', $RunbookExecutionPath) }
         if ($WriteIndex) { $extra += '--write-index' }
@@ -410,6 +392,9 @@ switch ($Command) {
         Invoke-JobToolCommand -JobToolCommand 'recover' -ExtraArgs $extra
     }
     'readiness' {
+        if ($HyperVReadiness -and ($ProviderReadiness -or (-not [string]::IsNullOrWhiteSpace($Provider) -and $Provider -ne 'HyperV'))) {
+            throw '-HyperVReadiness 只兼容 Hyper-V 专项检查；VMware/QEMU 请使用 readiness -Provider <VMware|Qemu>，或使用 -ProviderReadiness 读取当前配置。'
+        }
         if ($HyperVReadiness) {
             $readinessScript = Join-Path $script:ResolvedRepoRoot 'scripts\Test-HyperVReadiness.ps1'
             if (-not (Test-Path -LiteralPath $readinessScript -PathType Leaf)) {
@@ -434,6 +419,50 @@ switch ($Command) {
                     kind = 'KSwordSandbox.OperatorCliResult'
                     command = 'readiness'
                     mode = 'hyperv'
+                    success = ($exitCode -eq 0)
+                    exitCode = $exitCode
+                    result = $parsed
+                    rawOutput = if ($null -eq $parsed) { @($output) } else { @() }
+                    secretValuePrinted = $false
+                } | ConvertTo-Json -Depth 28
+            }
+            else {
+                $output
+            }
+            exit $exitCode
+        }
+
+        if ($ProviderReadiness -or -not [string]::IsNullOrWhiteSpace($Provider)) {
+            $runScript = Join-Path $script:ResolvedRepoRoot 'run.ps1'
+            if (-not (Test-Path -LiteralPath $runScript -PathType Leaf)) {
+                throw "run.ps1 was not found: $runScript"
+            }
+
+            $powerShell = Get-OperatorPowerShellExecutable
+            $readinessArgs = @(
+                '-NoLogo',
+                '-NoProfile',
+                '-ExecutionPolicy', 'Bypass',
+                '-File', $runScript,
+                '-Mode', 'CheckEnvironment',
+                '-ConfigPath', $script:ResolvedConfigPath,
+                '-RuntimeRoot', $script:ResolvedRuntimeRoot,
+                '-Json'
+            )
+            if (-not [string]::IsNullOrWhiteSpace($Provider)) {
+                $readinessArgs += @('-Provider', $Provider)
+            }
+            $output = @(& $powerShell @readinessArgs 2>&1 | ForEach-Object { [string]$_ })
+            $exitCode = $LASTEXITCODE
+            if ($Json) {
+                $parsed = $null
+                try { $parsed = ($output -join [Environment]::NewLine) | ConvertFrom-Json } catch { $parsed = $null }
+                [pscustomobject][ordered]@{
+                    contractVersion = 1
+                    kind = 'KSwordSandbox.OperatorCliResult'
+                    command = 'readiness'
+                    mode = 'provider-host'
+                    provider = if ([string]::IsNullOrWhiteSpace($Provider)) { $null } else { $Provider }
                     success = ($exitCode -eq 0)
                     exitCode = $exitCode
                     result = $parsed

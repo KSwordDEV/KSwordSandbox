@@ -6,7 +6,7 @@ Regenerates report artifacts for an existing KSword Sandbox job without rerunnin
 This operator wrapper calls KSword.Sandbox.JobTool rebuild-report. It reuses
 existing job artifacts such as events.json, driver-events.jsonl, packet captures,
 and runbook-execution.json. It does not start, restore, stop, or otherwise mutate
-Hyper-V VMs.
+Hyper-V, VMware, or QEMU VMs.
 #>
 [CmdletBinding()]
 param(
@@ -18,6 +18,14 @@ param(
     [string]$ConfigPath = '',
     [string]$RepoRoot = '',
     [string]$RuntimeRoot = '',
+    [ValidateSet('', 'HyperV', 'VMware', 'Qemu')]
+    [string]$Provider = '',
+    [string]$VmName = '',
+    [Alias('SnapshotName', 'CheckpointName')]
+    [string]$BaselineName = '',
+    [string]$MachineDefinitionPath = '',
+    [ValidateSet('', 'qcow2', 'raw', 'vhdx', 'vmdk')]
+    [string]$QemuDiskFormat = '',
     [int]$DurationSeconds = 120,
     [switch]$NoBuild,
     [switch]$Json
@@ -67,6 +75,21 @@ if (-not [string]::IsNullOrWhiteSpace($EventsPath)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($RunbookExecutionPath)) {
     $toolArgs += @('--runbook-execution', $RunbookExecutionPath)
+}
+if (-not [string]::IsNullOrWhiteSpace($Provider)) {
+    $toolArgs += @('--provider', $Provider)
+}
+if (-not [string]::IsNullOrWhiteSpace($VmName)) {
+    $toolArgs += @('--vm', $VmName)
+}
+if (-not [string]::IsNullOrWhiteSpace($BaselineName)) {
+    $toolArgs += @('--baseline', $BaselineName)
+}
+if (-not [string]::IsNullOrWhiteSpace($MachineDefinitionPath)) {
+    $toolArgs += @('--machine-definition-path', $MachineDefinitionPath)
+}
+if (-not [string]::IsNullOrWhiteSpace($QemuDiskFormat)) {
+    $toolArgs += @('--qemu-disk-format', $QemuDiskFormat.ToLowerInvariant())
 }
 if ($Json) {
     $toolArgs += '--json'

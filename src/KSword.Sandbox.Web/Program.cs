@@ -68,9 +68,9 @@ app.MapGet("/health", () => Results.Ok(new
     time = DateTimeOffset.UtcNow
 }));
 app.MapGet("/api/config", (SandboxConfig currentConfig) => Results.Ok(currentConfig));
-app.MapGet("/api/host/readiness", async Task<IResult> (bool? refresh, LocalHostReadinessProbe readinessProbe, CancellationToken cancellationToken) =>
+app.MapGet("/api/host/readiness", async Task<IResult> (bool? refresh, VirtualizationProvider? provider, LocalHostReadinessProbe readinessProbe, CancellationToken cancellationToken) =>
 {
-    var readiness = await readinessProbe.ProbeAsync(refresh == true, cancellationToken);
+    var readiness = await readinessProbe.ProbeAsync(refresh == true, provider, cancellationToken);
     return Results.Ok(readiness);
 });
 app.MapGet("/api/settings/virustotal", (VirusTotalSettingsStore settingsStore) => Results.Ok(settingsStore.GetState()));
@@ -87,11 +87,14 @@ app.MapPost("/api/settings/virustotal", (VirusTotalSettingsUpdateRequest request
         return Results.BadRequest(new { error = $"VirusTotal settings could not be saved: {ex.Message}" });
     }
 });
-app.MapGet("/api/jobs", (SandboxJobService service) => Results.Ok(service.ListJobs()));
+app.MapGet("/api/jobs", (SandboxJobService service) =>
+    Results.Ok(service.ListJobs().Select(job => BuildSafeWebJobSnapshot(job)).ToArray()));
 app.MapGet("/api/jobs/{jobId:guid}", (Guid jobId, SandboxJobService service) =>
 {
     var job = service.GetJob(jobId);
-    return job is null ? Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." }) : Results.Ok(job);
+    return job is null
+        ? Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." })
+        : Results.Ok(BuildSafeWebJobSnapshot(job));
 });
 app.MapGet("/api/jobs/{jobId:guid}/virustotal", async Task<IResult> (Guid jobId, bool? persist, SandboxJobService service, VirusTotalLookupService virusTotal, CancellationToken cancellationToken) =>
 {
@@ -325,14 +328,14 @@ app.MapPost("/api/files/upload/start", async Task<IResult> (HttpRequest request,
         return Results.Ok(new
         {
             Uploaded = candidate,
-            Job = job,
+            Job = BuildSafeWebJobSnapshot(job),
             MonitorHref = $"/jobs/{job.JobId:D}/live-events",
             UploadMonitorHref = $"/jobs/{job.JobId:D}/live-events?fromUpload=1&accepted={(runbookStart.Accepted ? "1" : "0")}&state={Uri.EscapeDataString(runbookStart.State ?? RunbookBackgroundExecutionStore.NotStarted)}",
             ExecutionFlowHref = $"/jobs/{job.JobId:D}/execution-flow",
             ReportHref = $"/api/jobs/{job.JobId:D}/report/html",
             BackgroundHref = $"/api/jobs/{job.JobId:D}/runbook/background",
             RunbookProgress = runbookProgress,
-            RunbookStart = runbookStart
+            RunbookStart = BuildSafeWebRunbookStartAttempt(runbookStart)
         });
     }
     catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or InvalidOperationException or IOException or UnauthorizedAccessException)
@@ -345,7 +348,7 @@ app.MapPost("/api/jobs/plan", (SandboxSubmission submission, SandboxJobService s
     try
     {
         var job = service.Plan(submission);
-        return Results.Ok(job);
+        return Results.Ok(BuildSafeWebJobSnapshot(job));
     }
     catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or InvalidOperationException)
     {
@@ -362,7 +365,11 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
 
     if (job.Runbook is null)
     {
-        return Results.BadRequest(new { error = $"任务 {jobId:D} 没有可执行流程；请重新上传或重新创建分析计划 / Job does not have a runbook; recreate the dry-run plan for the selected executable." });
+        return Results.BadRequest(new
+        {
+            error = $"任务 {jobId:D} 没有可执行流程；请重新上传或重新创建分析计划 / Job does not have a runbook; recreate the dry-run plan for the selected executable.",
+            provider = job.Submission.Provider
+        });
     }
 
     var prepareError = TryPrepareRunbookExecution(job, request, service, currentConfig, progressStore, out var options);
@@ -371,23 +378,24 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
         return prepareError;
     }
 
-    return Results.Ok(await ExecuteRunbookAndImportAsync(jobId, request, service, executor, options));
+    var outcome = await ExecuteRunbookAndImportAsync(jobId, request, service, executor, options);
+    return Results.Ok(BuildSafeWebRunbookExecutionOutcome(outcome));
 });
 // POST /api/jobs/{jobId}/runbook/start starts the same runbook work on a
 // server-side background task and returns immediately. This is the preferred
 // WebUI path for live VM analysis because the browser tab no longer owns the
-// long PowerShell/Hyper-V request lifetime.
+// long PowerShell/provider-runbook request lifetime.
 app.MapPost("/api/jobs/{jobId:guid}/runbook/start", (Guid jobId, RunbookExecuteRequest request, SandboxJobService service, IRunbookExecutor executor, SandboxConfig currentConfig, RunbookProgressStore progressStore, RunbookBackgroundExecutionStore backgroundStore) =>
 {
     var start = TryStartBackgroundRunbook(jobId, request, service, executor, currentConfig, progressStore, backgroundStore);
     if (start.StatusCode == StatusCodes.Status404NotFound)
     {
-        return Results.NotFound(new { error = start.Message });
+        return Results.NotFound(new { error = start.Message, provider = start.Provider });
     }
 
     if (start.StatusCode == StatusCodes.Status400BadRequest)
     {
-        return Results.BadRequest(new { error = start.Message });
+        return Results.BadRequest(new { error = start.Message, provider = start.Provider });
     }
 
     var safeSnapshot = BuildSafeRunbookBackgroundSnapshot(start.Snapshot ?? backgroundStore.Get(jobId));
@@ -395,12 +403,36 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/start", (Guid jobId, RunbookExecuteR
         ? Results.Accepted($"/api/jobs/{jobId:D}/runbook/background", safeSnapshot)
         : Results.Ok(safeSnapshot);
 });
+// POST /api/jobs/{jobId}/runbook/cancel requests cooperative cancellation of
+// a WebUI background run. The active state remains queued/running while the
+// executor performs required VM cleanup; clients wait for the canceled terminal
+// snapshot before treating cleanup as complete.
+app.MapPost("/api/jobs/{jobId:guid}/runbook/cancel", (Guid jobId, SandboxJobService service, RunbookBackgroundExecutionStore backgroundStore) =>
+{
+    if (service.GetJob(jobId) is null)
+    {
+        return Results.NotFound(new { error = $"未找到任务 {jobId:D}；无法请求取消 / Job was not found; cancellation could not be requested." });
+    }
+
+    if (!backgroundStore.TryCancel(jobId, out var snapshot))
+    {
+        return Results.Conflict(new
+        {
+            error = "该任务当前没有可取消的后台分析；请刷新状态确认它是否已经完成 / This job has no active background run to cancel; refresh status to see whether it already finished.",
+            background = BuildSafeRunbookBackgroundSnapshot(snapshot)
+        });
+    }
+
+    return Results.Accepted(
+        $"/api/jobs/{jobId:D}/runbook/background",
+        BuildSafeRunbookBackgroundSnapshot(snapshot));
+});
 app.MapPost("/api/jobs/{jobId:guid}/guest-events/import", (Guid jobId, GuestEventImportRequest request, SandboxJobService service) =>
 {
     try
     {
         var job = service.ImportGuestEvents(jobId, request.EventsPath);
-        return Results.Ok(job);
+        return Results.Ok(BuildSafeWebJobSnapshot(job));
     }
     catch (KeyNotFoundException ex)
     {
@@ -482,10 +514,15 @@ static JobArtifactDownloadContract ToJobArtifactDownloadContract(
     string contentType,
     string sha256)
 {
-    var href = string.IsNullOrWhiteSpace(selector)
+    var hostLocalOnly = IsHostLocalSensitiveRunbookArtifact(artifact);
+    var href = string.IsNullOrWhiteSpace(selector) || hostLocalOnly
         ? string.Empty
         : $"/api/jobs/{jobId:D}/artifacts/download?path={Uri.EscapeDataString(selector)}";
-    var rejectionCode = string.IsNullOrWhiteSpace(selector) ? "missing-safe-selector" : string.Empty;
+    var rejectionCode = hostLocalOnly
+        ? "host-local-sensitive-runbook-evidence"
+        : string.IsNullOrWhiteSpace(selector)
+            ? "missing-safe-selector"
+            : string.Empty;
 
     return new JobArtifactDownloadContract(
         Available: string.IsNullOrWhiteSpace(rejectionCode),
@@ -496,12 +533,45 @@ static JobArtifactDownloadContract ToJobArtifactDownloadContract(
         SizeBytes: artifact.SizeBytes,
         Sha256: sha256,
         RejectionCode: rejectionCode,
-        RejectionMessage: string.IsNullOrWhiteSpace(rejectionCode)
-            ? string.Empty
-            : "Artifact is indexed but has no safe relative selector; server will not stream it.",
-        RejectionMessageZh: string.IsNullOrWhiteSpace(rejectionCode)
-            ? string.Empty
-            : "产物已被索引，但缺少安全相对 selector，Web 端不会下载。");
+        RejectionMessage: hostLocalOnly
+            ? "Raw runbook commands and execution streams are host-local evidence; the Web API will not stream this artifact."
+            : string.IsNullOrWhiteSpace(rejectionCode)
+                ? string.Empty
+                : "Artifact is indexed but has no safe relative selector; server will not stream it.",
+        RejectionMessageZh: hostLocalOnly
+            ? "完整 runbook 命令和执行流属于宿主机本地证据，Web API 不会下载此文件。"
+            : string.IsNullOrWhiteSpace(rejectionCode)
+                ? string.Empty
+                : "产物已被索引，但缺少安全相对 selector，Web 端不会下载。");
+}
+
+static bool IsHostLocalSensitiveRunbookArtifact(ArtifactDescriptor artifact)
+{
+    if (artifact.Kind is ArtifactKind.RunbookJson or ArtifactKind.RunbookExecutionJson)
+    {
+        return true;
+    }
+
+    return new[]
+    {
+        artifact.Name,
+        artifact.RelativePath,
+        artifact.ImportPath,
+        artifact.FullPath
+    }.Any(value => IsHostLocalSensitiveRunbookFileName(value));
+}
+
+static bool IsHostLocalSensitiveRunbookFileName(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return false;
+    }
+
+    var fileName = Path.GetFileName(value.Replace('\\', '/'));
+    return fileName.Equals("runbook.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("runbook-execution.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("job-metadata.json", StringComparison.OrdinalIgnoreCase);
 }
 
 static (string RelativePath, string SafeLink, string ImportPath) BuildWebArtifactSelectors(ArtifactDescriptor artifact)
@@ -762,6 +832,17 @@ static IResult StreamIndexedArtifact(Guid jobId, string path, SandboxJobService 
     try
     {
         var artifact = service.ResolveDownloadableArtifact(jobId, path);
+        if (IsHostLocalSensitiveRunbookArtifact(artifact))
+        {
+            return Results.Json(new
+            {
+                error = "Raw runbook commands and execution streams are host-local evidence and cannot be downloaded through the Web API.",
+                rejectionCode = "host-local-sensitive-runbook-evidence",
+                selectorPolicy = "indexed-but-host-local-only",
+                selectorPreview = SafeSelectorPreview(path)
+            }, statusCode: StatusCodes.Status403Forbidden);
+        }
+
         var contentType = ResolveArtifactContentType(artifact);
         var fileName = SanitizeDownloadFileName(FirstNonEmpty(artifact.Name, artifact.FullPath, artifact.RelativePath, "artifact.bin"));
         return Results.File(artifact.FullPath, contentType, fileName, enableRangeProcessing: true);
@@ -862,7 +943,7 @@ static SandboxRunbookProgressSnapshot SelectLatestRunbookProgressSnapshot(
 /// Stores a progress snapshot in memory and best-effort durable state. Inputs
 /// are the job service, in-memory store, and one executor snapshot; processing
 /// writes only the UI-safe snapshot and deliberately ignores persistence
-/// failures so live Hyper-V execution is never aborted by report-folder locks.
+/// failures so live provider execution is never aborted by report-folder locks.
 /// </summary>
 static void UpdateRunbookProgress(
     SandboxJobService service,
@@ -950,7 +1031,11 @@ static object BuildRunbookProgressApiPayloadFromContract(
     return new
     {
         snapshot.JobId,
+        snapshot.Provider,
         snapshot.TargetVmName,
+        snapshot.BaselineName,
+        snapshot.MachineDefinitionPath,
+        snapshot.QemuDiskFormat,
         snapshot.Mode,
         snapshot.State,
         snapshot.TotalSteps,
@@ -1219,11 +1304,14 @@ static object BuildSafeRunbookBackgroundSnapshot(RunbookBackgroundExecutionSnaps
     return new
     {
         snapshot.JobId,
+        snapshot.Provider,
         snapshot.Live,
         snapshot.ImportGuestEvents,
         snapshot.Accepted,
         snapshot.State,
         snapshot.Success,
+        snapshot.CancelRequested,
+        snapshot.CancelRequestedAtUtc,
         snapshot.Message,
         snapshot.StartedAtUtc,
         snapshot.UpdatedAtUtc,
@@ -1244,25 +1332,159 @@ static object BuildSafeRunbookBackgroundSnapshot(RunbookBackgroundExecutionSnaps
         snapshot.RunningStepCount,
         snapshot.LatestStepSummary,
         snapshot.OperatorHintsZh,
-        Job = BuildSafeRunbookBackgroundJobSnapshot(snapshot.Job)
+        Execution = BuildSafeWebRunbookExecutionSnapshot(snapshot.Execution),
+        Job = BuildSafeWebJobSnapshot(snapshot.Job)
     };
 }
 
-static object? BuildSafeRunbookBackgroundJobSnapshot(AnalysisJob? job)
+/// <summary>
+/// Builds the only AnalysisJob shape allowed across Web API boundaries. The
+/// projection keeps operator-visible identity, status, artifact paths, and
+/// runbook step metadata while excluding PowerShell and future model fields by
+/// default.
+/// </summary>
+static object? BuildSafeWebJobSnapshot(AnalysisJob? job)
 {
     return job is null
         ? null
         : new
         {
             job.JobId,
+            job.CreatedAt,
+            Provider = job.Runbook?.Provider ?? job.Submission.Provider,
             Status = job.Status.ToString(),
+            Sample = job.Sample is null
+                ? null
+                : new
+                {
+                    job.Sample.FullPath,
+                    job.Sample.FileName,
+                    job.Sample.Sha256,
+                    job.Sample.Sha1,
+                    job.Sample.Md5,
+                    job.Sample.Crc32,
+                    job.Sample.SizeBytes
+                },
+            Submission = new
+            {
+                job.Submission.SamplePath,
+                job.Submission.DisplayName,
+                job.Submission.DurationSeconds,
+                job.Submission.DurationUnlimited,
+                job.Submission.GuestReadyTimeoutSeconds,
+                job.Submission.DryRun,
+                job.Submission.Provider,
+                job.Submission.GoldenVmName,
+                job.Submission.GoldenSnapshotName,
+                job.Submission.MachineDefinitionPath,
+                job.Submission.QemuDiskFormat,
+                job.Submission.GuestUserName,
+                job.Submission.GuestWorkingDirectory,
+                job.Submission.GuestPayloadRoot,
+                job.Submission.UseMockCollector,
+                job.Submission.CollectDroppedFiles,
+                job.Submission.CaptureScreenshots,
+                job.Submission.CaptureMemoryDumps,
+                job.Submission.CapturePacketCapture
+            },
+            Runbook = job.Runbook is null
+                ? null
+                : new
+                {
+                    job.Runbook.Provider,
+                    job.Runbook.TargetVmName,
+                    job.Runbook.BaselineName,
+                    job.Runbook.MachineDefinitionPath,
+                    job.Runbook.QemuDiskFormat,
+                    job.Runbook.UsesTemporaryVm,
+                    Steps = job.Runbook.Steps.Select(step => new
+                    {
+                        step.Id,
+                        step.Title,
+                        step.RequiresElevation,
+                        step.MutatesVmState
+                    }).ToArray()
+                },
             job.JsonReportPath,
             job.HtmlReportPath,
             job.HtmlReportZhPath,
             job.HtmlReportEnPath,
             job.GuestEventsPath,
-            job.RunbookExecutionResultPath
+            job.RunbookExecutionResultPath,
+            Messages = job.Messages.TakeLast(3).ToList()
         };
+}
+
+/// <summary>
+/// Projects one terminal execution result for Web clients. Full commands and
+/// captured streams remain only in the guarded local runbook-execution.json
+/// artifact; the API returns status and diagnostics that do not contain them.
+/// </summary>
+static object? BuildSafeWebRunbookExecutionSnapshot(SandboxRunbookExecutionResult? execution)
+{
+    return execution is null
+        ? null
+        : new
+        {
+            execution.JobId,
+            execution.Provider,
+            execution.TargetVmName,
+            execution.BaselineName,
+            execution.MachineDefinitionPath,
+            execution.QemuDiskFormat,
+            execution.Mode,
+            execution.Success,
+            execution.WasCanceled,
+            execution.TotalSteps,
+            execution.ExecutedSteps,
+            execution.FailedStepIndex,
+            execution.StartedAtUtc,
+            execution.Duration,
+            execution.RequiresElevation,
+            execution.Message,
+            StepResults = execution.StepResults.Select(step => new
+            {
+                step.StepIndex,
+                step.StepId,
+                step.Title,
+                step.Skipped,
+                step.Success,
+                step.ExitCode,
+                step.StartedAtUtc,
+                step.Duration,
+                step.RequiresElevation,
+                step.MutatesVmState
+            }).ToArray()
+        };
+}
+
+static object BuildSafeWebRunbookExecutionOutcome(RunbookExecutionOutcome outcome)
+{
+    return new
+    {
+        Execution = BuildSafeWebRunbookExecutionSnapshot(outcome.Execution),
+        Job = BuildSafeWebJobSnapshot(outcome.Job),
+        outcome.GuestImportSucceeded,
+        outcome.GuestImportSkipped,
+        outcome.GuestImportFailed,
+        outcome.GuestImportMessage
+    };
+}
+
+static object BuildSafeWebRunbookStartAttempt(RunbookBackgroundStartAttempt attempt)
+{
+    return new
+    {
+        attempt.Attempted,
+        attempt.Accepted,
+        attempt.Provider,
+        attempt.State,
+        attempt.Message,
+        attempt.StatusCode,
+        Snapshot = attempt.Snapshot is null
+            ? null
+            : BuildSafeRunbookBackgroundSnapshot(attempt.Snapshot)
+    };
 }
 
 static object? BuildRunbookProgressStreamCurrentStep(
@@ -1369,11 +1591,17 @@ static string ResolveRunbookProgressStreamState(
 {
     var backgroundState = (background.State ?? string.Empty).Trim().ToLowerInvariant();
     var progressState = (progress.State ?? string.Empty).Trim().ToLowerInvariant();
+    if (backgroundState is RunbookBackgroundExecutionStore.Canceled ||
+        progressState is SandboxRunbookProgressStates.Canceled)
+    {
+        return "canceled";
+    }
+
     if (backgroundState is RunbookBackgroundExecutionStore.Failed ||
-        progressState is SandboxRunbookProgressStates.Failed or SandboxRunbookProgressStates.Canceled ||
+        progressState is SandboxRunbookProgressStates.Failed ||
         progress.Success == false)
     {
-        return progressState == SandboxRunbookProgressStates.Canceled ? "canceled" : "failed";
+        return "failed";
     }
 
     if (backgroundState is RunbookBackgroundExecutionStore.Running or RunbookBackgroundExecutionStore.Queued)
@@ -1396,6 +1624,7 @@ static string? ResolveRunbookProgressStreamMessage(
     RunbookBackgroundExecutionSnapshot background)
 {
     if ((string.Equals(background.State, RunbookBackgroundExecutionStore.Failed, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(background.State, RunbookBackgroundExecutionStore.Canceled, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(background.State, RunbookBackgroundExecutionStore.Completed, StringComparison.OrdinalIgnoreCase)) &&
         !string.IsNullOrWhiteSpace(background.Message))
     {
@@ -1488,12 +1717,30 @@ static IResult? TryPrepareRunbookExecution(
     options = new SandboxRunbookExecutionOptions();
     if (job.Runbook is null)
     {
-        return Results.BadRequest(new { error = $"任务 {job.JobId:D} 没有可执行流程；请重新上传或重新创建分析计划 / Job does not have a runbook; recreate the dry-run plan for the selected executable." });
+        return Results.BadRequest(new
+        {
+            error = $"任务 {job.JobId:D} 没有可执行流程；请重新上传或重新创建分析计划 / Job does not have a runbook; recreate the dry-run plan for the selected executable.",
+            provider = job.Submission.Provider
+        });
     }
 
     var mode = request.Live ? SandboxRunbookExecutionMode.Live : SandboxRunbookExecutionMode.DryRun;
     var initialSnapshot = progressStore.Begin(job.Runbook, mode);
     UpdateRunbookProgress(service, progressStore, initialSnapshot);
+
+    var guestReadyTimeoutSeconds = job.Submission.GuestReadyTimeoutSeconds ?? currentConfig.Analysis.GuestReadyTimeoutSeconds;
+    if (request.Live && !request.DurationUnlimited && request.StepTimeoutSeconds > 0 &&
+        request.StepTimeoutSeconds < guestReadyTimeoutSeconds)
+    {
+        var timeoutMessage = $"单步 timeout ({request.StepTimeoutSeconds}s) 小于 guest readiness timeout ({guestReadyTimeoutSeconds}s)，会提前中断 PowerShell Direct/WinRM 等待；请增大 StepTimeoutSeconds 或选择 unlimited / Step timeout must be zero (unlimited) or at least the guest readiness timeout.";
+        var failureSnapshot = progressStore.Fail(job.Runbook, mode, timeoutMessage);
+        UpdateRunbookProgress(service, progressStore, failureSnapshot);
+        return Results.BadRequest(new
+        {
+            error = timeoutMessage,
+            provider = job.Runbook.Provider
+        });
+    }
 
     var environmentVariables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
     if (request.Live)
@@ -1511,7 +1758,8 @@ static IResult? TryPrepareRunbookExecution(
             UpdateRunbookProgress(service, progressStore, failureSnapshot);
             return Results.BadRequest(new
             {
-                error = $"实时虚拟机分析需要来宾密码环境变量 '{secretName}'。最省事的做法：运行 .\\install.ps1，选择重置密码，然后重启 .\\run.ps1 -Mode WebUI / Live runbook needs the guest credential secret. Run install.ps1, choose password reset, then restart run.ps1 -Mode WebUI."
+                error = $"实时虚拟机分析需要来宾密码环境变量 '{secretName}'。最省事的做法：运行 .\\install.ps1，选择重置密码，然后重启 .\\run.ps1 -Mode WebUI / Live runbook needs the guest credential secret. Run install.ps1, choose password reset, then restart run.ps1 -Mode WebUI.",
+                provider = job.Runbook.Provider
             });
         }
 
@@ -1545,7 +1793,8 @@ static async Task<RunbookExecutionOutcome> ExecuteRunbookAndImportAsync(
     RunbookExecuteRequest request,
     SandboxJobService service,
     IRunbookExecutor executor,
-    SandboxRunbookExecutionOptions options)
+    SandboxRunbookExecutionOptions options,
+    CancellationToken cancellationToken = default)
 {
     var job = service.GetJob(jobId) ?? throw new KeyNotFoundException($"未找到任务 {jobId:D}，无法开始执行 / Job was not found before execution.");
     if (job.Runbook is null)
@@ -1553,7 +1802,7 @@ static async Task<RunbookExecutionOutcome> ExecuteRunbookAndImportAsync(
         throw new InvalidOperationException($"任务 {jobId:D} 没有可执行流程 / Job does not have a runbook.");
     }
 
-    var result = await executor.ExecuteAsync(job.Runbook, options).ConfigureAwait(false);
+    var result = await executor.ExecuteAsync(job.Runbook, options, cancellationToken).ConfigureAwait(false);
     var updatedJob = service.SaveRunbookExecutionResult(jobId, result);
     var guestImportSucceeded = false;
     var guestImportSkipped = false;
@@ -1629,6 +1878,7 @@ static RunbookBackgroundStartAttempt TryStartBackgroundRunbook(
         {
             Attempted = true,
             Accepted = false,
+            Provider = job.Submission.Provider,
             State = RunbookBackgroundExecutionStore.NotStarted,
             Message = $"任务 {jobId:D} 没有可执行流程；请重新上传或重新创建分析计划 / Job does not have a runbook; recreate the dry-run plan for the selected executable.",
             StatusCode = StatusCodes.Status400BadRequest
@@ -1648,6 +1898,7 @@ static RunbookBackgroundStartAttempt TryStartBackgroundRunbook(
         {
             Attempted = true,
             Accepted = false,
+            Provider = activeSnapshot.Provider ?? job.Runbook.Provider,
             State = activeSnapshot.State,
             Message = activeSnapshot.Message,
             StatusCode = StatusCodes.Status200OK,
@@ -1663,23 +1914,26 @@ static RunbookBackgroundStartAttempt TryStartBackgroundRunbook(
         {
             Attempted = true,
             Accepted = false,
+            Provider = job.Runbook.Provider,
             State = RunbookBackgroundExecutionStore.Failed,
-            Message = $"分析流程预检查失败（{modeText}）。实时模式请检查来宾密码、Hyper-V 就绪状态和 VM 配置；打开执行流程页查看安全失败步骤 / Runbook preflight failed. Verify guest credential, Hyper-V readiness, and VM configuration.",
+            Message = $"分析流程预检查失败（{modeText}）。实时模式请检查来宾密码、所选虚拟化后端就绪状态和 VM 配置；打开执行流程页查看安全失败步骤 / Runbook preflight failed. Verify the guest credential, selected virtualization provider readiness, and VM configuration.",
             StatusCode = StatusCodes.Status400BadRequest
         };
     }
 
     var accepted = backgroundStore.TryStart(
         jobId,
+        job.Runbook.Provider,
         request.Live,
         request.ImportGuestEvents,
-        () => ExecuteRunbookAndImportAsync(jobId, request, service, executor, options),
+        cancellationToken => ExecuteRunbookAndImportAsync(jobId, request, service, executor, options, cancellationToken),
         out var snapshot);
 
     return new RunbookBackgroundStartAttempt
     {
         Attempted = true,
         Accepted = accepted,
+        Provider = snapshot.Provider ?? job.Runbook.Provider,
         State = snapshot.State,
         Message = snapshot.Message,
         StatusCode = accepted ? StatusCodes.Status202Accepted : StatusCodes.Status200OK,
@@ -1960,9 +2214,13 @@ static SandboxSubmission BuildSubmissionFromUploadForm(ExecutableCandidate candi
         DisplayName = candidate.FileName,
         DurationSeconds = durationUnlimited ? 0 : ReadFormInt(form, "durationSeconds", config.Analysis.DefaultDurationSeconds, 1, config.Analysis.MaxDurationSeconds),
         DurationUnlimited = durationUnlimited,
+        GuestReadyTimeoutSeconds = ReadFormInt(form, "guestReadyTimeoutSeconds", config.Analysis.GuestReadyTimeoutSeconds, 1, 7200),
         DryRun = true,
+        Provider = ReadFormVirtualizationProvider(form),
         GoldenVmName = ReadFormString(form, "goldenVmName"),
         GoldenSnapshotName = ReadFormString(form, "goldenSnapshotName"),
+        MachineDefinitionPath = ReadFormString(form, "machineDefinitionPath"),
+        QemuDiskFormat = ReadFormString(form, "qemuDiskFormat"),
         GuestUserName = ReadFormString(form, "guestUserName"),
         GuestWorkingDirectory = ReadFormString(form, "guestWorkingDirectory"),
         GuestPayloadRoot = ReadFormString(form, "guestPayloadRoot"),
@@ -1999,6 +2257,23 @@ static string? ReadFormString(IFormCollection form, string key)
     return form.TryGetValue(key, out var values) && !string.IsNullOrWhiteSpace(values.ToString())
         ? values.ToString().Trim()
         : null;
+}
+
+static VirtualizationProvider? ReadFormVirtualizationProvider(IFormCollection form)
+{
+    var value = ReadFormString(form, "provider");
+    if (value is null)
+    {
+        return null;
+    }
+
+    if (Enum.TryParse<VirtualizationProvider>(value, ignoreCase: true, out var provider) &&
+        Enum.IsDefined(provider))
+    {
+        return provider;
+    }
+
+    throw new ArgumentException($"Unsupported virtualization provider '{value}'. Expected HyperV, VMware, or Qemu.");
 }
 
 static int ReadFormInt(IFormCollection form, string key, int fallback, int min, int max)
@@ -2110,7 +2385,7 @@ static string SanitizeFileName(string fileName)
 }
 
 /// <summary>
-/// Request body for running a planned Hyper-V runbook.
+/// Request body for running a planned virtualization-provider runbook.
 /// Inputs come from the WebUI, processing maps Live to dry-run or live executor
 /// mode and clamps StepTimeoutSeconds, and the record is not persisted.
 /// </summary>
@@ -2136,6 +2411,8 @@ internal sealed record RunbookBackgroundStartAttempt
     public bool Attempted { get; init; }
 
     public bool Accepted { get; init; }
+
+    public VirtualizationProvider? Provider { get; init; }
 
     public string State { get; init; } = RunbookBackgroundExecutionStore.NotStarted;
 

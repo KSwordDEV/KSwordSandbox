@@ -22,6 +22,8 @@ public static class SampleCorrelationClassifier
         "live.events.",
         "report.",
         "hyperv.runbook.",
+        "vmware.runbook.",
+        "qemu.runbook.",
         "environment.",
         "security_eventlog.audit_policy.",
         "collection-health."

@@ -14,6 +14,24 @@ internal static class RunbookProgressFacts
     private const string HiddenStreamsNotice = "UI progress omits command text/stdout/stderr; use runbook-execution.json for raw execution evidence.";
     private const string HiddenStreamsNoticeZh = "UI 进度不会写入命令文本/stdout/stderr；需要原始执行证据时请查看 runbook-execution.json。";
 
+    public static bool IsPreflightFailureStepId(string? stepId) =>
+        stepId is not null &&
+        (stepId.Equals("live-execution-lease", StringComparison.OrdinalIgnoreCase) ||
+         stepId.Equals("elevation-check", StringComparison.OrdinalIgnoreCase));
+
+    public static bool IsPreflightFailureResult(SandboxRunbookStepExecutionResult result) =>
+        result.StepIndex < 0 && !result.Success && IsPreflightFailureStepId(result.StepId);
+
+    public static string GetPreflightFailureTitle(string stepId) =>
+        stepId.Equals("live-execution-lease", StringComparison.OrdinalIgnoreCase)
+            ? "Acquire exclusive live execution lease"
+            : "Verify elevated PowerShell host";
+
+    public static string GetPreflightFailureCategory(string stepId) =>
+        stepId.Equals("live-execution-lease", StringComparison.OrdinalIgnoreCase)
+            ? "execution-lease"
+            : "host-elevation";
+
     /// <summary>
     /// Builds stable display facts for one step.
     /// Inputs are source step metadata and zero-based position; processing maps
@@ -235,21 +253,30 @@ internal static class RunbookProgressFacts
         }
         else
         {
-            var canceled = result.StepResults.Any(IsCanceledStepResult);
+            var canceled = result.WasCanceled;
             var failedIndex = result.FailedStepIndex;
             if (failedIndex is >= 0 && failedIndex.Value < runbook.Steps.Count)
             {
                 var step = runbook.Steps[failedIndex.Value];
                 var facts = DescribeStep(step, failedIndex.Value, runbook.Steps.Count);
-                var failedResult = result.StepResults.LastOrDefault(candidate => candidate.StepIndex == failedIndex.Value);
+                var failedResult = canceled
+                    ? result.StepResults.FirstOrDefault(IsCanceledStepResult)
+                    : result.StepResults.LastOrDefault(candidate => candidate.StepIndex == failedIndex.Value);
                 var verb = canceled ? "was canceled" : "failed";
                 message = $"Runbook execution {verb} at step {facts.Ordinal} [phase={facts.Phase}; category={facts.Category}]: {step.Title}. {BuildExitCodeSummary(failedResult)} 修复建议：{facts.RemediationHintZh} {HiddenStreamsNoticeZh}";
             }
             else
             {
                 var firstFailure = result.StepResults.FirstOrDefault(candidate => !candidate.Success);
-                var reason = firstFailure is null ? "No source step reported a normal success result." : BuildExitCodeSummary(firstFailure);
-                message = $"Runbook execution failed before a recoverable source step was identified. {reason} 修复建议：确认宿主 PowerShell 已以管理员权限启动、配置项完整，并重新启动分析。 {HiddenStreamsNoticeZh}";
+                if (firstFailure is not null && IsPreflightFailureResult(firstFailure))
+                {
+                    message = BuildPreflightFailureProgressMessage(firstFailure.StepId, firstFailure.Message);
+                }
+                else
+                {
+                    var reason = firstFailure is null ? "No source step reported a normal success result." : BuildExitCodeSummary(firstFailure);
+                    message = $"Runbook execution failed before a recoverable source step was identified. {reason} 修复建议：确认 provider 工具与配置完整；若所选步骤需要管理员权限，请从提权 PowerShell 重新启动分析。 {HiddenStreamsNoticeZh}";
+                }
             }
         }
 
@@ -272,7 +299,11 @@ internal static class RunbookProgressFacts
         ArgumentNullException.ThrowIfNull(snapshot);
 
         var totalSteps = Math.Max(snapshot.TotalSteps, Math.Max(snapshot.Steps.Count, runbook?.Steps.Count ?? 0));
-        var explicitCurrent = ResolveCurrentStepIndex(snapshot.Steps, snapshot.CurrentStepIndex, snapshot.State, snapshot.Success);
+        var preflightFailure = IsPreflightFailureStepId(snapshot.CurrentStepId) &&
+            (StateEquals(snapshot.State, SandboxRunbookProgressStates.Failed) || snapshot.Success == false);
+        var explicitCurrent = preflightFailure
+            ? null
+            : ResolveCurrentStepIndex(snapshot.Steps, snapshot.CurrentStepIndex, snapshot.State, snapshot.Success);
         var steps = snapshot.Steps.Select(step =>
         {
             var sourceStep = ResolveSourceStep(runbook, step);
@@ -297,7 +328,9 @@ internal static class RunbookProgressFacts
             };
         }).ToList();
 
-        var currentIndex = ResolveCurrentStepIndex(steps, explicitCurrent, snapshot.State, snapshot.Success);
+        var currentIndex = preflightFailure
+            ? null
+            : ResolveCurrentStepIndex(steps, explicitCurrent, snapshot.State, snapshot.Success);
         var currentStep = currentIndex is >= 0
             ? steps.FirstOrDefault(step => step.StepIndex == currentIndex.Value)
             : null;
@@ -306,13 +339,18 @@ internal static class RunbookProgressFacts
 
         return snapshot with
         {
+            Provider = runbook?.Provider ?? snapshot.Provider,
+            TargetVmName = runbook?.TargetVmName ?? snapshot.TargetVmName,
+            BaselineName = runbook?.BaselineName ?? snapshot.BaselineName,
+            MachineDefinitionPath = runbook?.MachineDefinitionPath ?? snapshot.MachineDefinitionPath,
+            QemuDiskFormat = runbook?.QemuDiskFormat ?? snapshot.QemuDiskFormat,
             TotalSteps = totalSteps,
             CompletedSteps = steps.Count(step => CountsAsCompletedStep(step.State)),
             CurrentStepIndex = currentStep?.StepIndex,
-            CurrentStepId = currentStep?.StepId,
-            CurrentStepTitle = currentStep?.Title,
-            CurrentPhase = currentStep?.Phase,
-            CurrentCategory = currentStep?.Category,
+            CurrentStepId = preflightFailure ? snapshot.CurrentStepId : currentStep?.StepId,
+            CurrentStepTitle = preflightFailure ? GetPreflightFailureTitle(snapshot.CurrentStepId!) : currentStep?.Title,
+            CurrentPhase = preflightFailure ? "preflight" : currentStep?.Phase,
+            CurrentCategory = preflightFailure ? GetPreflightFailureCategory(snapshot.CurrentStepId!) : currentStep?.Category,
             ProgressPercent = ComputeProgressPercent(steps, snapshot.State, snapshot.Success, totalSteps),
             Message = message,
             UpdatedAtUtc = bumpUpdatedAt ? DateTimeOffset.UtcNow : snapshot.UpdatedAtUtc,
@@ -423,9 +461,12 @@ internal static class RunbookProgressFacts
 
         return stepId switch
         {
-            "check-hyperv" or "check-golden-vm" or "check-r0-driver-config" or "check-guest-credential" => "preflight",
-            "make-vm-root" or "make-diff-disk" or "create-temp-vm" or "stop-golden" or "restore-golden" or
-                "enable-guest-service" or "start-temp-vm" or "start-golden" or "start-vm" or "wait-powershell-direct" => "vm-prepare",
+            "check-hyperv" or "check-golden-vm" or "check-vmware" or "check-qemu" or
+                "check-r0-driver-config" or "check-guest-credential" => "preflight",
+            "make-vm-root" or "make-diff-disk" or "make-overlay-disk" or "create-temp-vm" or
+                "stop-golden" or "stop-vm-before-restore" or "restore-golden" or "restore-vm-snapshot" or
+                "enable-guest-service" or "start-temp-vm" or "start-golden" or "start-vm" or
+                "open-vm-desktop" or "wait-powershell-direct" or "wait-guest-remoting" => "vm-prepare",
             "stage-guest-payload" or "copy-sample" or "make-host-output" or "record-artifact-policy" or "prepare-guest-output" => "guest-prepare",
             "install-driver-service" => "r0-driver",
             "run-agent" => "analysis",
@@ -438,13 +479,16 @@ internal static class RunbookProgressFacts
     {
         return stepId switch
         {
-            "check-hyperv" or "check-golden-vm" => "host-readiness",
+            "check-hyperv" or "check-golden-vm" or "check-vmware" or "check-qemu" => "host-readiness",
             "check-r0-driver-config" => "driver-readiness",
             "check-guest-credential" => "credential",
-            "make-vm-root" or "make-diff-disk" or "create-temp-vm" or "stop-golden" or "restore-golden" or
-                "start-temp-vm" or "start-golden" or "start-vm" => "hyperv-vm",
+            "make-vm-root" or "make-diff-disk" or "make-overlay-disk" or "create-temp-vm" or
+                "stop-golden" or "stop-vm-before-restore" or "restore-golden" or "restore-vm-snapshot" or
+                "start-temp-vm" or "start-golden" or "start-vm" => "virtualization-vm",
             "enable-guest-service" => "guest-service",
+            "open-vm-desktop" => "virtualization-console",
             "wait-powershell-direct" => "powershell-direct",
+            "wait-guest-remoting" => "powershell-remoting",
             "stage-guest-payload" => "payload",
             "copy-sample" => "sample",
             "make-host-output" or "record-artifact-policy" or "prepare-guest-output" => "artifact-output",
@@ -462,21 +506,26 @@ internal static class RunbookProgressFacts
         {
             "check-hyperv" => "确认宿主机已安装 Hyper-V 模块，并从管理员 PowerShell 启动服务进程。",
             "check-golden-vm" => "确认 golden VM 名称与配置一致，且当前用户可读取该 VM。",
+            "check-vmware" => "确认已使用 VMware Workstation Pro、vmType=ws，并且 vmrun 路径、VMX 路径和干净 snapshot 名称与本机配置一致。",
+            "check-qemu" => "确认 qemu-system/qemu-img 路径、基础磁盘、磁盘格式和 internal snapshot/overlay 配置一致。",
             "check-r0-driver-config" => "确认 driver.hostDriverPath 指向已构建并测试签名的 .sys；如只验证流程，可启用 mock R0。",
             "check-guest-credential" => "确认来宾密码环境变量在 Process/User/Machine 作用域可见，且用户名与 VM 内账号一致。",
-            "start-temp-vm" or "start-golden" or "start-vm" => "检查 VM 当前状态、检查点/差分盘是否可用，以及 Hyper-V 服务是否正常。",
+            "stop-golden" or "stop-vm-before-restore" or "restore-golden" or "restore-vm-snapshot" or "start-temp-vm" or "start-golden" or "start-vm" => "检查当前 provider 管理工具、VM 状态、干净基线和本机路径是否可用；QEMU overlay 模式还应检查临时磁盘目录和启动参数。",
+            "open-vm-desktop" => "确认 VMConnect/RDP、VMware GUI 或 QEMU display 能在当前交互用户会话中显示；无人值守才显式启用 headless/NoOpenVmConsole。",
             "wait-powershell-direct" => "确认 VM 已启动、Guest Service Interface 已启用、来宾账号密码正确，并等待系统完成登录初始化。",
-            "stage-guest-payload" => "确认 Guest Agent/R0Collector payload 目录存在，Copy-VMFile/PowerShell Direct 可用，来宾目标目录可写。",
-            "copy-sample" => "确认样本文件仍在宿主机路径中，且来宾 incoming 目录可由 Guest Service 写入。",
+            "wait-guest-remoting" => "确认 guest WinRM 已启用且宿主可达，地址/端口/SSL/认证、TrustedHosts 或证书与来宾账号密码匹配；VMwareTools/QemuUserNat 自动端点要求 baseline 已配置 HTTPS listener。",
+            "stage-guest-payload" => "确认 Guest Agent/R0Collector payload 目录存在，当前 Guest PowerShell session 可用，来宾目标目录可写。",
+            "copy-sample" => "确认样本文件仍在宿主机路径中，且当前 Guest PowerShell session 可写入来宾 incoming 目录。",
             "install-driver-service" => "确认来宾处于测试签名模式，驱动已可信签名，服务名未被占用，驱动路径已正确 staging。",
             "run-agent" => "确认 Guest Agent 可执行文件存在，样本路径和输出目录有效，采集参数与来宾权限匹配。",
-            "sync-live-output" => "确认 agent.pid/agent.exit 标记文件可读，PowerShell Direct session 稳定，宿主输出目录可写。",
+            "sync-live-output" => "确认 agent.pid/agent.exit 标记文件可读，Guest PowerShell session 稳定，宿主输出目录可写。",
             "collect-output" => "确认 guest 输出目录存在，events.json、agent.pid、agent.exit 已生成，并重新执行最终复制。",
-            "stop-vm" or "remove-temp-vm" or "stop-vm-after-run" or "restore-checkpoint-after-run" => "检查 VM 是否仍存在/可访问；必要时手动关闭或恢复快照后再重试。",
+            "stop-vm" or "remove-temp-vm" or "stop-vm-after-run" or "restore-checkpoint-after-run" => "检查 VM 是否仍存在/可访问；必要时按所选 provider 手动关闭 VM 并恢复干净基线后再重试。",
             _ => category switch
             {
                 "credential" => "检查凭据配置和环境变量作用域。",
                 "powershell-direct" => "检查 PowerShell Direct、Guest Service Interface 和来宾账号可用性。",
+                "powershell-remoting" => "检查 WinRM 地址/端口/SSL/认证、宿主到来宾的网络可达性和来宾账号。",
                 "driver" or "driver-service" or "driver-readiness" => "检查驱动路径、签名、测试签名模式和服务状态。",
                 "guest-output" or "artifact-output" => "检查来宾/宿主输出目录、标记文件和复制权限。",
                 _ => "查看对应步骤配置、宿主权限、VM 状态和完整执行记录中的原始输出。"
@@ -628,6 +677,11 @@ internal static class RunbookProgressFacts
                 return $"Runbook progress {(canceled ? "was canceled" : "failed")} at step {FormatOrdinal(currentStep.StepIndex, Math.Max(snapshot.TotalSteps, snapshot.Steps.Count))}: {currentStep.Title}. {HiddenStreamsNoticeZh}";
             }
 
+            if (IsPreflightFailureStepId(snapshot.CurrentStepId))
+            {
+                return BuildPreflightFailureProgressMessage(snapshot.CurrentStepId!, snapshot.Message);
+            }
+
             return $"Runbook progress {(canceled ? "was canceled" : "failed")} before a current step could be identified. {HiddenStreamsNoticeZh}";
         }
 
@@ -637,6 +691,20 @@ internal static class RunbookProgressFacts
         }
 
         return $"Runbook progress is {snapshot.State}. {HiddenStreamsNoticeZh}";
+    }
+
+    private static string BuildPreflightFailureProgressMessage(string stepId, string? sourceMessage)
+    {
+        if (stepId.Equals("live-execution-lease", StringComparison.OrdinalIgnoreCase))
+        {
+            var legacyRunbook = sourceMessage?.Contains("predates the live execution lease contract", StringComparison.OrdinalIgnoreCase) == true ||
+                sourceMessage?.Contains("has no execution lease path", StringComparison.OrdinalIgnoreCase) == true;
+            return legacyRunbook
+                ? $"Live runbook preflight failed before any provider command because the persisted runbook has no execution lease path. 修复建议：为该样本重新创建 plan 后再执行 live。 {HiddenStreamsNoticeZh}"
+                : $"Live runbook preflight failed before any provider command because the exclusive execution lease is unavailable. 修复建议：等待当前 live/maintenance 操作完成；若确认没有操作运行，请检查 runtime root 的 locks 目录权限。 {HiddenStreamsNoticeZh}";
+        }
+
+        return $"Live runbook preflight failed before any provider command because the host process is not elevated. 修复建议：以管理员身份重新启动承载进程后再执行 live。 {HiddenStreamsNoticeZh}";
     }
 
     private static bool StateEquals(string? actual, string expected)

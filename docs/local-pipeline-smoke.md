@@ -1,8 +1,8 @@
 # 本地管线 Smoke / Local pipeline smoke
 
-`scripts/Invoke-LocalPipelineSmoke.ps1` 是快速 host-only smoke，用于在没有真实 Hyper-V VM 的情况下检查 Web/Core 管线。
+`scripts/Invoke-LocalPipelineSmoke.ps1` 是快速 host-only smoke，用于在没有真实 provider VM 的情况下检查 Web/Core 管线。
 
-English summary: this script checks the Web/Core pipeline without a real Hyper-V VM.
+English summary: this script checks the Web/Core pipeline without a real virtualization-provider VM.
 
 ## 用途 / Purpose
 
