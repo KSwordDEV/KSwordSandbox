@@ -15,6 +15,16 @@ internal static class LiveEventsPage
         var jobId = job.JobId.ToString("D");
         var samplePath = job.Sample?.FullPath ?? job.Submission.SamplePath;
         var submission = job.Submission;
+        var provider = job.Runbook?.Provider ?? submission.Provider ?? VirtualizationProvider.HyperV;
+        var targetVmName = job.Runbook?.TargetVmName ?? submission.GoldenVmName ?? string.Empty;
+        var baselineName = job.Runbook?.BaselineName ?? submission.GoldenSnapshotName ?? string.Empty;
+        var machineDefinitionPath = job.Runbook?.MachineDefinitionPath ?? submission.MachineDefinitionPath ?? string.Empty;
+        var providerResourceMetric = provider is VirtualizationProvider.HyperV
+            ? string.Empty
+            : $"<div class=\"metric\"><strong data-zh=\"{(provider is VirtualizationProvider.VMware ? "VMX 路径" : "基础磁盘路径")}\" data-en=\"{(provider is VirtualizationProvider.VMware ? "VMX path" : "Base disk path")}\">{(provider is VirtualizationProvider.VMware ? "VMX 路径" : "基础磁盘路径")}</strong><code data-copy=\"{Attr(machineDefinitionPath)}\">{Html(string.IsNullOrWhiteSpace(machineDefinitionPath) ? "-" : machineDefinitionPath)}</code></div>";
+        var qemuFormatMetric = provider is VirtualizationProvider.Qemu
+            ? $"<div class=\"metric\"><strong data-zh=\"QEMU 磁盘格式\" data-en=\"QEMU disk format\">QEMU 磁盘格式</strong><span class=\"pill\" data-copy=\"{Attr(job.Runbook?.QemuDiskFormat ?? submission.QemuDiskFormat ?? string.Empty)}\">{Html(job.Runbook?.QemuDiskFormat ?? submission.QemuDiskFormat ?? "-")}</span></div>"
+            : string.Empty;
         static string JsBool(bool? value) => value == true ? "true" : "false";
         return $$"""
         <!doctype html>
@@ -209,7 +219,7 @@ internal static class LiveEventsPage
                 <h1 data-zh="实时原始事件监控" data-en="Live raw event monitor">实时原始事件监控</h1>
                 <p data-zh="这是独立动态监控页，可与主界面并行打开；这里只显示未归类原始事件，最终结论请看报告。" data-en="This standalone dynamic monitor can stay open beside the dashboard; it shows unclassified raw events only, and final conclusions stay in the report.">这是独立动态监控页，可与主界面并行打开；这里只显示未归类原始事件，最终结论请看报告。</p>
                 <p data-zh="如果此页由上传流程进入，后台分析已经交给 Web Host 执行；你可以停留在这里查看真实 runbook 进度、原始事件、VirusTotal 和证据下载。" data-en="If this page was entered from upload, background analysis has already been handed to the Web host; stay here to watch real runbook progress, raw events, VirusTotal, and evidence downloads.">如果此页由上传流程进入，后台分析已经交给 Web Host 执行；你可以停留在这里查看真实 runbook 进度、原始事件、VirusTotal 和证据下载。</p>
-                <p><span class="pill" data-zh="任务 / Job" data-en="Job">任务 / Job</span> <code data-copy="{{Attr(jobId)}}">{{Html(jobId)}}</code></p>
+                <p><span class="pill" data-zh="任务 / Job" data-en="Job">任务 / Job</span> <code data-copy="{{Attr(jobId)}}">{{Html(jobId)}}</code> <span class="pill" data-copy="{{Attr(provider.ToString())}}">{{Html(provider.ToString())}}</span></p>
               </div>
               <button class="secondary" id="langToggle" type="button">切换到 English</button>
             </div>
@@ -228,6 +238,11 @@ internal static class LiveEventsPage
               <h2 data-zh="任务概览" data-en="Job summary">任务概览</h2>
               <div class="grid">
                 <div class="metric"><strong data-zh="样本" data-en="Sample">样本</strong><code data-copy="{{Attr(samplePath)}}">{{Html(samplePath)}}</code></div>
+                <div class="metric"><strong data-zh="虚拟化后端" data-en="Virtualization provider">虚拟化后端</strong><span class="pill" data-copy="{{Attr(provider.ToString())}}">{{Html(provider.ToString())}}</span></div>
+                <div class="metric"><strong data-zh="运行目标 VM" data-en="Runtime VM target">运行目标 VM</strong><code data-copy="{{Attr(targetVmName)}}">{{Html(string.IsNullOrWhiteSpace(targetVmName) ? "-" : targetVmName)}}</code></div>
+                <div class="metric"><strong data-zh="干净基线" data-en="Clean baseline">干净基线</strong><code data-copy="{{Attr(baselineName)}}">{{Html(string.IsNullOrWhiteSpace(baselineName) ? "-" : baselineName)}}</code></div>
+                {{providerResourceMetric}}
+                {{qemuFormatMetric}}
                 <div class="metric"><strong data-zh="状态" data-en="Status">状态</strong><span class="pill" data-copy="{{Attr(FormatAnalysisStatus(job.Status))}}">{{Html(FormatAnalysisStatus(job.Status))}}</span></div>
                 <div class="metric"><strong data-zh="事件文件" data-en="Event file">事件文件</strong><code data-copy="{{Attr(job.GuestEventsPath ?? string.Empty)}}">{{Html(string.IsNullOrWhiteSpace(job.GuestEventsPath) ? "等待回收" : job.GuestEventsPath)}}</code></div>
                 <div class="metric"><strong data-zh="报告" data-en="Report">报告</strong><code data-copy="{{Attr(job.HtmlReportPath ?? string.Empty)}}">{{Html(job.HtmlReportPath ?? "report.html")}}</code></div>
@@ -273,6 +288,7 @@ internal static class LiveEventsPage
               <p class="muted" data-zh="这里优先连接 /api/jobs/{jobId}/progress/stream 真实进度流，同步持久化 runbook-progress.json 中的真实执行步骤；只展示安全的步骤状态，不展示命令行、stdout 或 stderr，SSE 不可用时自动退回轮询。" data-en="This panel prefers the real /api/jobs/{jobId}/progress/stream feed and mirrors real runbook steps from durable runbook-progress.json; it shows UI-safe status only, not command lines, stdout, or stderr, and falls back to polling when SSE is unavailable.">这里优先连接 /api/jobs/{jobId}/progress/stream 真实进度流，同步持久化 runbook-progress.json 中的真实执行步骤；只展示安全的步骤状态，不展示命令行、stdout 或 stderr，SSE 不可用时自动退回轮询。</p>
               <div id="runbookProgress" class="metric muted" data-copy="等待执行进度 / runbook progress pending" data-zh="等待主界面启动分析。" data-en="Waiting for dashboard analysis.">等待主界面启动分析。</div>
               <div id="backgroundStatus" class="metric muted" data-copy="后台执行等待启动 / background execution pending" data-zh="后台执行状态：等待启动。" data-en="Background execution: waiting.">后台执行状态：等待启动。</div>
+              <p class="artifact-action"><button id="cancelRunbookButton" class="secondary" type="button" onclick="cancelRunbook()" data-zh="取消分析并清理虚拟机" data-en="Cancel analysis and clean up VM" hidden>取消分析并清理虚拟机</button></p>
             </section>
             <section>
               <h2 data-zh="VirusTotal 官方结果" data-en="VirusTotal official result">VirusTotal 官方结果</h2>
@@ -328,6 +344,7 @@ internal static class LiveEventsPage
             const jobId = '{{Js(jobId)}}';
             const initialJob = {
               jobId,
+              provider: '{{Js(provider.ToString())}}',
               jsonReportPath: '{{Js(job.JsonReportPath)}}',
               htmlReportPath: '{{Js(job.HtmlReportPath)}}',
               htmlReportZhPath: '{{Js(job.HtmlReportZhPath)}}',
@@ -336,6 +353,11 @@ internal static class LiveEventsPage
               guestEventsPath: '{{Js(job.GuestEventsPath)}}',
               status: '{{Js(job.Status.ToString())}}',
               submission: {
+                provider: '{{Js(submission.Provider?.ToString())}}',
+                goldenVmName: '{{Js(submission.GoldenVmName)}}',
+                goldenSnapshotName: '{{Js(submission.GoldenSnapshotName)}}',
+                machineDefinitionPath: '{{Js(submission.MachineDefinitionPath)}}',
+                qemuDiskFormat: '{{Js(submission.QemuDiskFormat)}}',
                 collectDroppedFiles: {{JsBool(submission.CollectDroppedFiles)}},
                 captureScreenshots: {{JsBool(submission.CaptureScreenshots)}},
                 captureMemoryDumps: {{JsBool(submission.CaptureMemoryDumps)}},
@@ -379,7 +401,7 @@ internal static class LiveEventsPage
             const uploadHandoffState = monitorQuery.get('state') || '';
             const autoOpenReportFromMonitor = enteredFromUpload;
             const monitorStages = [
-              ['启动 VM', 'Start VM', '还原快照并等待来宾机可用', 'Restore checkpoint and wait for guest readiness'],
+              ['启动 VM', 'Start VM', '恢复干净基线并等待来宾机可用', 'Restore clean baseline and wait for guest readiness'],
               ['部署 Payload', 'Deploy payload', '传入样本、Agent 与采集器', 'Copy sample, agent, and collectors'],
               ['执行样本', 'Execute sample', '运行样本并采集行为', 'Run the sample and collect behavior'],
               ['收集结果', 'Collect results', '同步事件、截图、转储与 PCAP', 'Sync events, screenshots, dumps, and PCAP'],
@@ -862,7 +884,7 @@ internal static class LiveEventsPage
                 renderBackgroundStatus(payload);
                 renderArtifactPanel();
                 const state = String(payload.state || '').toLowerCase();
-                if (['completed', 'failed'].includes(state) && backgroundTimer) {
+                if (['completed', 'failed', 'canceled'].includes(state) && backgroundTimer) {
                   clearInterval(backgroundTimer);
                   backgroundTimer = null;
                 }
@@ -878,6 +900,7 @@ internal static class LiveEventsPage
               const target = document.getElementById('backgroundStatus');
               if (!target || !snapshot) { return; }
               const state = String(snapshot.state || 'not_started').toLowerCase();
+              updateRunbookCancellationControl(snapshot);
               const stateLabel = formatBackgroundState(state);
               const message = localizeServerMessage(snapshot.message || '');
               const progress = summarizeProgressForStatus(lastProgressSnapshot, state);
@@ -892,20 +915,18 @@ internal static class LiveEventsPage
               const importMessage = snapshot.guestImportMessage
                 ? `<p class="${snapshot.guestImportSucceeded ? 'ok' : 'muted'}" data-copy="${escapeAttr(snapshot.guestImportMessage)}">${escapeHtml(localizeServerMessage(snapshot.guestImportMessage))}</p>`
                 : '';
-              const outputNotice = `<p class="muted">${escapeHtml(t('实时页默认不展开命令行、标准输出 stdout 或标准错误 stderr；这里只显示可读进度。终态排障输出仅放在折叠面板内。', 'The Live page keeps command lines, stdout, and stderr collapsed by default; readable progress stays visible. Terminal troubleshooting output is available only inside a collapsed panel.'))}</p>`;
-              const outputDetails = renderExecutionOutputDetails(snapshot);
+              const outputNotice = `<p class="muted">${escapeHtml(t('实时页和 Web API 只接收安全状态摘要，不接收命令行、标准输出 stdout 或标准错误 stderr；原始执行证据仅保留在宿主机 runbook-execution.json。', 'The Live page and Web API receive UI-safe status only, never command lines, stdout, or stderr; raw execution evidence remains host-local in runbook-execution.json.'))}</p>`;
               target.innerHTML = `
                 <div class="card-status"><span class="pill ${backgroundStateTone(state)}">${escapeHtml(stateLabel)}</span>
                   <strong>${escapeHtml(snapshot.live ? t('虚拟机分析', 'VM analysis') : t('流程验证', 'flow verification'))}</strong>
                   <span class="percent-label" data-copy="${escapeAttr(progress.percentText)}">${escapeHtml(progress.percentText)}</span></div>
-                <div class="progressbar compact" aria-label="${escapeAttr(t('后台执行进度', 'background execution progress'))}"><div class="progressbar-fill ${state === 'failed' ? 'failed' : ''}" style="width:${progress.percent}%"></div></div>
+                <div class="progressbar compact" aria-label="${escapeAttr(t('后台执行进度', 'background execution progress'))}"><div class="progressbar-fill ${state === 'failed' || state === 'canceled' ? 'failed' : ''}" style="width:${progress.percent}%"></div></div>
                 <p>${t('当前步骤', 'Current step')}：<strong>${escapeHtml(currentStep)}</strong></p>
                 <p>${t('已耗时', 'Elapsed')}：<strong>${escapeHtml(elapsed)}</strong></p>
                 ${message ? `<p>${escapeHtml(message)}</p>` : ''}
                 ${importMessage}
                 ${reportButtons}
-                ${outputNotice}
-                ${outputDetails}`;
+                ${outputNotice}`;
               target.setAttribute('data-copy', `后台分析 ${stateLabel}; 进度=${progress.percentText}; 当前=${currentStep}; 耗时=${elapsed}; 消息=${message}`);
               renderOperatorCockpit();
               if (!monitoringStopped && autoOpenReportFromMonitor && state === 'completed' && reportReadiness.hasJobHtmlReport && !reportAutoOpenScheduled) {
@@ -913,61 +934,37 @@ internal static class LiveEventsPage
               }
             }
 
-            function renderExecutionOutputDetails(snapshot) {
-              // Inputs: optional terminal background snapshot. Processing:
-              // renders captured step stdout/stderr only inside collapsed
-              // details after execution has produced a terminal result; command
-              // lines remain hidden from this live monitor. Return: HTML.
-              const execution = snapshot?.execution || snapshot?.Execution;
-              const stepResults = Array.isArray(execution?.stepResults)
-                ? execution.stepResults
-                : (Array.isArray(execution?.StepResults) ? execution.StepResults : []);
-              if (!stepResults.length) { return ''; }
-
-              const stepOutput = stepResults.slice(0, 48).map(result => renderStepOutputDetails(result)).join('');
-              return `<details class="output-details">
-                <summary>${escapeHtml(t('排障输出（标准输出/标准错误，默认隐藏）', 'Troubleshooting output (stdout/stderr, collapsed by default)'))}</summary>
-                <p class="muted">${escapeHtml(t('这些输出来自终端 runbook-execution 结果，仅用于本机排障；命令行仍不在实时页展示。', 'These outputs come from the terminal runbook-execution result for local troubleshooting only; command lines are still not shown on the Live page.'))}</p>
-                ${stepOutput}
-              </details>`;
+            function updateRunbookCancellationControl(snapshot) {
+              const button = document.getElementById('cancelRunbookButton');
+              if (!button) { return; }
+              const state = String(snapshot?.state || 'not_started').toLowerCase();
+              const active = state === 'queued' || state === 'running';
+              const cancelRequested = Boolean(snapshot?.cancelRequested);
+              const live = snapshot?.live !== false;
+              const zhText = cancelRequested ? '正在取消并清理虚拟机…' : (live ? '取消分析并清理虚拟机' : '取消流程验证');
+              const enText = cancelRequested ? 'Canceling and cleaning up VM...' : (live ? 'Cancel analysis and clean up VM' : 'Cancel flow verification');
+              button.hidden = !active;
+              button.disabled = !active || cancelRequested;
+              button.textContent = t(zhText, enText);
+              button.setAttribute('data-zh', zhText);
+              button.setAttribute('data-en', enText);
             }
 
-            function renderStepOutputDetails(result) {
-              const title = result.title || result.Title || result.stepId || result.StepId || t('未命名步骤', 'unnamed step');
-              const index = Number(result.stepIndex ?? result.StepIndex ?? 0) + 1;
-              const status = Boolean(result.success ?? result.Success)
-                ? t('成功', 'success')
-                : t('未完成或失败', 'not completed or failed');
-              const stdout = String(result.standardOutput ?? result.StandardOutput ?? '');
-              const stderr = String(result.standardError ?? result.StandardError ?? '');
-              const exitCode = result.exitCode ?? result.ExitCode;
-              const duration = formatDuration(result.duration ?? result.Duration) || '-';
-              const stdoutHtml = stdout
-                ? `<pre data-copy="${escapeAttr(truncateOutputForCopy(stdout))}">${escapeHtml(truncateOutputForDisplay(stdout))}</pre>`
-                : `<p class="output-empty">${escapeHtml(t('标准输出 stdout 为空', 'stdout is empty'))}</p>`;
-              const stderrHtml = stderr
-                ? `<pre data-copy="${escapeAttr(truncateOutputForCopy(stderr))}">${escapeHtml(truncateOutputForDisplay(stderr))}</pre>`
-                : `<p class="output-empty">${escapeHtml(t('标准错误 stderr 为空', 'stderr is empty'))}</p>`;
-              return `<details class="step-output-details">
-                <summary data-copy="${escapeAttr(`${index}. ${title} ${status}`)}">${escapeHtml(`${index}. ${title}`)} <span class="pill">${escapeHtml(status)}</span></summary>
-                <p class="muted" data-copy="${escapeAttr(`退出码=${exitCode ?? '-'}; 耗时=${duration}`)}">退出码=${escapeHtml(exitCode ?? '-')} · ${escapeHtml(duration)}</p>
-                <details><summary>${escapeHtml(t('标准输出 stdout', 'stdout'))}</summary>${stdoutHtml}</details>
-                <details><summary>${escapeHtml(t('标准错误 stderr', 'stderr'))}</summary>${stderrHtml}</details>
-              </details>`;
-            }
-
-            function truncateOutputForDisplay(value) {
-              const text = String(value || '');
-              const max = 12000;
-              return text.length > max
-                ? `${text.slice(0, max)}\n… ${t(`已隐藏 ${text.length - max} 个字符`, `${text.length - max} more characters hidden`)} …`
-                : text;
-            }
-
-            function truncateOutputForCopy(value) {
-              const text = String(value || '');
-              const max = 12000;
-              return text.length > max ? text.slice(0, max) : text;
+            async function cancelRunbook() {
+              const button = document.getElementById('cancelRunbookButton');
+              if (button) { button.disabled = true; }
+              setStatus(t('正在请求取消；虚拟机清理完成前任务会保持运行态。', 'Requesting cancellation; the job remains active until VM cleanup finishes.'), false);
+              try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/cancel`, { method: 'POST' });
+                const snapshot = await requireOk(response, t('取消后台分析', 'cancel background analysis'));
+                renderBackgroundStatus(snapshot);
+                startBackgroundStatusPolling();
+                setStatus(t('已请求取消，正在等待执行器完成虚拟机清理。', 'Cancellation requested; waiting for the executor to finish VM cleanup.'), false);
+              } catch (error) {
+                if (button) { button.disabled = false; }
+                setStatus(error.message, true);
+                await refreshBackgroundStatus();
+              }
             }
 
             function scheduleReportAutoOpen() {
@@ -1050,6 +1047,7 @@ internal static class LiveEventsPage
                 queued: t('已排队', 'queued'),
                 running: t('后台运行中', 'running in background'),
                 completed: t('已完成', 'completed'),
+                canceled: t('已取消', 'canceled'),
                 failed: t('失败', 'failed')
               };
               return labels[state] || state;
@@ -1058,6 +1056,7 @@ internal static class LiveEventsPage
             function backgroundStateTone(state) {
               switch (String(state || '').toLowerCase()) {
                 case 'completed': return 'ready';
+                case 'canceled': return 'failed';
                 case 'failed': return 'failed';
                 case 'quiet': return 'quiet';
                 case 'queued':
@@ -1283,6 +1282,7 @@ internal static class LiveEventsPage
               raw = raw || {};
               return {
                 jobId: raw.jobId || jobId,
+                provider: raw.provider || raw.runbook?.provider || raw.Runbook?.Provider || initialJob.provider,
                 jsonReportPath: raw.jsonReportPath || raw.reportJsonPath || '',
                 htmlReportPath: raw.htmlReportPath || raw.reportHtmlPath || '',
                 htmlReportZhPath: raw.htmlReportZhPath || raw.reportZhHtmlPath || '',
@@ -1297,6 +1297,11 @@ internal static class LiveEventsPage
             function normalizeSubmission(submission) {
               submission = submission || {};
               return {
+                provider: submission.provider || submission.Provider || '',
+                goldenVmName: submission.goldenVmName || submission.GoldenVmName || '',
+                goldenSnapshotName: submission.goldenSnapshotName || submission.GoldenSnapshotName || '',
+                machineDefinitionPath: submission.machineDefinitionPath || submission.MachineDefinitionPath || '',
+                qemuDiskFormat: submission.qemuDiskFormat || submission.QemuDiskFormat || '',
                 collectDroppedFiles: Boolean(submission.collectDroppedFiles ?? submission.CollectDroppedFiles),
                 captureScreenshots: Boolean(submission.captureScreenshots ?? submission.CaptureScreenshots),
                 captureMemoryDumps: Boolean(submission.captureMemoryDumps ?? submission.CaptureMemoryDumps),
@@ -1807,7 +1812,7 @@ internal static class LiveEventsPage
               pushArtifactCard(rows, seen, t('JSON 报告', 'JSON report'), 'report.json', artifactPath(jsonReportArtifact) || paths.reportJsonPath, artifactDownloadHref(jsonReportArtifact), reportReadiness.hasJsonReport, jsonReportArtifact ? artifactDetail(jsonReportArtifact, t('已索引，可下载；JSON 只作为 HTML 就绪提示，不显示 HTML 打开按钮', 'indexed and downloadable; JSON is only an HTML-readiness hint and does not show HTML open buttons')) : t('JSON 路径已记录；等待 artifact index 下载链接', 'JSON path is recorded; waiting for artifact-index download link'), jsonReportArtifact);
               pushArtifactCard(rows, seen, 'events.json', 'events.json', artifactPath(eventsArtifact) || paths.eventsJsonPath, artifactDownloadHref(eventsArtifact), Boolean(eventsArtifact || paths.eventsCollected), eventsArtifact ? artifactDetail(eventsArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.eventsCollected ? t('已记录事件来源', 'event source recorded') : t('等待回收', 'waiting for collection')), eventsArtifact);
               pushArtifactCard(rows, seen, 'driver-events.jsonl', 'driver-events.jsonl', artifactPath(driverArtifact) || paths.driverEventsJsonlPath, artifactDownloadHref(driverArtifact), Boolean(driverArtifact || paths.driverCollected), driverArtifact ? artifactDetail(driverArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.driverCollected ? t('已发现驱动遥测', 'driver telemetry found') : t('等待回收', 'waiting for collection')), driverArtifact);
-              pushArtifactCard(rows, seen, t('执行记录', 'Runbook execution'), 'runbook-execution.json', artifactPath(runbookArtifact) || paths.runbookExecutionPath, artifactDownloadHref(runbookArtifact), Boolean(runbookArtifact || paths.runbookExecutionPath), runbookArtifact ? artifactDetail(runbookArtifact, t('已索引，可下载', 'indexed and downloadable')) : t('执行后生成', 'expected after execution'), runbookArtifact);
+              pushArtifactCard(rows, seen, t('执行记录', 'Runbook execution'), 'runbook-execution.json', artifactPath(runbookArtifact) || paths.runbookExecutionPath, '', Boolean(runbookArtifact || paths.runbookExecutionPath), runbookArtifact ? artifactDetail(runbookArtifact, t('已索引，仅限宿主机本地检查；Web 下载已禁用', 'indexed for host-local inspection only; Web download is disabled')) : t('执行后仅在宿主机本地生成', 'generated host-locally after execution'), runbookArtifact);
               pushArtifactCard(rows, seen, t('落地文件', 'Dropped files'), 'artifacts/dropped-files', artifactPath(droppedArtifact) || paths.droppedFilesPath, artifactDownloadHref(droppedArtifact), Boolean(droppedArtifact || latestArtifactSignals.droppedFiles), droppedArtifact ? artifactDetail(droppedArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.droppedFiles ? t('事件中已出现落地文件证据', 'dropped-file evidence observed in events') : t('等待回收', 'waiting for collection')), droppedArtifact);
               pushArtifactCard(rows, seen, t('截图', 'Screenshots'), 'screenshots', artifactPath(screenshotArtifact) || paths.screenshotsPath, artifactDownloadHref(screenshotArtifact), Boolean(screenshotArtifact || latestArtifactSignals.screenshots), screenshotArtifact ? artifactDetail(screenshotArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.screenshots ? t('事件中已出现截图证据', 'screenshot evidence observed in events') : t('等待回收', 'waiting for collection')), screenshotArtifact);
               pushArtifactCard(rows, seen, t('内存转储', 'Memory dumps'), 'memory-dumps', artifactPath(dumpArtifact) || paths.memoryDumpsPath, artifactDownloadHref(dumpArtifact), Boolean(dumpArtifact || latestArtifactSignals.memoryDumps), dumpArtifact ? artifactDetail(dumpArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.memoryDumps ? t('事件中已出现内存转储证据', 'memory-dump evidence observed in events') : t('等待回收', 'waiting for collection')), dumpArtifact);
@@ -2497,7 +2502,7 @@ internal static class LiveEventsPage
 
             function isRunTerminal() {
               const backgroundState = String(lastBackgroundSnapshot?.state || '').toLowerCase();
-              if (backgroundState === 'completed' || backgroundState === 'failed') { return true; }
+              if (backgroundState === 'completed' || backgroundState === 'failed' || backgroundState === 'canceled') { return true; }
               const status = latestJobSnapshot ? latestJobSnapshot.status : '';
               const statusText = String(status || '').toLowerCase();
               return statusText === 'completed' || statusText === 'failed' || Number(status) === 4 || Number(status) === 5;

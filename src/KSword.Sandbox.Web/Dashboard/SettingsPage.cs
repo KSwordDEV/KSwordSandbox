@@ -128,10 +128,30 @@ internal static class SettingsPage
                 <div id="vmPresetCoreCard" class="card" data-copy="VM 与时长预设加载中 / VM and duration preset loading">
                   <h3 data-zh="VM 与时长" data-en="VM and duration">VM 与时长</h3>
                   <button id="copyVmPresetCoreCard" class="copy-btn" type="button" data-copy="VM 与时长预设加载中 / VM and duration preset loading" data-copy-label="VM and duration preset card" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
+                  <label for="settingsVirtualizationProvider" data-zh="虚拟化后端" data-en="Virtualization provider">虚拟化后端</label>
+                  <select id="settingsVirtualizationProvider" data-copy-label="virtualization provider preset">
+                    <option value="HyperV">Hyper-V</option>
+                    <option value="VMware">VMware Workstation Pro</option>
+                    <option value="Qemu">QEMU</option>
+                  </select>
                   <label for="settingsGoldenVmName" data-zh="VM 名称" data-en="VM name">VM 名称</label>
                   <input id="settingsGoldenVmName" placeholder="KSwordSandbox-Win10-Golden" data-copy-label="VM name preset">
-                  <label for="settingsGoldenSnapshotName" data-zh="检查点" data-en="Checkpoint">检查点</label>
-                  <input id="settingsGoldenSnapshotName" placeholder="Clean" data-copy-label="checkpoint preset">
+                  <div id="settingsMachineDefinitionFields" hidden>
+                    <label id="settingsMachineDefinitionLabel" for="settingsMachineDefinitionPath" data-zh="虚拟机定义路径" data-en="Machine definition path">虚拟机定义路径</label>
+                    <input id="settingsMachineDefinitionPath" data-copy-label="provider machine definition path preset">
+                  </div>
+                  <div id="settingsQemuDiskFormatFields" hidden>
+                    <label for="settingsQemuDiskFormat" data-zh="QEMU 磁盘格式" data-en="QEMU disk format">QEMU 磁盘格式</label>
+                    <select id="settingsQemuDiskFormat" data-copy-label="QEMU disk format preset">
+                      <option value="qcow2">qcow2</option>
+                      <option value="raw">raw</option>
+                      <option value="vhdx">vhdx</option>
+                      <option value="vmdk">vmdk</option>
+                    </select>
+                  </div>
+                  <label for="settingsGoldenSnapshotName" data-zh="干净基线" data-en="Clean baseline">干净基线</label>
+                  <input id="settingsGoldenSnapshotName" placeholder="Clean" data-copy-label="clean baseline preset">
+                  <p class="field-hint" data-copy="Hyper-V 检查点 / VMware 快照 / QEMU 每任务 overlay 或内部快照 / Hyper-V checkpoint / VMware snapshot / QEMU per-job overlay or internal snapshot" data-copy-label="clean baseline provider mapping" data-zh="按后端映射为 Hyper-V 检查点、VMware 快照，或 QEMU 每任务 overlay/内部快照。" data-en="Maps to a Hyper-V checkpoint, VMware snapshot, or QEMU per-job overlay/internal snapshot.">按后端映射为 Hyper-V 检查点、VMware 快照，或 QEMU 每任务 overlay/内部快照。</p>
                   <label for="settingsDurationSeconds" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
                   <input id="settingsDurationSeconds" type="number" min="1" max="900" value="120" data-copy-label="analysis duration preset">
                   <p id="settingsDurationHint" class="field-hint" data-copy="" data-copy-label="duration preset hint">-</p>
@@ -189,6 +209,7 @@ internal static class SettingsPage
             function applyLanguage(){
               document.documentElement.lang = currentLanguage === 'en' ? 'en' : 'zh-CN';
               document.querySelectorAll('[data-zh][data-en]').forEach(el => { if(el.id !== 'status'){ el.textContent = t(el.getAttribute('data-zh'), el.getAttribute('data-en')); } });
+              updateSettingsProviderResourceControls();
               renderVmSettingsHints();
               renderVmPresetSummary();
             }
@@ -232,8 +253,8 @@ internal static class SettingsPage
                 const defaultDuration = clampDuration(config.analysis?.defaultDurationSeconds, maxDuration);
                 document.getElementById('settingsDurationSeconds').max = String(maxDuration);
                 document.getElementById('settingsDurationSeconds').value = String(defaultDuration);
-                document.getElementById('settingsGoldenVmName').value = config.hyperV?.goldenVmName || '';
-                document.getElementById('settingsGoldenSnapshotName').value = config.hyperV?.goldenSnapshotName || '';
+                document.getElementById('settingsVirtualizationProvider').value = normalizeVirtualizationProvider(config.virtualization?.provider);
+                applySelectedProviderDefaults();
                 document.getElementById('settingsGuestUserName').value = config.guest?.userName || '';
                 document.getElementById('settingsGuestWorkingDirectory').value = config.guest?.workingDirectory || '';
                 document.getElementById('settingsGuestPayloadRoot').value = config.paths?.guestPayloadRoot || '';
@@ -297,6 +318,55 @@ internal static class SettingsPage
               const parsed = Number.parseInt(String(value ?? ''), 10);
               return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
             }
+            function normalizeVirtualizationProvider(value){
+              return ['HyperV', 'VMware', 'Qemu'].includes(value) ? value : 'HyperV';
+            }
+            function selectedVirtualizationProvider(){
+              return normalizeVirtualizationProvider(document.getElementById('settingsVirtualizationProvider')?.value || settingsConfigDefaults?.virtualization?.provider);
+            }
+            function selectedProviderDefaults(){
+              const provider = selectedVirtualizationProvider();
+              if(provider === 'VMware'){
+                return { vmName: settingsConfigDefaults?.vmware?.vmName || '', snapshotName: settingsConfigDefaults?.vmware?.snapshotName || '', machineDefinitionPath: settingsConfigDefaults?.vmware?.vmxPath || '', qemuDiskFormat: 'qcow2' };
+              }
+              if(provider === 'Qemu'){
+                return { vmName: settingsConfigDefaults?.qemu?.vmName || '', snapshotName: settingsConfigDefaults?.qemu?.useOverlayDisk ? 'per-job-overlay' : (settingsConfigDefaults?.qemu?.snapshotName || ''), machineDefinitionPath: settingsConfigDefaults?.qemu?.diskImagePath || '', qemuDiskFormat: settingsConfigDefaults?.qemu?.diskFormat || 'qcow2' };
+              }
+              return { vmName: settingsConfigDefaults?.hyperV?.goldenVmName || '', snapshotName: settingsConfigDefaults?.hyperV?.goldenSnapshotName || '', machineDefinitionPath: '', qemuDiskFormat: 'qcow2' };
+            }
+            function updateSettingsProviderResourceControls(){
+              const provider = selectedVirtualizationProvider();
+              const machineFields = document.getElementById('settingsMachineDefinitionFields');
+              const qemuFields = document.getElementById('settingsQemuDiskFormatFields');
+              const label = document.getElementById('settingsMachineDefinitionLabel');
+              const input = document.getElementById('settingsMachineDefinitionPath');
+              const snapshotInput = document.getElementById('settingsGoldenSnapshotName');
+              const qemuUsesOverlay = provider === 'Qemu' && settingsConfigDefaults?.qemu?.useOverlayDisk === true;
+              if(machineFields){ machineFields.hidden = provider === 'HyperV'; }
+              if(qemuFields){ qemuFields.hidden = provider !== 'Qemu'; }
+              if(label){
+                const zh = provider === 'VMware' ? 'VMX 路径' : 'QEMU 磁盘镜像路径';
+                const en = provider === 'VMware' ? 'VMX path' : 'QEMU disk image path';
+                label.setAttribute('data-zh', zh);
+                label.setAttribute('data-en', en);
+                label.textContent = t(zh, en);
+              }
+              if(input){ input.placeholder = provider === 'VMware' ? 'D:\\VMs\\KSword\\KSword.vmx' : 'D:\\VMs\\KSword\\base.qcow2'; }
+              if(snapshotInput){
+                snapshotInput.disabled = qemuUsesOverlay;
+                snapshotInput.title = qemuUsesOverlay
+                  ? t('当前 QEMU profile 使用每任务 overlay，不恢复内部快照。', 'The current QEMU profile uses a per-job overlay and does not restore an internal snapshot.')
+                  : '';
+              }
+            }
+            function applySelectedProviderDefaults(){
+              const defaults = selectedProviderDefaults();
+              document.getElementById('settingsGoldenVmName').value = defaults.vmName;
+              document.getElementById('settingsGoldenSnapshotName').value = defaults.snapshotName;
+              document.getElementById('settingsMachineDefinitionPath').value = defaults.machineDefinitionPath;
+              document.getElementById('settingsQemuDiskFormat').value = defaults.qemuDiskFormat;
+              updateSettingsProviderResourceControls();
+            }
             function clampDuration(value, maxDuration){
               const max = normalizePositiveInt(maxDuration, 900);
               const parsed = normalizePositiveInt(value, normalizePositiveInt(settingsConfigDefaults?.analysis?.defaultDurationSeconds, 120));
@@ -322,9 +392,16 @@ internal static class SettingsPage
               if(!preset){ return; }
               const setValue = (id, value) => { if(value !== undefined && value !== null){ document.getElementById(id).value = String(value); } };
               const setChecked = (id, value) => { if(typeof value === 'boolean'){ document.getElementById(id).checked = value; } };
+              if(preset.provider){
+                setValue('settingsVirtualizationProvider', normalizeVirtualizationProvider(preset.provider));
+                applySelectedProviderDefaults();
+              }
               setValue('settingsDurationSeconds', preset.durationSeconds);
               setValue('settingsGoldenVmName', preset.goldenVmName);
               setValue('settingsGoldenSnapshotName', preset.goldenSnapshotName);
+              setValue('settingsMachineDefinitionPath', preset.machineDefinitionPath);
+              setValue('settingsQemuDiskFormat', preset.qemuDiskFormat);
+              updateSettingsProviderResourceControls();
               setValue('settingsGuestUserName', preset.guestUserName);
               setValue('settingsGuestWorkingDirectory', preset.guestWorkingDirectory);
               setValue('settingsGuestPayloadRoot', preset.guestPayloadRoot);
@@ -341,9 +418,14 @@ internal static class SettingsPage
                 return value ? value : undefined;
               };
               return {
+                provider: selectedVirtualizationProvider(),
                 durationSeconds: getPresetDuration(),
                 goldenVmName: clean('settingsGoldenVmName'),
-                goldenSnapshotName: clean('settingsGoldenSnapshotName'),
+                goldenSnapshotName: selectedVirtualizationProvider() === 'Qemu' && settingsConfigDefaults?.qemu?.useOverlayDisk === true
+                  ? undefined
+                  : clean('settingsGoldenSnapshotName'),
+                machineDefinitionPath: selectedVirtualizationProvider() === 'HyperV' ? undefined : clean('settingsMachineDefinitionPath'),
+                qemuDiskFormat: selectedVirtualizationProvider() === 'Qemu' ? clean('settingsQemuDiskFormat') : undefined,
                 guestUserName: clean('settingsGuestUserName'),
                 guestWorkingDirectory: clean('settingsGuestWorkingDirectory'),
                 guestPayloadRoot: clean('settingsGuestPayloadRoot'),
@@ -358,7 +440,7 @@ internal static class SettingsPage
               const preset = captureVmPreset();
               localStorage.setItem(vmPresetStorageKey, JSON.stringify(preset));
               renderVmPresetSummary();
-              setVmStatus(t('VM WebUI 预设已保存；返回上传页后会自动套用。', 'VM WebUI preset saved; the upload page will apply it automatically.'), false);
+              setVmStatus(t('VM WebUI 预设已保存；返回上传页后点击“载入已保存覆盖值”即可套用。', 'VM WebUI preset saved; use Load saved overrides on the upload page to apply it.'), false);
             }
             async function clearVmPreset(){
               localStorage.removeItem(vmPresetStorageKey);
@@ -387,9 +469,14 @@ internal static class SettingsPage
                 [document.getElementById('settingsCaptureMemoryDumps')?.checked, t('内存转储', 'memory dumps')],
                 [document.getElementById('settingsCapturePacketCapture')?.checked, t('PCAP', 'PCAP')]
               ].filter(([enabled]) => enabled).map(([, label]) => label).join(', ') || t('未启用敏感产物采集', 'no sensitive artifact collection enabled');
+              const providerDefaults = selectedProviderDefaults();
+              const provider = selectedVirtualizationProvider();
               const parts = [
-                `${t('VM', 'VM')}: ${textValue('settingsGoldenVmName', settingsConfigDefaults?.hyperV?.goldenVmName)}`,
-                `${t('检查点', 'Checkpoint')}: ${textValue('settingsGoldenSnapshotName', settingsConfigDefaults?.hyperV?.goldenSnapshotName)}`,
+                `${t('后端', 'Provider')}: ${provider}`,
+                `${t('VM', 'VM')}: ${textValue('settingsGoldenVmName', providerDefaults.vmName)}`,
+                ...(provider === 'HyperV' ? [] : [`${provider === 'VMware' ? 'VMX' : t('磁盘', 'Disk')}: ${textValue('settingsMachineDefinitionPath', providerDefaults.machineDefinitionPath)}`]),
+                ...(provider === 'Qemu' ? [`${t('格式', 'Format')}: ${textValue('settingsQemuDiskFormat', providerDefaults.qemuDiskFormat)}`] : []),
+                `${t('干净基线', 'Clean baseline')}: ${textValue('settingsGoldenSnapshotName', providerDefaults.snapshotName)}`,
                 `${t('时长', 'Duration')}: ${getPresetDuration()}s`,
                 `${t('Guest', 'Guest')}: ${textValue('settingsGuestUserName', settingsConfigDefaults?.guest?.userName)}`,
                 r0Enabled ? (mock ? t('R0：Mock 采集器（collector）', 'R0: mock collector') : t('R0：真实采集器（collector）', 'R0: real collector')) : t('R0：config 已关闭', 'R0: disabled by config'),
@@ -400,9 +487,14 @@ internal static class SettingsPage
               refreshSettingsCopyAffordances(parts);
             }
             function refreshSettingsCopyAffordances(summaryParts){
+              const providerDefaults = selectedProviderDefaults();
+              const provider = selectedVirtualizationProvider();
               const core = [
-                `${t('VM', 'VM')}: ${(document.getElementById('settingsGoldenVmName')?.value || settingsConfigDefaults?.hyperV?.goldenVmName || t('默认', 'default')).trim()}`,
-                `${t('检查点', 'Checkpoint')}: ${(document.getElementById('settingsGoldenSnapshotName')?.value || settingsConfigDefaults?.hyperV?.goldenSnapshotName || t('默认', 'default')).trim()}`,
+                `${t('后端', 'Provider')}: ${provider}`,
+                `${t('VM', 'VM')}: ${(document.getElementById('settingsGoldenVmName')?.value || providerDefaults.vmName || t('默认', 'default')).trim()}`,
+                ...(provider === 'HyperV' ? [] : [`${provider === 'VMware' ? 'VMX' : t('磁盘', 'Disk')}: ${(document.getElementById('settingsMachineDefinitionPath')?.value || providerDefaults.machineDefinitionPath || t('默认', 'default')).trim()}`]),
+                ...(provider === 'Qemu' ? [`${t('格式', 'Format')}: ${document.getElementById('settingsQemuDiskFormat')?.value || providerDefaults.qemuDiskFormat}`] : []),
+                `${t('干净基线', 'Clean baseline')}: ${(document.getElementById('settingsGoldenSnapshotName')?.value || providerDefaults.snapshotName || t('默认', 'default')).trim()}`,
                 `${t('时长', 'Duration')}: ${getPresetDuration()}s`
               ].join(' | ');
               const guest = [
@@ -477,8 +569,11 @@ internal static class SettingsPage
             }
             function setupVmPresetListeners(){
               [
+                'settingsVirtualizationProvider',
                 'settingsGoldenVmName',
                 'settingsGoldenSnapshotName',
+                'settingsMachineDefinitionPath',
+                'settingsQemuDiskFormat',
                 'settingsDurationSeconds',
                 'settingsGuestUserName',
                 'settingsGuestWorkingDirectory',
@@ -492,7 +587,12 @@ internal static class SettingsPage
                 const element = document.getElementById(id);
                 if(!element){ return; }
                 element.addEventListener('input', renderVmPresetSummary);
-                element.addEventListener('change', renderVmPresetSummary);
+                element.addEventListener('change', () => {
+                  if(id === 'settingsVirtualizationProvider'){
+                    applySelectedProviderDefaults();
+                  }
+                  renderVmPresetSummary();
+                });
               });
             }
             document.addEventListener('click', event => {

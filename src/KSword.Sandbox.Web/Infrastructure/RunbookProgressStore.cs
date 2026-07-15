@@ -29,7 +29,11 @@ internal sealed class RunbookProgressStore
         var snapshot = new SandboxRunbookProgressSnapshot
         {
             JobId = runbook.JobId,
+            Provider = runbook.Provider,
             TargetVmName = runbook.TargetVmName,
+            BaselineName = runbook.BaselineName,
+            MachineDefinitionPath = runbook.MachineDefinitionPath,
+            QemuDiskFormat = runbook.QemuDiskFormat,
             Mode = mode,
             State = SandboxRunbookProgressStates.Pending,
             TotalSteps = runbook.Steps.Count,
@@ -107,7 +111,11 @@ internal sealed class RunbookProgressStore
         var snapshot = new SandboxRunbookProgressSnapshot
         {
             JobId = runbook.JobId,
+            Provider = runbook.Provider,
             TargetVmName = runbook.TargetVmName,
+            BaselineName = runbook.BaselineName,
+            MachineDefinitionPath = runbook.MachineDefinitionPath,
+            QemuDiskFormat = runbook.QemuDiskFormat,
             Mode = mode,
             State = SandboxRunbookProgressStates.Failed,
             TotalSteps = runbook.Steps.Count,
