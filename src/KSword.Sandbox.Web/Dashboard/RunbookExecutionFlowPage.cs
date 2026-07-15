@@ -6,7 +6,7 @@ namespace KSword.Sandbox.Web.Dashboard;
 
 /// <summary>
 /// Inputs: one planned job plus an optional persisted runbook execution result.
-/// Processing: renders a separate operator page for the Hyper-V execution flow
+/// Processing: renders a separate operator page for the provider execution flow
 /// without exposing PowerShell command text or stdout/stderr on the main
 /// dashboard. Return behavior: returns a complete HTML document.
 /// </summary>
@@ -163,15 +163,34 @@ internal static class RunbookExecutionFlowPage
         var jobId = job.JobId.ToString("D");
         var runbookSteps = job.Runbook?.Steps.Count ?? 0;
         var executionPath = job.RunbookExecutionResultPath ?? string.Empty;
+        var provider = execution?.Provider ?? job.Runbook?.Provider ?? job.Submission.Provider ?? VirtualizationProvider.HyperV;
+        var targetVmName = job.Runbook?.TargetVmName ?? job.Submission.GoldenVmName ?? string.Empty;
+        var baselineName = job.Runbook?.BaselineName ?? job.Submission.GoldenSnapshotName ?? string.Empty;
+        var machineDefinitionPath = job.Runbook?.MachineDefinitionPath ?? job.Submission.MachineDefinitionPath ?? string.Empty;
+        var providerResourceMetric = provider is VirtualizationProvider.HyperV
+            ? string.Empty
+            : $"<div class=\"metric\"><strong data-zh=\"{(provider is VirtualizationProvider.VMware ? "VMX 路径" : "基础磁盘路径")}\" data-en=\"{(provider is VirtualizationProvider.VMware ? "VMX path" : "Base disk path")}\">{(provider is VirtualizationProvider.VMware ? "VMX 路径" : "基础磁盘路径")}</strong><code data-copy=\"{Attr(machineDefinitionPath)}\">{Html(string.IsNullOrWhiteSpace(machineDefinitionPath) ? "-" : machineDefinitionPath)}</code></div>";
+        var qemuFormatMetric = provider is VirtualizationProvider.Qemu
+            ? $"<div class=\"metric\"><strong data-zh=\"QEMU 磁盘格式\" data-en=\"QEMU disk format\">QEMU 磁盘格式</strong><span class=\"pill\" data-copy=\"{Attr(job.Runbook?.QemuDiskFormat ?? job.Submission.QemuDiskFormat ?? string.Empty)}\">{Html(job.Runbook?.QemuDiskFormat ?? job.Submission.QemuDiskFormat ?? "-")}</span></div>"
+            : string.Empty;
         var jobStatus = FormatAnalysisStatus(job.Status);
         var executionState = execution is null
             ? "未执行 / not executed"
-            : execution.Success ? "成功 / success" : "失败 / failed";
+            : execution.Success
+                ? "成功 / success"
+                : execution.WasCanceled
+                    ? "已取消 / canceled"
+                    : "失败 / failed";
         var samplePath = job.Sample?.FullPath ?? job.Submission.SamplePath;
 
         return $$"""
           <div class="grid">
             <div class="metric"><strong data-zh="任务 / Job" data-en="Job">任务 / Job</strong><code data-copy="{{Attr(jobId)}}">{{Html(jobId)}}</code></div>
+            <div class="metric"><strong data-zh="虚拟化后端" data-en="Virtualization provider">虚拟化后端</strong><span class="pill" data-copy="{{Attr(provider.ToString())}}">{{Html(provider.ToString())}}</span></div>
+            <div class="metric"><strong data-zh="运行目标 VM" data-en="Runtime VM target">运行目标 VM</strong><code data-copy="{{Attr(targetVmName)}}">{{Html(string.IsNullOrWhiteSpace(targetVmName) ? "-" : targetVmName)}}</code></div>
+            <div class="metric"><strong data-zh="干净基线" data-en="Clean baseline">干净基线</strong><code data-copy="{{Attr(baselineName)}}">{{Html(string.IsNullOrWhiteSpace(baselineName) ? "-" : baselineName)}}</code></div>
+            {{providerResourceMetric}}
+            {{qemuFormatMetric}}
             <div class="metric"><strong data-zh="样本" data-en="Sample">样本</strong><code data-copy="{{Attr(samplePath)}}">{{Html(samplePath)}}</code></div>
             <div class="metric"><strong data-zh="任务状态" data-en="Job status">任务状态</strong><span class="pill" data-copy="{{Attr(jobStatus)}}">{{Html(jobStatus)}}</span></div>
             <div class="metric"><strong data-zh="执行状态" data-en="Execution status">执行状态</strong><span class="pill {{StatusClass(execution)}}">{{Html(executionState)}}</span></div>
@@ -199,9 +218,10 @@ internal static class RunbookExecutionFlowPage
         {
             var step = job.Runbook.Steps[index];
             resultsByIndex.TryGetValue(index, out var result);
+            var canceled = result is not null && IsCanceledStepResult(result);
             var statusText = result is null
                 ? "未执行 / pending"
-                : result.Skipped ? "已记录 / recorded" : result.Success ? "成功 / success" : "失败 / failed";
+                : result.Skipped ? "已记录 / recorded" : result.Success ? "成功 / success" : canceled ? "已取消 / canceled" : "失败 / failed";
             var css = result is null ? "pending" : result.Skipped ? "skipped" : result.Success ? "ok" : "failed";
             var message = string.IsNullOrWhiteSpace(result?.Message)
                 ? string.Empty
@@ -230,6 +250,13 @@ internal static class RunbookExecutionFlowPage
     private static string StatusClass(SandboxRunbookExecutionResult? execution)
     {
         return execution is null ? "pending" : execution.Success ? "ok" : "failed";
+    }
+
+    private static bool IsCanceledStepResult(SandboxRunbookStepExecutionResult result)
+    {
+        return !result.Success &&
+            ((result.Message?.Contains("canceled", StringComparison.OrdinalIgnoreCase) ?? false) ||
+             (result.Message?.Contains("cancelled", StringComparison.OrdinalIgnoreCase) ?? false));
     }
 
     private static string FormatDuration(TimeSpan? duration)

@@ -7,14 +7,14 @@ This script lives under scripts/ for packaging layouts that expose operational
 helpers from one folder. It forwards parameters to the repository-root
 install.ps1 in the same PowerShell process so local Process-scope environment
 updates, ShouldProcess/-WhatIf behavior, DPAPI/user-environment secret handling,
-Hyper-V configuration, guest-password reset delegation, guest test-signing
+provider configuration, guest-password reset delegation, guest test-signing
 delegation, payload preparation, and WebUI startup behavior stay identical to
 the primary release wrapper.
 
 The wrapper does not print secret values, does not sign drivers, and does not
 start a VM by itself. Install-entrypoint selection explicitly maps to the
 three release-supported operator modes: use an already configured environment,
-rollback/restore an existing clean checkpoint/snapshot, or fresh create /
+rollback/restore an existing clean baseline, or fresh create /
 new-computer local preparation.
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
@@ -34,9 +34,58 @@ param(
 
     [string]$DriverHostPath = '',
 
+    [ValidateSet('HyperV', 'VMware', 'Qemu')]
+    [string]$VirtualizationProvider = 'HyperV',
+
     [string]$VmName = 'KSwordSandbox-Win10-Golden',
 
+    [Alias('BaselineName', 'SnapshotName')]
     [string]$CheckpointName = 'Clean',
+
+    [string]$VMwareVmxPath = '',
+
+    [string]$VMwareVmrunPath = 'vmrun.exe',
+
+    [ValidateSet('ws')]
+    [string]$VMwareVmType = 'ws',
+
+    [bool]$VMwareHeadless = $false,
+
+    [string]$QemuDiskImagePath = '',
+
+    [string]$QemuSystemPath = 'qemu-system-x86_64.exe',
+
+    [string]$QemuImgPath = 'qemu-img.exe',
+
+    [string[]]$QemuAdditionalArguments = @('-accel', 'whpx'),
+
+    [ValidateSet('qcow2', 'raw', 'vhdx', 'vmdk')]
+    [string]$QemuDiskFormat = 'qcow2',
+
+    [ValidateSet('virtio', 'ide', 'scsi')]
+    [string]$QemuDiskInterface = 'virtio',
+
+    [bool]$QemuUseOverlayDisk = $true,
+
+    [ValidateRange(256, 1048576)]
+    [int]$QemuMemoryMegabytes = 4096,
+
+    [bool]$QemuHeadless = $false,
+
+    [string]$GuestRemotingAddress = '',
+
+    [ValidateSet('Configured', 'VMwareTools', 'QemuUserNat')]
+    [string]$GuestRemotingAddressMode = 'Configured',
+
+    [ValidateRange(0, 65535)]
+    [int]$GuestRemotingPort = 0,
+
+    [switch]$GuestRemotingUseSsl,
+
+    [switch]$GuestRemotingSkipCertificateChecks,
+
+    [ValidateSet('Negotiate', 'Basic', 'CredSSP')]
+    [string]$GuestRemotingAuthentication = 'Negotiate',
 
     [string]$GuestWorkingDirectory = 'C:\KSwordSandbox',
 
@@ -57,7 +106,11 @@ param(
 
     [switch]$ResetGuestVmPassword,
 
+    [switch]$RecoverGuestVmPasswordWithoutCurrentSecret,
+
     [switch]$UpdateHyperVConfig,
+
+    [switch]$UpdateVirtualizationConfig,
 
     [switch]$ConfigureVTKey,
 
@@ -113,6 +166,7 @@ param(
 
     [int]$BootTimeoutSeconds = 240,
 
+    [Alias('GuestReadyTimeoutSeconds')]
     [int]$PowerShellDirectTimeoutSeconds = 240,
 
     [switch]$OpenBrowser,
@@ -209,6 +263,139 @@ function Read-ScriptOptionalText {
     return $answer.Trim()
 }
 
+function Read-ScriptQemuAdditionalArguments {
+    $currentJson = ConvertTo-Json -InputObject @($QemuAdditionalArguments) -Compress
+    $answer = Read-Host "QEMU 额外参数 JSON 数组 / Additional arguments JSON array [$currentJson]"
+    if ([string]::IsNullOrWhiteSpace($answer)) {
+        return
+    }
+
+    $trimmed = $answer.Trim()
+    if (-not $trimmed.StartsWith('[')) {
+        throw '错误：QEMU 额外参数必须使用 JSON 数组，例如 ["-accel","whpx"]；内存请使用 QemuMemoryMegabytes。'
+    }
+
+    try {
+        $parsed = @($trimmed | ConvertFrom-Json -ErrorAction Stop)
+    }
+    catch {
+        throw "错误：QEMU 额外参数不是有效 JSON 数组：$($_.Exception.Message)"
+    }
+
+    if (@($parsed | Where-Object { $null -eq $_ -or $_ -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0) {
+        throw '错误：QEMU 额外参数数组只能包含非空字符串。'
+    }
+
+    $script:QemuAdditionalArguments = @($parsed | ForEach-Object { [string]$_ })
+}
+
+function Get-ScriptObjectPropertyValue {
+    param(
+        [AllowNull()]$Object,
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()]$DefaultValue = $null
+    )
+
+    if ($null -eq $Object) { return $DefaultValue }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $DefaultValue }
+    return $property.Value
+}
+
+function Import-ScriptSelectedVirtualizationProfile {
+    $configPath = if (-not [string]::IsNullOrWhiteSpace($LocalConfigPath)) {
+        [System.IO.Path]::GetFullPath($LocalConfigPath)
+    }
+    else {
+        [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot 'config\sandbox.local.json'))
+    }
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return }
+
+    try {
+        $localConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        switch ($VirtualizationProvider) {
+            'HyperV' {
+                $section = Get-ScriptObjectPropertyValue -Object $localConfig -Name 'hyperV'
+                $script:VmName = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'goldenVmName' -DefaultValue $VmName)
+                $script:CheckpointName = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'goldenSnapshotName' -DefaultValue $CheckpointName)
+            }
+            'VMware' {
+                $section = Get-ScriptObjectPropertyValue -Object $localConfig -Name 'vmware'
+                $script:VmName = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'vmName' -DefaultValue $VmName)
+                $script:VMwareVmxPath = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'vmxPath' -DefaultValue $VMwareVmxPath)
+                $script:CheckpointName = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'snapshotName' -DefaultValue $CheckpointName)
+                $script:VMwareVmrunPath = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'vmrunPath' -DefaultValue $VMwareVmrunPath)
+                $script:VMwareVmType = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'vmType' -DefaultValue $VMwareVmType)
+                $script:VMwareHeadless = [bool](Get-ScriptObjectPropertyValue -Object $section -Name 'headless' -DefaultValue $VMwareHeadless)
+            }
+            'Qemu' {
+                $section = Get-ScriptObjectPropertyValue -Object $localConfig -Name 'qemu'
+                $script:VmName = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'vmName' -DefaultValue $VmName)
+                $script:QemuDiskImagePath = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'diskImagePath' -DefaultValue $QemuDiskImagePath)
+                $script:CheckpointName = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'snapshotName' -DefaultValue $CheckpointName)
+                $script:QemuSystemPath = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'qemuSystemPath' -DefaultValue $QemuSystemPath)
+                $script:QemuImgPath = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'qemuImgPath' -DefaultValue $QemuImgPath)
+                $script:QemuDiskFormat = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'diskFormat' -DefaultValue $QemuDiskFormat)
+                $script:QemuDiskInterface = [string](Get-ScriptObjectPropertyValue -Object $section -Name 'diskInterface' -DefaultValue $QemuDiskInterface)
+                $script:QemuUseOverlayDisk = [bool](Get-ScriptObjectPropertyValue -Object $section -Name 'useOverlayDisk' -DefaultValue $QemuUseOverlayDisk)
+                $script:QemuMemoryMegabytes = [int](Get-ScriptObjectPropertyValue -Object $section -Name 'memoryMegabytes' -DefaultValue $QemuMemoryMegabytes)
+                $script:QemuHeadless = [bool](Get-ScriptObjectPropertyValue -Object $section -Name 'headless' -DefaultValue $QemuHeadless)
+                $additionalProperty = if ($null -eq $section) { $null } else { $section.PSObject.Properties['additionalArguments'] }
+                if ($null -ne $additionalProperty) { $script:QemuAdditionalArguments = @($additionalProperty.Value | ForEach-Object { [string]$_ }) }
+            }
+        }
+
+        if ($VirtualizationProvider -ne 'HyperV') {
+            $guest = Get-ScriptObjectPropertyValue -Object $localConfig -Name 'guest'
+            $remoting = Get-ScriptObjectPropertyValue -Object $section -Name 'guestRemoting'
+            $legacyAddress = [string](Get-ScriptObjectPropertyValue -Object $guest -Name 'powerShellRemotingAddress' -DefaultValue '')
+            $automaticGuestRemotingMigrated = $null -eq $remoting -and [string]::IsNullOrWhiteSpace($legacyAddress)
+            $defaultAddressMode = if ($automaticGuestRemotingMigrated) {
+                if ($VirtualizationProvider -eq 'VMware') { 'VMwareTools' } else { 'QemuUserNat' }
+            }
+            else {
+                'Configured'
+            }
+            $loadedAddressMode = [string](Get-ScriptObjectPropertyValue -Object $remoting -Name 'addressMode' -DefaultValue $defaultAddressMode)
+            $script:GuestRemotingAddressMode = $loadedAddressMode
+            $providerAddress = [string](Get-ScriptObjectPropertyValue -Object $remoting -Name 'address' -DefaultValue '')
+            if ($loadedAddressMode -eq 'Configured' -and [string]::IsNullOrWhiteSpace($providerAddress)) {
+                $remoting = $guest
+                $addressName = 'powerShellRemotingAddress'
+                $portName = 'powerShellRemotingPort'
+                $sslName = 'powerShellRemotingUseSsl'
+                $authenticationName = 'powerShellRemotingAuthentication'
+                $skipCertificateName = 'powerShellRemotingSkipCertificateChecks'
+            }
+            else {
+                $addressName = 'address'
+                $portName = 'port'
+                $sslName = 'useSsl'
+                $authenticationName = 'authentication'
+                $skipCertificateName = 'skipCertificateChecks'
+            }
+            $sslPropertyPresent = $null -ne $remoting -and $null -ne $remoting.PSObject.Properties[$sslName]
+            $skipCertificatePropertyPresent = $null -ne $remoting -and $null -ne $remoting.PSObject.Properties[$skipCertificateName]
+            $script:GuestRemotingAddress = [string](Get-ScriptObjectPropertyValue -Object $remoting -Name $addressName -DefaultValue $GuestRemotingAddress)
+            $script:GuestRemotingPort = [int](Get-ScriptObjectPropertyValue -Object $remoting -Name $portName -DefaultValue $GuestRemotingPort)
+            $script:GuestRemotingUseSsl = [bool](Get-ScriptObjectPropertyValue -Object $remoting -Name $sslName -DefaultValue $GuestRemotingUseSsl)
+            $script:GuestRemotingAuthentication = [string](Get-ScriptObjectPropertyValue -Object $remoting -Name $authenticationName -DefaultValue $GuestRemotingAuthentication)
+            $script:GuestRemotingSkipCertificateChecks = [bool](Get-ScriptObjectPropertyValue -Object $remoting -Name $skipCertificateName -DefaultValue $GuestRemotingSkipCertificateChecks)
+            if ($automaticGuestRemotingMigrated) {
+                $script:GuestRemotingUseSsl = $true
+                $script:GuestRemotingSkipCertificateChecks = $true
+            }
+            elseif ($loadedAddressMode -ne 'Configured') {
+                if (-not $sslPropertyPresent) { $script:GuestRemotingUseSsl = $true }
+                if (-not $skipCertificatePropertyPresent -and [bool]$GuestRemotingUseSsl) { $script:GuestRemotingSkipCertificateChecks = $true }
+            }
+        }
+    }
+    catch {
+        Write-ScriptInstallInfo "无法载入已有 $VirtualizationProvider 本机 profile，将保留当前值。详情：$($_.Exception.Message)"
+    }
+}
+
 function Read-ScriptInstallState {
     $statePath = if ([string]::IsNullOrWhiteSpace($env:ProgramData)) {
         ''
@@ -262,8 +449,20 @@ function Initialize-ScriptEffectiveParameters {
         RuntimeRoot = 'runtimeRoot'
         GuestPayloadRoot = 'guestPayloadRoot'
         DriverHostPath = 'driverHostPath'
+        VirtualizationProvider = 'virtualizationProvider'
         VmName = 'vmName'
         CheckpointName = 'checkpointName'
+        VMwareVmxPath = 'vmwareVmxPath'
+        VMwareVmrunPath = 'vmwareVmrunPath'
+        VMwareVmType = 'vmwareVmType'
+        QemuDiskImagePath = 'qemuDiskImagePath'
+        QemuSystemPath = 'qemuSystemPath'
+        QemuImgPath = 'qemuImgPath'
+        QemuDiskFormat = 'qemuDiskFormat'
+        QemuDiskInterface = 'qemuDiskInterface'
+        GuestRemotingAddress = 'guestRemotingAddress'
+        GuestRemotingAddressMode = 'guestRemotingAddressMode'
+        GuestRemotingAuthentication = 'guestRemotingAuthentication'
         GuestWorkingDirectory = 'guestWorkingDirectory'
         LocalConfigPath = 'localConfigPath'
     }
@@ -277,6 +476,73 @@ function Initialize-ScriptEffectiveParameters {
         $value = Get-ScriptStateString -State $State -Name $entry.Value -DefaultValue $current
         if (-not [string]::IsNullOrWhiteSpace($value)) {
             Set-Variable -Name $entry.Key -Value $value -Scope Script -WhatIf:$false
+        }
+    }
+
+    $automaticGuestRemotingMigrated = $false
+    if (-not $BoundParameters.ContainsKey('GuestRemotingAddressMode') -and
+        $VirtualizationProvider -ne 'HyperV' -and
+        [string]::IsNullOrWhiteSpace($GuestRemotingAddress) -and
+        ($null -eq $State -or
+         $null -eq $State.PSObject.Properties['guestRemotingAddressMode'] -or
+         [string]::IsNullOrWhiteSpace([string]$State.PSObject.Properties['guestRemotingAddressMode'].Value))) {
+        $script:GuestRemotingAddressMode = if ($VirtualizationProvider -eq 'VMware') { 'VMwareTools' } else { 'QemuUserNat' }
+        $automaticGuestRemotingMigrated = $true
+    }
+
+    foreach ($booleanBinding in @{
+            VMwareHeadless = 'vmwareHeadless'
+            QemuUseOverlayDisk = 'qemuUseOverlayDisk'
+            QemuHeadless = 'qemuHeadless'
+            GuestRemotingUseSsl = 'guestRemotingUseSsl'
+            GuestRemotingSkipCertificateChecks = 'guestRemotingSkipCertificateChecks'
+        }.GetEnumerator()) {
+        if ($BoundParameters.ContainsKey($booleanBinding.Key) -or $null -eq $State) {
+            continue
+        }
+
+        $property = $State.PSObject.Properties[$booleanBinding.Value]
+        if ($null -ne $property) {
+            Set-Variable -Name $booleanBinding.Key -Value ([bool]$property.Value) -Scope Script -WhatIf:$false
+        }
+    }
+
+    $automaticGuestEndpointSelected = $VirtualizationProvider -ne 'HyperV' -and $GuestRemotingAddressMode -ne 'Configured'
+    $sslStateMissing = $null -eq $State -or $null -eq $State.PSObject.Properties['guestRemotingUseSsl']
+    $skipCertificateStateMissing = $null -eq $State -or $null -eq $State.PSObject.Properties['guestRemotingSkipCertificateChecks']
+    if ($automaticGuestRemotingMigrated -or $automaticGuestEndpointSelected) {
+        if (-not $BoundParameters.ContainsKey('GuestRemotingUseSsl') -and ($automaticGuestRemotingMigrated -or $sslStateMissing)) {
+            $script:GuestRemotingUseSsl = $true
+        }
+        if (-not $BoundParameters.ContainsKey('GuestRemotingSkipCertificateChecks') -and
+            ($automaticGuestRemotingMigrated -or $skipCertificateStateMissing) -and
+            [bool]$GuestRemotingUseSsl) {
+            $script:GuestRemotingSkipCertificateChecks = $true
+        }
+    }
+
+    if (-not $BoundParameters.ContainsKey('QemuAdditionalArguments') -and $null -ne $State) {
+        $argumentsProperty = $State.PSObject.Properties['qemuAdditionalArguments']
+        if ($null -ne $argumentsProperty) {
+            $restoredArguments = @()
+            if ($null -ne $argumentsProperty.Value) {
+                $restoredArguments = @($argumentsProperty.Value | ForEach-Object { [string]$_ })
+            }
+            $script:QemuAdditionalArguments = $restoredArguments
+        }
+    }
+
+    if (-not $BoundParameters.ContainsKey('GuestRemotingPort') -and $null -ne $State) {
+        $portProperty = $State.PSObject.Properties['guestRemotingPort']
+        if ($null -ne $portProperty) {
+            $script:GuestRemotingPort = [int]$portProperty.Value
+        }
+    }
+
+    if (-not $BoundParameters.ContainsKey('QemuMemoryMegabytes') -and $null -ne $State) {
+        $memoryProperty = $State.PSObject.Properties['qemuMemoryMegabytes']
+        if ($null -ne $memoryProperty) {
+            $script:QemuMemoryMegabytes = [int]$memoryProperty.Value
         }
     }
 }
@@ -407,6 +673,48 @@ function Read-ScriptPasswordMode {
     }
 }
 
+function Resolve-ScriptExecutablePath {
+    param([AllowNull()][string]$ConfiguredPath)
+
+    if ([string]::IsNullOrWhiteSpace($ConfiguredPath)) { return $null }
+    if (Test-Path -LiteralPath $ConfiguredPath -PathType Leaf) {
+        return [System.IO.Path]::GetFullPath($ConfiguredPath)
+    }
+    $command = Get-Command -Name $ConfiguredPath -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $command) { return $null }
+    return [string]$command.Source
+}
+
+function Invoke-ScriptReadOnlyProviderCommand {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [AllowEmptyCollection()][string[]]$ArgumentList = @()
+    )
+
+    $savedEnvironment = [ordered]@{}
+    $environment = [Environment]::GetEnvironmentVariables('Process')
+    foreach ($nameValue in @($environment.Keys)) {
+        $name = [string]$nameValue
+        if ($name.Equals($SecretName, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $name.Equals($VirusTotalSecretName, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $name.StartsWith('KSWORDBOX_', [System.StringComparison]::OrdinalIgnoreCase) -or
+            $name -match '(?i)(PASSWORD|SECRET|TOKEN|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)') {
+            $savedEnvironment[$name] = [string]$environment[$nameValue]
+            [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+        }
+    }
+
+    try {
+        $output = @(& $FilePath @ArgumentList 2>&1)
+        return [pscustomobject][ordered]@{ Output = @($output); ExitCode = $LASTEXITCODE }
+    }
+    finally {
+        foreach ($item in $savedEnvironment.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable([string]$item.Key, [string]$item.Value, 'Process')
+        }
+    }
+}
+
 function Select-ScriptHyperVVmAndCheckpointInteractive {
     Write-Host ''
     Write-Host 'Hyper-V VM/快照选择 / Hyper-V VM/checkpoint selection'
@@ -486,11 +794,251 @@ function Select-ScriptHyperVVmAndCheckpointInteractive {
     Write-ScriptInstallInfo "已选择 checkpoint：$CheckpointName / Selected checkpoint."
 }
 
-function Invoke-ScriptHyperVConfigPrompt {
-    Write-ScriptInstallInfo '仅配置本机 Hyper-V 元数据；不会启动或还原 VM。 / Configuring local Hyper-V metadata only.'
-    Select-ScriptHyperVVmAndCheckpointInteractive
-    $script:VmName = Read-ScriptOptionalText -Prompt 'Hyper-V 黄金 VM 名称 / Hyper-V golden VM name' -CurrentValue $VmName
-    $script:CheckpointName = Read-ScriptOptionalText -Prompt '干净快照名称 / Clean checkpoint name' -CurrentValue $CheckpointName
+function Select-ScriptVMwareVmxAndSnapshotInteractive {
+    Write-Host ''
+    Write-Host 'VMware VMX/快照选择 / VMware VMX/snapshot selection'
+    Write-Host '中文提示：这里只执行只读 vmrun list/listSnapshots；不会启动、停止、还原或修改 VM。 / Read-only selection only.'
+
+    $vmrun = Resolve-ScriptExecutablePath -ConfiguredPath $VMwareVmrunPath
+    if ([string]::IsNullOrWhiteSpace($vmrun)) {
+        Write-ScriptInstallInfo '未找到 vmrun；将回退到手动输入 VMX/snapshot。 / vmrun unavailable; falling back to manual entry.'
+        return
+    }
+
+    $candidatePaths = [System.Collections.Generic.List[string]]::new()
+    if (Test-Path -LiteralPath $VMwareVmxPath -PathType Leaf) {
+        [void]$candidatePaths.Add((Resolve-Path -LiteralPath $VMwareVmxPath).ProviderPath)
+    }
+    try {
+        $runningResult = Invoke-ScriptReadOnlyProviderCommand -FilePath $vmrun -ArgumentList @('-T', 'ws', 'list')
+        if ($runningResult.ExitCode -eq 0) {
+            foreach ($line in @($runningResult.Output)) {
+                $candidate = ([string]$line).Trim().Trim('"')
+                if ($candidate.EndsWith('.vmx', [System.StringComparison]::OrdinalIgnoreCase) -and
+                    (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                    [void]$candidatePaths.Add((Resolve-Path -LiteralPath $candidate).ProviderPath)
+                }
+            }
+        }
+        else {
+            Write-ScriptInstallInfo "vmrun list 返回退出码 $($runningResult.ExitCode)；仍可使用当前 VMX 或手动输入。"
+        }
+    }
+    catch {
+        Write-ScriptInstallInfo "无法列出运行中的 VMware VM；仍可使用当前 VMX 或手动输入。详情：$($_.Exception.Message)"
+    }
+
+    $vmxCandidates = @($candidatePaths | Sort-Object -Unique)
+    if ($vmxCandidates.Count -gt 0) {
+        Write-Host '可用 VMX / Available VMX files:'
+        for ($i = 0; $i -lt $vmxCandidates.Count; $i++) {
+            Write-Host ("  {0}) {1}" -f ($i + 1), $vmxCandidates[$i])
+        }
+        Write-Host '  0) 保留当前值/手动输入 / Keep current or enter manually'
+        $vmxAllowed = @('0') + @(1..$vmxCandidates.Count | ForEach-Object { [string]$_ })
+        $vmxChoice = Read-ScriptMenuChoice -Prompt '请选择 VMX [0-N] / Choose VMX [0-N]' -Allowed $vmxAllowed
+        if ($vmxChoice -ne '0') {
+            $script:VMwareVmxPath = $vmxCandidates[[int]$vmxChoice - 1]
+            Write-ScriptInstallInfo "已选择 VMX：$VMwareVmxPath / Selected VMX."
+        }
+    }
+    else {
+        Write-ScriptInstallInfo '没有发现当前或运行中的 VMX；请手动输入现有 Workstation Pro VMX 路径。 / No current or running VMX candidate was found.'
+    }
+
+    if (-not (Test-Path -LiteralPath $VMwareVmxPath -PathType Leaf)) { return }
+    try {
+        $resolvedVmxPath = (Resolve-Path -LiteralPath $VMwareVmxPath).ProviderPath
+        $snapshotResult = Invoke-ScriptReadOnlyProviderCommand -FilePath $vmrun -ArgumentList @('-T', 'ws', 'listSnapshots', $resolvedVmxPath)
+        if ($snapshotResult.ExitCode -ne 0) {
+            Write-ScriptInstallInfo "vmrun listSnapshots 返回退出码 $($snapshotResult.ExitCode)；snapshot 将手动输入。"
+            return
+        }
+        $snapshots = @($snapshotResult.Output |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^Total snapshots:\s*\d+$' } |
+            Select-Object -Unique)
+    }
+    catch {
+        Write-ScriptInstallInfo "无法列出 VMX '$VMwareVmxPath' 的 snapshot；将回退到手动输入。详情：$($_.Exception.Message)"
+        return
+    }
+
+    if ($snapshots.Count -eq 0) {
+        Write-ScriptInstallInfo "VMX '$VMwareVmxPath' 没有可选 snapshot；请手动输入或先创建 clean snapshot。"
+        return
+    }
+    Write-Host "VMX '$VMwareVmxPath' 的 snapshot:"
+    for ($i = 0; $i -lt $snapshots.Count; $i++) {
+        Write-Host ("  {0}) {1}" -f ($i + 1), $snapshots[$i])
+    }
+    Write-Host '  0) 保留当前值/手动输入 / Keep current or enter manually'
+    $snapshotAllowed = @('0') + @(1..$snapshots.Count | ForEach-Object { [string]$_ })
+    $snapshotChoice = Read-ScriptMenuChoice -Prompt '请选择 clean snapshot [0-N] / Choose clean snapshot [0-N]' -Allowed $snapshotAllowed
+    if ($snapshotChoice -ne '0') {
+        $script:CheckpointName = $snapshots[[int]$snapshotChoice - 1]
+        Write-ScriptInstallInfo "已选择 snapshot：$CheckpointName / Selected snapshot."
+    }
+}
+
+function Select-ScriptQemuDiskMetadataAndSnapshotInteractive {
+    Write-Host ''
+    Write-Host 'QEMU 磁盘/基线选择 / QEMU disk/baseline selection'
+    Write-Host '中文提示：这里只执行只读 qemu-img info --output=json；不会创建 overlay、还原 snapshot 或启动 VM。 / Read-only selection only.'
+
+    $qemuImg = Resolve-ScriptExecutablePath -ConfiguredPath $QemuImgPath
+    if ([string]::IsNullOrWhiteSpace($qemuImg) -or -not (Test-Path -LiteralPath $QemuDiskImagePath -PathType Leaf)) {
+        Write-ScriptInstallInfo 'qemu-img 或基础磁盘不可用；磁盘格式/baseline 将手动输入。 / qemu-img or base disk unavailable; falling back to manual entry.'
+        return
+    }
+    try {
+        $imageResult = Invoke-ScriptReadOnlyProviderCommand -FilePath $qemuImg -ArgumentList @('info', '--output=json', $QemuDiskImagePath)
+        if ($imageResult.ExitCode -ne 0) {
+            Write-ScriptInstallInfo "qemu-img info 返回退出码 $($imageResult.ExitCode)；磁盘格式/baseline 将手动输入。"
+            return
+        }
+        $imageInfo = ($imageResult.Output -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-ScriptInstallInfo "无法读取 QEMU 磁盘 metadata；将回退到手动输入。详情：$($_.Exception.Message)"
+        return
+    }
+
+    $actualFormat = [string]$imageInfo.format
+    if ($actualFormat -in @('qcow2', 'raw', 'vhdx', 'vmdk')) {
+        $script:QemuDiskFormat = $actualFormat
+        Write-ScriptInstallInfo "已检测磁盘格式：$QemuDiskFormat / Detected disk format."
+    }
+    if ([bool]$QemuUseOverlayDisk) {
+        Write-ScriptInstallInfo '当前使用 per-job overlay；干净基线由每次新建 overlay 保证，无需选择内部 snapshot。 / Per-job overlay supplies the clean baseline.'
+        return
+    }
+
+    $snapshotProperty = $imageInfo.PSObject.Properties['snapshots']
+    $snapshots = if ($null -eq $snapshotProperty) {
+        @()
+    }
+    else {
+        @($snapshotProperty.Value |
+            ForEach-Object { $nameProperty = $_.PSObject.Properties['name']; if ($null -ne $nameProperty) { [string]$nameProperty.Value } } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique)
+    }
+    if ($snapshots.Count -eq 0) {
+        Write-ScriptInstallInfo "磁盘 '$QemuDiskImagePath' 没有可选内部 snapshot；请手动输入或先创建 clean snapshot。"
+        return
+    }
+    Write-Host "磁盘 '$QemuDiskImagePath' 的内部 snapshot:"
+    for ($i = 0; $i -lt $snapshots.Count; $i++) {
+        Write-Host ("  {0}) {1}" -f ($i + 1), $snapshots[$i])
+    }
+    Write-Host '  0) 保留当前值/手动输入 / Keep current or enter manually'
+    $snapshotAllowed = @('0') + @(1..$snapshots.Count | ForEach-Object { [string]$_ })
+    $snapshotChoice = Read-ScriptMenuChoice -Prompt '请选择 clean internal snapshot [0-N] / Choose clean internal snapshot [0-N]' -Allowed $snapshotAllowed
+    if ($snapshotChoice -ne '0') {
+        $script:CheckpointName = $snapshots[[int]$snapshotChoice - 1]
+        Write-ScriptInstallInfo "已选择内部 snapshot：$CheckpointName / Selected internal snapshot."
+    }
+}
+
+function Invoke-ScriptVirtualizationConfigPrompt {
+    Write-ScriptInstallInfo '仅配置本机虚拟化元数据；不会启动或还原 VM。 / Configuring local virtualization metadata only.'
+    Write-Host '  1) Hyper-V'
+    Write-Host '  2) VMware Workstation Pro'
+    Write-Host '  3) QEMU'
+    $providerChoice = Read-ScriptMenuChoice -Prompt '请选择虚拟化后端 [1-3] / Choose provider [1-3]' -Allowed @('1', '2', '3')
+    $script:VirtualizationProvider = @{ '1' = 'HyperV'; '2' = 'VMware'; '3' = 'Qemu' }[$providerChoice]
+    Import-ScriptSelectedVirtualizationProfile
+
+    if ($VirtualizationProvider -eq 'HyperV') {
+        Select-ScriptHyperVVmAndCheckpointInteractive
+        $script:VmName = Read-ScriptOptionalText -Prompt 'Hyper-V 黄金 VM 名称 / Hyper-V golden VM name' -CurrentValue $VmName
+        $script:CheckpointName = Read-ScriptOptionalText -Prompt '干净 checkpoint 名称 / Clean checkpoint name' -CurrentValue $CheckpointName
+    }
+    elseif ($VirtualizationProvider -eq 'VMware') {
+        $script:VMwareVmrunPath = Read-ScriptOptionalText -Prompt 'vmrun.exe 路径或命令名 / vmrun path or command' -CurrentValue $VMwareVmrunPath
+        $script:VMwareVmType = 'ws'
+        $script:VMwareVmxPath = Read-ScriptOptionalText -Prompt 'VMX 文件路径 / VMX file path' -CurrentValue $VMwareVmxPath
+        Select-ScriptVMwareVmxAndSnapshotInteractive
+        $script:VmName = Read-ScriptOptionalText -Prompt 'VMware VM 显示名称 / VMware VM display name' -CurrentValue $VmName
+        $script:CheckpointName = Read-ScriptOptionalText -Prompt '干净 snapshot 名称 / Clean snapshot name' -CurrentValue $CheckpointName
+        $vmwareHeadlessChoice = Read-ScriptMenuChoice -Prompt 'VMware 使用无头 nogui 模式？[y/n] / Start VMware without a console? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
+        $script:VMwareHeadless = $vmwareHeadlessChoice -in @('y', 'Y')
+    }
+    else {
+        $script:VmName = Read-ScriptOptionalText -Prompt 'QEMU VM 名称 / QEMU VM name' -CurrentValue $VmName
+        $script:QemuDiskImagePath = Read-ScriptOptionalText -Prompt '基础磁盘镜像路径 / Base disk image path' -CurrentValue $QemuDiskImagePath
+        $script:QemuSystemPath = Read-ScriptOptionalText -Prompt 'qemu-system 路径或命令名 / qemu-system path or command' -CurrentValue $QemuSystemPath
+        $script:QemuImgPath = Read-ScriptOptionalText -Prompt 'qemu-img 路径或命令名 / qemu-img path or command' -CurrentValue $QemuImgPath
+        Read-ScriptQemuAdditionalArguments
+        $overlayChoice = Read-ScriptMenuChoice -Prompt '每个 job 使用一次性 overlay？[y/n] / Use disposable overlay? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
+        $script:QemuUseOverlayDisk = $overlayChoice -in @('y', 'Y')
+        Select-ScriptQemuDiskMetadataAndSnapshotInteractive
+        $script:QemuDiskFormat = Read-ScriptOptionalText -Prompt '磁盘格式 / Disk format' -CurrentValue $QemuDiskFormat
+        $script:QemuDiskInterface = Read-ScriptOptionalText -Prompt '磁盘接口 (virtio/ide/scsi) / Disk interface' -CurrentValue $QemuDiskInterface
+        $memoryText = Read-ScriptOptionalText -Prompt 'QEMU 内存 MB / QEMU memory in MB' -CurrentValue ([string]$QemuMemoryMegabytes)
+        $parsedMemory = 0
+        if (-not [int]::TryParse($memoryText, [ref]$parsedMemory) -or $parsedMemory -lt 256 -or $parsedMemory -gt 1048576) {
+            throw "错误：QEMU 内存无效：$memoryText；应在 256 到 1048576 MB 之间。"
+        }
+        $script:QemuMemoryMegabytes = $parsedMemory
+        $qemuHeadlessChoice = Read-ScriptMenuChoice -Prompt 'QEMU 使用无头模式？[y/n] / Start QEMU without a display? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
+        $script:QemuHeadless = $qemuHeadlessChoice -in @('y', 'Y')
+        if (-not $QemuUseOverlayDisk) {
+            $script:CheckpointName = Read-ScriptOptionalText -Prompt '内部干净 snapshot 名称 / Internal snapshot name' -CurrentValue $CheckpointName
+        }
+    }
+
+    if ($VirtualizationProvider -ne 'HyperV') {
+        if ($GuestRemotingAddressMode -eq 'Configured' -and [string]::IsNullOrWhiteSpace($GuestRemotingAddress)) {
+            $script:GuestRemotingAddressMode = if ($VirtualizationProvider -eq 'VMware') { 'VMwareTools' } else { 'QemuUserNat' }
+        }
+        $script:GuestRemotingAddressMode = Read-ScriptOptionalText -Prompt 'Guest 端点模式 (Configured/VMwareTools/QemuUserNat) / Guest endpoint mode' -CurrentValue $GuestRemotingAddressMode
+        $allowedModes = if ($VirtualizationProvider -eq 'VMware') { @('Configured', 'VMwareTools') } else { @('Configured', 'QemuUserNat') }
+        if ($GuestRemotingAddressMode -notin $allowedModes) {
+            throw "错误：$VirtualizationProvider 不支持 Guest 端点模式 '$GuestRemotingAddressMode'；可选：$($allowedModes -join ', ')。"
+        }
+        if ($GuestRemotingAddressMode -eq 'Configured') {
+            $script:GuestRemotingAddress = Read-ScriptOptionalText -Prompt '来宾 WinRM 地址或主机名 / Guest WinRM address or host' -CurrentValue $GuestRemotingAddress
+        }
+        else {
+            $script:GuestRemotingAddress = ''
+            $modeDescription = if ($GuestRemotingAddressMode -eq 'VMwareTools') { 'VMware Tools 会在每次恢复后自动发现 Guest IP。' } else { 'QEMU 会管理 localhost user-NAT WinRM 端口转发。' }
+            Write-ScriptInstallInfo $modeDescription
+        }
+        $automaticGuestEndpoint = $GuestRemotingAddressMode -ne 'Configured'
+        if ($automaticGuestEndpoint) {
+            $upgradingAutomaticHttp = -not [bool]$GuestRemotingUseSsl
+            $script:GuestRemotingUseSsl = $true
+            if ($upgradingAutomaticHttp) {
+                $script:GuestRemotingSkipCertificateChecks = $true
+            }
+            Write-ScriptInstallInfo '自动端点模式固定使用 HTTPS，避免依赖宿主机全局 TrustedHosts。 / Automatic endpoints require HTTPS.'
+        }
+        $portPrompt = if ($GuestRemotingAddressMode -eq 'QemuUserNat') {
+            '宿主 WinRM HTTPS 转发端口（0=55986 -> Guest 5986） / Host HTTPS forwarding port'
+        }
+        elseif ($automaticGuestEndpoint) {
+            'WinRM HTTPS 端口（0=5986） / WinRM HTTPS port'
+        }
+        else {
+            'WinRM 端口（0=按 SSL 自动选择 5985/5986） / WinRM port'
+        }
+        $portText = Read-ScriptOptionalText -Prompt $portPrompt -CurrentValue ([string]$GuestRemotingPort)
+        $parsedPort = 0
+        if (-not [int]::TryParse($portText, [ref]$parsedPort) -or $parsedPort -lt 0 -or $parsedPort -gt 65535) {
+            throw "错误：WinRM 端口无效：$portText。"
+        }
+        $script:GuestRemotingPort = $parsedPort
+        if (-not $automaticGuestEndpoint) {
+            $sslChoice = Read-ScriptMenuChoice -Prompt 'WinRM 使用 HTTPS/SSL？[y/n] / Use HTTPS/SSL? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
+            $script:GuestRemotingUseSsl = $sslChoice -in @('y', 'Y')
+        }
+        $skipCertificateChoice = Read-ScriptMenuChoice -Prompt '跳过 WinRM 证书检查？[y/n] / Skip WinRM certificate checks? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
+        $script:GuestRemotingSkipCertificateChecks = $skipCertificateChoice -in @('y', 'Y')
+        $script:GuestRemotingAuthentication = Read-ScriptOptionalText -Prompt 'WinRM 认证 / WinRM authentication' -CurrentValue $GuestRemotingAuthentication
+    }
+
     $script:GuestUserName = Read-ScriptOptionalText -Prompt '来宾用户名 / Guest username' -CurrentValue $GuestUserName
     $script:GuestWorkingDirectory = Read-ScriptOptionalText -Prompt '来宾工作目录 / Guest working directory' -CurrentValue $GuestWorkingDirectory
     $script:RuntimeRoot = Read-ScriptOptionalText -Prompt '宿主机运行目录 / Host runtime root' -CurrentValue $RuntimeRoot
@@ -499,9 +1047,29 @@ function Invoke-ScriptHyperVConfigPrompt {
     $script:LocalConfigPath = Read-ScriptOptionalText -Prompt '本机 sandbox 配置路径 / Local sandbox config path' -CurrentValue $LocalConfigPath
 
     Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{
-        UpdateHyperVConfig = $true
+        UpdateVirtualizationConfig = $true
+        VirtualizationProvider = $VirtualizationProvider
         VmName = $VmName
         CheckpointName = $CheckpointName
+        VMwareVmxPath = $VMwareVmxPath
+        VMwareVmrunPath = $VMwareVmrunPath
+        VMwareVmType = $VMwareVmType
+        VMwareHeadless = [bool]$VMwareHeadless
+        QemuDiskImagePath = $QemuDiskImagePath
+        QemuSystemPath = $QemuSystemPath
+        QemuImgPath = $QemuImgPath
+        QemuAdditionalArguments = @($QemuAdditionalArguments)
+        QemuDiskFormat = $QemuDiskFormat
+        QemuDiskInterface = $QemuDiskInterface
+        QemuUseOverlayDisk = [bool]$QemuUseOverlayDisk
+        QemuMemoryMegabytes = [int]$QemuMemoryMegabytes
+        QemuHeadless = [bool]$QemuHeadless
+        GuestRemotingAddress = $GuestRemotingAddress
+        GuestRemotingAddressMode = $GuestRemotingAddressMode
+        GuestRemotingPort = $GuestRemotingPort
+        GuestRemotingUseSsl = [bool]$GuestRemotingUseSsl
+        GuestRemotingSkipCertificateChecks = [bool]$GuestRemotingSkipCertificateChecks
+        GuestRemotingAuthentication = $GuestRemotingAuthentication
         GuestUserName = $GuestUserName
         GuestWorkingDirectory = $GuestWorkingDirectory
         RuntimeRoot = $RuntimeRoot
@@ -559,8 +1127,9 @@ function Invoke-ScriptChangeMenu {
         Write-Host ''
         Write-Host '更改选项 / Change options:'
         Write-Host '  1) 重置宿主机 guest password secret / Reset password secret'
-        Write-Host '  2) 重置 VM 中实际来宾密码 / Reset actual VM guest password'
-        Write-Host '  3) 配置 Hyper-V VM 名称、快照和路径 / Configure Hyper-V VM/checkpoint/paths'
+        $actualResetLabel = if ($VirtualizationProvider -eq 'HyperV') { '自动离线重置 / automated offline reset' } elseif ($VirtualizationProvider -eq 'Qemu') { 'WinRM 或离线 VHDX/新 baseline / WinRM or offline recovery' } elseif ($VMwareVmType -eq 'ws') { 'WinRM 或 full-clone 离线 recovery / WinRM or offline recovery' } else { '需先迁移到 Workstation Pro / migrate to Workstation Pro first' }
+        Write-Host "  2) 重置 VM 中实际来宾密码（$actualResetLabel） / Reset actual VM guest password"
+        Write-Host '  3) 配置 Hyper-V、VMware 或 QEMU / Configure virtualization provider'
         Write-Host '  4) 管理 guest test-signing（指引/查询/启用/禁用） / Manage guest test-signing'
         Write-Host '  5) 准备 Guest Agent/R0Collector payload / Prepare guest payload'
         Write-Host '  6) 查看驱动 service/minifilter JSON 状态 / Driver JSON status'
@@ -579,18 +1148,27 @@ function Invoke-ScriptChangeMenu {
             '2' {
                 $passwordMode = Read-ScriptPasswordMode
                 Write-Host ''
-                Write-Host '中文提示：此操作可能还原/启动/停止已配置 VM；请只在隔离实验宿主机的管理员 PowerShell 中继续。 / This can restore/start/stop the configured VM.'
+                $offlineRecovery = $false
+                if ($VirtualizationProvider -eq 'Qemu' -or ($VirtualizationProvider -eq 'VMware' -and $VMwareVmType -eq 'ws')) {
+                    Write-Host '  1) 知道当前密码：WinRM 轮换 / Current password known: WinRM rotation'
+                    Write-Host '  2) 不知道当前密码：离线 VHDX recovery / Current password unknown: offline VHDX recovery'
+                    $recoveryChoice = Read-ScriptMenuChoice -Prompt '请选择 [1-2] / Choose [1-2]' -Allowed @('1', '2')
+                    $offlineRecovery = $recoveryChoice -eq '2'
+                }
+                $resetPermissionGuidance = if ($VirtualizationProvider -eq 'HyperV' -or $offlineRecovery) { '需管理员 PowerShell / requires elevated PowerShell' } else { '需当前账户具有 provider 和 WinRM 权限 / requires provider and WinRM permissions' }
+                Write-Host "中文提示：此操作可能还原/启动/停止已配置 VM；请只在隔离实验宿主机继续，$resetPermissionGuidance。 / This can restore/start/stop the configured VM."
                 $continue = Read-ScriptMenuChoice -Prompt '是否继续重置 VM 实际来宾密码？[y/n] / Continue actual VM guest password reset? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
                 if ($continue -in @('y', 'Y')) {
                     Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{
                         ResetGuestVmPassword = $true
+                        RecoverGuestVmPasswordWithoutCurrentSecret = $offlineRecovery
                         PromptPassword = $passwordMode.PromptPassword
                         GeneratePassword = $passwordMode.GeneratePassword
                         Force = $true
                     })
                 }
             }
-            '3' { Invoke-ScriptHyperVConfigPrompt }
+            '3' { Invoke-ScriptVirtualizationConfigPrompt }
             '4' { Invoke-ScriptGuestTestSigningMenu }
             '5' { Invoke-ScriptPayloadPreparation }
             '6' {
@@ -607,7 +1185,7 @@ function Invoke-ScriptInstallEntrypointMenu {
     Write-Host ''
     Write-Host '安装入口选择 / Install entrypoint selection:'
     Write-Host '  1) 使用已配置环境（只诊断，不写本机状态，不修改 VM） / Use already configured environment'
-    Write-Host '  2) 回退/恢复已有 clean checkpoint（菜单默认只给计划；真实还原需命令行 -AllowVmMutation -Confirm/-Force） / Plan rollback/restore existing clean checkpoint'
+    Write-Host '  2) 回退/恢复已有 clean baseline（Hyper-V checkpoint / VMware snapshot / QEMU internal snapshot；overlay 只确认干净启动） / Plan rollback/restore existing clean baseline'
     Write-Host '  3) 全新/新电脑本机准备（目录/config/secret，可选 payload；不创建 VM） / Fresh new-computer local preparation'
     $choice = Read-ScriptMenuChoice -Prompt '请选择 [1-3] / Choose [1-3]' -Allowed @('1', '2', '3')
     $selectedEntrypoint = switch ($choice) {
@@ -706,7 +1284,9 @@ if ($Mode -eq 'Interactive') {
 
 $hasChangeAction = [bool]$ResetPassword -or
     [bool]$ResetGuestVmPassword -or
+    [bool]$RecoverGuestVmPasswordWithoutCurrentSecret -or
     [bool]$UpdateHyperVConfig -or
+    [bool]$UpdateVirtualizationConfig -or
     [bool]$ConfigureVTKey -or
     [bool]$PromptVTKey -or
     [bool]$ClearVTKey -or

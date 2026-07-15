@@ -11,6 +11,7 @@ namespace KSword.Sandbox.Web.Contracts;
 /// </summary>
 public sealed record RunbookProgressContract(
     Guid JobId,
+    VirtualizationProvider Provider,
     string State,
     string? DurableSourcePath,
     DateTimeOffset SnapshotUpdatedAtUtc,
@@ -38,9 +39,18 @@ public sealed record RunbookProgressContract(
             ? generatedAtUtc - snapshot.UpdatedAtUtc
             : TimeSpan.Zero;
         var latestStep = SelectLatestStep(snapshot);
+        var preflightFailure = IsPreflightFailure(snapshot);
+        var failedStepCount = snapshot.Steps.Count(step =>
+            IsState(step.State, SandboxRunbookProgressStates.Failed) ||
+            IsState(step.State, SandboxRunbookProgressStates.Canceled));
+        if (preflightFailure && failedStepCount == 0)
+        {
+            failedStepCount = 1;
+        }
 
         return new RunbookProgressContract(
             snapshot.JobId,
+            snapshot.Provider,
             snapshot.State,
             string.IsNullOrWhiteSpace(durableSourcePath) ? null : durableSourcePath,
             snapshot.UpdatedAtUtc,
@@ -49,7 +59,7 @@ public sealed record RunbookProgressContract(
             IsSnapshotStale(snapshot, age, threshold),
             latestStep is null ? null : RunbookStepProgressSummaryContract.FromStep(latestStep, snapshot.TotalSteps),
             snapshot.Steps.Count(step => IsState(step.State, SandboxRunbookProgressStates.Completed) || IsState(step.State, SandboxRunbookProgressStates.Skipped)),
-            snapshot.Steps.Count(step => IsState(step.State, SandboxRunbookProgressStates.Failed) || IsState(step.State, SandboxRunbookProgressStates.Canceled)),
+            failedStepCount,
             snapshot.Steps.Count(step => IsState(step.State, SandboxRunbookProgressStates.Running)),
             BuildOperatorHintsZh(snapshot, durableSourcePath, age, threshold, latestStep));
     }
@@ -68,6 +78,11 @@ public sealed record RunbookProgressContract(
         if (indexed is not null)
         {
             return indexed;
+        }
+
+        if (IsPreflightFailure(snapshot))
+        {
+            return null;
         }
 
         return snapshot.Steps.LastOrDefault(step => !IsState(step.State, SandboxRunbookProgressStates.Pending)) ??
@@ -110,6 +125,15 @@ public sealed record RunbookProgressContract(
                 hints.Add(latestStep.RemediationHintZh);
             }
         }
+        else if (IsPreflightFailure(snapshot))
+        {
+            hints.Add($"Preflight：{snapshot.CurrentStepTitle ?? snapshot.CurrentStepId}（failed）。");
+            hints.Add(snapshot.CurrentStepId!.Equals("live-execution-lease", StringComparison.OrdinalIgnoreCase)
+                ? IsLegacyLeaseRunbookFailure(snapshot)
+                    ? "该任务的旧 runbook 缺少 lease 路径；为样本重新创建 plan 后再执行 live。"
+                    : "等待当前 live/maintenance 操作完成；若确认没有操作运行，请检查 runtime root 的 locks 目录权限后重试。"
+                : "以管理员身份重新启动承载进程后再执行 live 模式。");
+        }
 
         if (IsSnapshotStale(snapshot, age, threshold))
         {
@@ -138,6 +162,16 @@ public sealed record RunbookProgressContract(
     {
         return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsPreflightFailure(SandboxRunbookProgressSnapshot snapshot) =>
+        snapshot.Success == false &&
+        snapshot.CurrentStepId is not null &&
+        (snapshot.CurrentStepId.Equals("live-execution-lease", StringComparison.OrdinalIgnoreCase) ||
+         snapshot.CurrentStepId.Equals("elevation-check", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsLegacyLeaseRunbookFailure(SandboxRunbookProgressSnapshot snapshot) =>
+        snapshot.Message?.Contains("no execution lease path", StringComparison.OrdinalIgnoreCase) == true ||
+        snapshot.Message?.Contains("predates the live execution lease contract", StringComparison.OrdinalIgnoreCase) == true;
 }
 
 /// <summary>

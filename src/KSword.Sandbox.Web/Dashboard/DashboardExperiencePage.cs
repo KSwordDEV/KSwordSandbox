@@ -229,7 +229,7 @@ internal static class DashboardExperiencePage
                 </div>
                 <div class="operator-flow" aria-label="上传执行路径 / Upload execution path">
                   <div class="operator-step" data-copy="1. 选择本机 EXE / Choose local EXE"><b data-zh="1. 选择 EXE" data-en="1. Choose EXE">1. 选择 EXE</b><span data-zh="支持点击或拖拽到上传区域。" data-en="Click or drag into the upload zone.">支持点击或拖拽到上传区域。</span></div>
-                  <div class="operator-step" data-copy="2. 复核 VM / VT / 证据就绪态 / Review VM / VT / artifact readiness"><b data-zh="2. 看就绪态" data-en="2. Review readiness">2. 看就绪态</b><span data-zh="VM、检查点、R0、VT 和产物选项都可右键复制。" data-en="VM, checkpoint, R0, VT, and artifact options are right-click copyable.">VM、检查点、R0、VT 和产物选项都可右键复制。</span></div>
+                  <div class="operator-step" data-copy="2. 复核 VM / VT / 证据就绪态 / Review VM / VT / artifact readiness"><b data-zh="2. 看就绪态" data-en="2. Review readiness">2. 看就绪态</b><span data-zh="VM、干净基线、R0、VT 和产物选项都可右键复制。" data-en="VM, clean baseline, R0, VT, and artifact options are right-click copyable.">VM、干净基线、R0、VT 和产物选项都可右键复制。</span></div>
                   <div class="operator-step" data-copy="3. 提交分析并打开监控 / Submit analysis and open monitor"><b data-zh="3. 提交分析" data-en="3. Submit analysis">3. 提交分析</b><span data-zh="提交后打开动态监控页查看启动状态和真实进度。" data-en="Submission opens the dynamic monitor for start status and real progress.">提交后打开动态监控页查看启动状态和真实进度。</span></div>
                 </div>
               </div>
@@ -294,29 +294,49 @@ internal static class DashboardExperiencePage
               </div>
               <details class="vm-config" open>
                 <summary data-zh="本次任务：虚拟机运行配置" data-en="This job: VM run configuration">本次任务：虚拟机运行配置</summary>
-                <p class="hint" data-zh="页面先只读检测本机 VM、检查点和 Payload；检测不到时保持为空并明确提示，不会用 config 或浏览器预设冒充真实状态。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。" data-en="The page first performs a read-only local detection of the VM, checkpoint, and payload. Missing values stay empty and are never replaced by config or browser presets pretending to be detected state. Guest account and working folder cannot be inferred reliably from an offline host, so they are labeled separately as active job config.">页面先只读检测本机 VM、检查点和 Payload；检测不到时保持为空并明确提示，不会用 config 或浏览器预设冒充真实状态。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。</p>
+                <p class="hint" data-zh="页面先只读检测所选后端的 VM、干净基线和 Payload；基线按后端对应 Hyper-V 检查点、VMware 快照或 QEMU overlay/内部快照。检测结果与 config/浏览器候选值会分别标记，配置值不会冒充本机检测。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。" data-en="The page first performs read-only detection of the selected provider's VM, clean baseline, and payload. The baseline maps to a Hyper-V checkpoint, VMware snapshot, or QEMU overlay/internal snapshot. Detected results and config/browser candidates are labeled separately, so configured values never pretend to be local detections. Guest account and working folder cannot be inferred reliably from an offline host, so they are labeled separately as active job config.">页面先只读检测所选后端的 VM、干净基线和 Payload；基线按后端对应 Hyper-V 检查点、VMware 快照或 QEMU overlay/内部快照。检测结果与 config/浏览器候选值会分别标记，配置值不会冒充本机检测。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。</p>
                 <div id="localDetectionBar" class="local-detection-bar" data-copy="" data-copy-label="local host detection status">
                   <div>
                     <strong data-zh="本机自动检测" data-en="Local auto-detection">本机自动检测</strong>
-                    <p id="localDetectionStatus" class="field-hint" data-copy="" data-copy-label="local detection detail" data-zh="正在检测本机 Hyper-V 与 Payload…" data-en="Detecting local Hyper-V and payload…">正在检测本机 Hyper-V 与 Payload…</p>
+                    <p id="localDetectionStatus" class="field-hint" data-copy="" data-copy-label="local detection detail" data-zh="正在检测所选虚拟化后端与 Payload…" data-en="Detecting the selected virtualization provider and payload…">正在检测所选虚拟化后端与 Payload…</p>
                   </div>
                   <button class="secondary" type="button" onclick="refreshLocalHostReadiness(true)" data-zh="重新检测本机" data-en="Detect again">重新检测本机</button>
                 </div>
                 <div class="toggle-card runtime-limit-card" data-copy="不限制运行时间 / No runtime limit：未启用 / disabled" data-copy-label="runtime limit policy">
                   <label for="uploadDurationUnlimited"><input id="uploadDurationUnlimited" type="checkbox"> <span data-zh="不限制运行时间（仅传入无限制语义）" data-en="No runtime limit (send unlimited intent only)">不限制运行时间（仅传入无限制语义）</span></label>
-                  <p id="durationUnlimitedHint" class="field-hint" data-copy="未启用：使用上方秒数，并按后端 config 限制 / Disabled: use bounded seconds clamped by backend config" data-copy-label="runtime limit hint" data-zh="未勾选时使用上方秒数；勾选后上传/路径规划会提交 durationUnlimited=true、durationSeconds=0，启动 runbook 时 stepTimeoutSeconds=0（不设置 Web 端单步超时）。这不是“停止 VM/杀样本”按钮；需要后端取消接口时再接入。" data-en="When unchecked, the seconds field is used. When checked, upload/path planning submits durationUnlimited=true and durationSeconds=0, and runbook start uses stepTimeoutSeconds=0 (no Web-side per-step timeout). This is not a Stop VM/Kill sample button; backend cancellation can be wired only when a safe cancel API exists.">未勾选时使用上方秒数；勾选后上传/路径规划会提交 durationUnlimited=true、durationSeconds=0，启动 runbook 时 stepTimeoutSeconds=0（不设置 Web 端单步超时）。这不是“停止 VM/杀样本”按钮；需要后端取消接口时再接入。</p>
+                  <p id="durationUnlimitedHint" class="field-hint" data-copy="未启用：使用上方秒数，并按后端 config 限制 / Disabled: use bounded seconds clamped by backend config" data-copy-label="runtime limit hint" data-zh="未勾选时使用上方秒数；勾选后上传/路径规划会提交 durationUnlimited=true、durationSeconds=0，启动 runbook 时 stepTimeoutSeconds=0（不设置 Web 端单步超时）。这不是取消按钮；分析启动后，当前任务会显示“取消分析并清理虚拟机”，清理完成前不会显示 canceled 终态。" data-en="When unchecked, the seconds field is used. When checked, upload/path planning submits durationUnlimited=true and durationSeconds=0, and runbook start uses stepTimeoutSeconds=0 (no Web-side per-step timeout). This is not the cancel control; after analysis starts, the current job shows Cancel analysis and clean up VM, and does not show the canceled terminal state until cleanup finishes.">未勾选时使用上方秒数；勾选后上传/路径规划会提交 durationUnlimited=true、durationSeconds=0，启动 runbook 时 stepTimeoutSeconds=0（不设置 Web 端单步超时）。这不是取消按钮；分析启动后，当前任务会显示“取消分析并清理虚拟机”，清理完成前不会显示 canceled 终态。</p>
                 </div>
                 <div class="vm-grid">
                   <div class="config-card">
-                    <h4 data-zh="VM 与检查点" data-en="VM and checkpoint">VM 与检查点</h4>
+                    <h4 data-zh="VM 与干净基线" data-en="VM and clean baseline">VM 与干净基线</h4>
+                    <label for="virtualizationProvider" data-zh="虚拟化后端" data-en="Virtualization provider">虚拟化后端</label>
+                    <select id="virtualizationProvider" data-copy-label="virtualization provider">
+                      <option value="HyperV">Hyper-V</option>
+                      <option value="VMware">VMware Workstation Pro</option>
+                      <option value="Qemu">QEMU</option>
+                    </select>
                     <label for="goldenVmName" data-zh="VM 名称" data-en="VM name">VM 名称</label>
                     <input id="goldenVmName" list="detectedVmOptions" placeholder="正在检测本机 / detecting local host" data-copy-label="VM name">
                     <datalist id="detectedVmOptions"></datalist>
                     <p id="vmDetectionHint" class="field-hint" data-copy="" data-copy-label="VM detection source">等待本机检测。</p>
-                    <label for="goldenSnapshotName" data-zh="检查点" data-en="Checkpoint">检查点</label>
-                    <input id="goldenSnapshotName" list="detectedCheckpointOptions" placeholder="正在检测本机 / detecting local host" data-copy-label="checkpoint">
+                    <div id="providerMachineDefinitionFields" hidden>
+                      <label id="machineDefinitionPathLabel" for="machineDefinitionPath" data-zh="虚拟机定义路径" data-en="Machine definition path">虚拟机定义路径</label>
+                      <input id="machineDefinitionPath" placeholder="正在检测本机 / detecting local host" data-copy-label="provider machine definition path">
+                      <p id="machineDefinitionDetectionHint" class="field-hint" data-copy="" data-copy-label="machine definition detection source">等待本机检测。</p>
+                    </div>
+                    <div id="qemuDiskFormatFields" hidden>
+                      <label for="qemuDiskFormat" data-zh="QEMU 磁盘格式" data-en="QEMU disk format">QEMU 磁盘格式</label>
+                      <select id="qemuDiskFormat" data-copy-label="QEMU disk format">
+                        <option value="qcow2">qcow2</option>
+                        <option value="raw">raw</option>
+                        <option value="vhdx">vhdx</option>
+                        <option value="vmdk">vmdk</option>
+                      </select>
+                    </div>
+                    <label for="goldenSnapshotName" data-zh="干净基线" data-en="Clean baseline">干净基线</label>
+                    <input id="goldenSnapshotName" list="detectedCheckpointOptions" placeholder="正在检测本机 / detecting local host" data-copy-label="clean baseline">
                     <datalist id="detectedCheckpointOptions"></datalist>
-                    <p id="checkpointDetectionHint" class="field-hint" data-copy="" data-copy-label="checkpoint detection source">等待本机检测。</p>
+                    <p id="checkpointDetectionHint" class="field-hint" data-copy="" data-copy-label="clean baseline detection source">等待本机检测。</p>
                   </div>
                   <div class="config-card">
                     <h4 data-zh="Guest 任务配置" data-en="Guest job config">Guest 任务配置</h4>
@@ -402,11 +422,13 @@ internal static class DashboardExperiencePage
             let currentJobPayload = null;
             let currentJobListPayload = [];
             let latestRunbookProgressSnapshot = null;
+            let latestBackgroundExecutionSnapshot = null;
             let runtimeConfigDefaults = null;
             let runtimeConfigLoadError = '';
             let localHostReadiness = null;
             let localHostReadinessError = '';
             let localHostReadinessLoading = false;
+            let localHostReadinessRequestId = 0;
             let virusTotalSettingsState = null;
             let virusTotalReadinessError = '';
             let artifactCollectionSupport = {
@@ -494,6 +516,7 @@ internal static class DashboardExperiencePage
 
                 element.textContent = currentLanguage === 'en' ? element.getAttribute('data-en') : element.getAttribute('data-zh');
               });
+              updateProviderResourceControls();
               refreshLocalizedReportLinks();
               renderConfigDefaultHints();
               renderLocalHostReadiness();
@@ -683,8 +706,12 @@ internal static class DashboardExperiencePage
                 document.getElementById('uploadDuration').value = String(defaultDuration);
                 document.getElementById('uploadDurationUnlimited').checked = false;
                 document.getElementById('uploadDuration').max = String(maxDuration);
+                document.getElementById('virtualizationProvider').value = config.virtualization?.provider || 'HyperV';
                 document.getElementById('goldenVmName').value = '';
                 document.getElementById('goldenSnapshotName').value = '';
+                document.getElementById('machineDefinitionPath').value = '';
+                document.getElementById('qemuDiskFormat').value = config.qemu?.diskFormat || 'qcow2';
+                updateProviderResourceControls();
                 document.getElementById('guestUserName').value = config.guest?.userName || '';
                 document.getElementById('guestWorkingDirectory').value = config.guest?.workingDirectory || '';
                 document.getElementById('guestPayloadRoot').value = '';
@@ -711,30 +738,47 @@ internal static class DashboardExperiencePage
             }
 
             async function refreshLocalHostReadiness(forceRefresh = false, announce = true) {
+              const requestId = ++localHostReadinessRequestId;
+              const provider = document.getElementById('virtualizationProvider')?.value || runtimeConfigDefaults?.virtualization?.provider || 'HyperV';
               localHostReadinessLoading = true;
               localHostReadinessError = '';
               renderLocalHostReadiness();
               try {
-                const suffix = forceRefresh ? '?refresh=true' : '';
+                const suffix = `?refresh=${forceRefresh ? 'true' : 'false'}&provider=${encodeURIComponent(provider)}`;
                 const response = await fetch(`/api/host/readiness${suffix}`);
-                localHostReadiness = await requireOk(response, t('检测本机状态', 'Detect local host state'));
+                const readiness = await requireOk(response, t('检测本机状态', 'Detect local host state'));
+                if (requestId !== localHostReadinessRequestId ||
+                    provider !== (document.getElementById('virtualizationProvider')?.value || provider)) {
+                  return;
+                }
+
+                localHostReadiness = readiness;
                 applyLocalHostReadinessDefaults();
                 if (announce) {
                   setStatus(t('本机状态已重新检测；检测不到的项目保持为空，不使用预设值替代。', 'Local host state was detected again; missing values stay empty and are not replaced by presets.'), false);
                 }
               } catch (error) {
+                if (requestId !== localHostReadinessRequestId) {
+                  return;
+                }
+
                 localHostReadinessError = error && error.message
                   ? error.message
                   : t('本机状态检测失败。', 'Local host detection failed.');
                 if (!localHostReadiness) {
                   document.getElementById('goldenVmName').value = '';
                   document.getElementById('goldenSnapshotName').value = '';
+                  document.getElementById('machineDefinitionPath').value = '';
                   document.getElementById('guestPayloadRoot').value = '';
                 }
                 if (announce) {
                   setStatus(`${t('本机状态检测失败', 'Local host detection failed')}: ${localHostReadinessError}`, true);
                 }
               } finally {
+                if (requestId !== localHostReadinessRequestId) {
+                  return;
+                }
+
                 localHostReadinessLoading = false;
                 renderConfigDefaultHints();
                 renderLocalHostReadiness();
@@ -745,11 +789,33 @@ internal static class DashboardExperiencePage
             }
 
             function applyLocalHostReadinessDefaults() {
-              const hyperV = localHostReadiness?.hyperV;
+              const virtualization = localHostReadiness?.virtualization;
               const guest = localHostReadiness?.guest;
               const paths = localHostReadiness?.paths;
-              document.getElementById('goldenVmName').value = hyperV?.vmExists ? (hyperV.vmName || '') : '';
-              document.getElementById('goldenSnapshotName').value = hyperV?.checkpointExists ? (hyperV.checkpointName || '') : '';
+              const provider = document.getElementById('virtualizationProvider')?.value || runtimeConfigDefaults?.virtualization?.provider || 'HyperV';
+              const providerConfig = provider === 'VMware'
+                ? runtimeConfigDefaults?.vmware
+                : provider === 'Qemu'
+                  ? runtimeConfigDefaults?.qemu
+                  : null;
+              const readinessMatchesProvider = !virtualization?.provider || virtualization.provider === provider;
+              document.getElementById('goldenVmName').value = readinessMatchesProvider && virtualization?.vmExists
+                ? (virtualization.vmName || '')
+                : (providerConfig?.vmName || '');
+              document.getElementById('goldenSnapshotName').value = readinessMatchesProvider && readinessBaselineExists(virtualization)
+                ? readinessBaselineName(virtualization)
+                : (provider === 'Qemu' && providerConfig?.useOverlayDisk
+                  ? 'per-job-overlay'
+                  : (providerConfig?.snapshotName || ''));
+              document.getElementById('machineDefinitionPath').value = provider === 'HyperV'
+                ? ''
+                : (readinessMatchesProvider && virtualization?.machineDefinition?.exists
+                  ? (virtualization.machineDefinition.path || '')
+                  : (provider === 'VMware' ? (providerConfig?.vmxPath || '') : (providerConfig?.diskImagePath || '')));
+              document.getElementById('qemuDiskFormat').value = provider === 'Qemu'
+                ? (providerConfig?.diskFormat || 'qcow2')
+                : 'qcow2';
+              updateProviderResourceControls();
               document.getElementById('guestUserName').value = guest?.userName || runtimeConfigDefaults?.guest?.userName || '';
               document.getElementById('guestWorkingDirectory').value = guest?.workingDirectory || runtimeConfigDefaults?.guest?.workingDirectory || '';
               document.getElementById('guestPayloadRoot').value = paths?.guestPayloadRoot?.exists ? (paths.guestPayloadRoot.path || '') : '';
@@ -757,8 +823,8 @@ internal static class DashboardExperiencePage
             }
 
             function renderDetectedVmOptions() {
-              const candidates = Array.isArray(localHostReadiness?.hyperV?.vmCandidates)
-                ? localHostReadiness.hyperV.vmCandidates
+              const candidates = Array.isArray(localHostReadiness?.virtualization?.vmCandidates)
+                ? localHostReadiness.virtualization.vmCandidates
                 : [];
               const vmList = document.getElementById('detectedVmOptions');
               const checkpointList = document.getElementById('detectedCheckpointOptions');
@@ -842,6 +908,52 @@ internal static class DashboardExperiencePage
               return duration;
             }
 
+            function selectedProvider() {
+              return document.getElementById('virtualizationProvider')?.value || runtimeConfigDefaults?.virtualization?.provider || 'HyperV';
+            }
+
+            function readinessBaselineExists(virtualization) {
+              return virtualization?.baselineExists ?? virtualization?.snapshotExists ?? false;
+            }
+
+            function readinessBaselineName(virtualization) {
+              return virtualization?.baselineName ?? virtualization?.snapshotName ?? '';
+            }
+
+            function updateProviderResourceControls() {
+              const provider = selectedProvider();
+              const machineFields = document.getElementById('providerMachineDefinitionFields');
+              const qemuFormatFields = document.getElementById('qemuDiskFormatFields');
+              const machineLabel = document.getElementById('machineDefinitionPathLabel');
+              const machineInput = document.getElementById('machineDefinitionPath');
+              const snapshotInput = document.getElementById('goldenSnapshotName');
+              const qemuUsesOverlay = provider === 'Qemu' && runtimeConfigDefaults?.qemu?.useOverlayDisk === true;
+              if (machineFields) {
+                machineFields.hidden = provider === 'HyperV';
+              }
+              if (qemuFormatFields) {
+                qemuFormatFields.hidden = provider !== 'Qemu';
+              }
+              if (machineLabel) {
+                const zh = provider === 'VMware' ? 'VMX 路径' : 'QEMU 磁盘镜像路径';
+                const en = provider === 'VMware' ? 'VMX path' : 'QEMU disk image path';
+                machineLabel.setAttribute('data-zh', zh);
+                machineLabel.setAttribute('data-en', en);
+                machineLabel.textContent = t(zh, en);
+              }
+              if (machineInput) {
+                machineInput.placeholder = provider === 'VMware'
+                  ? t('选择 .vmx 文件', 'Select a .vmx file')
+                  : t('选择基础磁盘镜像', 'Select the base disk image');
+              }
+              if (snapshotInput) {
+                snapshotInput.disabled = qemuUsesOverlay;
+                snapshotInput.title = qemuUsesOverlay
+                  ? t('当前 QEMU profile 使用每任务 overlay，不恢复内部快照。', 'The current QEMU profile uses a per-job overlay and does not restore an internal snapshot.')
+                  : '';
+              }
+            }
+
             function getVmConfig() {
               const clean = id => {
                 const value = document.getElementById(id).value.trim();
@@ -849,8 +961,13 @@ internal static class DashboardExperiencePage
               };
 
               return {
+                provider: document.getElementById('virtualizationProvider')?.value || undefined,
                 goldenVmName: clean('goldenVmName'),
-                goldenSnapshotName: clean('goldenSnapshotName'),
+                goldenSnapshotName: selectedProvider() === 'Qemu' && runtimeConfigDefaults?.qemu?.useOverlayDisk === true
+                  ? undefined
+                  : clean('goldenSnapshotName'),
+                machineDefinitionPath: selectedProvider() === 'HyperV' ? undefined : clean('machineDefinitionPath'),
+                qemuDiskFormat: selectedProvider() === 'Qemu' ? clean('qemuDiskFormat') : undefined,
                 guestUserName: clean('guestUserName'),
                 guestWorkingDirectory: clean('guestWorkingDirectory'),
                 guestPayloadRoot: clean('guestPayloadRoot'),
@@ -949,8 +1066,12 @@ internal static class DashboardExperiencePage
               setValue('uploadDuration', preset.durationSeconds);
               setValue('duration', preset.durationSeconds);
               setChecked('uploadDurationUnlimited', preset.durationUnlimited);
+              setValue('virtualizationProvider', preset.provider);
               setValue('goldenVmName', preset.goldenVmName);
               setValue('goldenSnapshotName', preset.goldenSnapshotName);
+              setValue('machineDefinitionPath', preset.machineDefinitionPath);
+              setValue('qemuDiskFormat', preset.qemuDiskFormat);
+              updateProviderResourceControls();
               setValue('guestUserName', preset.guestUserName);
               setValue('guestWorkingDirectory', preset.guestWorkingDirectory);
               setValue('guestPayloadRoot', preset.guestPayloadRoot);
@@ -963,12 +1084,20 @@ internal static class DashboardExperiencePage
               return true;
             }
 
-            function loadVmPresetExplicitly() {
+            async function loadVmPresetExplicitly() {
+              const previousProvider = selectedProvider();
               if (!applyOperatorVmPreset()) {
                 setStatus(t('没有已保存的覆盖值；页面继续使用本机检测结果。', 'No saved overrides were found; the page continues using local detection.'), true);
                 return;
               }
 
+              if (selectedProvider() !== previousProvider) {
+                localHostReadiness = null;
+                localHostReadinessError = '';
+              }
+
+              await refreshLocalHostReadiness(true, false);
+              applyOperatorVmPreset();
               renderConfigDefaultHints();
               renderLocalHostReadiness();
               renderVmConfigSummary();
@@ -1036,12 +1165,29 @@ internal static class DashboardExperiencePage
             }
 
             function detectedFieldBaseline(id) {
-              const hyperV = localHostReadiness?.hyperV;
+              const virtualization = localHostReadiness?.virtualization;
               const guest = localHostReadiness?.guest;
               const payload = localHostReadiness?.paths?.guestPayloadRoot;
+              const provider = document.getElementById('virtualizationProvider')?.value || runtimeConfigDefaults?.virtualization?.provider || 'HyperV';
+              const providerConfig = provider === 'VMware'
+                ? runtimeConfigDefaults?.vmware
+                : provider === 'Qemu'
+                  ? runtimeConfigDefaults?.qemu
+                  : null;
+              const readinessMatchesProvider = !virtualization?.provider || virtualization.provider === provider;
               const baselines = {
-                goldenVmName: { value: hyperV?.vmExists ? (hyperV.vmName || '') : '', source: 'detected' },
-                goldenSnapshotName: { value: hyperV?.checkpointExists ? (hyperV.checkpointName || '') : '', source: 'detected' },
+                goldenVmName: readinessMatchesProvider && virtualization?.vmExists
+                  ? { value: virtualization.vmName || '', source: 'detected' }
+                  : { value: providerConfig?.vmName || '', source: providerConfig ? 'config' : 'missing' },
+                goldenSnapshotName: readinessMatchesProvider && readinessBaselineExists(virtualization)
+                  ? { value: readinessBaselineName(virtualization), source: 'detected' }
+                  : { value: provider === 'Qemu' && providerConfig?.useOverlayDisk ? 'per-job-overlay' : (providerConfig?.snapshotName || ''), source: providerConfig ? 'config' : 'missing' },
+                machineDefinitionPath: provider === 'HyperV'
+                  ? { value: '', source: 'missing' }
+                  : readinessMatchesProvider && virtualization?.machineDefinition?.exists
+                    ? { value: virtualization.machineDefinition.path || '', source: 'detected' }
+                    : { value: provider === 'VMware' ? (providerConfig?.vmxPath || '') : (providerConfig?.diskImagePath || ''), source: providerConfig ? 'config' : 'missing' },
+                qemuDiskFormat: { value: providerConfig?.diskFormat || 'qcow2', source: 'config' },
                 guestUserName: { value: guest?.userName || runtimeConfigDefaults?.guest?.userName || '', source: 'config' },
                 guestWorkingDirectory: { value: guest?.workingDirectory || runtimeConfigDefaults?.guest?.workingDirectory || '', source: 'config' },
                 guestPayloadRoot: { value: payload?.exists ? (payload.path || '') : '', source: 'detected' }
@@ -1067,37 +1213,82 @@ internal static class DashboardExperiencePage
 
             function renderLocalHostReadiness() {
               const bar = document.getElementById('localDetectionBar');
-              const hyperV = localHostReadiness?.hyperV;
+              const hostVirtualization = localHostReadiness?.hostVirtualization;
+              const virtualization = localHostReadiness?.virtualization;
               const paths = localHostReadiness?.paths;
+              const provider = document.getElementById('virtualizationProvider')?.value || runtimeConfigDefaults?.virtualization?.provider || 'HyperV';
+              const guestTransportSecure = provider === 'HyperV' || virtualization?.guestTransportSecure !== false;
+              const guestTransportReady = (provider === 'HyperV' || virtualization?.guestEndpointReady === true) && guestTransportSecure;
+              const machineDefinitionOverride = provider !== 'HyperV' && classifyConfigField('machineDefinitionPath').source === 'override';
+              const configuredMachineMissing = virtualization?.diagnosticCode === 'VMWARE_VMX_MISSING' || virtualization?.diagnosticCode === 'QEMU_DISK_MISSING';
               let message = '';
               let level = '';
               if (localHostReadinessLoading) {
-                message = t('正在只读检测 Hyper-V、VM、检查点、运行目录与 Payload…', 'Running read-only detection for Hyper-V, VM, checkpoint, runtime folders, and payload…');
+                message = t('正在只读检测虚拟化环境、运行目录与 Payload…', 'Running read-only detection for virtualization, runtime folders, and payload…');
               } else if (localHostReadinessError) {
                 level = 'error';
                 message = `${t('本机检测失败；未使用 config 或浏览器预设替代真实状态', 'Local detection failed; config and browser presets were not used as detected state')}: ${localHostReadinessError}`;
-              } else if (hyperV?.accessDenied) {
-                level = 'warn';
-                message = t(
-                  `Hyper-V 命令存在，但当前 Web Host 无权查询 VM；VM/检查点保持为空。Payload：${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? '已检测到' : '缺失'}。请以管理员身份重启 WebUI 后重新检测。`,
-                  `Hyper-V cmdlets exist, but this Web Host cannot query VMs; VM/checkpoint stay empty. Payload: ${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? 'detected' : 'missing'}. Restart the WebUI elevated and detect again.`);
-              } else if (!hyperV?.managementAvailable) {
+              } else if (hostVirtualization?.operatingSystemSupported === false) {
                 level = 'error';
-                message = t('未检测到 Hyper-V PowerShell 管理命令；VM/检查点保持为空，不使用预设值。', 'Hyper-V PowerShell management cmdlets were not detected; VM/checkpoint stay empty and presets are not substituted.');
-              } else if (hyperV?.querySucceeded && hyperV?.vmExists && hyperV?.checkpointExists) {
+                message = t('当前宿主机不是 Windows；KSwordSandbox Live 不支持在此宿主启动虚拟化分析。', 'This host is not Windows; KSwordSandbox Live virtualization is not supported here.');
+              } else if (hostVirtualization?.requiredWindowsFeatureReady === false) {
+                level = 'error';
                 message = t(
-                  `已检测到 VM “${hyperV.vmName}”与检查点“${hyperV.checkpointName}”；Payload ${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? '已就绪' : '缺失'}。`,
-                  `Detected VM “${hyperV.vmName}” and checkpoint “${hyperV.checkpointName}”; payload is ${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? 'ready' : 'missing'}.`);
-                level = paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? '' : 'warn';
-              } else if (hyperV?.querySucceeded) {
+                  `${provider} 所需的 Windows 功能 ${hostVirtualization.requiredWindowsFeature} 当前为 ${hostVirtualization.requiredWindowsFeatureState || 'Unknown'}；请启用并重启宿主机。`,
+                  `Windows feature ${hostVirtualization.requiredWindowsFeature} required by ${provider} is ${hostVirtualization.requiredWindowsFeatureState || 'Unknown'}; enable it and restart the host.`);
+              } else if (hostVirtualization?.hardwareAccelerationReady === false) {
+                level = 'error';
+                message = t(
+                  `${provider} 所需的宿主硬件虚拟化未就绪；请检查 BIOS/UEFI 的 Intel VT-x/AMD-V 与 SLAT/EPT/NPT。`,
+                  `Host hardware virtualization required by ${provider} is not ready; check Intel VT-x/AMD-V and SLAT/EPT/NPT in BIOS/UEFI.`);
+              } else if (hostVirtualization && hostVirtualization.hardwareAccelerationReady !== true) {
                 level = 'warn';
-                const count = Array.isArray(hyperV.vmCandidates) ? hyperV.vmCandidates.length : 0;
+                message = hostVirtualization.requiredWindowsFeature && hostVirtualization.requiredWindowsFeatureReady !== true
+                  ? t(
+                    `尚未确认 ${provider} 所需的 Windows 功能 ${hostVirtualization.requiredWindowsFeature}；未确认前不会声明 Live-ready。`,
+                    `Windows feature ${hostVirtualization.requiredWindowsFeature} required by ${provider} is not confirmed; Live-ready will not be declared.`)
+                  : (hostVirtualization.diagnosticMessage || t(
+                    `${provider} 的宿主加速能力尚未确认；未确认前不会声明 Live-ready。`,
+                    `Host acceleration for ${provider} is not confirmed; Live-ready will not be declared.`));
+              } else if (virtualization?.accessDenied) {
+                level = 'warn';
+                message = t(
+                  `${provider} 管理工具存在，但当前 Web Host 无权查询 VM；VM/基线保持为空。Payload：${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? '已检测到' : '缺失'}。`,
+                  `${provider} management exists, but this Web Host cannot query the VM; VM/baseline stay empty. Payload: ${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? 'detected' : 'missing'}.`);
+              } else if (!virtualization?.managementAvailable) {
+                level = 'error';
+                message = t(`未检测到 ${provider} 管理工具；VM/基线保持为空。`, `${provider} management tools were not detected; VM/baseline stay empty.`);
+              } else if (virtualization?.diagnosticCode === 'QEMU_USER_NAT_PORT_UNAVAILABLE') {
+                level = 'error';
+                message = virtualization.diagnosticMessage || t(
+                  `QEMU 的 localhost WinRM 转发端口 ${virtualization.guestPort || ''} 已被其他进程占用；请停止冲突监听器或配置其他 guestRemoting.port。`,
+                  `QEMU localhost WinRM forwarding port ${virtualization.guestPort || ''} is occupied; stop the conflicting listener or configure another guestRemoting.port.`);
+              } else if (!guestTransportReady) {
+                level = 'error';
+                message = guestTransportSecure
+                  ? t(`${provider} 管理工具已检测到，但 Guest 端点模式无效或 Configured 模式缺少地址；Live 无法连接 Windows guest。`, `${provider} management was detected, but the guest endpoint mode is invalid or Configured mode has no address; Live cannot connect to the Windows guest.`)
+                  : t(`${provider} 的 WinRM 安全配置无效：Basic 必须使用 HTTPS，跳过证书检查也只适用于 HTTPS。`, `${provider} WinRM security is invalid: Basic requires HTTPS, and certificate checks can be skipped only with HTTPS.`);
+              } else if (machineDefinitionOverride && configuredMachineMissing) {
+                level = 'warn';
+                message = t(
+                  `${provider} 默认 profile 的 VM 定义路径未检测到；本次任务已提供手动覆盖，执行前仍会由 provider preflight 校验实际路径与 baseline。`,
+                  `The ${provider} default profile machine path was not detected; this job has a manual override that provider preflight will validate with its baseline before execution.`);
+              } else if (virtualization?.querySucceeded && virtualization?.vmExists && readinessBaselineExists(virtualization)) {
+                const detectedBaselineName = readinessBaselineName(virtualization);
+                message = t(
+                  `已通过 ${provider} 检测到 VM “${virtualization.vmName}”与干净基线“${detectedBaselineName}”；Payload ${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? '已就绪' : '缺失'}。`,
+                  `${provider} detected VM “${virtualization.vmName}” and clean baseline “${detectedBaselineName}”; payload is ${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? 'ready' : 'missing'}.`);
+                level = paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? '' : 'warn';
+              } else if (virtualization?.querySucceeded) {
+                level = 'warn';
+                const count = Array.isArray(virtualization.vmCandidates) ? virtualization.vmCandidates.length : 0;
                 message = count > 1
                   ? t(`检测到 ${count} 个 VM 候选，无法安全自动选择；请手动选择。未使用 config 预设值。`, `Detected ${count} VM candidates and could not select one safely; choose manually. Config presets were not substituted.`)
-                  : t('未检测到可用的 VM 或检查点；字段保持为空，未使用 config 预设值。', 'No usable VM/checkpoint was detected; fields stay empty and config presets were not substituted.');
+                  : t('未检测到可用的 VM 或干净基线；字段保持为空，未使用 config 预设值。', 'No usable VM/clean baseline was detected; fields stay empty and config presets were not substituted.');
               } else {
-                level = 'warn';
-                message = t('等待本机检测结果；可检测字段不会从预设值填充。', 'Waiting for local detection; detectable fields will not be populated from presets.');
+                const configurationInvalid = virtualization?.diagnosticCode === 'QEMU_CONFIGURATION_INVALID';
+                level = configurationInvalid ? 'error' : 'warn';
+                message = virtualization?.diagnosticMessage || t('等待本机检测结果；可检测字段不会从预设值填充。', 'Waiting for local detection; detectable fields will not be populated from presets.');
               }
 
               if (bar) {
@@ -1109,19 +1300,27 @@ internal static class DashboardExperiencePage
 
               const vmField = classifyConfigField('goldenVmName');
               const checkpointField = classifyConfigField('goldenSnapshotName');
+              const machineDefinitionField = classifyConfigField('machineDefinitionPath');
               const payloadField = classifyConfigField('guestPayloadRoot');
-              const vmDetail = hyperV?.accessDenied
-                ? t('来源：未检测到（当前 Web Host 查询 Hyper-V 被拒绝；请以管理员身份重启）。', 'Source: not detected (this Web Host was denied access to Hyper-V; restart elevated).')
+              const vmDetail = virtualization?.accessDenied
+                ? t(`来源：未检测到（当前 Web Host 查询 ${provider} 被拒绝）。`, `Source: not detected (this Web Host was denied access to ${provider}).`)
                 : vmField.source === 'detected'
-                  ? t(`来源：本机检测；状态 ${hyperV?.vmState || '-'}。`, `Source: local detection; state ${hyperV?.vmState || '-'}.`)
+                  ? t(`来源：本机检测；状态 ${virtualization?.vmState || '-'}。`, `Source: local detection; state ${virtualization?.vmState || '-'}.`)
                   : vmField.source === 'override'
                     ? t('来源：本次任务手动覆盖。', 'Source: manual override for this job.')
                     : t('未检测到 VM；可从候选列表选择或手动输入。', 'No VM detected; choose a candidate or enter one manually.');
               const checkpointDetail = checkpointField.source === 'detected'
-                ? t('来源：选中 VM 的本机检查点清单。', 'Source: local checkpoint inventory for the selected VM.')
+                ? t('来源：所选后端为该 VM 检测到的干净基线。', 'Source: clean baseline detected by the selected provider for this VM.')
                 : checkpointField.source === 'override'
                   ? t('来源：本次任务手动覆盖。', 'Source: manual override for this job.')
-                  : t('未检测到可安全自动选择的检查点。', 'No checkpoint could be selected safely.');
+                  : t('未检测到可安全自动选择的干净基线。', 'No clean baseline could be selected safely.');
+              const machineDefinitionDetail = provider === 'HyperV'
+                ? ''
+                : machineDefinitionField.source === 'detected'
+                  ? t('来源：本机文件存在性与 provider 查询。', 'Source: local file existence and provider query.')
+                  : machineDefinitionField.source === 'override'
+                    ? t('来源：本次任务路径覆盖；运行前仍会由 provider 预检。', 'Source: path override for this job; provider preflight still checks it before execution.')
+                    : t('未检测到虚拟机定义路径；无法确定实际要启动的 VMware VMX 或 QEMU 磁盘。', 'No machine definition path was detected; the VMware VMX or QEMU disk to start is unknown.');
               const payloadDetail = payloadField.source === 'detected'
                 ? t(`来源：本机路径存在性检测；manifest ${paths?.payloadManifest?.exists ? '存在' : '缺失'}，Agent ${paths?.agentExecutable?.exists ? '存在' : '缺失'}，R0Collector ${paths?.collectorExecutable?.exists ? '存在' : '缺失'}。`, `Source: local path existence check; manifest ${paths?.payloadManifest?.exists ? 'exists' : 'missing'}, Agent ${paths?.agentExecutable?.exists ? 'exists' : 'missing'}, R0Collector ${paths?.collectorExecutable?.exists ? 'exists' : 'missing'}.`)
                 : payloadField.source === 'override'
@@ -1129,6 +1328,7 @@ internal static class DashboardExperiencePage
                   : t(`未检测到 Guest Payload 目录${paths?.guestPayloadRoot?.path ? `；配置候选路径不存在：${paths.guestPayloadRoot.path}` : ''}。`, `Guest payload folder was not detected${paths?.guestPayloadRoot?.path ? `; configured candidate does not exist: ${paths.guestPayloadRoot.path}` : ''}.`);
               setElementTextAndCopy('vmDetectionHint', vmDetail);
               setElementTextAndCopy('checkpointDetectionHint', checkpointDetail);
+              setElementTextAndCopy('machineDefinitionDetectionHint', machineDefinitionDetail);
               setElementTextAndCopy('guestUserSourceHint', t('来源：当前任务配置；宿主机无法在不连接 Guest 的情况下可靠推断帐号。', 'Source: active job config; the host cannot reliably infer the account without connecting to the guest.'));
               setElementTextAndCopy('guestWorkingDirectorySourceHint', t('来源：当前任务配置；这是 Guest 内路径，不是宿主机路径。', 'Source: active job config; this is a guest path, not a host path.'));
               setElementTextAndCopy('guestPayloadDetectionHint', payloadDetail);
@@ -1152,11 +1352,15 @@ internal static class DashboardExperiencePage
               const artifacts = buildArtifactCollectionSummary({ submission: getArtifactCollectionConfig() });
               const vm = classifyConfigField('goldenVmName');
               const checkpoint = classifyConfigField('goldenSnapshotName');
+              const machineDefinition = classifyConfigField('machineDefinitionPath');
               const guest = classifyConfigField('guestUserName');
               const payload = classifyConfigField('guestPayloadRoot');
+              const provider = document.getElementById('virtualizationProvider')?.value || 'HyperV';
               const parts = [
+                { text: `${t('后端', 'Provider')}: ${provider}`, state: 'neutral' },
                 { text: `${t('VM', 'VM')} [${vm.label}]: ${vm.value || t('未检测到', 'NOT_FOUND')}`, state: vm.state },
-                { text: `${t('检查点', 'Checkpoint')} [${checkpoint.label}]: ${checkpoint.value || t('未检测到', 'NOT_FOUND')}`, state: checkpoint.state },
+                ...(provider === 'HyperV' ? [] : [{ text: `${provider === 'VMware' ? 'VMX' : t('磁盘', 'Disk')} [${machineDefinition.label}]: ${machineDefinition.value || t('未检测到', 'NOT_FOUND')}`, state: machineDefinition.state }]),
+                { text: `${t('干净基线', 'Clean baseline')} [${checkpoint.label}]: ${checkpoint.value || t('未检测到', 'NOT_FOUND')}`, state: checkpoint.state },
                 { text: `${t('Payload', 'Payload')} [${payload.label}]: ${payload.value || t('未检测到', 'NOT_FOUND')}`, state: payload.state },
                 { text: `${t('运行时间', 'Runtime')}: ${durationLabel}`, state: isDurationUnlimited() ? 'warn' : 'neutral' },
                 { text: `${t('Guest', 'Guest')} [${guest.label}]: ${guest.value || t('未配置', 'not configured')}`, state: guest.state },
@@ -1176,8 +1380,22 @@ internal static class DashboardExperiencePage
               const file = document.getElementById('sampleUpload')?.files?.[0] || null;
               const vmField = classifyConfigField('goldenVmName');
               const checkpointField = classifyConfigField('goldenSnapshotName');
+              const machineDefinitionField = classifyConfigField('machineDefinitionPath');
               const secretName = localHostReadiness?.guest?.passwordSecretName || runtimeConfigDefaults?.guest?.passwordSecretName || 'KSWORDBOX_GUEST_PASSWORD';
               const secretAvailable = Boolean(localHostReadiness?.guest?.passwordSecretAvailable);
+              const provider = document.getElementById('virtualizationProvider')?.value || runtimeConfigDefaults?.virtualization?.provider || 'HyperV';
+              const hostVirtualization = localHostReadiness?.hostVirtualization;
+              const guestTransport = localHostReadiness?.virtualization?.guestTransport || (provider === 'HyperV' ? 'PowerShellDirect' : 'PowerShellRemoting');
+              const guestAddressMode = localHostReadiness?.virtualization?.guestAddressMode || (provider === 'HyperV' ? 'PowerShellDirect' : 'Configured');
+              const guestAddressSource = localHostReadiness?.virtualization?.guestAddressSource || 'configured';
+              const guestAddress = localHostReadiness?.virtualization?.guestAddress || '';
+              const guestPort = Number(localHostReadiness?.virtualization?.guestPort || 0);
+              const guestUseSsl = Boolean(localHostReadiness?.virtualization?.guestUseSsl);
+              const guestAuthentication = localHostReadiness?.virtualization?.guestAuthentication || 'Negotiate';
+              const guestSkipCertificateChecks = Boolean(localHostReadiness?.virtualization?.guestSkipCertificateChecks);
+              const guestTransportSecure = provider === 'HyperV' || localHostReadiness?.virtualization?.guestTransportSecure !== false;
+              const guestEndpoint = guestAddress && guestPort > 0 ? `${guestAddress}:${guestPort}` : guestAddress;
+              const guestTransportReady = (provider === 'HyperV' || localHostReadiness?.virtualization?.guestEndpointReady === true) && guestTransportSecure;
               const r0Enabled = document.getElementById('r0Enabled')?.checked;
               const mock = document.getElementById('useMockCollector')?.checked;
               const artifactConfig = getArtifactCollectionConfig();
@@ -1202,20 +1420,44 @@ internal static class DashboardExperiencePage
                   : t('使用有界秒数，由后端按 config 限制', 'Uses bounded seconds clamped by backend config')
               });
               chips.push({
-                state: vmField.value && checkpointField.value ? (vmField.source === 'detected' ? 'good' : 'warn') : 'error',
+                state: vmField.value && checkpointField.value && (provider === 'HyperV' || machineDefinitionField.value)
+                  ? (vmField.source === 'detected' && (provider === 'HyperV' || machineDefinitionField.source === 'detected') ? 'good' : 'warn')
+                  : 'error',
                 label: t('VM', 'VM'),
                 value: vmField.value || t('未检测到 / NOT_FOUND', 'NOT_FOUND'),
-                hint: checkpointField.value
-                  ? `${t('检查点', 'Checkpoint')} [${checkpointField.label}]: ${checkpointField.value}`
-                  : (localHostReadiness?.hyperV?.accessDenied
-                    ? t('当前 Web Host 查询 Hyper-V 被拒绝；未使用预设值', 'Hyper-V query was denied for this Web Host; presets were not substituted')
-                    : t('未检测到检查点；请重新检测或手动覆盖', 'Checkpoint not detected; detect again or override manually'))
+                hint: checkpointField.value && (provider === 'HyperV' || machineDefinitionField.value)
+                  ? `${t('干净基线', 'Clean baseline')} [${checkpointField.label}]: ${checkpointField.value}${provider === 'HyperV' ? '' : ` · ${provider === 'VMware' ? 'VMX' : t('磁盘', 'Disk')} [${machineDefinitionField.label}]: ${machineDefinitionField.value}`}`
+                  : (localHostReadiness?.virtualization?.accessDenied
+                    ? t('当前 Web Host 查询虚拟化后端被拒绝；未使用预设值', 'The provider query was denied for this Web Host; presets were not substituted')
+                    : t('VM、干净基线或 provider 资源路径不完整；请重新检测或手动覆盖', 'VM, clean baseline, or provider resource path is incomplete; detect again or override it manually'))
               });
               chips.push({
                 state: secretAvailable ? 'good' : 'warn',
                 label: t('Guest 密钥', 'Guest secret'),
                 value: secretAvailable ? t('已检测到', 'detected') : t('未检测到', 'not detected'),
                 hint: `${secretName} · ${t('仅检测存在性，不显示值', 'presence only; value is never displayed')}`
+              });
+              const hostAccelerationBlocked = hostVirtualization?.operatingSystemSupported === false || hostVirtualization?.hardwareAccelerationReady === false;
+              const requiredFeatureHint = hostVirtualization?.requiredWindowsFeature
+                ? `${t('Windows 功能', 'Windows feature')}: ${hostVirtualization.requiredWindowsFeature} · ${hostVirtualization.requiredWindowsFeatureState || t('未知', 'unknown')}`
+                : '';
+              chips.push({
+                state: hostAccelerationBlocked ? 'error' : (hostVirtualization?.hardwareAccelerationReady === true ? 'good' : 'warn'),
+                label: t('宿主加速', 'Host acceleration'),
+                value: hostAccelerationBlocked
+                  ? t('未就绪', 'not ready')
+                  : (hostVirtualization?.hardwareAccelerationReady === true ? t('已检测到', 'detected') : t('未确认', 'not confirmed')),
+                hint: requiredFeatureHint || hostVirtualization?.diagnosticMessage || t('只读检查 Windows CPU、BIOS/UEFI 与 provider 功能依赖', 'Read-only check of Windows CPU, BIOS/UEFI, and provider feature dependencies')
+              });
+              chips.push({
+                state: guestTransportReady ? 'good' : 'error',
+                label: t('Guest 通道', 'Guest transport'),
+                value: provider === 'HyperV'
+                  ? 'PowerShell Direct'
+                  : (guestEndpoint || (guestAddressMode === 'VMwareTools' ? t('VMware Tools 自动发现', 'VMware Tools auto-discovery') : t('未配置', 'not configured'))),
+                hint: provider === 'HyperV'
+                  ? t('通过 VM 名称建立会话', 'Session is established by VM name')
+                  : `${guestTransport} · ${guestAddressMode} · ${guestAddressSource} · ${guestUseSsl ? 'HTTPS' : 'HTTP'} · ${guestAuthentication}${guestSkipCertificateChecks ? ` · ${t('跳过证书检查', 'certificate checks skipped')}` : ''} · ${guestTransportSecure ? t('Live 前必须可达', 'must be reachable before Live') : t('安全配置无效', 'invalid security configuration')}`
               });
               chips.push({
                 state: r0Enabled ? (mock ? 'warn' : 'good') : 'neutral',
@@ -1354,8 +1596,11 @@ internal static class DashboardExperiencePage
                 'sampleUpload',
                 'uploadDuration',
                 'uploadDurationUnlimited',
+                'virtualizationProvider',
                 'goldenVmName',
                 'goldenSnapshotName',
+                'machineDefinitionPath',
+                'qemuDiskFormat',
                 'guestUserName',
                 'guestWorkingDirectory',
                 'guestPayloadRoot',
@@ -1378,6 +1623,17 @@ internal static class DashboardExperiencePage
                   renderOperatorReadinessChips();
                 });
                 element.addEventListener('change', () => {
+                  if (id === 'virtualizationProvider') {
+                    localHostReadiness = null;
+                    localHostReadinessError = '';
+                    document.getElementById('goldenVmName').value = '';
+                    document.getElementById('goldenSnapshotName').value = '';
+                    document.getElementById('machineDefinitionPath').value = '';
+                    document.getElementById('qemuDiskFormat').value = runtimeConfigDefaults?.qemu?.diskFormat || 'qcow2';
+                    updateProviderResourceControls();
+                    renderDetectedVmOptions();
+                    refreshLocalHostReadiness(true, false);
+                  }
                   renderConfigDefaultHints();
                   renderLocalHostReadiness();
                   renderSelectedSample();
@@ -1437,8 +1693,11 @@ internal static class DashboardExperiencePage
               const ids = [
                 'uploadDuration',
                 'uploadDurationUnlimited',
+                'virtualizationProvider',
                 'goldenVmName',
                 'goldenSnapshotName',
+                'machineDefinitionPath',
+                'qemuDiskFormat',
                 'guestUserName',
                 'guestWorkingDirectory',
                 'guestPayloadRoot',
@@ -2036,13 +2295,29 @@ internal static class DashboardExperiencePage
               // Processing: summarizes only operator-safe VM choices, avoiding
               // command-line or executor output details. Return: copyable text.
               const submission = job.submission || {};
+              const provider = job.runbook?.provider || submission.provider || runtimeConfigDefaults?.virtualization?.provider || 'HyperV';
+              const providerConfig = provider === 'VMware'
+                ? runtimeConfigDefaults?.vmware
+                : provider === 'Qemu'
+                  ? runtimeConfigDefaults?.qemu
+                  : runtimeConfigDefaults?.hyperV;
+              const configuredVmName = provider === 'HyperV' ? providerConfig?.goldenVmName : providerConfig?.vmName;
+              const configuredSnapshotName = provider === 'HyperV' ? providerConfig?.goldenSnapshotName : providerConfig?.snapshotName;
+              const configuredMachineDefinition = provider === 'VMware'
+                ? providerConfig?.vmxPath
+                : provider === 'Qemu'
+                  ? providerConfig?.diskImagePath
+                  : null;
               const r0Enabled = runtimeConfigDefaults?.driver?.enabled;
               const r0Mode = r0Enabled === false
                 ? t('R0：config 关闭', 'R0: disabled by config')
                 : (submission.useMockCollector ? t('R0：Mock 采集器（collector）', 'R0: mock collector') : t('R0：真实采集器（collector）', 'R0: real collector'));
               const parts = [
-                `${t('VM', 'VM')}: ${submission.goldenVmName || runtimeConfigDefaults?.hyperV?.goldenVmName || t('config 默认', 'config default')}`,
-                `${t('检查点', 'Checkpoint')}: ${submission.goldenSnapshotName || runtimeConfigDefaults?.hyperV?.goldenSnapshotName || t('config 默认', 'config default')}`,
+                `${t('后端', 'Provider')}: ${provider}`,
+                `${t('VM', 'VM')}: ${job.runbook?.targetVmName || submission.goldenVmName || configuredVmName || t('config 默认', 'config default')}`,
+                ...(provider === 'HyperV' ? [] : [`${provider === 'VMware' ? 'VMX' : t('磁盘', 'Disk')}: ${job.runbook?.machineDefinitionPath || submission.machineDefinitionPath || configuredMachineDefinition || t('config 默认', 'config default')}`]),
+                ...(provider === 'Qemu' ? [`${t('格式', 'Format')}: ${job.runbook?.qemuDiskFormat || submission.qemuDiskFormat || providerConfig?.diskFormat || 'qcow2'}`] : []),
+                `${t('Baseline', 'Baseline')}: ${job.runbook?.baselineName || submission.goldenSnapshotName || configuredSnapshotName || t('config 默认', 'config default')}`,
                 `${t('运行时间', 'Runtime')}: ${formatSubmissionRuntime(submission)}`,
                 `${t('Guest', 'Guest')}: ${submission.guestUserName || runtimeConfigDefaults?.guest?.userName || t('config 默认', 'config default')}`,
                 r0Mode
@@ -2056,6 +2331,9 @@ internal static class DashboardExperiencePage
               const jobId = String(job.jobId || '');
               if (latestRunbookProgressSnapshot && String(latestRunbookProgressSnapshot.jobId || '').toLowerCase() !== jobId.toLowerCase()) {
                 latestRunbookProgressSnapshot = null;
+              }
+              if (latestBackgroundExecutionSnapshot && String(latestBackgroundExecutionSnapshot.jobId || '').toLowerCase() !== jobId.toLowerCase()) {
+                latestBackgroundExecutionSnapshot = null;
               }
               const statusLabel = formatJobStatus(job.status);
               const htmlReportPath = job.htmlReportPath || '';
@@ -2101,7 +2379,8 @@ internal static class DashboardExperiencePage
                   <p class="hint"><strong>${escapeHtml(t('VM 配置', 'VM configuration'))}</strong> <span class="pill" data-copy="${escapeAttribute(vmRunSummary)}" data-copy-label="VM configuration summary">${escapeHtml(vmRunSummary)}</span></p>
                   <p class="hint"><strong data-zh="产物采集显式启用（opt-in）" data-en="Artifact collection opt-in">产物采集显式启用（opt-in）</strong> <span class="pill" data-copy="${escapeAttribute(artifactCollectionSummary)}" data-copy-label="artifact collection opt-in">${escapeHtml(artifactCollectionSummary)}</span></p>
                   <p class="button-row">
-                    <button onclick="executeRunbook('${escapeJs(jobId)}', true, ${job.submission?.durationUnlimited ? 'true' : 'false'})" data-zh="启动虚拟机分析" data-en="Start VM analysis">启动虚拟机分析</button>
+                    <button id="startRunbookButton" onclick="executeRunbook('${escapeJs(jobId)}', true, ${job.submission?.durationUnlimited ? 'true' : 'false'})" data-zh="启动虚拟机分析" data-en="Start VM analysis">启动虚拟机分析</button>
+                    <button id="cancelRunbookButton" class="secondary" type="button" onclick="cancelRunbook('${escapeJs(jobId)}', true)" data-zh="取消分析并清理虚拟机" data-en="Cancel analysis and clean up VM" hidden>取消分析并清理虚拟机</button>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="实时原始事件监控（独立页）" data-en="Live raw event monitor (standalone)">实时原始事件监控（独立页）</a>
                   </p>
@@ -2158,6 +2437,9 @@ internal static class DashboardExperiencePage
                 renderRunbookProgress(latestRunbookProgressSnapshot);
               } else {
                 renderStages(0, false, false);
+              }
+              if (latestBackgroundExecutionSnapshot && String(latestBackgroundExecutionSnapshot.jobId || '').toLowerCase() === jobId.toLowerCase()) {
+                updateRunbookCancellationControl(latestBackgroundExecutionSnapshot, jobId, Boolean(latestBackgroundExecutionSnapshot.live));
               }
             }
 
@@ -2800,8 +3082,11 @@ internal static class DashboardExperiencePage
             }
 
             function renderBackgroundExecutionSnapshot(snapshot, live) {
+              latestBackgroundExecutionSnapshot = snapshot;
               const state = String(snapshot.state || 'not_started').toLowerCase();
-              const terminal = state === 'completed' || state === 'failed';
+              const snapshotJobId = String(snapshot.jobId || snapshot.job?.jobId || currentJobPayload?.jobId || '');
+              updateRunbookCancellationControl(snapshot, snapshotJobId, live);
+              const terminal = state === 'completed' || state === 'failed' || state === 'canceled';
               if (!terminal) {
                 const text = document.getElementById('progressText');
                 if (text) {
@@ -2815,7 +3100,15 @@ internal static class DashboardExperiencePage
               stopEstimatedProgress();
               stopRunbookProgressPolling();
               if (snapshot.job) {
-                renderJob(snapshot.job);
+                const sameCurrentJob = currentJobPayload &&
+                  String(currentJobPayload.jobId || '').toLowerCase() === String(snapshot.job.jobId || snapshotJobId).toLowerCase();
+                renderJob({
+                  ...(sameCurrentJob ? currentJobPayload : {}),
+                  ...snapshot.job,
+                  submission: snapshot.job.submission || (sameCurrentJob ? currentJobPayload.submission : undefined),
+                  runbook: snapshot.job.runbook || (sameCurrentJob ? currentJobPayload.runbook : undefined),
+                  sample: snapshot.job.sample || (sameCurrentJob ? currentJobPayload.sample : undefined)
+                });
               }
 
               if (snapshot.execution) {
@@ -2827,9 +3120,14 @@ internal static class DashboardExperiencePage
               const execution = snapshot.execution || {};
               const importFailed = Boolean(snapshot.guestImportMessage && !snapshot.guestImportSucceeded);
               const success = Boolean(snapshot.success ?? (execution.success && !importFailed));
+              const canceled = state === 'canceled' || execution.wasCanceled === true;
               renderStages(liveStages.length - 1, success, !success);
               setStatus(
-                (success ? t('后台分析流程已完成。', 'Background analysis flow completed.') : t('后台分析流程失败。', 'Background analysis flow failed.')) +
+                (success
+                  ? t('后台分析流程已完成。', 'Background analysis flow completed.')
+                  : canceled
+                    ? t('后台分析流程已取消，清理结果已保留。', 'Background analysis flow was canceled; cleanup results were retained.')
+                    : t('后台分析流程失败。', 'Background analysis flow failed.')) +
                   (snapshot.guestImportMessage ? ` ${localizeServerMessage(snapshot.guestImportMessage)}` : ''),
                 !success);
 
@@ -2838,16 +3136,62 @@ internal static class DashboardExperiencePage
                 if (text) {
                   text.textContent = t('分析完成，报告已生成，正在打开。', 'Analysis completed; report is ready and opening.');
                 }
-                showReportReadyNotice(jobId, true);
+                showReportReadyNotice(snapshotJobId, true);
               } else if (live && execution.success) {
                 const text = document.getElementById('progressText');
                 if (text) {
                   text.textContent = t('分析完成，但事件导入未确认；请检查报告入口或手动导入。', 'Analysis completed, but event import was not confirmed; check report links or import events manually.');
                 }
-                showReportReadyNotice(jobId, false);
+                showReportReadyNotice(snapshotJobId, false);
               }
 
               return true;
+            }
+
+            function updateRunbookCancellationControl(snapshot, jobId, live) {
+              const state = String(snapshot?.state || 'not_started').toLowerCase();
+              const active = state === 'queued' || state === 'running';
+              const cancelRequested = Boolean(snapshot?.cancelRequested);
+              const startButton = document.getElementById('startRunbookButton');
+              const cancelButton = document.getElementById('cancelRunbookButton');
+              if (startButton) {
+                startButton.disabled = active;
+              }
+              if (!cancelButton) {
+                return;
+              }
+
+              cancelButton.hidden = !active;
+              cancelButton.disabled = !active || cancelRequested;
+              cancelButton.textContent = cancelRequested
+                ? t('正在取消并清理虚拟机…', 'Canceling and cleaning up VM...')
+                : t(live ? '取消分析并清理虚拟机' : '取消流程验证', live ? 'Cancel analysis and clean up VM' : 'Cancel flow verification');
+              cancelButton.setAttribute('data-zh', cancelRequested ? '正在取消并清理虚拟机…' : (live ? '取消分析并清理虚拟机' : '取消流程验证'));
+              cancelButton.setAttribute('data-en', cancelRequested ? 'Canceling and cleaning up VM...' : (live ? 'Cancel analysis and clean up VM' : 'Cancel flow verification'));
+              if (jobId) {
+                cancelButton.onclick = () => cancelRunbook(jobId, live);
+              }
+            }
+
+            async function cancelRunbook(jobId, live) {
+              const button = document.getElementById('cancelRunbookButton');
+              if (button) {
+                button.disabled = true;
+              }
+              setStatus(t('正在请求取消；虚拟机清理完成前任务会保持运行态。', 'Requesting cancellation; the job remains active until VM cleanup finishes.'), false);
+              try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/cancel`, { method: 'POST' });
+                const snapshot = await requireOk(response, t('取消后台分析', 'Cancel background analysis'));
+                renderBackgroundExecutionSnapshot(snapshot, live);
+                startBackgroundExecutionPolling(jobId, live);
+                setStatus(t('已请求取消，正在等待执行器完成虚拟机清理。', 'Cancellation requested; waiting for the executor to finish VM cleanup.'), false);
+              } catch (error) {
+                if (button) {
+                  button.disabled = false;
+                }
+                setStatus(error.message, true);
+                await refreshBackgroundExecution(jobId, live, true);
+              }
             }
 
             async function executeRunbook(jobId, live, durationUnlimited) {
@@ -3144,6 +3488,13 @@ internal static class DashboardExperiencePage
                 }
 
                 button.disabled = isBusy;
+              }
+
+              if (!isBusy && latestBackgroundExecutionSnapshot) {
+                updateRunbookCancellationControl(
+                  latestBackgroundExecutionSnapshot,
+                  String(latestBackgroundExecutionSnapshot.jobId || latestBackgroundExecutionSnapshot.job?.jobId || currentJobPayload?.jobId || ''),
+                  Boolean(latestBackgroundExecutionSnapshot.live));
               }
             }
 

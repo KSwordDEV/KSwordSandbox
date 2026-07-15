@@ -16,9 +16,12 @@ internal sealed class RunbookBackgroundExecutionStore
     public const string Queued = "queued";
     public const string Running = "running";
     public const string Completed = "completed";
+    public const string Canceled = "canceled";
     public const string Failed = "failed";
 
     private readonly ConcurrentDictionary<Guid, RunbookBackgroundExecutionSnapshot> snapshots = new();
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> activeExecutions = new();
+    private readonly object executionGate = new();
 
     /// <summary>
     /// Starts one background run unless the same job is already queued/running.
@@ -28,63 +31,83 @@ internal sealed class RunbookBackgroundExecutionStore
     /// </summary>
     public bool TryStart(
         Guid jobId,
+        VirtualizationProvider provider,
         bool live,
         bool importGuestEvents,
-        Func<Task<RunbookExecutionOutcome>> executeAsync,
+        Func<CancellationToken, Task<RunbookExecutionOutcome>> executeAsync,
         out RunbookBackgroundExecutionSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(executeAsync);
 
-        if (snapshots.TryGetValue(jobId, out var existing) && IsActive(existing.State))
+        CancellationTokenSource cancellationSource;
+        RunbookBackgroundExecutionSnapshot queuedSnapshot;
+        lock (executionGate)
         {
-            snapshot = existing with
+            if (activeExecutions.ContainsKey(jobId))
             {
-                Accepted = false,
-                Message = "该任务的分析流程已经在排队或运行中；下一步：打开监控页或进度页查看当前状态，不要重复提交 / Runbook execution is already queued or running for this job. Next step: open the monitor or progress page to view the current state instead of submitting again.",
-                UpdatedAtUtc = DateTimeOffset.UtcNow
-            };
-            return false;
-        }
+                var existing = Get(jobId);
+                snapshot = existing with
+                {
+                    Accepted = false,
+                    Message = "该任务的分析流程已经在排队或运行中；下一步：打开监控页或进度页查看当前状态，不要重复提交 / Runbook execution is already queued or running for this job. Next step: open the monitor or progress page to view the current state instead of submitting again.",
+                    UpdatedAtUtc = DateTimeOffset.UtcNow
+                };
+                return false;
+            }
 
-        var now = DateTimeOffset.UtcNow;
-        var queuedSnapshot = new RunbookBackgroundExecutionSnapshot
-        {
-            JobId = jobId,
-            Live = live,
-            ImportGuestEvents = importGuestEvents,
-            Accepted = true,
-            State = Queued,
-            Message = "WebUI 已接收后台分析任务；下一步：进入监控页查看安全进度 / Runbook execution has been accepted by the WebUI background runner. Next step: open the monitor page for UI-safe progress.",
-            StartedAtUtc = now,
-            UpdatedAtUtc = now
-        };
-        snapshot = queuedSnapshot;
-        snapshots[jobId] = snapshot;
+            var now = DateTimeOffset.UtcNow;
+            queuedSnapshot = new RunbookBackgroundExecutionSnapshot
+            {
+                JobId = jobId,
+                Provider = provider,
+                Live = live,
+                ImportGuestEvents = importGuestEvents,
+                Accepted = true,
+                State = Queued,
+                Message = "WebUI 已接收后台分析任务；下一步：进入监控页查看安全进度 / Runbook execution has been accepted by the WebUI background runner. Next step: open the monitor page for UI-safe progress.",
+                StartedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            cancellationSource = new CancellationTokenSource();
+            activeExecutions[jobId] = cancellationSource;
+            snapshots[jobId] = queuedSnapshot;
+            snapshot = queuedSnapshot;
+        }
 
         _ = Task.Run(async () =>
         {
+            var current = Get(jobId);
             Update(queuedSnapshot with
             {
                 State = Running,
-                Message = "后台正在执行虚拟机分析流程；下一步：保持监控页打开等待报告入口 / Runbook execution is running in the WebUI background runner. Next step: keep the monitor page open until report links appear.",
+                CancelRequested = current.CancelRequested,
+                CancelRequestedAtUtc = current.CancelRequestedAtUtc,
+                Message = current.CancelRequested
+                    ? "已请求取消后台分析；执行器正在完成必要的虚拟机清理 / Cancellation was requested; the executor is completing required VM cleanup."
+                    : "后台正在执行虚拟机分析流程；下一步：保持监控页打开等待报告入口 / Runbook execution is running in the WebUI background runner. Next step: keep the monitor page open until report links appear.",
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             });
 
             try
             {
-                var outcome = await executeAsync().ConfigureAwait(false);
+                var outcome = await executeAsync(cancellationSource.Token).ConfigureAwait(false);
                 var importFailed = outcome.GuestImportFailed ||
                     (outcome.Execution.Success && outcome.Job.Status == AnalysisStatus.Failed);
                 var terminalFailed = !outcome.Execution.Success || importFailed || outcome.Job.Status == AnalysisStatus.Failed;
                 var success = outcome.Execution.Success && !terminalFailed;
+                var canceled = outcome.Execution.WasCanceled;
+                current = Get(jobId);
                 Update(new RunbookBackgroundExecutionSnapshot
                 {
                     JobId = jobId,
+                    Provider = outcome.Execution.Provider,
                     Live = live,
                     ImportGuestEvents = importGuestEvents,
                     Accepted = true,
-                    State = success ? Completed : Failed,
+                    State = success ? Completed : canceled ? Canceled : Failed,
                     Success = success,
+                    CancelRequested = current.CancelRequested,
+                    CancelRequestedAtUtc = current.CancelRequestedAtUtc,
                     Execution = outcome.Execution,
                     Job = outcome.Job,
                     GuestImportSucceeded = outcome.GuestImportSucceeded,
@@ -92,26 +115,87 @@ internal sealed class RunbookBackgroundExecutionStore
                     GuestImportFailed = importFailed,
                     GuestImportMessage = outcome.GuestImportMessage,
                     Message = ResolveTerminalMessage(success, outcome),
-                    StartedAtUtc = now,
+                    StartedAtUtc = queuedSnapshot.StartedAtUtc,
                     UpdatedAtUtc = DateTimeOffset.UtcNow
                 });
             }
             catch (Exception ex)
             {
+                current = Get(jobId);
                 Update(new RunbookBackgroundExecutionSnapshot
                 {
                     JobId = jobId,
+                    Provider = provider,
                     Live = live,
                     ImportGuestEvents = importGuestEvents,
                     Accepted = true,
                     State = Failed,
                     Success = false,
+                    CancelRequested = current.CancelRequested,
+                    CancelRequestedAtUtc = current.CancelRequestedAtUtc,
                     Message = $"后台分析执行失败；下一步：打开进度页查看失败阶段并检查 Web Host 日志 / Runbook background execution failed. Next step: open the progress page for the failed stage and check Web Host logs: {ex.Message}",
-                    StartedAtUtc = now,
+                    StartedAtUtc = queuedSnapshot.StartedAtUtc,
                     UpdatedAtUtc = DateTimeOffset.UtcNow
                 });
             }
+            finally
+            {
+                lock (executionGate)
+                {
+                    if (activeExecutions.TryGetValue(jobId, out var activeSource) && ReferenceEquals(activeSource, cancellationSource))
+                    {
+                        activeExecutions.TryRemove(jobId, out _);
+                    }
+                }
+
+                cancellationSource.Dispose();
+            }
         });
+
+        return true;
+    }
+
+    /// <summary>
+    /// Requests cancellation for an active WebUI run. The snapshot remains in
+    /// queued/running state until the executor returns after its mandatory VM
+    /// cleanup, so clients never mistake a cancel request for completed cleanup.
+    /// </summary>
+    public bool TryCancel(Guid jobId, out RunbookBackgroundExecutionSnapshot snapshot)
+    {
+        lock (executionGate)
+        {
+            if (!activeExecutions.TryGetValue(jobId, out var cancellationSource))
+            {
+                snapshot = Get(jobId);
+                return false;
+            }
+
+            var current = Get(jobId);
+            if (!IsActive(current.State))
+            {
+                snapshot = current;
+                return false;
+            }
+
+            var requestedAtUtc = current.CancelRequestedAtUtc ?? DateTimeOffset.UtcNow;
+            snapshot = current with
+            {
+                CancelRequested = true,
+                CancelRequestedAtUtc = requestedAtUtc,
+                Message = "已请求取消后台分析；执行器正在完成必要的虚拟机清理，请等待 canceled 终态 / Cancellation was requested. The executor is completing required VM cleanup; wait for the canceled terminal state.",
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            snapshots[jobId] = snapshot;
+            try
+            {
+                cancellationSource.Cancel();
+            }
+            catch (AggregateException)
+            {
+                // The cancellation bit is already set. Executor cleanup and
+                // terminal-state publication remain the source of truth.
+            }
+        }
 
         return true;
     }
@@ -123,6 +207,13 @@ internal sealed class RunbookBackgroundExecutionStore
             return !string.IsNullOrWhiteSpace(outcome.GuestImportMessage)
                 ? outcome.GuestImportMessage!
                 : "分析流程已完成；下一步：打开中文或英文报告 / Runbook execution completed. Next step: open the Chinese or English report.";
+        }
+
+        if (outcome.Execution.WasCanceled)
+        {
+            return !string.IsNullOrWhiteSpace(outcome.Execution.Message)
+                ? outcome.Execution.Message!
+                : "分析流程已取消，所需 VM 清理已继续执行 / Runbook execution was canceled and required VM cleanup was still attempted.";
         }
 
         if (outcome.GuestImportFailed && !string.IsNullOrWhiteSpace(outcome.GuestImportMessage))
@@ -178,6 +269,8 @@ internal sealed record RunbookBackgroundExecutionSnapshot
 
     public required Guid JobId { get; init; }
 
+    public VirtualizationProvider? Provider { get; init; }
+
     public bool Live { get; init; }
 
     public bool ImportGuestEvents { get; init; }
@@ -187,6 +280,10 @@ internal sealed record RunbookBackgroundExecutionSnapshot
     public required string State { get; init; }
 
     public bool? Success { get; init; }
+
+    public bool CancelRequested { get; init; }
+
+    public DateTimeOffset? CancelRequestedAtUtc { get; init; }
 
     public string? Message { get; init; }
 
@@ -260,10 +357,13 @@ internal sealed record RunbookBackgroundExecutionSnapshot
             .Last();
         var state = latest.Success
             ? latest.Skipped ? SandboxRunbookProgressStates.Skipped : SandboxRunbookProgressStates.Completed
-            : SandboxRunbookProgressStates.Failed;
+            : IsCanceledStep(latest)
+                ? SandboxRunbookProgressStates.Canceled
+                : SandboxRunbookProgressStates.Failed;
         var progressStep = new SandboxRunbookStepProgressSnapshot
         {
             StepIndex = latest.StepIndex,
+            Ordinal = latest.StepIndex < 0 ? "preflight" : null,
             StepId = latest.StepId,
             Title = latest.Title,
             State = state,
@@ -273,12 +373,39 @@ internal sealed record RunbookBackgroundExecutionSnapshot
             Duration = latest.Duration,
             ExitCode = latest.ExitCode,
             Message = latest.Message,
-            RemediationHintZh = latest.Success
-                ? "该步骤已完成；继续观察后续步骤或报告入口。"
-                : "该步骤失败；打开执行流程页查看 stdout/stderr，并保留 job 目录用于排障。"
+            RemediationHintZh = BuildLatestStepRemediationHintZh(latest)
         };
 
         return RunbookStepProgressSummaryContract.FromStep(progressStep, execution.TotalSteps);
+    }
+
+    private static string BuildLatestStepRemediationHintZh(SandboxRunbookStepExecutionResult step)
+    {
+        if (step.StepId.Equals("live-execution-lease", StringComparison.OrdinalIgnoreCase))
+        {
+            return IsLegacyLeaseRunbookFailure(step)
+                ? "该任务的旧 runbook 缺少 lease 路径；为样本重新创建 plan 后再执行 live。"
+                : "等待当前 live job 完成；若确认没有任务运行，检查 runtime root 的 locks 目录权限后重试。";
+        }
+
+        if (step.StepId.Equals("elevation-check", StringComparison.OrdinalIgnoreCase))
+        {
+            return "以管理员身份重新启动承载进程后再执行 live 模式。";
+        }
+
+        return step.Success
+            ? "该步骤已完成；继续观察后续步骤或报告入口。"
+            : "该步骤失败；打开执行流程页查看 stdout/stderr，并保留 job 目录用于排障。";
+    }
+
+    private static bool IsLegacyLeaseRunbookFailure(SandboxRunbookStepExecutionResult step) =>
+        step.Message?.Contains("predates the live execution lease contract", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool IsCanceledStep(SandboxRunbookStepExecutionResult step)
+    {
+        return !step.Success &&
+            ((step.Message?.Contains("canceled", StringComparison.OrdinalIgnoreCase) ?? false) ||
+             (step.Message?.Contains("cancelled", StringComparison.OrdinalIgnoreCase) ?? false));
     }
 
     private IReadOnlyList<string> BuildOperatorHintsZh()
@@ -298,6 +425,10 @@ internal sealed record RunbookBackgroundExecutionSnapshot
         if (LatestStepSummary is not null)
         {
             hints.Add($"最新步骤：{LatestStepSummary.Ordinal} {LatestStepSummary.Title}（{LatestStepSummary.State}）。");
+            if (!string.IsNullOrWhiteSpace(LatestStepSummary.RemediationHintZh))
+            {
+                hints.Add(LatestStepSummary.RemediationHintZh);
+            }
         }
 
         if (GuestImportFailed)
@@ -330,6 +461,10 @@ internal sealed record RunbookBackgroundExecutionSnapshot
         else if (string.Equals(State, RunbookBackgroundExecutionStore.Failed, StringComparison.OrdinalIgnoreCase))
         {
             hints.Add("后台执行失败：不要重复提交；先打开进度页/执行流程页定位失败步骤。");
+        }
+        else if (string.Equals(State, RunbookBackgroundExecutionStore.Canceled, StringComparison.OrdinalIgnoreCase))
+        {
+            hints.Add("后台执行已取消：先确认尾部 cleanup 结果和 VM 状态，再决定是否重新提交。");
         }
         else if (IsBackgroundActive(State))
         {
