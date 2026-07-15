@@ -334,6 +334,19 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(defaultHtml, "<html lang=\"zh-CN\">", "Default rendered HTML should use the Simplified Chinese compatibility report.");
         RequireContains(defaultHtml, "href=\"report.zh.html\"", "Default rendered HTML should link to report.zh.html.");
         RequireContains(defaultHtml, "href=\"report.en.html\"", "Default rendered HTML should link to report.en.html.");
+        RequireContains(englishHtml, "Virtualization provider", "Rendered report covers should identify the selected provider.");
+        RequireContains(englishHtml, "Qemu", "Rendered report covers should show the persisted provider value.");
+        RequireContains(englishHtml, "Target VM", "Rendered report covers should identify the effective VM target.");
+        RequireContains(englishHtml, "contract-qemu", "Rendered report covers should show the effective VM target value.");
+        RequireContains(englishHtml, "Clean baseline", "Rendered report covers should identify the effective clean baseline.");
+        RequireContains(englishHtml, "per-job-overlay", "Rendered report covers should show QEMU overlay baseline semantics.");
+        RequireContains(englishHtml, "QEMU base disk", "Rendered QEMU report covers should identify the effective base disk.");
+        RequireContains(englishHtml, @"D:\VMs\contract.qcow2", "Rendered QEMU report covers should show the persisted base-disk path.");
+        RequireContains(englishHtml, "QEMU disk format", "Rendered QEMU report covers should identify the base-disk format.");
+        RequireContains(englishHtml, "qcow2", "Rendered QEMU report covers should show the persisted base-disk format.");
+        RequireContains(chineseHtml, "目标虚拟机", "Chinese report covers should localize the provider VM label.");
+        RequireContains(chineseHtml, "干净基线", "Chinese report covers should localize the provider baseline label.");
+        RequireContains(chineseHtml, "QEMU 基础磁盘", "Chinese report covers should localize the QEMU base-disk label.");
         RequireContains(englishHtml, "#43A0FF", "Rendered HTML should include the required bright-blue accent color.");
         RequireContainsNormalized(englishHtml, "max-height:75vh", "Rendered major sections should be bounded to around 75vh.");
         RequireContainsNormalized(englishHtml, "overflow:auto", "Rendered major sections should scroll overflowing evidence.");
@@ -799,6 +812,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         return new AnalysisReport
         {
             JobId = Guid.Parse("11111111-2222-3333-4444-555555555555"),
+            Provider = VirtualizationProvider.Qemu,
+            TargetVmName = "contract-qemu",
+            BaselineName = "per-job-overlay",
+            MachineDefinitionPath = @"D:\VMs\contract.qcow2",
+            QemuDiskFormat = "qcow2",
             GeneratedAt = timestamp,
             Status = AnalysisStatus.Failed,
             Sample = new SampleIdentity

@@ -38,10 +38,17 @@ internal sealed class JobPersistenceRecoveryScenario : ISmokeTestScenario
         var config = CreateConfig(runtimeRoot, context.RulesDirectory);
         var service = new SandboxJobService(config, new BehaviorRuleSet());
         var samplePath = WriteSample(runtimeRoot);
+        AssertQemuOverlayReportRebuildIdentity(runtimeRoot, context.RulesDirectory, samplePath);
 
         var fallbackJob = CreateImportedJob(service, samplePath);
         var earlyJob = service.Plan(CreateSubmission(samplePath));
         var hugeEventsJob = service.Plan(CreateSubmission(samplePath));
+        var canceledJob = service.Plan(CreateSubmission(samplePath));
+        PersistCanceledExecution(service, canceledJob);
+        SmokeAssert.True(
+            service.TryGetRunbookProgress(canceledJob.JobId, out var canceledProgress) &&
+            string.Equals(canceledProgress.State, SandboxRunbookProgressStates.Canceled, StringComparison.OrdinalIgnoreCase),
+            "Persisting a canceled execution should keep the durable progress state canceled.");
 
         SetPersistedCreatedAt(earlyJob, runtimeRoot, new DateTimeOffset(2024, 01, 01, 00, 00, 00, TimeSpan.Zero));
         SetPersistedCreatedAt(hugeEventsJob, runtimeRoot, new DateTimeOffset(2024, 01, 02, 00, 00, 00, TimeSpan.Zero));
@@ -54,6 +61,10 @@ internal sealed class JobPersistenceRecoveryScenario : ISmokeTestScenario
         var recoveredService = new SandboxJobService(config, new BehaviorRuleSet());
         var recoveredJobs = recoveredService.ListJobs();
         AssertRecoveredJobList(recoveredJobs, fallbackJob.JobId, earlyJob.JobId, hugeEventsJob.JobId);
+        SmokeAssert.True(
+            recoveredService.TryGetRunbookProgress(canceledJob.JobId, out var recoveredCanceledProgress) &&
+            string.Equals(recoveredCanceledProgress.State, SandboxRunbookProgressStates.Canceled, StringComparison.OrdinalIgnoreCase),
+            "Restart recovery should not rewrite a canceled runbook as failed.");
 
         var recoveredFallback = recoveredService.GetJob(fallbackJob.JobId);
         SmokeAssert.True(recoveredFallback is not null, "Job with corrupt compact sidecars should recover from report/runbook fallbacks.");
@@ -80,7 +91,7 @@ internal sealed class JobPersistenceRecoveryScenario : ISmokeTestScenario
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = "Job persistence recovery quarantines corrupt compact sidecars, preserves ListJobs order, and skips huge events.json live parsing."
+            Message = "Job persistence recovery preserves provider identity and creation time, quarantines corrupt compact sidecars, keeps ListJobs order, and skips huge events.json live parsing."
         });
     }
 
@@ -138,6 +149,123 @@ internal sealed class JobPersistenceRecoveryScenario : ISmokeTestScenario
 
         var eventsPath = WriteSmallEventsJson(GetJobRootFromReport(executed), executed.JobId);
         return service.ImportGuestEvents(executed.JobId, eventsPath);
+    }
+
+    private static void AssertQemuOverlayReportRebuildIdentity(
+        string runtimeRoot,
+        string rulesDirectory,
+        string samplePath)
+    {
+        var qemuRuntimeRoot = Path.Combine(runtimeRoot, "qemu-overlay-rebuild");
+        var qemuConfig = CreateConfig(qemuRuntimeRoot, rulesDirectory) with
+        {
+            Virtualization = new VirtualizationConfig { Provider = VirtualizationProvider.Qemu },
+            Qemu = new QemuConfig
+            {
+                VmName = "KSword-QEMU-Recovery",
+                DiskImagePath = Path.Combine(qemuRuntimeRoot, "base.qcow2"),
+                DiskFormat = "qcow2",
+                UseOverlayDisk = true
+            }
+        };
+        var service = new SandboxJobService(qemuConfig, new BehaviorRuleSet());
+        var planned = service.Plan(new SandboxSubmission
+        {
+            SamplePath = samplePath,
+            DisplayName = Path.GetFileName(samplePath),
+            DurationSeconds = 5,
+            DryRun = true,
+            Provider = VirtualizationProvider.Qemu
+        });
+        var runbook = planned.Runbook ?? throw new InvalidOperationException("QEMU plan should include a runbook.");
+        var executed = service.SaveRunbookExecutionResult(planned.JobId, new SandboxRunbookExecutionResult
+        {
+            JobId = planned.JobId,
+            Provider = runbook.Provider,
+            TargetVmName = runbook.TargetVmName,
+            BaselineName = runbook.BaselineName,
+            MachineDefinitionPath = runbook.MachineDefinitionPath,
+            QemuDiskFormat = runbook.QemuDiskFormat,
+            Mode = SandboxRunbookExecutionMode.DryRun,
+            Success = true,
+            TotalSteps = runbook.Steps.Count,
+            ExecutedSteps = 0,
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            Duration = TimeSpan.Zero,
+            RequiresElevation = false
+        });
+        var eventsPath = WriteSmallEventsJson(GetJobRootFromReport(executed), executed.JobId);
+        var rebuilt = service.ImportExternalRun(
+            executed.JobId,
+            new SandboxSubmission
+            {
+                SamplePath = samplePath,
+                DisplayName = Path.GetFileName(samplePath),
+                DurationSeconds = 5,
+                DryRun = false,
+                Provider = VirtualizationProvider.Qemu,
+                GoldenVmName = runbook.TargetVmName,
+                GoldenSnapshotName = runbook.BaselineName,
+                MachineDefinitionPath = runbook.MachineDefinitionPath,
+                QemuDiskFormat = runbook.QemuDiskFormat
+            },
+            eventsPath,
+            executed.RunbookExecutionResultPath);
+
+        SmokeAssert.True(
+            string.Equals(rebuilt.Runbook?.TargetVmName, runbook.TargetVmName, StringComparison.Ordinal),
+            "QEMU overlay report rebuild should not append the job id to an already effective target VM name.");
+        SmokeAssert.True(
+            rebuilt.CreatedAt == planned.CreatedAt,
+            "Offline report rebuild should preserve the historical job creation time.");
+        SmokeAssert.True(
+            string.Equals(rebuilt.Submission.GoldenVmName, planned.Submission.GoldenVmName, StringComparison.Ordinal),
+            "Offline report rebuild should preserve the original logical submission instead of replacing it with the effective overlay target.");
+        SmokeAssert.True(
+            string.Equals(rebuilt.Runbook?.MachineDefinitionPath, runbook.MachineDefinitionPath, StringComparison.OrdinalIgnoreCase),
+            "QEMU overlay report rebuild should preserve the persisted base disk identity.");
+    }
+
+    private static void PersistCanceledExecution(SandboxJobService service, AnalysisJob job)
+    {
+        var runbook = job.Runbook ?? throw new InvalidOperationException("Planned job should include a runbook.");
+        var canceledStep = runbook.Steps.First();
+        var startedAt = DateTimeOffset.UtcNow;
+        service.SaveRunbookExecutionResult(job.JobId, new SandboxRunbookExecutionResult
+        {
+            JobId = job.JobId,
+            Provider = runbook.Provider,
+            TargetVmName = runbook.TargetVmName,
+            BaselineName = runbook.BaselineName,
+            MachineDefinitionPath = runbook.MachineDefinitionPath,
+            QemuDiskFormat = runbook.QemuDiskFormat,
+            Mode = SandboxRunbookExecutionMode.Live,
+            Success = false,
+            TotalSteps = runbook.Steps.Count,
+            ExecutedSteps = 0,
+            FailedStepIndex = 0,
+            StartedAtUtc = startedAt,
+            Duration = TimeSpan.Zero,
+            RequiresElevation = runbook.Steps.Any(step => step.RequiresElevation),
+            StepResults =
+            [
+                new SandboxRunbookStepExecutionResult
+                {
+                    StepIndex = 0,
+                    StepId = canceledStep.Id,
+                    Title = canceledStep.Title,
+                    PowerShell = canceledStep.PowerShell,
+                    Skipped = false,
+                    Success = false,
+                    StartedAtUtc = startedAt,
+                    Duration = TimeSpan.Zero,
+                    RequiresElevation = canceledStep.RequiresElevation,
+                    MutatesVmState = canceledStep.MutatesVmState,
+                    Message = "Runbook execution was canceled before this step started."
+                }
+            ],
+            Message = "Live runbook execution was canceled at step 1."
+        });
     }
 
     private static void SetPersistedCreatedAt(AnalysisJob job, string runtimeRoot, DateTimeOffset createdAt)

@@ -5,7 +5,7 @@ namespace KSword.Sandbox.SmokeTests.Scenarios;
 
 /// <summary>
 /// Verifies the release-wrapper contract for the install/run path without
-/// executing Hyper-V or starting the WebUI. Inputs are repository scripts/docs;
+/// executing a provider or starting the WebUI. Inputs are repository scripts/docs;
 /// processing performs static checks; the scenario returns pass/fail metadata.
 /// </summary>
 internal sealed class InstallRunPackagingContractScenario : ISmokeTestScenario
@@ -20,16 +20,19 @@ internal sealed class InstallRunPackagingContractScenario : ISmokeTestScenario
         var runScriptPath = Path.Combine(context.RepositoryRoot, "run.ps1");
         var installDocPath = Path.Combine(context.RepositoryRoot, "docs", "install.md");
         var readmePath = Path.Combine(context.RepositoryRoot, "README.md");
+        var runtimeManifestPath = Path.Combine(context.RepositoryRoot, "packaging", "runtime-package.manifest.json");
 
         SmokeAssert.True(File.Exists(installScriptPath), "install.ps1 is missing.");
         SmokeAssert.True(File.Exists(runScriptPath), "run.ps1 is missing.");
         SmokeAssert.True(File.Exists(installDocPath), "docs/install.md is missing.");
         SmokeAssert.True(File.Exists(readmePath), "README.md is missing.");
+        SmokeAssert.True(File.Exists(runtimeManifestPath), "Runtime package manifest is missing.");
 
         var installScript = File.ReadAllText(installScriptPath);
         var runScript = File.ReadAllText(runScriptPath);
         var installDoc = File.ReadAllText(installDocPath);
         var readme = File.ReadAllText(readmePath);
+        var runtimeManifest = File.ReadAllText(runtimeManifestPath);
 
         RequireNotContains(installScript, "CSignTool", "install.ps1 must not call or reference CSignTool.");
         RequireNotContains(installScript, "Sign-SandboxDriverWithKswordCSignTool", "install.ps1 must not call the legacy KSword signing wrapper.");
@@ -46,7 +49,7 @@ internal sealed class InstallRunPackagingContractScenario : ISmokeTestScenario
         RequireContains(runScript, "R0CollectorPayloadExists", "run.ps1 status should show collector payload readiness.");
         RequireContains(runScript, "GuestPasswordGuidance", "run.ps1 status should guide operators to configure the guest password.");
         RequireContains(runScript, "RecommendedActions", "run.ps1 status should provide human-readable repair suggestions.");
-        RequireContains(runScript, "Hyper-V live prerequisites", "run.ps1 should print live prerequisite guidance at WebUI startup.");
+        RequireContains(runScript, "Provider live prerequisites", "run.ps1 should print selected-provider live prerequisite guidance at WebUI startup.");
 
         RequireContains(installDoc, ".\\run.ps1", "Install docs should show the post-install WebUI command.");
         RequireContains(installDoc, ".\\install.ps1 -Mode CheckEnvironment", "Install docs should show the environment-check command.");
@@ -62,6 +65,13 @@ internal sealed class InstallRunPackagingContractScenario : ISmokeTestScenario
         RequireContains(readme, "Guest Agent/R0Collector payload", "README should explain payload preparation in the wrapper path.");
         RequireContains(readme, "RequirePayloadForWebUI", "README should document strict WebUI payload preparation.");
         RequireContains(readme, "不调用 `CSignTool.exe`", "README should preserve the no-CSignTool install/run boundary.");
+
+        RequireContains(runtimeManifest, "docs/vmware-qemu.md", "Runtime packages should include the provider operations guide.");
+        RequireContains(runtimeManifest, "scripts/Invoke-WebUIApiE2E.ps1", "Runtime packages should include the three-provider Web API parity evidence helper.");
+        RequireContains(runtimeManifest, "scripts/Test-ProviderParityEvidence.ps1", "Runtime packages should include the read-only aggregate provider parity validator.");
+        RequireContains(runtimeManifest, "scripts/Set-GuestTestSigning.ps1", "Runtime packages should include the shared provider guest test-signing helper.");
+        RequireContains(runtimeManifest, "scripts/Reset-RemoteGuestPassword.ps1", "Runtime packages should include provider WinRM password rotation.");
+        RequireContains(runtimeManifest, "scripts/Inject-OfflineGuestPasswordService.ps1", "Runtime packages should include provider-neutral offline VHDX password injection.");
 
         return Task.FromResult(new SmokeTestResult
         {
