@@ -23,53 +23,53 @@ internal static class RulesEditorPage
           <meta name="viewport" content="width=device-width,initial-scale=1">
           <title>规则编辑器 / Rule editor - KSword Sandbox</title>
           <style>
-            :root { --ink:#111827; --muted:#5b6472; --line:#c8d1dc; --soft:#f5f7fa; --blue:#1f5f8b; --danger:#a32626; --ok:#176b45; }
+            :root { --page:#f7f8fa; --surface:#fff; --subtle:#f1f3f5; --ink:#151515; --muted:#6b7280; --line:#e5e7eb; --accent:#1f78ff; --accent-soft:#e5f0ff; --success:#16704a; --warn:#946200; --danger:#a32020; color-scheme:light; }
             * { box-sizing:border-box; }
-            body { background:#eef1f4; color:var(--ink); font-family:"Microsoft YaHei UI",Segoe UI,Arial,sans-serif; margin:0; }
-            header { background:#1b2938; border-bottom:4px solid #2b709d; color:#fff; padding:22px clamp(18px,4vw,48px); }
-            header .head { align-items:flex-start; display:flex; gap:18px; justify-content:space-between; }
-            main { margin:24px auto 56px; max-width:1280px; padding:0 18px; }
-            section, .rule-card { background:#fff; border:1px solid var(--line); border-radius:0; box-shadow:none; }
-            section { margin-bottom:18px; padding:18px; }
-            h1,h2,h3 { margin:0 0 8px; }
-            h1 { font-size:clamp(22px,3vw,32px); }
-            h2 { font-size:19px; }
-            h3 { color:#173a55; font-size:17px; }
-            p { line-height:1.5; }
+            body { background:var(--page); color:var(--ink); font-family:"Microsoft YaHei UI","Segoe UI",Arial,sans-serif; font-size:14px; line-height:1.55; margin:0; }
+            header { background:var(--surface); border-bottom:1px solid var(--line); padding:28px max(20px,calc((100% - 1180px)/2)); }
+            header .head { align-items:flex-start; display:flex; gap:20px; justify-content:space-between; }
+            main { margin:0 auto; max-width:1180px; padding:24px 20px 64px; }
+            h1,h2,h3 { color:var(--ink); line-height:1.25; margin:0 0 8px; }
+            h1 { font-size:clamp(25px,3vw,36px); font-weight:500; letter-spacing:-.02em; }
+            h2 { font-size:21px; font-weight:550; }
+            h3 { font-size:17px; font-weight:600; }
+            p { margin:8px 0; }
             .muted { color:var(--muted); }
             .small { font-size:12px; }
-            .toolbar, .actions { align-items:center; display:flex; flex-wrap:wrap; gap:8px; }
-            button, a.button { background:var(--blue); border:1px solid var(--blue); border-radius:0; color:white; cursor:pointer; display:inline-block; font:inherit; font-weight:700; padding:9px 13px; text-decoration:none; }
-            button:hover, a.button:hover { filter:brightness(1.1); }
-            button.secondary, a.secondary { background:#5c6773; border-color:#5c6773; }
+            section { background:var(--surface); border:1px solid var(--line); margin:0 0 18px; padding:20px; }
+            .toolbar,.actions { align-items:center; display:flex; flex-wrap:wrap; gap:8px; }
+            button,a.button { align-items:center; background:var(--accent); border:1px solid var(--accent); color:#fff; cursor:pointer; display:inline-flex; font:inherit; font-weight:600; justify-content:center; line-height:1.25; padding:9px 13px; text-decoration:none; }
+            button:hover,a.button:hover { background:#155fc9; border-color:#155fc9; }
+            button.secondary,a.secondary { background:var(--surface); border-color:#cbd5e1; color:var(--ink); }
+            button.secondary:hover,a.secondary:hover { background:var(--subtle); border-color:#9ca3af; }
             button.danger { background:var(--danger); border-color:var(--danger); }
-            button.ghost { background:#fff; border-color:var(--line); color:var(--ink); }
+            button.ghost { background:var(--surface); border-color:#cbd5e1; color:var(--ink); }
             button:disabled { cursor:wait; opacity:.6; }
-            .path { background:var(--soft); border:1px solid var(--line); font-family:Consolas,monospace; margin:10px 0 0; overflow-wrap:anywhere; padding:8px; }
-            .status { border-left:4px solid var(--line); margin:12px 0 0; min-height:24px; padding:8px 10px; }
-            .status.ok { border-color:var(--ok); color:var(--ok); }
-            .status.error { border-color:var(--danger); color:var(--danger); }
-            .status.warn { border-color:#9a6500; color:#7c4d00; }
+            button:focus-visible,a:focus-visible,input:focus,textarea:focus,select:focus { border-color:var(--accent); outline:2px solid #b8d6ff; outline-offset:1px; }
+            .path { background:var(--subtle); border:1px solid var(--line); font-family:Consolas,"JetBrains Mono",monospace; margin:12px 0 0; overflow-wrap:anywhere; padding:9px 10px; }
+            .status { border-left:3px solid var(--line); margin-top:12px; min-height:24px; padding:9px 10px; }
+            .status.ok { background:#eefbf4; border-color:var(--success); color:var(--success); }
+            .status.error { background:#fff1f1; border-color:var(--danger); color:var(--danger); }
+            .status.warn { background:#fff8e8; border-color:var(--warn); color:var(--warn); }
             .rules { display:grid; gap:16px; }
-            .rule-card { padding:16px; }
-            .rule-head { align-items:flex-start; border-bottom:1px solid var(--line); display:flex; gap:10px; justify-content:space-between; margin-bottom:10px; padding-bottom:9px; }
-            .rule-index { color:var(--muted); font-size:12px; font-weight:700; }
-            .grid { display:grid; gap:11px 14px; grid-template-columns:repeat(4,minmax(0,1fr)); }
+            .rule-card { background:var(--surface); border:1px solid var(--line); padding:18px; }
+            .rule-head { align-items:flex-start; border-bottom:1px solid var(--line); display:flex; gap:12px; justify-content:space-between; margin-bottom:14px; padding-bottom:10px; }
+            .rule-index { color:var(--muted); font-size:12px; font-weight:600; }
+            .grid { display:grid; gap:14px; grid-template-columns:repeat(4,minmax(0,1fr)); }
             .wide { grid-column:span 2; }
             .full { grid-column:1/-1; }
-            label { display:block; font-size:13px; font-weight:700; margin-bottom:5px; }
-            input, textarea, select { background:#fff; border:1px solid #aebbc8; border-radius:0; color:var(--ink); font:inherit; padding:8px 9px; width:100%; }
-            textarea { min-height:72px; resize:vertical; }
-            textarea.long { min-height:98px; }
-            input:focus, textarea:focus, select:focus { border-color:#2b709d; outline:2px solid #c6e2f5; }
-            .field-help { color:var(--muted); font-size:11px; margin-top:3px; }
+            label { display:block; font-size:13px; font-weight:600; margin-bottom:5px; }
+            input,textarea,select { background:var(--surface); border:1px solid #cbd5e1; color:var(--ink); font:inherit; padding:9px 10px; width:100%; }
+            textarea { min-height:76px; resize:vertical; }
+            textarea.long { min-height:102px; }
+            .field-help { color:var(--muted); font-size:11px; margin-top:4px; }
             .check { align-items:center; display:flex; gap:8px; min-height:38px; }
             .check input { width:auto; }
             .empty { border:1px dashed var(--line); color:var(--muted); padding:22px; text-align:center; }
             .import-label { cursor:pointer; }
             #importFile { display:none; }
-            @media (max-width:900px) { .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .wide { grid-column:span 2; } }
-            @media (max-width:560px) { .grid { grid-template-columns:1fr; } .wide { grid-column:auto; } .rule-head { display:block; } .rule-head .actions { margin-top:8px; } }
+            @media(max-width:900px) { .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .wide { grid-column:span 2; } }
+            @media(max-width:560px) { header { padding-left:14px; padding-right:14px; } header .head { flex-direction:column; } main { padding-left:14px; padding-right:14px; } section,.rule-card { padding:16px; } .grid { grid-template-columns:1fr; } .wide { grid-column:auto; } .rule-head { display:block; } .rule-head .actions { margin-top:8px; } }
           </style>
         </head>
         <body>
@@ -193,4 +193,3 @@ internal static class RulesEditorPage
         """;
     }
 }
-

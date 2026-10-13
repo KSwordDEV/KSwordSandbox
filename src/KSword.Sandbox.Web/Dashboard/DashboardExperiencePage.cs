@@ -22,8 +22,8 @@ internal static class DashboardExperiencePage
           <style>
             :root { --blue:#43A0FF; --blue-dark:#0B6FCC; --ink:#0f172a; --muted:#64748b; --line:#dbeafe; --soft:#eef7ff; color-scheme: light; }
             * { box-sizing: border-box; }
-            body { font-family: "Microsoft YaHei UI", Segoe UI, Arial, sans-serif; margin: 0; color: var(--ink); background: radial-gradient(circle at 8% 4%,rgba(67,160,255,.20),transparent 27%),linear-gradient(180deg,#f4f9ff,#f8fafc); }
-            header { padding: 28px 36px; color: white; background: radial-gradient(circle at 85% 10%,rgba(67,160,255,.55),transparent 32%),linear-gradient(135deg,#08111f,#123d66 62%,#0d5fa8); }
+            body { font-family: "Microsoft YaHei UI", Segoe UI, Arial, sans-serif; margin: 0; color: var(--ink); background:#f7f8fa; }
+            header { padding: 28px 36px; color: white; background:#fff; }
             .header-row { align-items: flex-start; display: flex; gap: 18px; justify-content: space-between; }
             .lang-toggle { background: rgba(255,255,255,.22); border: 2px solid rgba(255,255,255,.72); box-shadow:none; letter-spacing: .02em; white-space: nowrap; }
             .lang-toggle:hover { background: rgba(255,255,255,.32); }
@@ -75,7 +75,7 @@ internal static class DashboardExperiencePage
             .pill { background: #e7f3ff; border:1px solid rgba(67,160,255,.35); border-radius:2px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
             .pill.ready { background:#dcfce7; border-color:#86efac; color:#166534; }
             .pill.warn { background:#fff7ed; border-color:#fdba74; color:#9a3412; }
-            .operator-hero { background:linear-gradient(135deg,#f8fbff,#eef7ff); border-left:4px solid var(--blue); }
+            .operator-hero { background:#fff; border-left:4px solid var(--blue); }
             .operator-hero h2 { margin-top:0; }
             .operator-hero-grid { display:grid; gap:12px; grid-template-columns:1.15fr .85fr; margin-top:14px; }
             .operator-brief { background:white; border:1px solid var(--line); padding:14px; }
@@ -99,7 +99,7 @@ internal static class DashboardExperiencePage
             .selected-sample.empty { border-style:dashed; color:var(--muted); }
             .preset-row { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
             .preset-row button { background:#e7f3ff; border:1px solid rgba(67,160,255,.45); color:#075985; margin-top:0; padding:8px 10px; }
-            .primary-cta { align-items:center; background:linear-gradient(90deg,var(--blue-dark),var(--blue)); display:inline-flex; font-size:16px; gap:8px; justify-content:center; min-height:46px; min-width:320px; }
+            .primary-cta { align-items:center; background:var(--blue); display:inline-flex; font-size:16px; gap:8px; justify-content:center; min-height:46px; min-width:320px; }
             .primary-cta::before { content:"▶"; font-size:13px; }
             .primary-cta:disabled::before { content:"…"; }
             .microcopy { color:#475569; font-size:13px; line-height:1.5; margin:8px 0 0; }
@@ -145,15 +145,15 @@ internal static class DashboardExperiencePage
             .progress-head { align-items:center; display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; margin-bottom:8px; }
             .progress-meta { color:#075985; font-size:12px; font-weight:800; }
             .progress-bar { background:#dbeafe; border-radius:2px; height:12px; overflow:hidden; }
-            .progress-fill { background:linear-gradient(90deg,var(--blue),#7dd3fc); height:100%; width:0%; transition:width .25s ease; }
-            .progress-fill.failed { background:linear-gradient(90deg,#f97316,#ef4444); }
+            .progress-fill { background:var(--blue); transition:none; height:100%; width:0%; }
+            .progress-fill.failed { background:#dc6b3f; }
             .progress-facts { display:grid; gap:10px; grid-template-columns:repeat(3,minmax(0,1fr)); margin-top:10px; }
             .progress-facts .metric { margin-top:0; }
             .stages { display:grid; gap:8px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:12px; }
             .stage { background:white; border:1px solid #e5edf6; border-radius:2px; color:#64748b; padding:9px; }
             .stage small { color:#94a3b8; display:block; font-size:11px; margin-top:2px; }
             .stage.active { border-color:var(--blue); box-shadow:none; color:#075985; font-weight:800; position:relative; }
-            .stage.active::after { animation:pulse 1.2s ease-in-out infinite; background:var(--blue); border-radius:2px; content:""; height:8px; position:absolute; right:10px; top:10px; width:8px; }
+            .stage.active::after { background:var(--blue); border-radius:2px; content:""; height:8px; position:absolute; right:10px; top:10px; width:8px; }
             .stage.done { background:#ecfdf5; border-color:#bbf7d0; color:#047857; }
             .stage.failed { background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:800; }
             .recent-job-list { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); margin-top:14px; }
@@ -193,7 +193,38 @@ internal static class DashboardExperiencePage
             .pill, button, a.button, a.buttonlink { box-shadow: none !important; }
             @media (max-width: 980px) { .grid,.vm-grid,.job-summary,.stages,.progress-facts,.operator-hero-grid,.operator-flow { grid-template-columns: 1fr; } header { padding:24px; } .primary-cta { min-width:0; width:100%; } .local-detection-bar { align-items:stretch; flex-direction:column; } .local-detection-bar button { width:100%; } }
           </style>
-        </head>
+          <style>
+            :root { --blue:#1f78ff; --blue-dark:#155fc9; --ink:#151515; --muted:#6b7280; --line:#e5e7eb; --soft:#f1f3f5; }
+            body { background:#f7f8fa; color:var(--ink); font-family:"Microsoft YaHei UI","Segoe UI",Arial,sans-serif; font-size:14px; line-height:1.55; }
+            header { background:#fff; border-bottom:1px solid var(--line); color:var(--ink); padding:28px max(20px,calc((100% - 1180px)/2)); }
+            main { max-width:1180px; margin:0 auto; padding:24px 20px 64px; }
+            h1,h2,h3,h4 { color:var(--ink); line-height:1.25; } h1 { font-weight:500; letter-spacing:-.02em; } h2 { font-weight:550; }
+            section { background:#fff; border:1px solid var(--line); margin-bottom:18px; padding:22px; box-shadow:none; }
+            .topnav,.workspace-tabs,.tabs,.button-row,.actions,.preset-row,.readiness-strip,.recent-job-meta { gap:8px; }
+            .topnav a { border:1px solid var(--line); color:var(--muted); } .topnav a:hover { border-color:var(--blue); color:var(--blue); }
+            button,.buttonlink { background:var(--blue); border:1px solid var(--blue); font-weight:600; } button:hover,.buttonlink:hover { background:var(--blue-dark); border-color:var(--blue-dark); }
+            button.secondary,.buttonlink.secondary { background:#fff; border-color:#cbd5e1; color:var(--ink); } button.secondary:hover,.buttonlink.secondary:hover { background:var(--soft); }
+            .lang-toggle { background:#fff; border-color:#cbd5e1; color:var(--ink); }
+            input,select,textarea { border-color:#cbd5e1; } input:focus,select:focus,textarea:focus,button:focus-visible,a:focus-visible { border-color:var(--blue); outline:2px solid #b8d6ff; }
+            .hint,.field-hint,.microcopy { color:var(--muted); font-size:13px; }
+            .operator-hero { background:#fff; border-left:3px solid var(--blue); } .operator-hero-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+            .operator-brief,.operator-step,.config-card,.toggle-card,.upload-card,.selected-sample,.pathbox,.callout,.report-entry,.report-notice,.progress-box,.metric,.stage,.recent-job-card,.runbook-step,.mini-form,.tab-panel,.empty { box-shadow:none; border-color:var(--line); }
+            .operator-step { background:#fff; border-top:2px solid var(--blue); } .upload-card,.job-card { border-left-color:var(--blue); }
+            .workspace-tab,.tab-button { background:#fff; border-color:#cbd5e1; color:var(--muted); } .workspace-tab.active,.tab-button.active { background:var(--blue); border-color:var(--blue); color:#fff; }
+            .tab-panel,details.vm-config { background:var(--soft); border-color:var(--line); }
+            .upload-dropzone { background:var(--soft); border-color:#9ca3af; } .upload-dropzone.dragging { background:#e5f0ff; border-color:var(--blue); }
+            .preset-row button { background:#fff; border-color:#b8d6ff; color:#1559ad; }
+            .primary-cta { background:var(--blue); background-image:none; min-width:290px; } .primary-cta:hover { background:var(--blue-dark); }
+            .local-detection-bar { background:#e5f0ff; border-color:#b8d6ff; } .local-detection-bar.warn { background:#fff8e8; } .local-detection-bar.error { background:#fff1f1; }
+            .job-summary { grid-template-columns:repeat(4,minmax(0,1fr)); } .metric { border-top:2px solid var(--blue); background:#fff; }
+            .progress-box { border-left:3px solid var(--blue); background:#fff; } .progress-fill { background:var(--blue); background-image:none; transition:none; }
+            .stage,.runbook-step { background:#fff; border-left:3px solid #d1d5db; } .stage.active,.runbook-step.running { border-left-color:var(--blue); box-shadow:none; }
+            .recent-job-card { background:#fff; border-left:3px solid var(--blue); }
+            .report-notice { background:#eefbf4; border-color:#a9e3c3; } .countdown { background:#fff8e8; border-color:#efcf8b; }
+            code,pre { background:var(--soft); font-family:Consolas,"JetBrains Mono",monospace; }
+            @media(max-width:980px) { .grid,.vm-grid,.job-summary,.stages,.progress-facts,.operator-hero-grid,.operator-flow { grid-template-columns:1fr; } .header-row { flex-direction:column; } .primary-cta { min-width:0; width:100%; } }
+            @media(max-width:560px) { main { padding-left:14px; padding-right:14px; } header { padding-left:14px; padding-right:14px; } section { padding:16px; } }
+          </style>        </head>
         <body>
           <header>
             <div class="header-row">

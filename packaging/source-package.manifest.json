@@ -276,6 +276,7 @@
     "README.md",
     "install.ps1",
     "run.ps1",
+    "Start-KSwordSandbox.cmd",
     "config/**",
     "docs/**",
     "driver/**",

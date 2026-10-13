@@ -19,8 +19,14 @@ var repositoryRoot = ResolveRepositoryRoot(builder.Environment.ContentRootPath);
 var configPath = builder.Configuration["Sandbox:ConfigPath"] ?? Path.Combine("config", "sandbox.example.json");
 var config = SandboxConfigLoader.Load(configPath, repositoryRoot);
 var resolvedConfigPath = Path.GetFullPath(configPath, repositoryRoot);
+var configuredRuntimeRoot = Path.GetFullPath(config.Paths.RuntimeRoot, repositoryRoot);
+var configuredRuntimeDrive = Path.GetPathRoot(configuredRuntimeRoot);
+if (string.IsNullOrWhiteSpace(configuredRuntimeDrive) || !Directory.Exists(configuredRuntimeDrive))
+{
+    configuredRuntimeRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KSwordSandbox");
+}
 var profilePath = string.Equals(Path.GetFileName(resolvedConfigPath), "sandbox.example.json", StringComparison.OrdinalIgnoreCase)
-    ? Path.Combine(Path.GetFullPath(config.Paths.RuntimeRoot, repositoryRoot), "config", "sandbox.local.json")
+    ? Path.Combine(configuredRuntimeRoot, "config", "sandbox.local.json")
     : resolvedConfigPath;
 var rulesPath = Path.IsPathRooted(config.Paths.RulesDirectory)
     ? Path.Combine(config.Paths.RulesDirectory, "behavior-rules.json")
@@ -107,6 +113,19 @@ app.MapPost("/api/setup/profile", (BackendProfileUpdateRequest request, SandboxC
     try
     {
         return Results.Ok(profiles.Save(currentConfig, request));
+    }
+    catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException or IOException or UnauthorizedAccessException or InvalidOperationException)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+app.MapPost("/api/setup/preview", async Task<IResult> (BackendProfileUpdateRequest request, SandboxConfig currentConfig, BackendProfileStore profiles, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var previewConfig = profiles.BuildUpdatedConfig(currentConfig, request);
+        var readiness = await new LocalHostReadinessProbe(previewConfig).ProbeAsync(true, request.Provider, cancellationToken);
+        return Results.Ok(new { readiness, profile = new { request.Provider, request.VmName, request.VmxPath, request.SnapshotName, request.VmrunPath } });
     }
     catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException or IOException or UnauthorizedAccessException or InvalidOperationException)
     {

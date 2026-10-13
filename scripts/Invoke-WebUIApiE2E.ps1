@@ -580,7 +580,7 @@ try {
     $effectiveTargetVmName = [string]$job.runbook.targetVmName
     $effectiveBaselineName = [string]$job.runbook.baselineName
     $effectiveMachineDefinitionPath = [string]$job.runbook.machineDefinitionPath
-    $effectiveQemuDiskFormat = [string]$job.runbook.qemuDiskFormat
+    $effectiveQemuDiskFormat = if ($null -ne $job.runbook.PSObject.Properties['qemuDiskFormat']) { [string]$job.runbook.qemuDiskFormat } else { '' }
     Assert-E2ECondition -Condition (-not [string]::IsNullOrWhiteSpace($effectiveProvider)) -Message 'Planned runbook did not expose provider identity.'
     if (-not [string]::IsNullOrWhiteSpace($Provider)) {
         Assert-E2ECondition -Condition ($effectiveProvider -eq $Provider) -Message "Planned provider '$effectiveProvider' does not match requested provider '$Provider'."
@@ -624,7 +624,8 @@ try {
         Assert-E2ECondition -Condition ([string]$updatedJob.runbook.targetVmName -eq $effectiveTargetVmName) -Message "Background terminal VM '$($updatedJob.runbook.targetVmName)' does not match planned VM '$effectiveTargetVmName'."
         Assert-E2ECondition -Condition ([string]$updatedJob.runbook.baselineName -eq $effectiveBaselineName) -Message "Background terminal baseline '$($updatedJob.runbook.baselineName)' does not match planned baseline '$effectiveBaselineName'."
         Assert-E2ECondition -Condition ([string]$updatedJob.runbook.machineDefinitionPath -eq $effectiveMachineDefinitionPath) -Message 'Background terminal VMX/base-disk identity does not match the planned runbook.'
-        Assert-E2ECondition -Condition ([string]$updatedJob.runbook.qemuDiskFormat -eq $effectiveQemuDiskFormat) -Message 'Background terminal QEMU disk format does not match the planned runbook.'
+        $updatedQemuDiskFormat = if ($null -ne $updatedJob.runbook.PSObject.Properties['qemuDiskFormat']) { [string]$updatedJob.runbook.qemuDiskFormat } else { '' }
+        Assert-E2ECondition -Condition ($updatedQemuDiskFormat -eq $effectiveQemuDiskFormat) -Message 'Background terminal QEMU disk format does not match the planned runbook.'
         $executionPath = [string]$updatedJob.runbookExecutionResultPath
         Assert-E2ECondition -Condition (-not [string]::IsNullOrWhiteSpace($executionPath)) -Message 'Background terminal job is missing runbookExecutionResultPath.'
         Assert-E2ECondition -Condition (Test-Path -LiteralPath $executionPath -PathType Leaf) -Message "runbook-execution.json was not written: $executionPath"
@@ -683,7 +684,8 @@ try {
     Assert-E2ECondition -Condition ([string]$report.targetVmName -eq $effectiveTargetVmName) -Message "Report VM '$($report.targetVmName)' does not match execution VM '$effectiveTargetVmName'."
     Assert-E2ECondition -Condition ([string]$report.baselineName -eq $effectiveBaselineName) -Message "Report baseline '$($report.baselineName)' does not match planned baseline '$effectiveBaselineName'."
     Assert-E2ECondition -Condition ([string]$report.machineDefinitionPath -eq $effectiveMachineDefinitionPath) -Message 'Report VMX/base-disk identity does not match the planned runbook.'
-    Assert-E2ECondition -Condition ([string]$report.qemuDiskFormat -eq $effectiveQemuDiskFormat) -Message 'Report QEMU disk format does not match the planned runbook.'
+    $reportQemuDiskFormat = if ($null -ne $report.PSObject.Properties['qemuDiskFormat']) { [string]$report.qemuDiskFormat } else { '' }
+    Assert-E2ECondition -Condition ($reportQemuDiskFormat -eq $effectiveQemuDiskFormat) -Message 'Report QEMU disk format does not match the planned runbook.'
     Assert-E2ECondition -Condition ([string]$report.sample.sha256 -ceq $sampleSha256) -Message 'Report sample SHA-256 does not match the bytes hashed before planning.'
     Assert-E2ECondition -Condition ([long]$report.sample.sizeBytes -eq [long]$sampleFile.Length) -Message 'Report sample size does not match the file inspected before planning.'
     $sampleAfterExecution = Get-Item -LiteralPath $resolvedSamplePath -ErrorAction Stop

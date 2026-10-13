@@ -39,6 +39,7 @@ public sealed record SandboxConfig
 
     public HyperVConfig HyperV { get; init; } = new();
 
+    [JsonPropertyName("vmware")]
     public VMwareConfig VMware { get; init; } = new();
 
     public QemuConfig Qemu { get; init; } = new();

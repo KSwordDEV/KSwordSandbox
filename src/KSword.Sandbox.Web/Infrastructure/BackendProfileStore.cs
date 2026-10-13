@@ -40,7 +40,50 @@ internal sealed class BackendProfileStore
         ArgumentNullException.ThrowIfNull(request);
         Validate(request);
 
-        var updated = current with
+        var updated = BuildUpdatedConfig(current, request);
+
+        var directory = Path.GetDirectoryName(configPath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            throw new InvalidOperationException("The local config path has no parent directory.");
+        }
+
+        lock (gate)
+        {
+            Directory.CreateDirectory(directory);
+            var temporaryPath = configPath + ".tmp";
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(updated, JsonOptions));
+            if (File.Exists(configPath))
+            {
+                File.Replace(temporaryPath, configPath, null);
+            }
+            else
+            {
+                File.Move(temporaryPath, configPath);
+            }
+        }
+
+        return new BackendProfileResponse(configPath, true, updated, RestartRequired: true);
+    }
+
+    public SandboxConfig BuildUpdatedConfig(SandboxConfig current, BackendProfileUpdateRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(request);
+        Validate(request);
+
+        var runtimeRoot = current.Paths.RuntimeRoot;
+        var runtimeDrive = Path.GetPathRoot(runtimeRoot);
+        if (string.IsNullOrWhiteSpace(runtimeDrive) || !Directory.Exists(runtimeDrive))
+        {
+            runtimeRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KSwordSandbox");
+        }
+
+        var payloadRoot = string.Equals(runtimeRoot, current.Paths.RuntimeRoot, StringComparison.OrdinalIgnoreCase)
+            ? current.Paths.GuestPayloadRoot
+            : Path.Combine(runtimeRoot, "payload", "guest-tools");
+
+        return current with
         {
             Virtualization = current.Virtualization with { Provider = request.Provider },
             VMware = current.VMware with
@@ -66,31 +109,13 @@ internal sealed class BackendProfileStore
                 PowerShellRemotingUseSsl = request.UseSsl,
                 PowerShellRemotingPort = request.Port,
                 PowerShellRemotingSkipCertificateChecks = request.SkipCertificateChecks
+            },
+            Paths = current.Paths with
+            {
+                RuntimeRoot = runtimeRoot,
+                GuestPayloadRoot = payloadRoot
             }
         };
-
-        var directory = Path.GetDirectoryName(configPath);
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            throw new InvalidOperationException("The local config path has no parent directory.");
-        }
-
-        lock (gate)
-        {
-            Directory.CreateDirectory(directory);
-            var temporaryPath = configPath + ".tmp";
-            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(updated, JsonOptions));
-            if (File.Exists(configPath))
-            {
-                File.Replace(temporaryPath, configPath, null);
-            }
-            else
-            {
-                File.Move(temporaryPath, configPath);
-            }
-        }
-
-        return new BackendProfileResponse(configPath, true, updated, RestartRequired: true);
     }
 
     private static void Validate(BackendProfileUpdateRequest request)

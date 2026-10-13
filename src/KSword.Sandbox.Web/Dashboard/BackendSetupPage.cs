@@ -32,47 +32,48 @@ internal static class BackendSetupPage
           <meta name="viewport" content="width=device-width,initial-scale=1">
           <title>后端设置 · KSword Sandbox</title>
           <style>
-            :root { --ink:#17212b; --muted:#5c6975; --line:#cbd5df; --blue:#0b5cad; --blue-dark:#083b70; --paper:#f5f7f9; --ok:#116b4b; --warn:#8a5a00; --bad:#9b2c2c; color-scheme:light; }
+            :root { --page:#f7f8fa; --surface:#fff; --subtle:#f1f3f5; --ink:#151515; --muted:#6b7280; --line:#e5e7eb; --accent:#1f78ff; --accent-soft:#e5f0ff; --success:#16704a; --warn:#946200; --danger:#a32020; color-scheme:light; }
             * { box-sizing:border-box; }
-            body { margin:0; color:var(--ink); background:var(--paper); font-family:"Microsoft YaHei UI", "Segoe UI", Arial, sans-serif; }
-            header { color:#fff; background:var(--blue-dark); border-bottom:4px solid var(--blue); padding:28px max(20px,calc((100% - 1080px)/2)); }
-            main { max-width:1080px; margin:24px auto 64px; padding:0 20px; }
-            h1,h2,h3 { line-height:1.2; margin-top:0; }
-            h1 { font-size:28px; letter-spacing:.02em; }
-            h2 { font-size:20px; }
-            p { line-height:1.55; }
+            body { margin:0; color:var(--ink); background:var(--page); font-family:"Microsoft YaHei UI","Segoe UI",Arial,sans-serif; font-size:14px; line-height:1.55; }
+            header { background:var(--surface); border-bottom:1px solid var(--line); padding:30px max(20px,calc((100% - 1080px)/2)); }
+            main { max-width:1080px; margin:0 auto; padding:24px 20px 64px; }
+            h1,h2,h3 { color:var(--ink); line-height:1.25; margin:0 0 8px; }
+            h1 { font-size:clamp(25px,3vw,34px); font-weight:500; letter-spacing:-.02em; }
+            h2 { font-size:20px; font-weight:550; }
+            p { margin:8px 0; }
             .topline,.actions,.choice-row,.grid,.checks { display:flex; flex-wrap:wrap; gap:12px; }
             .topline { align-items:flex-start; justify-content:space-between; }
-            .subtle { color:#dce8f5; max-width:760px; }
-            .lang { margin:0; background:#fff; color:var(--blue-dark); }
-            section { background:#fff; border:1px solid var(--line); margin:14px 0; padding:20px; }
-            .steps { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); padding:0; list-style:none; margin:0 0 20px; }
-            .steps li { border:1px solid var(--line); border-right:0; padding:12px; background:#edf2f7; color:var(--muted); font-weight:700; }
+            .subtle { color:var(--muted); max-width:760px; }
+            .lang { margin:0; white-space:nowrap; }
+            .steps { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); list-style:none; margin:0 0 20px; padding:0; }
+            .steps li { background:var(--surface); border:1px solid var(--line); border-right:0; color:var(--muted); font-weight:600; padding:12px; }
             .steps li:last-child { border-right:1px solid var(--line); }
-            .steps li.active { background:#e2effc; border-top:3px solid var(--blue); color:var(--blue-dark); padding-top:10px; }
-            .num { display:inline-block; margin-right:5px; min-width:22px; text-align:center; border:1px solid currentColor; }
-            .choice { flex:1 1 180px; border:1px solid var(--line); padding:13px; cursor:pointer; background:#fff; }
-            .choice:has(input:checked) { border:2px solid var(--blue); padding:12px; background:#f1f7fe; }
+            .steps li.active { border-top:3px solid var(--accent); color:var(--accent); padding-top:10px; }
+            .num { border:1px solid currentColor; display:inline-block; margin-right:5px; min-width:22px; text-align:center; }
+            section { background:var(--surface); border:1px solid var(--line); margin:0 0 18px; padding:20px; }
+            .choice { background:var(--surface); border:1px solid var(--line); cursor:pointer; flex:1 1 180px; padding:13px; }
+            .choice:hover { border-color:#b8d6ff; }
+            .choice:has(input:checked) { background:var(--accent-soft); border:2px solid var(--accent); padding:12px; }
             .choice input { margin-right:7px; }
             .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
-            label { display:block; font-weight:700; margin:10px 0 5px; }
-            input,select { width:100%; border:1px solid #aebdca; background:#fff; color:var(--ink); padding:10px 11px; font:inherit; border-radius:0; }
-            input:focus,select:focus { outline:2px solid #83b6e8; outline-offset:1px; }
-            .hint { font-size:12px; color:var(--muted); margin:4px 0 0; }
-            .checks label { flex:1 1 200px; border:1px solid var(--line); padding:11px; font-weight:600; }
+            label { display:block; font-weight:600; margin:12px 0 6px; }
+            input,select { background:var(--surface); border:1px solid #cbd5e1; color:var(--ink); font:inherit; padding:9px 10px; width:100%; }
+            input:focus,select:focus,button:focus-visible,a:focus-visible { border-color:var(--accent); outline:2px solid #b8d6ff; outline-offset:1px; }
+            .hint,.footer-note { color:var(--muted); font-size:12px; margin:4px 0 0; }
+            .checks label { background:var(--subtle); border:1px solid var(--line); flex:1 1 200px; padding:11px; }
             .checks input { width:auto; margin-right:7px; }
-            button,.button { border:1px solid var(--blue); border-radius:0; background:var(--blue); color:#fff; cursor:pointer; display:inline-block; font:inherit; font-weight:700; padding:10px 16px; text-decoration:none; }
-            button:hover,.button:hover { background:#084b8c; }
-            button.secondary,.button.secondary { color:var(--ink); background:#fff; border-color:#8494a4; }
-            button:disabled { opacity:.55; cursor:wait; }
-            .status { border-left:4px solid var(--line); background:#f5f7f9; padding:12px 14px; white-space:pre-wrap; }
-            .status.ok { border-color:var(--ok); color:var(--ok); }
+            button,.button { align-items:center; background:var(--accent); border:1px solid var(--accent); color:#fff; cursor:pointer; display:inline-flex; font:inherit; font-weight:600; justify-content:center; line-height:1.25; padding:9px 14px; text-decoration:none; }
+            button:hover,.button:hover { background:#155fc9; border-color:#155fc9; }
+            button.secondary,.button.secondary { background:var(--surface); border-color:#cbd5e1; color:var(--ink); }
+            button.secondary:hover,.button.secondary:hover { background:var(--subtle); border-color:#9ca3af; }
+            button:disabled { cursor:wait; opacity:.6; }
+            .status { background:var(--subtle); border-left:3px solid var(--line); min-height:24px; padding:10px 12px; white-space:pre-wrap; }
+            .status.ok { border-color:var(--success); color:var(--success); }
             .status.warn { border-color:var(--warn); color:var(--warn); }
-            .status.bad { border-color:var(--bad); color:var(--bad); }
-            pre { overflow:auto; border:1px solid var(--line); background:#f7f9fb; padding:11px; margin:10px 0 0; font:12px Consolas,monospace; }
+            .status.bad { border-color:var(--danger); color:var(--danger); }
+            pre { background:var(--subtle); border:1px solid var(--line); font:12px Consolas,"JetBrains Mono",monospace; margin:10px 0 0; max-height:340px; overflow:auto; padding:11px; }
             .hidden { display:none !important; }
-            .footer-note { color:var(--muted); font-size:12px; }
-            @media(max-width:760px) { .steps { grid-template-columns:1fr; } .steps li { border-right:1px solid var(--line); border-bottom:0; } .steps li:last-child { border-bottom:1px solid var(--line); } .grid { grid-template-columns:1fr; } }
+            @media(max-width:760px) { .topline { flex-direction:column; } .steps { grid-template-columns:1fr; } .steps li { border-bottom:0; border-right:1px solid var(--line); } .steps li:last-child { border-bottom:1px solid var(--line); } .grid { grid-template-columns:1fr; } main { padding-left:14px; padding-right:14px; } header { padding-left:14px; padding-right:14px; } }
           </style>
         </head>
         <body data-config-path="{{Attr(path)}}">
@@ -97,7 +98,7 @@ internal static class BackendSetupPage
             <section>
               <h2 data-zh="1. 选择虚拟化后端" data-en="1. Choose a virtualization backend">1. 选择虚拟化后端</h2>
               <div class="choice-row">
-                <label class="choice"><input type="radio" name="provider" value="VMware"{{(selectedProvider == VirtualizationProvider.VMware ? " checked" : "")}}>VMware Workstation / Player<div class="hint" data-zh="推荐：自动开机、传样本、采集、还原快照并关机。" data-en="Recommended: boot, transfer, collect, restore snapshot, and shut down automatically.">推荐：自动开机、传样本、采集、还原快照并关机。</div></label>
+                <label class="choice"><input type="radio" name="provider" value="VMware"{{(selectedProvider == VirtualizationProvider.VMware ? " checked" : "")}}>VMware Workstation Pro<div class="hint" data-zh="推荐：自动开机、传样本、采集、还原快照并关机。" data-en="Recommended: boot, transfer, collect, restore snapshot, and shut down automatically.">推荐：自动开机、传样本、采集、还原快照并关机。</div></label>
                 <label class="choice"><input type="radio" name="provider" value="HyperV"{{(selectedProvider == VirtualizationProvider.HyperV ? " checked" : "")}}>Hyper-V<div class="hint" data-zh="保留已有 Hyper-V 配置兼容性。" data-en="Keep compatibility with existing Hyper-V configurations.">保留已有 Hyper-V 配置兼容性。</div></label>
                 <label class="choice"><input type="radio" name="provider" value="Qemu"{{(selectedProvider == VirtualizationProvider.Qemu ? " checked" : "")}}>QEMU<div class="hint" data-zh="用于已有 QEMU 工作流。" data-en="For existing QEMU workflows.">用于已有 QEMU 工作流。</div></label>
               </div>
@@ -144,19 +145,19 @@ internal static class BackendSetupPage
             </section>
           </main>
           <script>
-            let language = localStorage.getItem('ksword-language') || 'zh';
+            let language = localStorage.getItem('ksword-lang') || localStorage.getItem('ksword-language') || 'zh';
             const t = (zh, en) => language === 'en' ? en : zh;
-            function toggleLanguage() { language = language === 'zh' ? 'en' : 'zh'; localStorage.setItem('ksword-language', language); applyLanguage(); }
+            function toggleLanguage() { language = language === 'zh' ? 'en' : 'zh'; localStorage.setItem('ksword-lang', language); applyLanguage(); }
             function applyLanguage() {
               document.documentElement.lang = language === 'en' ? 'en' : 'zh-CN';
               document.querySelectorAll('[data-zh][data-en]').forEach(x => { x.textContent = language === 'en' ? x.dataset.en : x.dataset.zh; });
             }
             function selectedProvider() { return document.querySelector('input[name=provider]:checked')?.value || 'VMware'; }
             function formProfile() {
-              return { provider: selectedProvider(), vmware: { vmxPath: document.getElementById('vmxPath').value.trim(), snapshotName: document.getElementById('snapshot').value.trim(), vmrunPath: document.getElementById('vmrun').value.trim(), vmName: document.getElementById('vmName').value.trim(), guestRemoting: { addressMode: document.getElementById('guestAddress').value.trim() ? 'Configured' : 'VMwareTools', address: document.getElementById('guestAddress').value.trim() || null, useSsl: document.getElementById('ssl').checked, port: Number(document.getElementById('guestPort').value || 5986), skipCertificateChecks: document.getElementById('skipCert').checked } } };
+              return { provider: selectedProvider(), vmxPath: document.getElementById('vmxPath').value.trim(), snapshotName: document.getElementById('snapshot').value.trim(), vmrunPath: document.getElementById('vmrun').value.trim(), vmName: document.getElementById('vmName').value.trim(), addressMode: document.getElementById('guestAddress').value.trim() ? 'Configured' : 'VMwareTools', address: document.getElementById('guestAddress').value.trim() || null, authentication: 'Negotiate', useSsl: document.getElementById('ssl').checked, port: Number(document.getElementById('guestPort').value || 5986), skipCertificateChecks: document.getElementById('skipCert').checked };
             async function json(url, options) { const response = await fetch(url, options); const text = await response.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch { data = { raw:text }; } if (!response.ok) throw new Error(`${response.status}: ${data.error || data.title || data.detail || text}`); return data; }
-            async function loadProfile() { const target = document.getElementById('preflight'); target.className = 'status'; target.textContent = t('正在读取 setup profile…', 'Loading setup profile…'); try { const data = await json('/api/setup/profile'); if (data.vmware?.vmxPath) document.getElementById('vmxPath').value = data.vmware.vmxPath; target.className = 'status ok'; target.textContent = t('已读取本机配置。', 'Local profile loaded.'); } catch (e) { target.className = 'status warn'; target.textContent = t(`读取失败：${e.message}`, `Load failed: ${e.message}`); } }
-            async function runPreflight() { const target = document.getElementById('preflight'), detail = document.getElementById('readinessDetail'); target.className = 'status'; target.textContent = t('检查中…', 'Checking…'); try { const provider = encodeURIComponent(selectedProvider()); const [status, ready] = await Promise.all([json('/api/setup/status'), json(`/api/host/readiness?refresh=true&provider=${provider}`)]); detail.classList.remove('hidden'); detail.textContent = JSON.stringify({ setup:status, readiness:ready }, null, 2); const vm = ready.virtualization || ready.Virtualization || {}; const configReady = vm.configurationReady ?? vm.ConfigurationReady ?? false; const queryOk = vm.querySucceeded ?? vm.QuerySucceeded ?? false; const baselineOk = vm.baselineExists ?? vm.BaselineExists ?? false; const ok = Boolean(configReady && queryOk && baselineOk); target.className = `status ${ok ? 'ok' : 'warn'}`; target.textContent = ok ? t('预检通过，可以保存。', 'Preflight passed; ready to save.') : t('预检有待处理项目，请查看详情。', 'Preflight has pending items; inspect details.'); } catch (e) { target.className = 'status bad'; target.textContent = t(`预检失败：${e.message}`, `Preflight failed: ${e.message}`); } }
+            async function loadProfile() { const target = document.getElementById('preflight'); target.className = 'status'; target.textContent = t('正在读取 setup profile…', 'Loading setup profile…'); try { const data = await json('/api/setup/profile'); const vmware = data.config?.vmware || data.config?.vMware || data.vmware || data.vMware; if (vmware?.vmxPath) document.getElementById('vmxPath').value = vmware.vmxPath; if (vmware?.snapshotName) document.getElementById('snapshot').value = vmware.snapshotName; if (vmware?.vmrunPath) document.getElementById('vmrun').value = vmware.vmrunPath; target.className = 'status ok'; target.textContent = t('已读取本机配置。', 'Local profile loaded.'); } catch (e) { target.className = 'status warn'; target.textContent = t(`读取失败：${e.message}`, `Load failed: ${e.message}`); } }
+            async function runPreflight() { const target = document.getElementById('preflight'), detail = document.getElementById('readinessDetail'); target.className = 'status'; target.textContent = t('检查中…', 'Checking…'); try { const preview = await json('/api/setup/preview', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(formProfile()) }); const ready = preview.readiness || {}; detail.classList.remove('hidden'); detail.textContent = JSON.stringify(preview, null, 2); const vm = ready.virtualization || ready.Virtualization || {}; const configReady = vm.configurationReady ?? vm.ConfigurationReady ?? ((vm.managementAvailable ?? vm.ManagementAvailable) && (vm.vmExists ?? vm.VmExists)); const queryOk = vm.querySucceeded ?? vm.QuerySucceeded ?? false; const baselineOk = vm.baselineExists ?? vm.BaselineExists ?? false; const ok = Boolean(configReady && queryOk && baselineOk); target.className = `status ${ok ? 'ok' : 'warn'}`; target.textContent = ok ? t('当前表单配置预检通过，可以保存。', 'The values currently in this form passed preflight; ready to save.') : t('当前表单配置仍有待处理项目，请查看详情。', 'The values currently in this form have pending items; inspect details.'); } catch (e) { target.className = 'status bad'; target.textContent = t(`预检失败：${e.message}`, `Preflight failed: ${e.message}`); } }
             async function saveProfile() { const target = document.getElementById('saveStatus'); target.className = 'status'; target.textContent = t('保存中…', 'Saving…'); try { const data = await json('/api/setup/profile', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(formProfile()) }); target.className = 'status ok'; target.textContent = t('已保存。请重新启动 WebUI，再进入样本选择。', 'Saved. Restart the WebUI, then continue to sample selection.'); if (data) document.getElementById('readinessDetail').textContent = JSON.stringify(data, null, 2); } catch (e) { target.className = 'status bad'; target.textContent = t(`保存失败：${e.message}`, `Save failed: ${e.message}`); } }
             async function saveGuestSecret() { const target = document.getElementById('secretStatus'), password = document.getElementById('guestPassword').value; target.className = 'status'; target.textContent = t('保存 secret 中…', 'Saving secret…'); try { const data = await json('/api/setup/guest-secret', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ password, clear:false }) }); document.getElementById('guestPassword').value = ''; target.className = 'status ok'; target.textContent = t(`已保存到本机 secret：${data.secretName}。`, `Saved to local secret: ${data.secretName}.`); } catch (e) { target.className = 'status bad'; target.textContent = t(`保存失败：${e.message}`, `Save failed: ${e.message}`); } }
             async function clearGuestSecret() { const target = document.getElementById('secretStatus'); if (!confirm(t('清除当前用户的来宾 secret？','Clear the current-user guest secret?'))) return; try { const data = await json('/api/setup/guest-secret', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ clear:true }) }); target.className = 'status warn'; target.textContent = t(`已清除：${data.secretName}。`, `Cleared: ${data.secretName}.`); } catch (e) { target.className = 'status bad'; target.textContent = t(`清除失败：${e.message}`, `Clear failed: ${e.message}`); } }
@@ -170,4 +171,3 @@ internal static class BackendSetupPage
 
     private static string Attr(string? value) => WebUtility.HtmlEncode(value ?? string.Empty);
 }
-

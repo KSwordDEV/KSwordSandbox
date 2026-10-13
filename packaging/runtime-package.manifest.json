@@ -292,6 +292,12 @@
     },
     {
       "sourceType": "repository",
+      "source": "Start-KSwordSandbox.cmd",
+      "target": "Start-KSwordSandbox.cmd",
+      "required": true
+    },
+    {
+      "sourceType": "repository",
       "source": "config/sandbox.example.json",
       "target": "config/sandbox.example.json",
       "required": true
