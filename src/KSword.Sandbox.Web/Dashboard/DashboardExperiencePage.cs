@@ -208,6 +208,8 @@ internal static class DashboardExperiencePage
               <a href="#workspace-plan" onclick="selectWorkspaceTab('plan')" data-zh="上传 / 配置" data-en="Upload / config">上传 / 配置</a>
               <a href="#workspace-analysis" onclick="selectWorkspaceTab('analysis')" data-zh="进度" data-en="Progress">进度</a>
               <a href="#workspace-results" onclick="selectWorkspaceTab('results')" data-zh="报告" data-en="Reports">报告</a>
+              <a href="/setup" data-zh="首次设置 / 后端" data-en="Setup / backends">首次设置 / 后端</a>
+              <a href="/rules" data-zh="规则编辑器" data-en="Rule editor">规则编辑器</a>
               <a href="/settings" data-zh="设置 / VM / VirusTotal" data-en="Settings / VM / VirusTotal">设置 / VM / VirusTotal</a>
             </nav>
           </header>

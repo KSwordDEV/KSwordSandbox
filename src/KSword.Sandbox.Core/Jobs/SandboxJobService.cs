@@ -91,6 +91,15 @@ public sealed partial class SandboxJobService
     }
 
     /// <summary>
+    /// Replaces the behavior rules used for future planning and report
+    /// rebuilds. The local WebUI calls this after persisting rules.json.
+    /// </summary>
+    public void ReplaceRules(BehaviorRuleSet rules)
+    {
+        ruleEngine.ReplaceRuleSet(rules);
+    }
+
+    /// <summary>
     /// Returns one job by ID when present.
     /// The input is a job ID, processing performs an in-memory lookup, and the
     /// method returns the job or null.

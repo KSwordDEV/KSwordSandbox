@@ -23,7 +23,7 @@ public sealed class RuleEngine
         WriteIndented = true
     };
 
-    private readonly BehaviorRuleSet ruleSet;
+    private BehaviorRuleSet ruleSet;
 
     /// <summary>
     /// Creates a rule engine for one immutable rule set.
@@ -33,6 +33,16 @@ public sealed class RuleEngine
     public RuleEngine(BehaviorRuleSet ruleSet)
     {
         this.ruleSet = ruleSet;
+    }
+
+    /// <summary>
+    /// Replaces the in-memory rule set after the local WebUI saves an edited
+    /// document. The next job uses the new rules without requiring a process
+    /// restart; the JSON file remains the durable source of truth.
+    /// </summary>
+    public void ReplaceRuleSet(BehaviorRuleSet rules)
+    {
+        ruleSet = rules ?? throw new ArgumentNullException(nameof(rules));
     }
 
     /// <summary>

@@ -795,6 +795,9 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
     private static string Read(SmokeTestContext context, string relativePath) =>
         File.ReadAllText(Path.Combine(context.RepositoryRoot, relativePath));
 
-    private static void Require(string text, string expected, string message) =>
-        SmokeAssert.True(text.Contains(expected, StringComparison.Ordinal), message);
+    private static void Require(bool condition, string message) =>
+        SmokeAssert.True(condition, message);
+
+    private static void Require(string text, string expected, string? message = null) =>
+        SmokeAssert.True(text.Contains(expected, StringComparison.Ordinal), message ?? $"Expected source text to contain: {expected}");
 }

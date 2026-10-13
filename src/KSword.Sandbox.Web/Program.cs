@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Core.Configuration;
@@ -12,10 +13,18 @@ using KSword.Sandbox.Web.Dashboard;
 using KSword.Sandbox.Web.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 var repositoryRoot = ResolveRepositoryRoot(builder.Environment.ContentRootPath);
 var configPath = builder.Configuration["Sandbox:ConfigPath"] ?? Path.Combine("config", "sandbox.example.json");
 var config = SandboxConfigLoader.Load(configPath, repositoryRoot);
-var rulesPath = Path.Combine(config.Paths.RulesDirectory, "behavior-rules.json");
+var resolvedConfigPath = Path.GetFullPath(configPath, repositoryRoot);
+var profilePath = string.Equals(Path.GetFileName(resolvedConfigPath), "sandbox.example.json", StringComparison.OrdinalIgnoreCase)
+    ? Path.Combine(Path.GetFullPath(config.Paths.RuntimeRoot, repositoryRoot), "config", "sandbox.local.json")
+    : resolvedConfigPath;
+var rulesPath = Path.IsPathRooted(config.Paths.RulesDirectory)
+    ? Path.Combine(config.Paths.RulesDirectory, "behavior-rules.json")
+    : Path.Combine(repositoryRoot, config.Paths.RulesDirectory, "behavior-rules.json");
 var rules = RuleEngine.LoadRuleSet(rulesPath);
 var jobService = new SandboxJobService(config, rules);
 var targetScanner = new ExecutableTargetScanner();
@@ -24,6 +33,7 @@ builder.Services.AddSingleton(config);
 builder.Services.AddSingleton(rules);
 builder.Services.AddSingleton(jobService);
 builder.Services.AddSingleton(targetScanner);
+builder.Services.AddSingleton(new BackendProfileStore(profilePath));
 builder.Services.AddSingleton<RunbookProgressStore>();
 builder.Services.AddSingleton<RunbookBackgroundExecutionStore>();
 builder.Services.AddSingleton<VirusTotalSettingsStore>();
@@ -37,7 +47,14 @@ builder.Services.AddHttpClient<VirusTotalLookupService>(client =>
 
 var app = builder.Build();
 
-app.MapGet("/", () => Results.Content(DashboardExperiencePage.Render(), "text/html"));
+var firstRunNeedsSetup = string.Equals(Path.GetFileName(resolvedConfigPath), "sandbox.example.json", StringComparison.OrdinalIgnoreCase);
+app.MapGet("/", () => firstRunNeedsSetup
+    ? Results.Redirect("/setup")
+    : Results.Content(DashboardExperiencePage.Render(), "text/html"));
+app.MapGet("/setup", (SandboxConfig currentConfig, BackendProfileStore profiles) =>
+    Results.Content(BackendSetupPage.Render(currentConfig, profiles.ConfigPath, firstRunNeedsSetup), "text/html; charset=utf-8"));
+app.MapGet("/rules", (BehaviorRuleSet currentRules) =>
+    Results.Content(RulesEditorPage.Render(currentRules, rulesPath), "text/html; charset=utf-8"));
 app.MapGet("/settings", (VirusTotalSettingsStore settingsStore) =>
     Results.Content(SettingsPage.Render(settingsStore.GetState()), "text/html; charset=utf-8"));
 app.MapGet("/jobs/{jobId:guid}/execution-flow", (Guid jobId, SandboxJobService service) =>
@@ -68,6 +85,82 @@ app.MapGet("/health", () => Results.Ok(new
     time = DateTimeOffset.UtcNow
 }));
 app.MapGet("/api/config", (SandboxConfig currentConfig) => Results.Ok(currentConfig));
+app.MapGet("/api/setup/status", (SandboxConfig currentConfig, BackendProfileStore profiles) => Results.Ok(new
+{
+    configPath = profiles.ConfigPath,
+    configExists = File.Exists(profiles.ConfigPath),
+    provider = currentConfig.Virtualization.Provider.ToString(),
+    vmware = new
+    {
+        vmName = currentConfig.VMware.VmName,
+        vmxPath = currentConfig.VMware.VmxPath,
+        snapshotName = currentConfig.VMware.SnapshotName,
+        vmrunPath = currentConfig.VMware.VmrunPath,
+        vmrunExists = File.Exists(currentConfig.VMware.VmrunPath),
+        vmxExists = File.Exists(currentConfig.VMware.VmxPath)
+    },
+    restartRequired = false
+}));
+app.MapGet("/api/setup/profile", (SandboxConfig currentConfig, BackendProfileStore profiles) => Results.Ok(profiles.Read(currentConfig)));
+app.MapPost("/api/setup/profile", (BackendProfileUpdateRequest request, SandboxConfig currentConfig, BackendProfileStore profiles) =>
+{
+    try
+    {
+        return Results.Ok(profiles.Save(currentConfig, request));
+    }
+    catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException or IOException or UnauthorizedAccessException or InvalidOperationException)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+app.MapPost("/api/setup/guest-secret", (GuestSecretUpdateRequest request, SandboxConfig currentConfig) =>
+{
+    var secretName = string.IsNullOrWhiteSpace(currentConfig.Guest.PasswordSecretName)
+        ? "KSWORDBOX_GUEST_PASSWORD"
+        : currentConfig.Guest.PasswordSecretName.Trim();
+    if (request.Clear)
+    {
+        Environment.SetEnvironmentVariable(secretName, null, EnvironmentVariableTarget.Process);
+        Environment.SetEnvironmentVariable(secretName, null, EnvironmentVariableTarget.User);
+        return Results.Ok(new { configured = false, secretName });
+    }
+
+    if (string.IsNullOrEmpty(request.Password))
+    {
+        return Results.BadRequest(new { error = "Guest password is required, or choose Clear." });
+    }
+
+    Environment.SetEnvironmentVariable(secretName, request.Password, EnvironmentVariableTarget.Process);
+    Environment.SetEnvironmentVariable(secretName, request.Password, EnvironmentVariableTarget.User);
+    return Results.Ok(new { configured = true, secretName });
+});
+app.MapGet("/api/rules", (BehaviorRuleSet currentRules) => Results.Ok(currentRules));
+app.MapPut("/api/rules", (BehaviorRuleSet updatedRules, SandboxJobService service) =>
+{
+    try
+    {
+        ValidateRuleSet(updatedRules);
+        Directory.CreateDirectory(Path.GetDirectoryName(rulesPath)!);
+        var json = JsonSerializer.Serialize(updatedRules, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
+        var tempPath = rulesPath + ".tmp";
+        File.WriteAllText(tempPath, json);
+        if (File.Exists(rulesPath))
+        {
+            File.Replace(tempPath, rulesPath, null);
+        }
+        else
+        {
+            File.Move(tempPath, rulesPath);
+        }
+
+        service.ReplaceRules(updatedRules);
+        return Results.Ok(updatedRules);
+    }
+    catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
 app.MapGet("/api/host/readiness", async Task<IResult> (bool? refresh, VirtualizationProvider? provider, LocalHostReadinessProbe readinessProbe, CancellationToken cancellationToken) =>
 {
     var readiness = await readinessProbe.ProbeAsync(refresh == true, provider, cancellationToken);
@@ -2382,6 +2475,38 @@ static string SanitizeFileName(string fileName)
     var invalid = Path.GetInvalidFileNameChars();
     var sanitized = new string(fileName.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
     return string.IsNullOrWhiteSpace(sanitized) ? "sample.exe" : sanitized;
+}
+
+static void ValidateRuleSet(BehaviorRuleSet ruleSet)
+{
+    if (ruleSet is null)
+    {
+        throw new ArgumentException("Rule document is required.", nameof(ruleSet));
+    }
+
+    var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var rule in ruleSet.Rules)
+    {
+        if (string.IsNullOrWhiteSpace(rule.Id))
+        {
+            throw new ArgumentException("Every rule needs a non-empty id.", nameof(ruleSet));
+        }
+
+        if (!ids.Add(rule.Id.Trim()))
+        {
+            throw new ArgumentException($"Rule id '{rule.Id}' is duplicated.", nameof(ruleSet));
+        }
+
+        if (string.IsNullOrWhiteSpace(rule.Title))
+        {
+            throw new ArgumentException($"Rule '{rule.Id}' needs a non-empty title.", nameof(ruleSet));
+        }
+
+        if (!new[] { "info", "low", "medium", "high", "critical" }.Contains(rule.Severity, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException($"Rule '{rule.Id}' has unsupported severity '{rule.Severity}'.", nameof(ruleSet));
+        }
+    }
 }
 
 /// <summary>

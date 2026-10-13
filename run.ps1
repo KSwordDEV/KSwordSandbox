@@ -373,6 +373,14 @@ function Assert-RunLocalConfigReadyForInteractiveStartup {
         return
     }
 
+    # A first-run WebUI is intentionally allowed to start against the checked-in
+    # example. The setup page writes a real local profile outside the repository;
+    # Plan/Analyze still fail closed until that profile exists.
+    if ($ModeName -in @('WebUI', 'StartWebUI')) {
+        Write-RunInfo '中文提示：尚未找到本机 sandbox.local.json，将启动首次设置 WebUI；保存后请重新启动。 / No local sandbox.local.json yet; starting the first-run setup WebUI.'
+        return
+    }
+
     $reason = if ($usesExampleFallback) {
         '尚未找到本机 sandbox.local.json；当前只剩仓库模板 config\sandbox.example.json。'
     }
@@ -3398,8 +3406,13 @@ switch ($Mode) {
         Assert-RunLocalConfigReadyForInteractiveStartup -EffectiveConfigPath $effectiveConfigPath -ModeName 'WebUI'
         $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
         Write-R0DriverConfigurationWarning -Config $config
-        $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
-        Ensure-GuestPayloadForWebUi -PayloadRoot $payloadRoot -Config $config
+        if (-not (Test-UsingRepositoryExampleConfigFallback -EffectiveConfigPath $effectiveConfigPath)) {
+            $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
+            Ensure-GuestPayloadForWebUi -PayloadRoot $payloadRoot -Config $config
+        }
+        else {
+            Write-RunInfo '首次设置模式跳过 payload 构建；请先在 WebUI 保存 VMware profile，再重新启动以准备来宾 payload。 / First-run mode skips payload preparation until a VMware profile is saved.'
+        }
         Invoke-WebUi -EffectiveConfigPath $effectiveConfigPath
     }
     'StartWebUI' {
@@ -3410,8 +3423,13 @@ switch ($Mode) {
         }
         $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
         Write-R0DriverConfigurationWarning -Config $config
-        $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
-        Ensure-GuestPayloadForWebUi -PayloadRoot $payloadRoot -Config $config
+        if (-not (Test-UsingRepositoryExampleConfigFallback -EffectiveConfigPath $effectiveConfigPath)) {
+            $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
+            Ensure-GuestPayloadForWebUi -PayloadRoot $payloadRoot -Config $config
+        }
+        else {
+            Write-RunInfo '首次设置模式跳过 payload 构建；请先在 WebUI 保存 VMware profile，再重新启动以准备来宾 payload。 / First-run mode skips payload preparation until a VMware profile is saved.'
+        }
         Invoke-WebUi -EffectiveConfigPath $effectiveConfigPath
     }
     'Plan' {

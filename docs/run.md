@@ -14,6 +14,23 @@ Windows 等价验收见 [`vmware-qemu.md`](vmware-qemu.md)。
 .\run.ps1                                     # 日常启动 WebUI；不会启动/还原 VM
 ```
 
+发行包首次启动 / First launch from a release package：
+
+从完整发行目录直接双击根目录的 `Start-KSwordSandbox.cmd`，无需先打开 PowerShell。
+该脚本会固定工作目录，使用仅限本次进程的执行策略调用
+`.\run.ps1 -Mode StartWebUI`，并自动打开本机 WebUI。首次访问时按页面向导选择
+VMware 后端、检查 Windows 10 虚拟机与主机的通信、选择样本和规则；向导完成后再进入
+分析工作区。启动错误会保留命令窗口，并同时显示中文和 English 修复提示。
+
+For a source checkout, the equivalent command is:
+
+```powershell
+.\run.ps1 -Mode StartWebUI
+```
+
+如果页面报告本机配置尚未准备好，先在向导中完成 VMware/VM profile 和 guest transport
+设置；命令行用户也可以运行 `.\install.ps1` 进入同一套安装配置入口。
+
 出错时先按输出中的“下一步”处理。常见路径：
 
 - WebUI 端口不可用：去掉 `-StrictUrl` 让脚本自动换端口，或传
