@@ -30,6 +30,10 @@ param(
 
     [switch]$Live,
 
+    # Explicit lab override for nested VMware hosts that cannot expose SLAT/NPT.
+    # The readiness evidence still records hardwareAccelerationReady=false.
+    [switch]$AllowUnconfirmedHostAcceleration,
+
     [ValidateSet('Background', 'Blocking')]
     [string]$ExecutionTransport = 'Background',
 
@@ -397,7 +401,8 @@ function Get-E2EProviderReadiness {
         [Parameter(Mandatory)][string]$Url,
         [AllowEmptyString()][string]$RequestedProvider,
         [Parameter(Mandatory)][bool]$HasResourceOverride,
-        [Parameter(Mandatory)][bool]$LiveMode
+        [Parameter(Mandatory)][bool]$LiveMode,
+        [Parameter(Mandatory)][bool]$AllowUnconfirmedHostAcceleration
     )
 
     $readinessUri = "$Url/api/host/readiness?refresh=true"
@@ -422,7 +427,12 @@ function Get-E2EProviderReadiness {
 
     if ($LiveMode) {
         Assert-E2ECondition -Condition ([bool]$readiness.hostVirtualization.operatingSystemSupported) -Message "$readinessProvider Live requires a supported Windows host."
-        Assert-E2ECondition -Condition ($readiness.hostVirtualization.hardwareAccelerationReady -eq $true) -Message "$readinessProvider hardware acceleration is not confirmed ready. code=$($readiness.hostVirtualization.diagnosticCode) message=$($readiness.hostVirtualization.diagnosticMessage)"
+        if (-not $AllowUnconfirmedHostAcceleration) {
+            Assert-E2ECondition -Condition ($readiness.hostVirtualization.hardwareAccelerationReady -eq $true) -Message "$readinessProvider hardware acceleration is not confirmed ready. code=$($readiness.hostVirtualization.diagnosticCode) message=$($readiness.hostVirtualization.diagnosticMessage)"
+        }
+        elseif ($readiness.hostVirtualization.hardwareAccelerationReady -ne $true) {
+            Write-E2EStep "WARNING: continuing without confirmed hardware acceleration; evidence remains hardwareAccelerationReady=false."
+        }
         Assert-E2ECondition -Condition ([bool]$readiness.virtualization.managementAvailable) -Message "$readinessProvider management tools are unavailable. code=$($readiness.virtualization.diagnosticCode) message=$($readiness.virtualization.diagnosticMessage)"
         Assert-E2ECondition -Condition ([bool]$readiness.virtualization.guestTransportSecure) -Message "$readinessProvider guest transport is not secure."
         Assert-E2ECondition -Condition ([bool]$readiness.virtualization.guestEndpointReady) -Message "$readinessProvider guest endpoint configuration is not ready. code=$($readiness.virtualization.diagnosticCode) message=$($readiness.virtualization.diagnosticMessage)"
@@ -525,7 +535,8 @@ try {
         -Url $BaseUrl `
         -RequestedProvider $Provider `
         -HasResourceOverride $hasProviderResourceOverride `
-        -LiveMode ([bool]$Live)
+        -LiveMode ([bool]$Live) `
+        -AllowUnconfirmedHostAcceleration ([bool]$AllowUnconfirmedHostAcceleration)
 
     $planBody = [ordered]@{
         samplePath      = $resolvedSamplePath

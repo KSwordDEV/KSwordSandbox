@@ -1,0 +1,166 @@
+#requires -RunAsAdministrator
+<#
+.SYNOPSIS
+Prepare a Windows 10 VMware guest for KSwordSandbox WinRM HTTPS access.
+
+.DESCRIPTION
+Run once from an elevated Windows PowerShell prompt inside the guest. The script is
+safe to run again: it updates the local account when requested, reuses a usable
+machine certificate, and reconciles the WinRM HTTPS listener and firewall rule.
+Passwords are read as SecureString and are never written to output or command-line
+arguments.
+#>
+[CmdletBinding()]
+param(
+    [ValidatePattern('^[^\\/:*?"<>|]{1,20}$')]
+    [string]$GuestUserName = 'SandboxUser',
+    [string]$WorkingDirectory = 'C:\KSwordSandbox',
+    [ValidateRange(1, 65535)]
+    [int]$Port = 5986,
+    [switch]$SkipPasswordSet
+)
+
+Set-StrictMode -Version 3.0
+$ErrorActionPreference = 'Stop'
+$ruleName = 'KSwordSandbox-WinRM-HTTPS'
+$certificateFriendlyName = 'KSwordSandbox WinRM HTTPS'
+
+function Write-Bilingual {
+    param([Parameter(Mandatory)][string]$Chinese, [Parameter(Mandatory)][string]$English)
+    Write-Host "$Chinese / $English"
+}
+
+function Assert-Administrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw '请用管理员身份运行此脚本。 / Run this script from an elevated Administrator PowerShell.'
+    }
+}
+
+function Get-OrCreateGuestUser {
+    $existing = Get-LocalUser -Name $GuestUserName -ErrorAction SilentlyContinue
+    if ($SkipPasswordSet) {
+        if ($null -eq $existing) {
+            throw "找不到本地账户 '$GuestUserName'，不能使用 -SkipPasswordSet。 / Local account '$GuestUserName' was not found; omit -SkipPasswordSet to create it."
+        }
+        Enable-LocalUser -Name $GuestUserName -ErrorAction SilentlyContinue
+        return $existing
+    }
+
+    $securePassword = Read-Host -Prompt "为 $GuestUserName 输入密码（不会显示） / Enter the password for $GuestUserName (hidden)" -AsSecureString
+    if ($null -eq $securePassword -or $securePassword.Length -eq 0) {
+        throw '密码不能为空。 / The password cannot be empty.'
+    }
+
+    if ($null -eq $existing) {
+        New-LocalUser -Name $GuestUserName -Password $securePassword -Description 'KSwordSandbox VMware guest operator' -PasswordNeverExpires:$true -AccountNeverExpires:$true -UserMayNotChangePassword:$false | Out-Null
+        $existing = Get-LocalUser -Name $GuestUserName -ErrorAction Stop
+        Write-Bilingual -Chinese "已创建本地账户 $GuestUserName" -English "Created local account $GuestUserName"
+    }
+    else {
+        Set-LocalUser -Name $GuestUserName -Password $securePassword -PasswordNeverExpires:$true -UserMayNotChangePassword:$false
+        Enable-LocalUser -Name $GuestUserName -ErrorAction SilentlyContinue
+        Write-Bilingual -Chinese "已更新本地账户密码 $GuestUserName" -English "Updated the local account password for $GuestUserName"
+    }
+    return $existing
+}
+
+function Ensure-LocalAdministrator {
+    param([Parameter(Mandatory)]$User)
+    $members = @(Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop)
+    $isMember = $members | Where-Object { $_.SID.Value -eq $User.SID.Value }
+    if ($null -eq $isMember) {
+        Add-LocalGroupMember -Group 'Administrators' -Member $User.SID -ErrorAction Stop
+        Write-Bilingual -Chinese "已将 $GuestUserName 加入 Administrators" -English "Added $GuestUserName to the Administrators group"
+    }
+    else {
+        Write-Bilingual -Chinese "$GuestUserName 已经是 Administrators 成员" -English "$GuestUserName is already a member of Administrators"
+    }
+}
+
+function Get-UsableWinRmCertificate {
+    $computerName = [Environment]::MachineName
+    $ekuServerAuth = '1.3.6.1.5.5.7.3.1'
+    $certificates = @(Get-ChildItem -Path 'Cert:\LocalMachine\My' -ErrorAction Stop | Where-Object {
+        $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(30) -and
+        $_.Subject -eq "CN=$computerName" -and
+        (@($_.EnhancedKeyUsageList | ForEach-Object { $_.ObjectId.Value }) -contains $ekuServerAuth)
+    } | Sort-Object NotAfter -Descending)
+    if ($certificates.Count -gt 0) { return $certificates[0] }
+
+    Write-Bilingual -Chinese '正在创建来宾自签名 HTTPS 证书' -English 'Creating a self-signed HTTPS certificate in the guest'
+    return New-SelfSignedCertificate -DnsName @($computerName, 'localhost') -CertStoreLocation 'Cert:\LocalMachine\My' -FriendlyName $certificateFriendlyName -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddYears(3) -Type SSLServerAuthentication
+}
+
+function Get-HttpsListeners {
+    @(Get-ChildItem -Path 'WSMan:\localhost\Listener' -ErrorAction SilentlyContinue | Where-Object {
+        $transport = @($_.Keys | Where-Object { [string]$_ -like 'Transport=*' }) -join ''
+        $transport -eq 'Transport=HTTPS'
+    })
+}
+
+function Ensure-WinRmHttpsListener {
+    param([Parameter(Mandatory)]$Certificate)
+    $listeners = @(Get-HttpsListeners)
+    $matching = @($listeners | Where-Object {
+        $item = Get-Item -LiteralPath $_.PSPath -ErrorAction SilentlyContinue
+        $item.CertificateThumbprint -eq $Certificate.Thumbprint -and ([int]$item.Port -eq $Port)
+    })
+    if ($matching.Count -eq 0) {
+        foreach ($listener in $listeners) {
+            Remove-Item -LiteralPath $listener.PSPath -Recurse -Force -ErrorAction Stop
+        }
+        $created = New-Item -Path 'WSMan:\localhost\Listener' -Transport HTTPS -Address '*' -Hostname ([Environment]::MachineName) -CertificateThumbprint $Certificate.Thumbprint -Enabled $true -Force
+        if ($null -eq $created) { $created = Get-HttpsListeners | Select-Object -Last 1 }
+        Set-Item -LiteralPath "$($created.PSPath)\Port" -Value $Port -Force
+        Write-Bilingual -Chinese "已创建 WinRM HTTPS 监听器（端口 $Port）" -English "Created the WinRM HTTPS listener on port $Port"
+    }
+    else {
+        Write-Bilingual -Chinese "WinRM HTTPS 监听器已就绪（端口 $Port）" -English "WinRM HTTPS listener is already configured on port $Port"
+    }
+}
+
+function Ensure-FirewallRule {
+    $rule = Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue
+    if ($null -eq $rule) {
+        New-NetFirewallRule -Name $ruleName -DisplayName 'KSwordSandbox WinRM HTTPS' -Description 'Allow KSwordSandbox host remoting to this VMware guest' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Profile Any | Out-Null
+        Write-Bilingual -Chinese "已开放防火墙 TCP $Port" -English "Opened TCP $Port in Windows Firewall"
+        return
+    }
+    $portFilter = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue
+    if ($null -ne $portFilter -and [string]$portFilter.LocalPort -ne [string]$Port) {
+        Set-NetFirewallRule -Name $ruleName -Enabled False -ErrorAction Stop
+        Remove-NetFirewallRule -Name $ruleName -ErrorAction Stop
+        New-NetFirewallRule -Name $ruleName -DisplayName 'KSwordSandbox WinRM HTTPS' -Description 'Allow KSwordSandbox host remoting to this VMware guest' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Profile Any | Out-Null
+    }
+    Write-Bilingual -Chinese "防火墙规则已就绪" -English 'Windows Firewall rule is ready'
+}
+
+function Ensure-WorkingDirectory {
+    if (-not (Test-Path -LiteralPath $WorkingDirectory -PathType Container)) {
+        New-Item -Path $WorkingDirectory -ItemType Directory -Force | Out-Null
+    }
+    Write-Bilingual -Chinese "工作目录已就绪：$WorkingDirectory" -English "Working directory is ready: $WorkingDirectory"
+}
+
+Assert-Administrator
+$user = Get-OrCreateGuestUser
+Ensure-LocalAdministrator -User $user
+Enable-PSRemoting -Force -SkipNetworkProfileCheck | Out-Null
+Set-Service -Name WinRM -StartupType Automatic
+Start-Service -Name WinRM
+$certificate = Get-UsableWinRmCertificate
+Ensure-WinRmHttpsListener -Certificate $certificate
+Ensure-FirewallRule
+Ensure-WorkingDirectory
+
+$addresses = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {
+    $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*'
+} | ForEach-Object { $_.IPAddress } | Select-Object -Unique)
+Write-Host ''
+Write-Bilingual -Chinese '来宾 bootstrap 完成。请在宿主 WebUI 中选择 VMware、填入来宾用户名和密码，然后运行只读预检。' -English 'Guest bootstrap completed. In the host WebUI, choose VMware, enter the guest username and password, then run the read-only preflight.'
+Write-Bilingual -Chinese "WinRM HTTPS 端口：$Port；证书指纹：$($certificate.Thumbprint)" -English "WinRM HTTPS port: $Port; certificate thumbprint: $($certificate.Thumbprint)"
+Write-Bilingual -Chinese ("来宾 IPv4：" + ($(if ($addresses.Count -gt 0) { $addresses -join ', ' } else { '未发现，请稍后查看 ipconfig' }))) -English ("Guest IPv4: " + ($(if ($addresses.Count -gt 0) { $addresses -join ', ' } else { 'not found; check ipconfig later' })))
+Write-Bilingual -Chinese '如果这是基线虚拟机，请现在关机并在 VMware 中创建 powered-off 的 Clean 快照。' -English 'If this is the baseline VM, power it off now and create a powered-off Clean snapshot in VMware.'
+
