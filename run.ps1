@@ -118,6 +118,12 @@ $script:RunModeCoercionTriggerParameter = ''
 $script:RunModeCoercionOriginalMode = $Mode
 $script:OriginalRunBoundParameters = [hashtable]$PSBoundParameters
 $script:RunScriptPath = if ([string]::IsNullOrWhiteSpace($PSCommandPath)) { Join-Path $script:RepositoryRoot 'run.ps1' } else { $PSCommandPath }
+$script:PortableToolResolverPath = Join-Path $script:RepositoryRoot 'scripts\Resolve-PortableTool.ps1'
+if (Test-Path -LiteralPath $script:PortableToolResolverPath -PathType Leaf) {
+    # Load the resolver at script scope so its functions remain available to
+    # status/readiness code that runs later from nested helper functions.
+    . $script:PortableToolResolverPath
+}
 
 function Write-RunInfo {
     param([Parameter(Mandatory)][string]$Message)
@@ -763,6 +769,12 @@ function Import-PortableToolResolver {
 
     . $resolver
 }
+
+# Dot-source the resolver once at script scope. PowerShell functions declared
+# only inside Import-PortableToolResolver would otherwise disappear when that
+# helper returns, making provider readiness report a missing JobTool even when
+# the source project is present.
+Import-PortableToolResolver
 
 function Get-WebUiLaunchTarget {
     param([bool]$ThrowIfMissing = $true)
