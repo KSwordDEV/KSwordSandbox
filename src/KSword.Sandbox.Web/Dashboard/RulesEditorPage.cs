@@ -23,61 +23,70 @@ internal static class RulesEditorPage
           <meta name="viewport" content="width=device-width,initial-scale=1">
           <title>规则编辑器 / Rule editor - KSword Sandbox</title>
           <style>
-            :root { --page:#f7f8fa; --surface:#fff; --subtle:#f1f3f5; --ink:#151515; --muted:#6b7280; --line:#e5e7eb; --accent:#1f78ff; --accent-soft:#e5f0ff; --success:#16704a; --warn:#946200; --danger:#a32020; color-scheme:light; }
+            :root { --page:#f7f8fa; --surface:#fff; --subtle:#f5f5f5; --subtle-strong:#ededed; --ink:#151515; --muted:#757575; --muted-soft:#a5a5a5; --line:#ededed; --accent:#1f78ff; --accent-soft:#e5f0ff; --success:#16704a; --warn:#946200; --danger:#a32020; color-scheme:light; }
             * { box-sizing:border-box; }
-            body { background:var(--page); color:var(--ink); font-family:"Microsoft YaHei UI","Segoe UI",Arial,sans-serif; font-size:14px; line-height:1.55; margin:0; }
-            header { background:var(--surface); border-bottom:1px solid var(--line); padding:28px max(20px,calc((100% - 1180px)/2)); }
-            header .head { align-items:flex-start; display:flex; gap:20px; justify-content:space-between; }
-            main { margin:0 auto; max-width:1180px; padding:24px 20px 64px; }
+            body { background:var(--page); color:var(--ink); font-family:Inter,"Microsoft YaHei UI","Segoe UI",Arial,sans-serif; font-size:14px; line-height:1.55; margin:0; }
+            header { background:var(--surface); border-bottom:1px solid var(--line); padding:30px max(20px,calc((100% - 1240px)/2)); }
+            header .head { align-items:flex-start; display:flex; gap:24px; justify-content:space-between; }
+            header .eyebrow { color:var(--accent); font-family:Consolas,"JetBrains Mono",monospace; font-size:11px; font-weight:600; letter-spacing:.04em; margin:0 0 8px; text-transform:uppercase; }
+            header .intro { max-width:760px; }
+            main { margin:0 auto; max-width:1240px; padding:28px 20px 72px; }
             h1,h2,h3 { color:var(--ink); line-height:1.25; margin:0 0 8px; }
-            h1 { font-size:clamp(25px,3vw,36px); font-weight:500; letter-spacing:-.02em; }
-            h2 { font-size:21px; font-weight:550; }
-            h3 { font-size:17px; font-weight:600; }
+            h1 { font-size:clamp(26px,3vw,38px); font-weight:500; letter-spacing:-.02em; }
+            h2 { font-size:21px; font-weight:500; }
+            h3 { font-size:17px; font-weight:500; }
             p { margin:8px 0; }
             .muted { color:var(--muted); }
             .small { font-size:12px; }
-            section { background:var(--surface); border:1px solid var(--line); margin:0 0 18px; padding:20px; }
+            section { background:var(--surface); border:1px solid var(--line); border-radius:10px; box-shadow:0 1px 2px rgba(15,23,42,.03); margin:0 0 20px; padding:22px; }
             .toolbar,.actions { align-items:center; display:flex; flex-wrap:wrap; gap:8px; }
-            button,a.button { align-items:center; background:var(--accent); border:1px solid var(--accent); color:#fff; cursor:pointer; display:inline-flex; font:inherit; font-weight:600; justify-content:center; line-height:1.25; padding:9px 13px; text-decoration:none; }
+            .toolbar { justify-content:space-between; }
+            .toolbar-group { align-items:center; display:flex; flex-wrap:wrap; gap:8px; }
+            .toolbar-group.primary-actions { flex:1 1 420px; }
+            .toolbar-group.secondary-actions { justify-content:flex-end; }
+            button,a.button { align-items:center; background:var(--accent); border:1px solid var(--accent); border-radius:7px; color:#fff; cursor:pointer; display:inline-flex; font:inherit; font-weight:600; justify-content:center; line-height:1.25; min-height:36px; padding:8px 13px; text-decoration:none; }
             button:hover,a.button:hover { background:#155fc9; border-color:#155fc9; }
-            button.secondary,a.secondary { background:var(--surface); border-color:#cbd5e1; color:var(--ink); }
-            button.secondary:hover,a.secondary:hover { background:var(--subtle); border-color:#9ca3af; }
-            button.danger { background:var(--danger); border-color:var(--danger); }
-            button.ghost { background:var(--surface); border-color:#cbd5e1; color:var(--ink); }
+            button.secondary,a.secondary,button.ghost { background:var(--surface); border-color:#d6dbe1; color:var(--ink); }
+            button.secondary:hover,a.secondary:hover,button.ghost:hover { background:var(--subtle); border-color:#b8bec7; }
+            button.danger { background:#fff; border-color:#efb5b5; color:var(--danger); }
+            button.danger:hover { background:#fff1f1; border-color:#d98a8a; }
             button:disabled { cursor:wait; opacity:.6; }
             button:focus-visible,a:focus-visible,input:focus,textarea:focus,select:focus { border-color:var(--accent); outline:2px solid #b8d6ff; outline-offset:1px; }
-            .path { background:var(--subtle); border:1px solid var(--line); font-family:Consolas,"JetBrains Mono",monospace; margin:12px 0 0; overflow-wrap:anywhere; padding:9px 10px; }
+            .path { background:var(--subtle); border:1px solid var(--line); border-radius:7px; color:var(--muted); font-family:Consolas,"JetBrains Mono",monospace; margin:16px 0 0; overflow-wrap:anywhere; padding:10px 12px; }
             .status { border-left:3px solid var(--line); margin-top:12px; min-height:24px; padding:9px 10px; }
             .status.ok { background:#eefbf4; border-color:var(--success); color:var(--success); }
             .status.error { background:#fff1f1; border-color:var(--danger); color:var(--danger); }
             .status.warn { background:#fff8e8; border-color:var(--warn); color:var(--warn); }
-            .rules { display:grid; gap:16px; }
-            .rule-card { background:var(--surface); border:1px solid var(--line); padding:18px; }
-            .rule-head { align-items:flex-start; border-bottom:1px solid var(--line); display:flex; gap:12px; justify-content:space-between; margin-bottom:14px; padding-bottom:10px; }
-            .rule-index { color:var(--muted); font-size:12px; font-weight:600; }
-            .grid { display:grid; gap:14px; grid-template-columns:repeat(4,minmax(0,1fr)); }
-            .wide { grid-column:span 2; }
+            .rules { display:grid; gap:14px; }
+            .rule-card { background:var(--surface); border:1px solid var(--line); border-radius:10px; box-shadow:0 1px 2px rgba(15,23,42,.03); padding:20px; }
+            .rule-head { align-items:flex-start; border-bottom:1px solid var(--line); display:flex; gap:16px; justify-content:space-between; margin-bottom:18px; padding-bottom:14px; }
+            .rule-index { color:var(--muted-soft); font-family:Consolas,"JetBrains Mono",monospace; font-size:11px; font-weight:600; margin-bottom:4px; text-transform:uppercase; }
+            .rule-head h3 { overflow-wrap:anywhere; }
+            .grid { display:grid; gap:16px; grid-template-columns:repeat(12,minmax(0,1fr)); }
+            .grid > div { grid-column:span 3; min-width:0; }
+            .wide { grid-column:span 6 !important; }
             .full { grid-column:1/-1; }
-            label { display:block; font-size:13px; font-weight:600; margin-bottom:5px; }
-            input,textarea,select { background:var(--surface); border:1px solid #cbd5e1; color:var(--ink); font:inherit; padding:9px 10px; width:100%; }
-            textarea { min-height:76px; resize:vertical; }
-            textarea.long { min-height:102px; }
-            .field-help { color:var(--muted); font-size:11px; margin-top:4px; }
+            label { display:block; font-size:13px; font-weight:600; margin-bottom:6px; }
+            input,textarea,select { background:var(--surface); border:1px solid #d6dbe1; border-radius:6px; color:var(--ink); font:inherit; padding:9px 10px; width:100%; }
+            textarea { min-height:84px; resize:vertical; }
+            textarea.long { min-height:118px; }
+            .field-help { color:var(--muted-soft); font-size:11px; margin-top:5px; }
             .check { align-items:center; display:flex; gap:8px; min-height:38px; }
             .check input { width:auto; }
-            .empty { border:1px dashed var(--line); color:var(--muted); padding:22px; text-align:center; }
+            .empty { border:1px dashed #cfd4dc; border-radius:8px; color:var(--muted); padding:32px 22px; text-align:center; }
             .import-label { cursor:pointer; }
             #importFile { display:none; }
-            @media(max-width:900px) { .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .wide { grid-column:span 2; } }
-            @media(max-width:560px) { header { padding-left:14px; padding-right:14px; } header .head { flex-direction:column; } main { padding-left:14px; padding-right:14px; } section,.rule-card { padding:16px; } .grid { grid-template-columns:1fr; } .wide { grid-column:auto; } .rule-head { display:block; } .rule-head .actions { margin-top:8px; } }
+            @media(max-width:900px) { .grid { grid-template-columns:repeat(6,minmax(0,1fr)); } .grid > div { grid-column:span 3; } .wide { grid-column:span 6 !important; } }
+            @media(max-width:560px) { header { padding-left:16px; padding-right:16px; } header .head { flex-direction:column; } header .head .secondary { align-self:flex-start; } main { padding:20px 14px 56px; } section,.rule-card { padding:16px; } .toolbar,.toolbar-group { align-items:stretch; flex-direction:column; } .toolbar-group,.toolbar-group.primary-actions { width:100%; } .toolbar-group button,.toolbar-group .button,.import-label { width:100%; } .grid,.grid > div,.wide { display:grid; grid-column:1/-1 !important; } .rule-head { display:block; } .rule-head .actions { margin-top:12px; } .rule-head .actions button { width:100%; } }
           </style>
         </head>
         <body>
           <header>
             <div class="head">
-              <div>
+              <div class="intro">
+                <p class="eyebrow">KSword Sandbox · local workspace</p>
                 <h1 data-zh="行为规则编辑器" data-en="Behavior rule editor">行为规则编辑器</h1>
-                <p class="muted" style="color:#d4e0ea" data-zh="以卡片方式编辑检测规则；保存后立即供本机 Web Host 使用。" data-en="Edit detection rules as cards; saved changes are immediately available to this local Web Host.">以卡片方式编辑检测规则；保存后立即供本机 Web Host 使用。</p>
+                <p class="muted" data-zh="以卡片方式编辑检测规则；保存后立即供本机 Web Host 使用。" data-en="Edit detection rules as cards; saved changes are immediately available to this local Web Host.">以卡片方式编辑检测规则；保存后立即供本机 Web Host 使用。</p>
               </div>
               <button class="secondary" id="languageButton" type="button" onclick="toggleLanguage()" data-zh="English" data-en="中文">English</button>
             </div>
@@ -85,13 +94,17 @@ internal static class RulesEditorPage
           <main>
             <section>
               <div class="toolbar">
-                <button type="button" onclick="addRule()" data-zh="新增规则" data-en="Add rule">新增规则</button>
-                <button type="button" onclick="saveRules()" data-zh="保存规则" data-en="Save rules">保存规则</button>
-                <button class="secondary" type="button" onclick="loadRules()" data-zh="从服务端重新载入" data-en="Reload from server">从服务端重新载入</button>
-                <button class="ghost" type="button" onclick="validateRules()" data-zh="校验" data-en="Validate">校验</button>
-                <button class="ghost" type="button" onclick="exportRules()" data-zh="导出 JSON" data-en="Export JSON">导出 JSON</button>
-                <label class="button secondary import-label" for="importFile" data-zh="导入 JSON" data-en="Import JSON">导入 JSON</label>
-                <input id="importFile" type="file" accept="application/json,.json" onchange="importRules(event)">
+                <div class="toolbar-group primary-actions">
+                  <button type="button" onclick="addRule()" data-zh="新增规则" data-en="Add rule">新增规则</button>
+                  <button type="button" onclick="saveRules()" data-zh="保存规则" data-en="Save rules">保存规则</button>
+                  <button class="secondary" type="button" onclick="loadRules()" data-zh="从服务端重新载入" data-en="Reload from server">从服务端重新载入</button>
+                </div>
+                <div class="toolbar-group secondary-actions">
+                  <button class="ghost" type="button" onclick="validateRules()" data-zh="校验" data-en="Validate">校验</button>
+                  <button class="ghost" type="button" onclick="exportRules()" data-zh="导出 JSON" data-en="Export JSON">导出 JSON</button>
+                  <label class="button secondary import-label" for="importFile" data-zh="导入 JSON" data-en="Import JSON">导入 JSON</label>
+                  <input id="importFile" type="file" accept="application/json,.json" onchange="importRules(event)">
+                </div>
               </div>
               <div class="path" data-zh="规则文件：{{path}}" data-en="Rule file: {{path}}">规则文件：{{path}}</div>
               <div id="status" class="status muted" role="status" aria-live="polite"></div>
@@ -135,6 +148,7 @@ internal static class RulesEditorPage
             function normalizeRule(rule) {
               return Object.assign({ id:'', title:'', titleZh:'', severity:'info', confidence:'medium', summary:'', summaryZh:'', mitreTechniqueId:'', mitreTechniqueName:'', eventTypes:[], containsCommandLine:[], containsPath:[], tags:[], includeNonBehaviorEvidence:false }, rule || {});
             }
+            function fieldLabel(label) { const parts = String(label || '').split(' / '); return language === 'zh' ? parts[0] : (parts[1] || parts[0]); }
             function render() {
               const host = document.getElementById('rules');
               if (!state.rules.length) { host.innerHTML = `<div class="empty">${htmlEscape(t('还没有规则。点击“新增规则”开始。','No rules yet. Select “Add rule” to begin.'))}</div>`; return; }
@@ -143,13 +157,13 @@ internal static class RulesEditorPage
             function renderRule(rule, index) {
               const controls = fieldSpecs.map(([key, label, type, classes]) => {
                 const id = `rule-${index}-${key}`;
-                if (type === 'checkbox') return `<div class="${classes}"><label class="check"><input id="${id}" type="checkbox" ${rule[key] ? 'checked' : ''} onchange="updateRule(${index})"><span>${htmlEscape(label)}</span></label></div>`;
+                if (type === 'checkbox') return `<div class="${classes}"><label class="check"><input id="${id}" type="checkbox" ${rule[key] ? 'checked' : ''} onchange="updateRule(${index})"><span>${htmlEscape(fieldLabel(label))}</span></label></div>`;
                 const value = type === 'textarea' ? splitValues(rule[key]) : String(rule[key] ?? '');
                 const control = type === 'select'
                   ? `<select id="${id}" onchange="updateRule(${index})"><option value="info" ${value === 'info' ? 'selected' : ''}>info</option><option value="low" ${value === 'low' ? 'selected' : ''}>low</option><option value="medium" ${value === 'medium' ? 'selected' : ''}>medium</option><option value="high" ${value === 'high' ? 'selected' : ''}>high</option><option value="critical" ${value === 'critical' ? 'selected' : ''}>critical</option></select>`
                   : type === 'textarea' ? `<textarea class="${key === 'summary' || key === 'summaryZh' ? 'long' : ''}" id="${id}" oninput="updateRule(${index})">${htmlEscape(value)}</textarea>`
                   : `<input id="${id}" value="${attrEscape(value)}" oninput="updateRule(${index})">`;
-                return `<div class="${classes}"><label for="${id}">${htmlEscape(label)}</label>${control}${['eventTypes','containsCommandLine','containsPath','tags'].includes(key) ? `<div class="field-help">${htmlEscape(t('可用换行或逗号分隔','Separate with newlines or commas'))}</div>` : ''}</div>`;
+                return `<div class="${classes}"><label for="${id}">${htmlEscape(fieldLabel(label))}</label>${control}${['eventTypes','containsCommandLine','containsPath','tags'].includes(key) ? `<div class="field-help">${htmlEscape(t('可用换行或逗号分隔','Separate with newlines or commas'))}</div>` : ''}</div>`;
               }).join('');
               return `<article class="rule-card"><div class="rule-head"><div><div class="rule-index">${htmlEscape(t('规则','Rule'))} #${index + 1}</div><h3>${htmlEscape(rule.title || rule.id || t('未命名规则','Untitled rule'))}</h3></div><div class="actions"><button class="danger" type="button" onclick="removeRule(${index})" data-zh="删除" data-en="Delete">${htmlEscape(t('删除','Delete'))}</button></div></div><div class="grid">${controls}</div></article>`;
             }
