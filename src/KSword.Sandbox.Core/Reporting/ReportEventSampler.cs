@@ -122,6 +122,22 @@ public static class ReportEventSampler
         "zhHint"
     ];
 
+    private static readonly string[] PcapImportPriorityDataKeys =
+    [
+        "collectionName",
+        "importMode",
+        "sourceArtifactRelativePath",
+        "sourceArtifactSha256",
+        "sourceArtifactSizeBytes",
+        "sourcePcapArtifactSha256",
+        "pcapSourceArtifactRelativePath",
+        "pcapDownloadSelector",
+        "eventFamily",
+        "eventKind",
+        "protocol",
+        "serviceHint"
+    ];
+
     // Synthetic R0 rows are plumbing evidence used to verify JSONL import and
     // must retain their source marker even when host metadata is verbose.
     private static readonly string[] R0MockPriorityDataKeys =
@@ -956,6 +972,13 @@ public static class ReportEventSampler
             return ReportSamplingBucket.GeneralBehaviorEvidence;
         }
 
+        if (string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "pcap.import.summary", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "network.import.summary", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReportSamplingBucket.GeneralBehaviorEvidence;
+        }
+
         if (IsDiagnosticReportEvent(evt))
         {
             return ReportSamplingBucket.Diagnostics;
@@ -1369,6 +1392,14 @@ public static class ReportEventSampler
         if ((evt.EventType ?? string.Empty).StartsWith("guest.events.", StringComparison.OrdinalIgnoreCase))
         {
             foreach (var key in GuestImportPriorityDataKeys)
+            {
+                yield return key;
+            }
+        }
+
+        if ((evt.EventType ?? string.Empty).StartsWith("pcap.", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var key in PcapImportPriorityDataKeys)
             {
                 yield return key;
             }
