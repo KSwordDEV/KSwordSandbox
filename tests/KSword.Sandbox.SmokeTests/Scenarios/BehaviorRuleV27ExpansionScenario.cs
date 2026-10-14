@@ -40,7 +40,8 @@ internal sealed class BehaviorRuleV27ExpansionScenario : ISmokeTestScenario
         var rules = RuleEngine.LoadRuleSet(behaviorRulesPath);
         SmokeAssert.True(
             string.Equals(rules.Version, "2026-07-12-v27-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(rules.Version, "2026-07-12-v28-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase),
+            string.Equals(rules.Version, "2026-07-12-v28-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(rules.Version, "2026-07-12-v31-noise-sampling-boundary", StringComparison.OrdinalIgnoreCase),
             "Behavior rules should carry the v27/v28 behavior-rule expansion version.");
 
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);

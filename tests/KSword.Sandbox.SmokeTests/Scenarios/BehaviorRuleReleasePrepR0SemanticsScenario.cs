@@ -79,7 +79,8 @@ internal sealed class BehaviorRuleReleasePrepR0SemanticsScenario : ISmokeTestSce
             string.Equals(rules.Version, "2026-07-12-v25-r0-file-network-semantic-fields", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(rules.Version, "2026-07-12-v26-self-noise-guard-hardening", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(rules.Version, "2026-07-12-v27-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(rules.Version, "2026-07-12-v28-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase),
+            string.Equals(rules.Version, "2026-07-12-v28-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(rules.Version, "2026-07-12-v31-noise-sampling-boundary", StringComparison.OrdinalIgnoreCase),
             "Behavior rules should carry the v22+ defensive behavior expansion or newer self-noise/behavior hardening version while retaining release-prep rules.");
 
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
@@ -451,7 +452,8 @@ internal sealed class BehaviorRuleReleasePrepR0SemanticsScenario : ISmokeTestSce
                 {
                     ["dropLocationFamily"] = "startup-folder",
                     ["droppedFileCandidate"] = "true",
-                    ["fileIntent"] = "create"
+                    ["fileIntent"] = "create",
+                    ["operationName"] = "create"
                 }
             },
             new SandboxEvent
@@ -464,7 +466,8 @@ internal sealed class BehaviorRuleReleasePrepR0SemanticsScenario : ISmokeTestSce
                 {
                     ["dropLocationFamily"] = "shared-writable-directory",
                     ["droppedFileCandidate"] = "true",
-                    ["fileIntent"] = "create"
+                    ["fileIntent"] = "create",
+                    ["operationName"] = "create"
                 }
             },
             new SandboxEvent

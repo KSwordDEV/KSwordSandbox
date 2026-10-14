@@ -40,7 +40,8 @@ internal sealed class BehaviorRuleV25SemanticFieldsScenario : ISmokeTestScenario
             string.Equals(rules.Version, "2026-07-12-v26-self-noise-guard-hardening", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(rules.Version, "2026-07-12-v27-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(rules.Version, "2026-07-12-v28-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(rules.Version, "2026-07-12-v29-security-privilege", StringComparison.OrdinalIgnoreCase),
+            string.Equals(rules.Version, "2026-07-12-v29-security-privilege", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(rules.Version, "2026-07-12-v31-noise-sampling-boundary", StringComparison.OrdinalIgnoreCase),
             "Behavior rules should carry the v25 R0/file/network semantic-field version or newer behavior hardening version.");
 
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
