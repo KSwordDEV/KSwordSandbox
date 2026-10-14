@@ -18,6 +18,7 @@ internal static class DashboardExperiencePage
         <html lang="zh-CN">
         <head>
           <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
           <title>KSword Sandbox 主机控制台</title>
           <style>
             :root { --blue:#43A0FF; --blue-dark:#0B6FCC; --ink:#0f172a; --muted:#64748b; --line:#dbeafe; --soft:#eef7ff; color-scheme: light; }
@@ -224,14 +225,53 @@ internal static class DashboardExperiencePage
             code,pre { background:var(--soft); font-family:Consolas,"JetBrains Mono",monospace; }
             @media(max-width:980px) { .grid,.vm-grid,.job-summary,.stages,.progress-facts,.operator-hero-grid,.operator-flow { grid-template-columns:1fr; } .header-row { flex-direction:column; } .primary-cta { min-width:0; width:100%; } }
             @media(max-width:560px) { main { padding-left:14px; padding-right:14px; } header { padding-left:14px; padding-right:14px; } section { padding:16px; } }
+            /* Two-column task layout: sample first, readiness beside it. */
+            #workspace-plan { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:24px; align-items:start; }
+            #workspace-plan[hidden] { display:none; }
+            #plan { grid-column:1; grid-row:1; min-width:0; }
+            #operator-start { grid-column:2; grid-row:1; min-width:0; border-left:1px solid var(--line); padding:20px; }
+            header { padding-top:22px; padding-bottom:18px; }
+            .header-row h1 { font-size:28px; margin:0 0 8px; }
+            .header-row p { color:var(--muted); margin:0; max-width:720px; }
+            .topnav { margin-top:18px; }
+            .workspace-tabs { border-bottom:1px solid var(--line); margin-bottom:24px; padding-bottom:14px; }
+            #plan > h2 { font-size:22px; margin:0 0 8px; }
+            #plan .tabs { margin:16px 0 18px; gap:0; border-bottom:1px solid var(--line); }
+            #plan .tab-button { border:0; border-bottom:2px solid transparent; background:#fff; color:var(--muted); margin:0; padding:10px 12px; font-size:13px; }
+            #plan .tab-button.active { border-bottom-color:var(--blue); color:var(--blue); }
+            #plan .tab-panel { background:#fff; border:0; padding:0; }
+            #plan .upload-card { border:0; padding:0; background:#fff; }
+            #plan .upload-card > h3 { display:none; }
+            .upload-dropzone { margin:16px 0; padding:22px; border:1px dashed #a5b2c4; }
+            .upload-dropzone label { margin:0 0 10px; }
+            .selected-sample:empty { display:none; }
+            #uploadDuration { max-width:190px; }
+            .primary-cta { width:100%; margin-top:18px; min-height:48px; }
+            .preset-row { gap:6px; margin:14px 0; }
+            .preset-row button { font-size:12px; padding:7px 10px; }
+            #durationHint { max-width:560px; }
+            #operator-start h2 { font-size:18px; margin:0 0 8px; }
+            #operator-start .readiness-strip { display:grid; gap:0; margin:16px 0; }
+            #operator-start .readiness-chip { display:grid; max-width:none; padding:10px 0; background:#fff; border:0; border-bottom:1px solid var(--line); }
+            #operator-start .readiness-chip b { font-size:13px; }
+            #operator-start .readiness-chip span { line-height:1.5; }
+            #operator-start .readiness-chip span:last-child { display:none; }
+            .sidebar-note { border-top:1px solid var(--line); margin-top:20px; padding-top:14px; }
+            .sidebar-note p { font-size:12px; color:var(--muted); margin:8px 0 0; }
+            .sidebar-note a { color:var(--blue); }
+            details.vm-config { background:#fff; border:1px solid var(--line); margin-top:18px; padding:14px; }
+            details.vm-config summary { font-weight:600; }
+            details.handoff-details { margin:14px 0; }
+            details.handoff-details summary { cursor:pointer; color:var(--muted); font-size:12px; }
+            @media(max-width:980px) { #workspace-plan { grid-template-columns:minmax(0,1fr) 270px; gap:18px; } #plan { padding:18px; } .vm-grid { grid-template-columns:1fr; } }
+            @media(max-width:760px) { #workspace-plan { display:flex; flex-direction:column; gap:18px; } #plan { order:0; width:100%; margin:0; } #operator-start { order:1; width:100%; margin:0; } .header-row { gap:14px; } .workspace-tabs { gap:6px; } .workspace-tab { flex:1; padding:10px 6px; font-size:12px; } .tab-button { flex:1; } .topnav a { font-size:12px; padding:6px 8px; } #uploadDuration { max-width:none; } .preset-row { display:grid; grid-template-columns:1fr 1fr; } .upload-dropzone { padding:18px; } }
           </style>        </head>
         <body>
           <header>
             <div class="header-row">
               <div>
-                <h1 data-zh="KSword 沙箱主机" data-en="KSword Sandbox Host">KSword 沙箱主机</h1>
-              <p data-zh="上传样本后会保存到本机、创建安全计划并尝试提交 VM 动态分析；随后进入独立监控页查看启动状态、真实进度和报告入口，原始事件与下载列表集中在监控页。" data-en="After upload, the UI stores the sample locally, creates a safe plan, and attempts to submit VM dynamic analysis. It then enters the standalone monitor for start status, real progress, and report links; raw events and downloads stay on the monitor page.">上传样本后会保存到本机、创建安全计划并尝试提交 VM 动态分析；随后进入独立监控页查看启动状态、真实进度和报告入口，原始事件与下载列表集中在监控页。</p>
-                <p><span class="pill" data-zh="提示：右键路径、表格值、证据字段和执行流程视图可复制。" data-en="Tip: right-click paths, table values, evidence fields, and execution-flow details to copy.">提示：右键路径、表格值、证据字段和执行流程视图可复制。</span></p>
+                <h1 data-zh="KSword Sandbox" data-en="KSword Sandbox">KSword Sandbox</h1>
+                <p data-zh="在本机虚拟机中分析样本，查看行为证据与检测报告。" data-en="Analyze samples in a local virtual machine and review behavior evidence and reports.">在本机虚拟机中分析样本，查看行为证据与检测报告。</p>
               </div>
               <button class="secondary lang-toggle" type="button" onclick="toggleLanguage()" aria-label="语言切换 / Language switch" data-zh="语言：中文 ⇄ English" data-en="Language: English ⇄ 中文">语言：中文 ⇄ English</button>
             </div>
@@ -252,19 +292,14 @@ internal static class DashboardExperiencePage
             </div>
             <div id="workspace-plan" class="workspace-panel active" role="tabpanel" aria-labelledby="workspace-tab-plan">
             <section class="operator-hero" id="operator-start">
-              <h2 data-zh="从这里开始：上传后提交 VM 分析" data-en="Start here: upload and submit VM analysis">从这里开始：上传后提交 VM 分析</h2>
-              <p class="hint" data-zh="首屏按云沙箱操作习惯组织：先选择样本，再看 VM / VirusTotal / 证据采集就绪状态，最后点击一个主按钮。任务创建后会打开动态监控页确认后台接管状态和真实进度，不需要再找“启动”按钮。" data-en="The first screen follows a polished cloud-sandbox flow: choose a sample, review VM / VirusTotal / evidence readiness, then press one primary button. After the job is created, the dynamic monitor opens to confirm background handoff and real progress; no extra Start button hunting.">首屏按云沙箱操作习惯组织：先选择样本，再看 VM / VirusTotal / 证据采集就绪状态，最后点击一个主按钮。任务创建后会打开动态监控页确认后台接管状态和真实进度，不需要再找“启动”按钮。</p>
+              <h2 data-zh="分析环境" data-en="Analysis environment">分析环境</h2>
+              <p class="hint" data-zh="只读检查后端与采集就绪状态。" data-en="Read-only checks for backend and collection readiness.">只读检查后端与采集就绪状态。</p>
               <div id="operatorReadinessChips" class="readiness-strip" data-copy="等待配置加载 / waiting for readiness" data-copy-label="operator readiness summary"></div>
-              <div class="operator-hero-grid">
-                <div class="operator-brief" data-copy="KSword WebUI 一键分析：上传 EXE、生成计划、提交 VM、打开动态监控；样本留在本机，VT 只做 hash-only 查询 / one-click run: upload EXE, plan, start VM, open live monitor">
-                  <strong data-zh="本地安全边界" data-en="Local safety boundary">本地安全边界</strong>
-                  <span data-zh="样本只保存到本机 runtime root；VirusTotal 只查 SHA-256，不上传样本字节。若 VT 未配置、未收录或调用失败，只作为页面静默状态，主流程继续。" data-en="Samples are saved only to the local runtime root; VirusTotal performs SHA-256 lookup only and never uploads sample bytes. If VT is missing, not found, or fails, it remains a quiet page status and the main flow continues.">样本只保存到本机 runtime root；VirusTotal 只查 SHA-256，不上传样本字节。若 VT 未配置、未收录或调用失败，只作为页面静默状态，主流程继续。</span>
-                </div>
-                <div class="operator-flow" aria-label="上传执行路径 / Upload execution path">
-                  <div class="operator-step" data-copy="1. 选择本机 EXE / Choose local EXE"><b data-zh="1. 选择 EXE" data-en="1. Choose EXE">1. 选择 EXE</b><span data-zh="支持点击或拖拽到上传区域。" data-en="Click or drag into the upload zone.">支持点击或拖拽到上传区域。</span></div>
-                  <div class="operator-step" data-copy="2. 复核 VM / VT / 证据就绪态 / Review VM / VT / artifact readiness"><b data-zh="2. 看就绪态" data-en="2. Review readiness">2. 看就绪态</b><span data-zh="VM、干净基线、R0、VT 和产物选项都可右键复制。" data-en="VM, clean baseline, R0, VT, and artifact options are right-click copyable.">VM、干净基线、R0、VT 和产物选项都可右键复制。</span></div>
-                  <div class="operator-step" data-copy="3. 提交分析并打开监控 / Submit analysis and open monitor"><b data-zh="3. 提交分析" data-en="3. Submit analysis">3. 提交分析</b><span data-zh="提交后打开动态监控页查看启动状态和真实进度。" data-en="Submission opens the dynamic monitor for start status and real progress.">提交后打开动态监控页查看启动状态和真实进度。</span></div>
-                </div>
+              <a class="buttonlink secondary" href="/setup" data-zh="配置后端与虚拟机" data-en="Configure backend and VM">配置后端与虚拟机</a>
+              <div class="sidebar-note">
+                <strong data-zh="本机分析" data-en="Local analysis">本机分析</strong>
+                <p data-zh="样本保存在本机。VirusTotal 只查询文件哈希，不上传样本。" data-en="Samples stay on this host. VirusTotal looks up file hashes without uploading sample files.">样本保存在本机。VirusTotal 只查询文件哈希，不上传样本。</p>
+                <p data-zh="分析启动后进入监控页，采集完成后生成报告。" data-en="The monitor opens after launch; reports follow collection.">分析启动后进入监控页，采集完成后生成报告。</p>
               </div>
             </section>
             <section id="plan">
@@ -297,11 +332,12 @@ internal static class DashboardExperiencePage
                     </div>
                     <button class="primary-cta" onclick="uploadAndPlan()" data-zh="开始分析：上传 → 提交 VM → 打开监控" data-en="Start analysis: upload → submit VM → monitor">开始分析：上传 → 提交 VM → 打开监控</button>
                     <p class="microcopy" data-copy="上传会创建任务、尝试提交 VM 分析并打开实时监控；若预检失败会保留任务上下文 / Upload creates a job, attempts VM analysis, and opens the live monitor" data-zh="点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。" data-en="After click, the browser shows real upload progress. If VM start preflight fails, the UI still preserves the created job, failure reason, and monitor/recent-job entry points so context is not lost.">点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。</p>
-                    <div id="uploadAutoStartNotice" class="callout" data-copy="一键路径：接口=/api/files/upload/start；跳转=/jobs/{jobId}/live-events；当前页进入监控；无需弹窗 / One-click path: endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; no popup" data-copy-label="upload auto-start live redirect affordance">
+                    <details class="handoff-details"><summary data-zh="查看一键路径与状态" data-en="View handoff path and status">查看一键路径与状态</summary><div id="uploadAutoStartNotice" class="callout" data-copy="一键路径：接口=/api/files/upload/start；跳转=/jobs/{jobId}/live-events；当前页进入监控；无需弹窗 / One-click path: endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; no popup" data-copy-label="upload auto-start live redirect affordance">
                       <strong data-zh="一键接管路径" data-en="One-click handoff path">一键接管路径</strong>
                       <p class="hint" data-zh="主按钮使用 /api/files/upload/start：保存样本、创建任务、提交后台 VM 分析，然后当前页面进入 /jobs/{jobId}/live-events；右键或点击按钮可复制这条操作路径。" data-en="The primary button uses /api/files/upload/start: save sample, create job, submit background VM analysis, then navigate the current page to /jobs/{jobId}/live-events. Right-click or use the button to copy this operation path.">主按钮使用 /api/files/upload/start：保存样本、创建任务、提交后台 VM 分析，然后当前页面进入 /jobs/{jobId}/live-events；右键或点击按钮可复制这条操作路径。</p>
                       <button class="copy-btn" type="button" data-copy="一键路径：接口=/api/files/upload/start；跳转=/jobs/{jobId}/live-events；当前页进入监控；无需弹窗 / One-click path: endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; no popup" data-copy-label="one-click handoff path" data-zh="复制一键路径" data-en="Copy handoff path">复制一键路径</button>
                     </div>
+                    </details>
                   </div>
               </div>
               <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path" hidden>
@@ -325,7 +361,7 @@ internal static class DashboardExperiencePage
                   <p class="hint"><span data-zh="候选项：" data-en="Candidates:">候选项：</span> <span id="candidateCount" data-copy="0">0</span></p>
                   <div id="candidates" class="hint" data-copy="等待扫描 / waiting for scan" data-zh="等待扫描。" data-en="Waiting for scan.">等待扫描。</div>
               </div>
-              <details class="vm-config" open>
+              <details class="vm-config">
                 <summary data-zh="本次任务：虚拟机运行配置" data-en="This job: VM run configuration">本次任务：虚拟机运行配置</summary>
                 <p class="hint" data-zh="页面先只读检测所选后端的 VM、干净基线和 Payload；基线按后端对应 Hyper-V 检查点、VMware 快照或 QEMU overlay/内部快照。检测结果与 config/浏览器候选值会分别标记，配置值不会冒充本机检测。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。" data-en="The page first performs read-only detection of the selected provider's VM, clean baseline, and payload. The baseline maps to a Hyper-V checkpoint, VMware snapshot, or QEMU overlay/internal snapshot. Detected results and config/browser candidates are labeled separately, so configured values never pretend to be local detections. Guest account and working folder cannot be inferred reliably from an offline host, so they are labeled separately as active job config.">页面先只读检测所选后端的 VM、干净基线和 Payload；基线按后端对应 Hyper-V 检查点、VMware 快照或 QEMU overlay/内部快照。检测结果与 config/浏览器候选值会分别标记，配置值不会冒充本机检测。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。</p>
                 <div id="localDetectionBar" class="local-detection-bar" data-copy="" data-copy-label="local host detection status">
@@ -406,7 +442,7 @@ internal static class DashboardExperiencePage
                   <a class="buttonlink secondary" href="/settings" data-zh="在设置页管理默认值" data-en="Manage defaults in Settings">在设置页管理默认值</a>
                 </div>
               </details>
-              <details class="vm-config" open>
+              <details class="vm-config">
                 <summary data-zh="高级：敏感产物采集（显式启用 / opt-in）" data-en="Advanced: sensitive artifact collection (explicit opt-in)">高级：敏感产物采集（显式启用 / opt-in）</summary>
                 <p class="hint" data-zh="这些选项默认关闭；勾选后只影响当前任务，上传点击会随计划一起提交并在动态监控页显示，runbook 会把对应参数（flag）传给 Guest Agent。" data-en="These options are disabled by default. When checked, they affect only this job, upload submits them with the plan and shows them on the dynamic monitor, and the runbook forwards matching flags to the Guest Agent.">这些选项默认关闭；勾选后只影响当前任务，上传点击会随计划一起提交并在动态监控页显示，runbook 会把对应参数（flag）传给 Guest Agent。</p>
                 <div class="vm-grid">
