@@ -1125,6 +1125,14 @@ public sealed class HyperVRunbookBuilder
     private static string BuildGuestCredentialPreamble(SandboxConfig config)
     {
         var secretName = config.Guest.PasswordSecretName;
+        var guestUserName = config.Guest.UserName.Trim();
+        if (!guestUserName.Contains('\\', StringComparison.Ordinal) &&
+            !guestUserName.Contains('@', StringComparison.Ordinal) &&
+            !guestUserName.StartsWith(".\\", StringComparison.Ordinal))
+        {
+            guestUserName = ".\\" + guestUserName;
+        }
+
         return string.Join(" ", new[]
         {
             $"$guestPasswordText = [System.Environment]::GetEnvironmentVariable({Q(secretName)}, 'Process');",
@@ -1135,7 +1143,7 @@ public sealed class HyperVRunbookBuilder
             "$guestPassword = [System.Security.SecureString]::new();",
             "foreach ($guestPasswordChar in $guestPasswordText.ToCharArray()) { $guestPassword.AppendChar($guestPasswordChar) };",
             "$guestPassword.MakeReadOnly();",
-            $"$guestCredential = [pscredential]::new({Q(config.Guest.UserName)}, $guestPassword);",
+            $"$guestCredential = [pscredential]::new({Q(guestUserName)}, $guestPassword);",
             "$guestPasswordText = $null; $guestPasswordChar = $null;"
         });
     }
