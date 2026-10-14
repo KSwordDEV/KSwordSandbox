@@ -6,6 +6,8 @@ using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Core.StaticAnalysis;
 using KSword.Sandbox.SmokeTests.Framework;
 using System.Text.Json;
+using System.Text;
+using System.Text.RegularExpressions;
 
 return SmokeTestProgram.Run(args);
 
@@ -328,10 +330,11 @@ internal static class SmokeTestProgram
         Assert(stagePayloadStep.PowerShell.Contains("KSword.Sandbox.Agent.exe", StringComparison.Ordinal), "runbook should validate guest agent path");
         Assert(stagePayloadStep.PowerShell.Contains("KSword.Sandbox.R0Collector.exe", StringComparison.Ordinal), "runbook should validate R0Collector path when driver is enabled");
         var runAgentStep = runbook.Steps.Single(step => step.Id == "run-agent");
-        Assert(runAgentStep.PowerShell.Contains("--driver-events", StringComparison.Ordinal), "runbook should pass driver events path");
-        Assert(runAgentStep.PowerShell.Contains($"{job.JobId:N}\\driver-events.jsonl", StringComparison.Ordinal), "runbook should use job-specific driver events path");
-        Assert(runAgentStep.PowerShell.Contains("--r0collector", StringComparison.Ordinal), "runbook should pass R0Collector path");
-        Assert(runAgentStep.PowerShell.Contains("--driver-device", StringComparison.Ordinal), "runbook should pass driver device path");
+        var decodedGuestAgentCommand = DecodeEncodedPowerShellCommands(runAgentStep.PowerShell);
+        Assert(decodedGuestAgentCommand.Contains("--driver-events", StringComparison.Ordinal), "runbook should pass driver events path in the encoded guest command");
+        Assert(decodedGuestAgentCommand.Contains($"{job.JobId:N}\\driver-events.jsonl", StringComparison.Ordinal), "runbook should use job-specific driver events path");
+        Assert(decodedGuestAgentCommand.Contains("--r0collector", StringComparison.Ordinal), "runbook should pass R0Collector path in the encoded guest command");
+        Assert(decodedGuestAgentCommand.Contains("--driver-device", StringComparison.Ordinal), "runbook should pass driver device path in the encoded guest command");
         var liveSyncStep = runbook.Steps.Single(step => step.Id == "sync-live-output");
         Assert(liveSyncStep.PowerShell.Contains("Copy-Item -FromSession", StringComparison.Ordinal), "runbook should sync guest output through PowerShell Direct");
         Assert(liveSyncStep.PowerShell.Contains($"{job.JobId:N}", StringComparison.Ordinal), "live sync should target the job-specific guest output directory");
@@ -391,6 +394,28 @@ internal static class SmokeTestProgram
         Assert(html.Contains("r0collector.mockDriverEvent", StringComparison.Ordinal), "html report should include raw R0 event type");
         Assert(html.Contains("driver-events.jsonl", StringComparison.Ordinal), "html report should include the imported R0 mock JSONL source path");
         Assert(html.Contains("Raw normalized events", StringComparison.Ordinal), "html report should include raw events section");
+    }
+
+    private static string DecodeEncodedPowerShellCommands(string script)
+    {
+        var decoded = new StringBuilder();
+        foreach (Match match in Regex.Matches(script, @"'(?<value>[A-Za-z0-9+/=]{40,})'"))
+        {
+            try
+            {
+                var text = Encoding.Unicode.GetString(Convert.FromBase64String(match.Groups["value"].Value));
+                if (text.Contains("--", StringComparison.Ordinal) || text.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+                {
+                    decoded.AppendLine(text);
+                }
+            }
+            catch (FormatException)
+            {
+                // Other quoted script values are ordinary paths or literals.
+            }
+        }
+
+        return decoded.ToString();
     }
 
     /// <summary>

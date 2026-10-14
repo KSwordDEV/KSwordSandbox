@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Core.Files;
@@ -190,15 +191,38 @@ internal sealed class SyntheticEndToEndSmokeScenario : ISmokeTestScenario
         RequireContains(artifactPolicy.PowerShell, "sample-process-tree-descendants-if-supported", "Artifact policy should document memory-dump descendant semantics.");
         RequireContains(artifactPolicy.PowerShell, "safe relative selectors", "Artifact policy should document safe download selector expectations.");
         var runAgent = planned.Runbook.Steps.Single(step => step.Id == "run-agent");
-        RequireContains(runAgent.PowerShell, "--collect-dropped-files", "Runbook should pass dropped-file collection into the guest agent.");
-        RequireContains(runAgent.PowerShell, "--screenshot", "Runbook should pass screenshot collection into the guest agent.");
-        RequireContains(runAgent.PowerShell, "--memory-dump", "Runbook should pass memory-dump collection into the guest agent.");
-        RequireContains(runAgent.PowerShell, "--driver-events", "Runbook should pass driver JSONL output into the guest agent.");
-        RequireContains(runAgent.PowerShell, "--r0-mock", "Runbook should use mock R0 collection for the VM-free smoke path.");
+        var decodedGuestAgentCommand = DecodeEncodedPowerShellCommands(runAgent.PowerShell);
+        RequireContains(decodedGuestAgentCommand, "--collect-dropped-files", "Runbook should pass dropped-file collection into the encoded guest command.");
+        RequireContains(decodedGuestAgentCommand, "--screenshot", "Runbook should pass screenshot collection into the encoded guest command.");
+        RequireContains(decodedGuestAgentCommand, "--memory-dump", "Runbook should pass memory-dump collection into the encoded guest command.");
+        RequireContains(decodedGuestAgentCommand, "--driver-events", "Runbook should pass driver JSONL output into the encoded guest command.");
+        RequireContains(decodedGuestAgentCommand, "--r0-mock", "Runbook should use mock R0 collection in the encoded guest command.");
         SmokeAssert.True(File.Exists(planned.JsonReportPath), "Planning should write report.json.");
         SmokeAssert.True(File.Exists(planned.HtmlReportPath), "Planning should write compatibility report.html.");
         SmokeAssert.True(File.Exists(planned.HtmlReportZhPath), "Planning should write report.zh.html.");
         SmokeAssert.True(File.Exists(planned.HtmlReportEnPath), "Planning should write report.en.html.");
+    }
+
+    private static string DecodeEncodedPowerShellCommands(string script)
+    {
+        var decoded = new StringBuilder();
+        foreach (Match match in Regex.Matches(script, @"'(?<value>[A-Za-z0-9+/=]{40,})'"))
+        {
+            try
+            {
+                var text = Encoding.Unicode.GetString(Convert.FromBase64String(match.Groups["value"].Value));
+                if (text.Contains("--", StringComparison.Ordinal) || text.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+                {
+                    decoded.AppendLine(text);
+                }
+            }
+            catch (FormatException)
+            {
+                // Other quoted script values are ordinary paths or literals.
+            }
+        }
+
+        return decoded.ToString();
     }
 
     private static SandboxRunbookExecutionResult BuildSyntheticRunbookExecution(AnalysisJob job)
