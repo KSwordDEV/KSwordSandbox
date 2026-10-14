@@ -1348,7 +1348,7 @@ public sealed class HyperVRunbookBuilder
             commands.Add($"Copy-Item -ToSession $session -Path $collectorSource -Destination {Q(guestCollectorDirectory)} -Recurse -Force;");
         }
 
-        if (!string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
+        if (!config.Driver.UseMockCollector && !string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
         {
             requiredGuestPaths.Add(config.Driver.DriverPathInGuest);
             commands.Add("if (-not (Test-Path -LiteralPath $driverSource -PathType Leaf)) { throw \"Host driver path was not found: $driverSource\" }");
