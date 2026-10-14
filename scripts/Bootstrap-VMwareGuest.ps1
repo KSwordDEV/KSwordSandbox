@@ -151,9 +151,17 @@ function Ensure-WorkingDirectory {
     Write-Bilingual -Chinese "工作目录已就绪：$WorkingDirectory" -English "Working directory is ready: $WorkingDirectory"
 }
 
+function Ensure-LocalWinRmAccessPolicy {
+    $policyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+    New-Item -Path $policyPath -Force | Out-Null
+    New-ItemProperty -Path $policyPath -Name 'LocalAccountTokenFilterPolicy' -PropertyType DWord -Value 1 -Force | Out-Null
+    Write-Bilingual -Chinese '已允许本地管理员通过 WinRM 使用完整令牌（仅限此实验 VM）' -English 'Enabled full-token WinRM access for local administrators (this disposable lab VM only)'
+}
+
 Assert-Administrator
 $user = Get-OrCreateGuestUser
 Ensure-LocalAdministrator -User $user
+Ensure-LocalWinRmAccessPolicy
 Enable-PSRemoting -Force -SkipNetworkProfileCheck | Out-Null
 Set-Service -Name WinRM -StartupType Automatic
 Start-Service -Name WinRM
