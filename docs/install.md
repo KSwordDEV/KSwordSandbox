@@ -220,6 +220,10 @@ payload；源码仓库运行仍默认使用仓库外 `D:\Temp\KSwordSandbox\payl
 
 ## 交互模式 / Interactive mode
 
+- Install / prepare local settings：首次安装向导会写入本机配置，并逐项引导 provider、VM、guest、payload 和 secret 设置。
+- Change menu：已安装环境可从 Change 菜单更新 provider、VM、guest、payload 和本机 secret。
+- Change can reset password secret without printing the password value.
+
 从仓库根目录运行：
 
 ```powershell
