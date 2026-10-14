@@ -94,6 +94,8 @@ release UX 约定 / release UX contract：
 - Runtime 位置：runtime root、payload、样本、job、报告、VM 磁盘/快照、`.sys`、
   `.pdb`、证书、PFX 和本机 config/secret 都必须在 git 仓库外，例如
   `D:\Temp\KSwordSandbox`。
+  如果目标机没有 `D:` 盘，启动器和 WebUI 会一致回退到 `%LOCALAPPDATA%\KSwordSandbox`；便携包内的
+  `payload\guest-tools` 仍按包根目录解析。
 - VM 兼容性：Live 路径需要 Windows guest、`SandboxUser` 或等价本地管理员账号和一个 clean
   checkpoint/snapshot/overlay baseline。Hyper-V 使用 PowerShell Direct 和 Guest Service
   Interface（来宾服务接口）；VMware/QEMU 使用 WinRM。源码仓库运行 WebUI 需要本机 .NET SDK；便携 runtime 包默认使用包内

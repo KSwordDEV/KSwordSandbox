@@ -177,6 +177,9 @@ config 时，仍可显式传入 `-ConfigPath`。
 密码值永不打印；可选 VT key 值也永不打印 / never printed。
 WebUI 启动路径只打印简短状态、选定 URL 和修复提示；不会向操作者输出一长串命令墙。
 
+如果 `D:` 盘或旧 install-state 中的路径在当前机器不存在，启动器会回退到
+`%LOCALAPPDATA%\KSwordSandbox`，并继续从便携包根目录寻找 `payload\guest-tools`。
+
 如果请求的 localhost 端口被 Windows/Hyper-V TCP port exclusion 或其他进程占用，
 `run.ps1` 会自动 fallback 到附近可用安全端口，并打印最终 WebUI URL。需要端口绑定失败时
 立即停止，请使用 `-StrictUrl`。
