@@ -223,6 +223,20 @@ payload；源码仓库运行仍默认使用仓库外 `D:\Temp\KSwordSandbox\payl
 - Install / prepare local settings：首次安装向导会写入本机配置，并逐项引导 provider、VM、guest、payload 和 secret 设置。
 - Change menu：已安装环境可从 Change 菜单更新 provider、VM、guest、payload 和本机 secret。
 - Change can reset password secret without printing the password value.
+- The Change flow can reset the actual VM guest password when explicitly requested.
+- Change options can change the recorded guest username or recreate runtime folders and local config.
+- Status remediation calls out missing VM, missing checkpoint, and missing Guest Agent/R0Collector payload before live analysis.
+
+Non-interactive examples:
+
+The install path does not sign drivers.
+
+```powershell
+.\install.ps1 -InstallEntrypoint CreateOrPreparePath -GeneratePassword
+.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
+.\install.ps1 -Mode Change -ResetPassword -GeneratePassword
+.\install.ps1 -Mode Change -ResetPassword -PromptPassword
+```
 
 从仓库根目录运行：
 
