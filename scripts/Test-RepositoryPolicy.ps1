@@ -72,6 +72,7 @@ function Test-ForbiddenPath {
         '.vhdset', '.vhdx', '.vmcx', '.vmgs', '.vmrs', '.vsv', '.webp',
         '.wer', '.wim', '.xls', '.xlsx', '.zip'
     )
+    # Canonical blocked path spellings include /bin/, /obj/, runtime/, reports/, and samples/.
     $caseInsensitiveForbiddenSegments = @(
         '.agents', '.cert', '.vs', 'bin', 'captures', 'checkpoints',
         'coverage', 'dist', 'dumps', 'logs', 'memory-dumps', 'obj',
