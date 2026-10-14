@@ -144,7 +144,12 @@ internal sealed class BackendProfileStore
             {
                 Enabled = request.DriverEnabled,
                 UseMockCollector = request.UseMockCollector,
-                HostDriverPath = string.IsNullOrWhiteSpace(request.HostDriverPath) ? null : request.HostDriverPath.Trim()
+                // Keep an existing operator-local driver path when an older API
+                // client omits the optional field; the setup page can still
+                // replace it by submitting a new path.
+                HostDriverPath = string.IsNullOrWhiteSpace(request.HostDriverPath)
+                    ? current.Driver.HostDriverPath
+                    : request.HostDriverPath.Trim()
             },
             Paths = current.Paths with
             {
