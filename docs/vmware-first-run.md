@@ -2,6 +2,16 @@
 
 本文把工作拆成**来宾层**和**宿主层**。先完成来宾层，再在主机 WebUI 保存配置；这样空白 Windows 10 VM 能按步骤产出第一份报告。全文以 VMware Workstation Pro（`vmrun.exe`、`vmType=ws`）为例。
 
+## 交付给用户的最短步骤 / Minimum handoff
+
+1. 关机状态把 VM 网卡设为 **NAT**；可以在 VMX 中确认 `ethernet0.connectionType = "nat"`。命令行只需检查主机网络：`vmrun -T ws listHostNetworks`，看到 `vmnet8` 类型为 `nat` 即可。
+2. 启动 Windows 10，安装 VMware Tools，然后在来宾管理员 PowerShell 执行 `Bootstrap-VMwareGuest.ps1`，设置 `SandboxUser` 和 WinRM HTTPS。
+3. 关机并创建一个 powered-off 快照，名称记为 `Clean`（或把实际名称填进 WebUI）。
+4. 双击 `Start-KSwordSandbox.cmd`，在 `/setup` 填 VMX、快照、`vmrun.exe`、用户名和密码，运行只读预检并保存。
+5. 首轮选择 Notepad、MSPaint、Calculator，关闭真实 R0 采集，策略选择“每个样本结束后停止并还原 Clean”，确认三份 HTML 报告后再启用 R0。
+
+本项目不要求用户配置 NAT 端口转发；宿主通过 VMware Tools 获取来宾地址后直接访问 WinRM 5986。只有主机无法直达来宾时，才额外使用 `vmrun setPortForwarding vmnet8 tcp <host-port> <guest-ip> 5986`。
+
 ## 0. 先看边界 / Boundaries
 
 - 来宾 VM 必须是可丢弃的 Windows 10，样本执行可能改变系统；不要放个人数据。
