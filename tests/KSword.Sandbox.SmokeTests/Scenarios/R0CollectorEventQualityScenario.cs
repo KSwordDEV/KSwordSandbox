@@ -1,6 +1,7 @@
 using System.Text.Json;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Core.Jobs;
+using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Core.Telemetry;
 using KSword.Sandbox.SmokeTests.Assertions;
@@ -492,7 +493,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             malformedLine.Contains("broken", StringComparison.Ordinal),
             "Parse-error evidence should retain the malformed JSONL line.");
         AssertSyntheticEventQualityRows(report.Events, requireFullQueueHealthAliases: false);
-        AssertMonotonicStressSequences(report.Events);
+        AssertMonotonicStressSequences(report.Events, allowReportSampling: true);
 
         var importedMarker = report.Events.FirstOrDefault(evt => string.Equals(evt.EventType, "guest.events.imported", StringComparison.OrdinalIgnoreCase));
         SmokeAssert.True(importedMarker is not null, "Report should include guest.events.imported marker.");
@@ -901,7 +902,16 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             .Where(evt => string.Equals(evt.EventType, "driver.file", StringComparison.OrdinalIgnoreCase) &&
                 DataEquals(evt, "stress", "true"))
             .ToList();
-        SmokeAssert.True(stressRows.Count == ExpectedStressDriverRows, $"Synthetic stress corpus should preserve {ExpectedStressDriverRows} driver.file rows. Actual: {stressRows.Count}");
+        var expectedStressRows = requireFullQueueHealthAliases
+            ? ExpectedStressDriverRows
+            : Math.Min(ExpectedStressDriverRows, ReportEventSampler.DefaultOptions.MaxEventsPerType);
+        SmokeAssert.True(
+            requireFullQueueHealthAliases
+                ? stressRows.Count == ExpectedStressDriverRows
+                : stressRows.Count == expectedStressRows,
+            requireFullQueueHealthAliases
+                ? $"Synthetic stress corpus should preserve {ExpectedStressDriverRows} driver.file rows. Actual: {stressRows.Count}"
+                : $"Sampled report should retain the configured driver.file cap ({expectedStressRows}) while raw import keeps {ExpectedStressDriverRows} rows. Actual: {stressRows.Count}");
         var stressRowsDataSampled =
             !requireFullQueueHealthAliases &&
             stressRows.All(evt => evt.Data.ContainsKey("__omittedDataPairs"));
@@ -1220,7 +1230,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
     /// Requires stress row sequences to be contiguous. Inputs are parsed events;
     /// processing extracts integer sequence values; return value is none.
     /// </summary>
-    private static void AssertMonotonicStressSequences(IReadOnlyCollection<SandboxEvent> events)
+    private static void AssertMonotonicStressSequences(IReadOnlyCollection<SandboxEvent> events, bool allowReportSampling = false)
     {
         var sequences = events
             .Where(evt => string.Equals(evt.EventType, "driver.file", StringComparison.OrdinalIgnoreCase) &&
@@ -1228,9 +1238,15 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             .Select(evt => ToInt(evt, "sequence"))
             .Order()
             .ToList();
-        SmokeAssert.True(sequences.Count == ExpectedStressDriverRows, $"Expected {ExpectedStressDriverRows} stress sequences.");
+        var expectedCount = allowReportSampling
+            ? Math.Min(ExpectedStressDriverRows, ReportEventSampler.DefaultOptions.MaxEventsPerType)
+            : ExpectedStressDriverRows;
+        SmokeAssert.True(sequences.Count == expectedCount, $"Expected {expectedCount} stress sequences.");
         SmokeAssert.True(sequences.First() == StressJsonlSequenceStart, "Stress driver event sequence start should match the gate contract.");
-        SmokeAssert.True(sequences.Last() == StressJsonlSequenceEnd, "Stress driver event sequence end should match the gate contract.");
+        var expectedLastSequence = allowReportSampling
+            ? StressJsonlSequenceStart + expectedCount - 1
+            : StressJsonlSequenceEnd;
+        SmokeAssert.True(sequences.Last() == expectedLastSequence, "Stress driver event sequence end should match the gate contract.");
         var gapCount = 0;
         for (var index = 1; index < sequences.Count; index++)
         {
