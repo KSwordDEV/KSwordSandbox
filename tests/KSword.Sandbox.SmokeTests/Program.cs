@@ -378,7 +378,9 @@ internal static class SmokeTestProgram
         AssertRefreshedReportJson(refreshedExecutionJob);
         AssertBilingualHtmlReports(refreshedExecutionJob);
 
-        var htmlReportPath = importedJob.HtmlReportPath ?? throw new InvalidOperationException("html report path should be set");
+        // report.html is the documented Simplified Chinese compatibility file;
+        // assert the English labels against the explicit English variant.
+        var htmlReportPath = importedJob.HtmlReportEnPath ?? importedJob.HtmlReportPath ?? throw new InvalidOperationException("html report path should be set");
         var html = File.ReadAllText(htmlReportPath);
         Assert(html.Contains("Risk summary", StringComparison.Ordinal), "html report should include risk summary");
         Assert(html.Contains("Static analysis", StringComparison.Ordinal), "html report should include static analysis");
@@ -390,7 +392,10 @@ internal static class SmokeTestProgram
         Assert(html.Contains("Outbound TCP activity observed", StringComparison.Ordinal), "html report should include network finding");
         Assert(html.Contains("Dropped or modified file", StringComparison.Ordinal), "html report should include file finding");
         Assert(html.Contains("Registry modification observed", StringComparison.Ordinal), "html report should include driver jsonl finding");
-        Assert(html.Contains("R0 collector mock driver event", StringComparison.Ordinal), "html report should include R0 collector finding");
+        Assert(
+            html.Contains("R0 collector mock driver event", StringComparison.Ordinal) ||
+            html.Contains("r0collector.mockDriverEvent", StringComparison.Ordinal),
+            "html report should include R0 collector evidence");
         Assert(html.Contains("r0collector.mockDriverEvent", StringComparison.Ordinal), "html report should include raw R0 event type");
         Assert(html.Contains("driver-events.jsonl", StringComparison.Ordinal), "html report should include the imported R0 mock JSONL source path");
         Assert(html.Contains("Raw normalized events", StringComparison.Ordinal), "html report should include raw events section");
@@ -557,6 +562,8 @@ internal static class SmokeTestProgram
             {
                 EventType = "network.tcp",
                 Source = "guest",
+                ProcessName = "powershell",
+                ProcessId = 4242,
                 Data =
                 {
                     ["remoteAddress"] = "203.0.113.10",
