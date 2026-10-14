@@ -37,7 +37,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\Bootstrap-VMwareGuest.ps1
 ```
 
-脚本会隐藏读取 `SandboxUser` 密码，创建或更新本地账号，将其加入 Administrators，启用 WinRM 服务，复用或创建本机自签 HTTPS 证书，建立 WinRM HTTPS listener 和 TCP 5986 防火墙规则，并创建 `C:\KSwordSandbox`。密码不会写入命令行、日志或配置文件。
+脚本会隐藏读取 `SandboxUser` 密码，创建或更新本地账号，将其加入 Administrators，启用 WinRM 服务，复用或创建本机自签 HTTPS 证书，建立 WinRM HTTPS listener 和 TCP 5986 防火墙规则，并创建 `C:\KSwordSandbox`。脚本不额外强制长度或字符集，只要求密码非空并符合 Windows 本机策略；密码不会写入命令行、日志或配置文件。
 
 已有正确账户而不想轮换密码时：
 
