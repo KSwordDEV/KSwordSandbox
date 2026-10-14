@@ -264,7 +264,7 @@ Invoke-Command -VMName '<vm>' -Credential '<in-memory credential>' -ScriptBlock 
 }
 ```
 
-如果 VM 为 `Off`，check 报 `Warning` 和 `RequiresRunning=true`；preflight 不会启动 VM。缺少 password 时，
+如果 VM 为 `Off`，check 报 `Warning` 和 `RequiresRunning=true`；preflight 不会启动 VM。If the VM is off, readiness does not start the VM. 缺少 password 时，
 password check failed，PowerShell Direct check 会明确跳过。
 
 ### Guest deployed payload files

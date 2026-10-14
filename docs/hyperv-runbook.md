@@ -67,7 +67,8 @@ AMD-V 是 Hyper-V live 前置条件。runbook 准备路径不签名 driver，不
 
 ## Live 前只读门禁
 
-运行 readiness preflight；它不会启动 VM、还原 checkpoint、复制文件或启用 integration service：
+运行 readiness preflight；它不会启动 VM、还原 checkpoint、复制文件或启用 integration service。The preflight is intentionally safer than the live runbook：
+Live mode uses `PromptForMissingGuestPassword` only when the process needs the guest credential; readiness and PlanOnly never prompt or mutate the VM。
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
