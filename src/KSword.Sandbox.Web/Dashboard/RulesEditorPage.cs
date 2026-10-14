@@ -58,6 +58,17 @@ internal static class RulesEditorPage
             .status.error { background:#fff1f1; border-color:var(--danger); color:var(--danger); }
             .status.warn { background:#fff8e8; border-color:var(--warn); color:var(--warn); }
             .rules { display:grid; gap:14px; }
+            .editor-layout { display:grid; grid-template-columns:300px minmax(0,1fr); gap:20px; align-items:start; }
+            .rule-browser { min-width:0; }
+            .rule-browser > label { margin-top:12px; }
+            .rule-list { display:grid; gap:6px; margin:14px 0; max-height:560px; overflow:auto; padding:2px; }
+            .rule-choice { display:block; text-align:left; width:100%; background:var(--surface); border-color:var(--line); color:var(--ink); font-weight:400; }
+            .rule-choice:hover { background:var(--subtle); border-color:#b8bec7; }
+            .rule-choice.active { background:var(--accent-soft); border-color:var(--accent); color:var(--ink); }
+            .rule-choice strong,.rule-choice small { display:block; overflow-wrap:anywhere; }
+            .rule-choice small { color:var(--muted); font-family:Consolas,monospace; margin-top:4px; }
+            .page-actions { display:flex; justify-content:space-between; gap:8px; }
+            .rule-detail { min-width:0; }
             .rule-card { background:var(--surface); border:1px solid var(--line); border-radius:10px; box-shadow:0 1px 2px rgba(15,23,42,.03); padding:20px; }
             .rule-head { align-items:flex-start; border-bottom:1px solid var(--line); display:flex; gap:16px; justify-content:space-between; margin-bottom:18px; padding-bottom:14px; }
             .rule-index { color:var(--muted-soft); font-family:Consolas,"JetBrains Mono",monospace; font-size:11px; font-weight:600; margin-bottom:4px; text-transform:uppercase; }
@@ -76,7 +87,7 @@ internal static class RulesEditorPage
             .empty { border:1px dashed #cfd4dc; border-radius:8px; color:var(--muted); padding:32px 22px; text-align:center; }
             .import-label { cursor:pointer; }
             #importFile { display:none; }
-            @media(max-width:900px) { .grid { grid-template-columns:repeat(6,minmax(0,1fr)); } .grid > div { grid-column:span 3; } .wide { grid-column:span 6 !important; } }
+            @media(max-width:900px) { .editor-layout { grid-template-columns:1fr; } .rule-list { max-height:280px; } .grid { grid-template-columns:repeat(6,minmax(0,1fr)); } .grid > div { grid-column:span 3; } .wide { grid-column:span 6 !important; } }
             @media(max-width:560px) { header { padding-left:16px; padding-right:16px; } header .head { flex-direction:column; } header .head .secondary { align-self:flex-start; } main { padding:20px 14px 56px; } section,.rule-card { padding:16px; } .toolbar,.toolbar-group { align-items:stretch; flex-direction:column; } .toolbar-group,.toolbar-group.primary-actions { width:100%; } .toolbar-group button,.toolbar-group .button,.import-label { width:100%; } .grid,.grid > div,.wide { display:grid; grid-column:1/-1 !important; } .rule-head { display:block; } .rule-head .actions { margin-top:12px; } .rule-head .actions button { width:100%; } }
           </style>
         </head>
@@ -88,7 +99,7 @@ internal static class RulesEditorPage
                 <h1 data-zh="行为规则编辑器" data-en="Behavior rule editor">行为规则编辑器</h1>
                 <p class="muted" data-zh="以卡片方式编辑检测规则；保存后立即供本机 Web Host 使用。" data-en="Edit detection rules as cards; saved changes are immediately available to this local Web Host.">以卡片方式编辑检测规则；保存后立即供本机 Web Host 使用。</p>
               </div>
-              <button class="secondary" id="languageButton" type="button" onclick="toggleLanguage()" data-zh="English" data-en="中文">English</button>
+              <div class="actions"><a class="button secondary" href="/" data-zh="返回主页" data-en="Back to dashboard">返回主页</a><button class="secondary" id="languageButton" type="button" onclick="toggleLanguage()" data-zh="English" data-en="中文">English</button></div>
             </div>
           </header>
           <main>
@@ -109,16 +120,28 @@ internal static class RulesEditorPage
               <div class="path" data-zh="规则文件：{{path}}" data-en="Rule file: {{path}}">规则文件：{{path}}</div>
               <div id="status" class="status muted" role="status" aria-live="polite"></div>
             </section>
-            <section>
-              <h2 data-zh="规则列表" data-en="Rules">规则列表</h2>
-              <p class="muted small" data-zh="数组字段使用换行或逗号分隔。id 和标题必须填写且不能重复。" data-en="Use a newline or comma between array values. Each id and title is required and ids must be unique.">数组字段使用换行或逗号分隔。id 和标题必须填写且不能重复。</p>
-              <div id="rules" class="rules"></div>
-            </section>
+            <div class="editor-layout">
+              <section class="rule-browser">
+                <h2 data-zh="规则列表" data-en="Rules">规则列表</h2>
+                <label for="ruleSearch" data-zh="搜索 ID、标题或标签" data-en="Search ID, title or tag">搜索 ID、标题或标签</label>
+                <input id="ruleSearch" type="search" oninput="searchRules()">
+                <p id="ruleCount" class="small muted"></p>
+                <div id="ruleList" class="rule-list"></div>
+                <div class="page-actions"><button class="secondary" id="previousPage" type="button" onclick="changePage(-1)" data-zh="上一页" data-en="Previous">上一页</button><button class="secondary" id="nextPage" type="button" onclick="changePage(1)" data-zh="下一页" data-en="Next">下一页</button></div>
+              </section>
+              <div class="rule-detail">
+                <p class="muted small" data-zh="选择一条规则编辑。数组字段使用换行或逗号分隔；摘要保留原文。修改后点击保存规则。" data-en="Select a rule to edit. Separate list values with newlines or commas; summaries remain plain text. Click Save rules after editing.">选择一条规则编辑。数组字段使用换行或逗号分隔；摘要保留原文。修改后点击保存规则。</p>
+                <div id="rules" class="rules"></div>
+              </div>
+            </div>
           </main>
           <script>
             const fallbackRules = {{json}};
             let state = normalizeSet(fallbackRules);
-            let language = 'zh';
+            let language = localStorage.getItem('ksword-lang') === 'en' ? 'en' : 'zh';
+            let selectedIndex = 0, listPage = 0;
+            const pageSize = 50;
+            const listFields = new Set(['eventTypes','containsCommandLine','containsPath','tags']);
             const fieldSpecs = [
               ['id','规则 ID / Rule ID','input',''],
               ['title','标题 / Title','input','wide'],
@@ -151,16 +174,32 @@ internal static class RulesEditorPage
             function fieldLabel(label) { const parts = String(label || '').split(' / '); return language === 'zh' ? parts[0] : (parts[1] || parts[0]); }
             function render() {
               const host = document.getElementById('rules');
-              if (!state.rules.length) { host.innerHTML = `<div class="empty">${htmlEscape(t('还没有规则。点击“新增规则”开始。','No rules yet. Select “Add rule” to begin.'))}</div>`; return; }
-              host.innerHTML = state.rules.map((rule, index) => renderRule(rule, index)).join('');
+              selectedIndex = Math.max(0, Math.min(selectedIndex, state.rules.length - 1));
+              renderList();
+              host.innerHTML = state.rules.length ? renderRule(state.rules[selectedIndex], selectedIndex) : `<div class="empty">${htmlEscape(t('还没有规则。点击“新增规则”开始。','No rules yet. Select “Add rule” to begin.'))}</div>`;
             }
+            function matchingRules() {
+              const query = document.getElementById('ruleSearch').value.trim().toLowerCase();
+              return state.rules.map((rule,index) => ({rule,index})).filter(({rule}) => !query || [rule.id,rule.title,rule.titleZh,...(rule.tags || [])].join(' ').toLowerCase().includes(query));
+            }
+            function renderList() {
+              const matches = matchingRules(), pages = Math.max(1, Math.ceil(matches.length / pageSize));
+              listPage = Math.max(0, Math.min(listPage, pages - 1));
+              document.getElementById('ruleCount').textContent = t(`${matches.length} / ${state.rules.length} 条规则 · 第 ${listPage + 1} / ${pages} 页`, `${matches.length} / ${state.rules.length} rules · Page ${listPage + 1} / ${pages}`);
+              document.getElementById('ruleList').innerHTML = matches.slice(listPage * pageSize, (listPage + 1) * pageSize).map(({rule,index}) => `<button type="button" class="rule-choice ${index === selectedIndex ? 'active' : ''}" aria-pressed="${index === selectedIndex}" onclick="selectRule(${index})"><strong>${htmlEscape(language === 'zh' ? rule.titleZh || rule.title || rule.id : rule.title || rule.id)}</strong><small>${htmlEscape(rule.id)} · ${htmlEscape(rule.severity)}</small></button>`).join('') || `<p class="muted">${htmlEscape(t('没有匹配的规则。','No matching rules.'))}</p>`;
+              document.getElementById('previousPage').disabled = listPage === 0;
+              document.getElementById('nextPage').disabled = listPage >= pages - 1;
+            }
+            function selectRule(index) { collect(); selectedIndex = index; render(); }
+            function searchRules() { collect(); listPage = 0; renderList(); }
+            function changePage(delta) { listPage += delta; renderList(); }
             function renderRule(rule, index) {
               const controls = fieldSpecs.map(([key, label, type, classes]) => {
                 const id = `rule-${index}-${key}`;
                 if (type === 'checkbox') return `<div class="${classes}"><label class="check"><input id="${id}" type="checkbox" ${rule[key] ? 'checked' : ''} onchange="updateRule(${index})"><span>${htmlEscape(fieldLabel(label))}</span></label></div>`;
                 const value = type === 'textarea' ? splitValues(rule[key]) : String(rule[key] ?? '');
                 const control = type === 'select'
-                  ? `<select id="${id}" onchange="updateRule(${index})"><option value="info" ${value === 'info' ? 'selected' : ''}>info</option><option value="low" ${value === 'low' ? 'selected' : ''}>low</option><option value="medium" ${value === 'medium' ? 'selected' : ''}>medium</option><option value="high" ${value === 'high' ? 'selected' : ''}>high</option><option value="critical" ${value === 'critical' ? 'selected' : ''}>critical</option></select>`
+                  ? `<select id="${id}" onchange="updateRule(${index})">${(key === 'confidence' ? ['low','medium','high'] : ['info','low','medium','high','critical']).map(option => `<option value="${option}" ${value === option ? 'selected' : ''}>${option}</option>`).join('')}</select>`
                   : type === 'textarea' ? `<textarea class="${key === 'summary' || key === 'summaryZh' ? 'long' : ''}" id="${id}" oninput="updateRule(${index})">${htmlEscape(value)}</textarea>`
                   : `<input id="${id}" value="${attrEscape(value)}" oninput="updateRule(${index})">`;
                 return `<div class="${classes}"><label for="${id}">${htmlEscape(fieldLabel(label))}</label>${control}${['eventTypes','containsCommandLine','containsPath','tags'].includes(key) ? `<div class="field-help">${htmlEscape(t('可用换行或逗号分隔','Separate with newlines or commas'))}</div>` : ''}</div>`;
@@ -169,13 +208,14 @@ internal static class RulesEditorPage
             }
             function updateRule(index) {
               const rule = state.rules[index]; if (!rule) return;
-              fieldSpecs.forEach(([key,,type]) => { const element = document.getElementById(`rule-${index}-${key}`); if (!element) return; rule[key] = type === 'checkbox' ? element.checked : type === 'textarea' ? parseList(element.value) : element.value; });
-              const title = document.querySelectorAll('.rule-card h3')[index]; if (title) title.textContent = rule.title || rule.id || t('未命名规则','Untitled rule');
+              fieldSpecs.forEach(([key,,type]) => { const element = document.getElementById(`rule-${index}-${key}`); if (!element) return; rule[key] = type === 'checkbox' ? element.checked : listFields.has(key) ? parseList(element.value) : element.value; });
+              const title = document.querySelector('.rule-card h3'); if (title) title.textContent = rule.title || rule.id || t('未命名规则','Untitled rule');
+              renderList();
             }
             function parseList(value) { return String(value || '').split(/[\n,]/).map(item => item.trim()).filter(Boolean); }
-            function addRule() { state.rules.push(normalizeRule({ id:`rule-${state.rules.length + 1}`, title:t('新规则','New rule'), summary:t('请填写规则摘要','Describe what this rule detects') })); render(); document.querySelector('.rule-card:last-child')?.scrollIntoView({ behavior:'smooth', block:'start' }); }
+            function addRule() { collect(); let number = state.rules.length + 1; while(state.rules.some(rule => rule.id === `rule-${number}`)) number++; state.rules.push(normalizeRule({ id:`rule-${number}`, title:t('新规则','New rule'), summary:t('请填写规则摘要','Describe what this rule detects') })); selectedIndex = state.rules.length - 1; document.getElementById('ruleSearch').value = ''; listPage = Math.floor(selectedIndex / pageSize); render(); }
             function removeRule(index) { if (!confirm(t('确认删除这条规则？','Delete this rule?'))) return; state.rules.splice(index,1); render(); setStatus(t('规则已从编辑器移除，点击保存后才会写入文件。','Rule removed from the editor; save to write the file.'), 'warn'); }
-            function collect() { state.rules.forEach((_, index) => updateRule(index)); return { version:state.version || '1', rules:state.rules }; }
+            function collect() { updateRule(selectedIndex); return { version:state.version || '1', rules:state.rules }; }
             function validateRules() {
               const value = collect(), errors = [], ids = new Set();
               value.rules.forEach((rule, index) => { if (!String(rule.id || '').trim()) errors.push(t(`第 ${index + 1} 条缺少 id。`,`Rule ${index + 1} has no id.`)); else if (ids.has(rule.id.toLowerCase())) errors.push(t(`id 重复：${rule.id}`,`Duplicate id: ${rule.id}`)); else ids.add(rule.id.toLowerCase()); if (!String(rule.title || '').trim()) errors.push(t(`第 ${index + 1} 条缺少标题。`,`Rule ${index + 1} has no title.`)); });
@@ -198,8 +238,8 @@ internal static class RulesEditorPage
             function importRules(event) { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const parsed = normalizeSet(JSON.parse(String(reader.result))); state = parsed; render(); setStatus(t(`已导入 ${parsed.rules.length} 条规则；点击保存写入服务端。`,`Imported ${parsed.rules.length} rule(s); click Save to write to the server.`), 'warn'); } catch (error) { setStatus(t(`JSON 无效：${error.message}`,`Invalid JSON: ${error.message}`), 'error'); } }; reader.readAsText(file); event.target.value = ''; }
             function setStatus(message, kind) { const element = document.getElementById('status'); element.className = `status ${kind || 'muted'}`; element.textContent = message; }
             function applyLanguage() { document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en'; document.querySelectorAll('[data-zh][data-en]').forEach(element => { if (element.id === 'languageButton') { element.textContent = language === 'zh' ? 'English' : '中文'; return; } if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') return; element.textContent = language === 'zh' ? element.dataset.zh : element.dataset.en; }); render(); }
-            function toggleLanguage() { collect(); language = language === 'zh' ? 'en' : 'zh'; applyLanguage(); }
-            render();
+            function toggleLanguage() { collect(); language = language === 'zh' ? 'en' : 'zh'; localStorage.setItem('ksword-lang',language); applyLanguage(); }
+            applyLanguage();
             loadRules();
           </script>
         </body>
