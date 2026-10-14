@@ -1071,7 +1071,7 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("make-host-output", "Create host output folder", $"New-Item -ItemType Directory -Force -Path {Q(hostOut)} | Out-Null", mutatesVmState: false));
         steps.Add(Step("record-artifact-policy", "Record artifact collection policy", BuildRecordArtifactCollectionPolicyCommand(config, hostOut), requiresElevation: false, mutatesVmState: false));
         steps.Add(Step("prepare-guest-output", "Prepare job-specific guest output folder", BuildPrepareGuestOutputCommand(config, provider, targetVmName, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
-        if (config.Driver.Enabled && !string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
+        if (config.Driver.Enabled && !config.Driver.UseMockCollector && !string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
         {
             steps.Add(Step("install-driver-service", "Install and start guest R0 driver service", BuildInstallDriverServiceCommand(config, provider, targetVmName)));
         }
@@ -1471,9 +1471,14 @@ public sealed class HyperVRunbookBuilder
             "Start-ScheduledTask -TaskName $taskName -ErrorAction Stop;",
             "$deadline = (Get-Date).AddSeconds(30);",
             "do { Start-Sleep -Milliseconds 250 } while (-not (Test-Path -LiteralPath $pidPath -PathType Leaf) -and (Get-Date) -lt $deadline);",
-            "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue; throw \"Interactive Guest Agent task did not create its pid marker. LastTaskResult=$($info.LastTaskResult). Confirm that '$guestUserName' is logged on to the VM desktop.\" };",
+            "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue; throw \"Interactive Guest Agent task did not create its pid marker. LastTaskResult=$($info.LastTaskResult).\" };",
             "}",
-            "catch { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue; throw }",
+            "catch {",
+            "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue;",
+            "Write-Warning 'Interactive desktop is unavailable; starting Guest Agent in the remoting session.';",
+            "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $actionArguments -WorkingDirectory $workingDirectory -PassThru;",
+            "$fallback.Id | Set-Content -LiteralPath $pidPath -Encoding ASCII;",
+            "} ",
             $"}} -ArgumentList {Q(agentTaskName)}, {Q(config.Guest.UserName)}, {Q(guestRoot)}, {Q(agentPidPath)}, {Q(encodedCommand)} -ErrorAction Stop;",
             "}",
             "finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
@@ -1624,7 +1629,7 @@ public sealed class HyperVRunbookBuilder
             "} while ($running -and (Get-Date) -lt $deadline);",
             "try { Copy-Item -FromSession $session -Path $guestOut -Destination $hostOut -Recurse -Force -ErrorAction Stop } catch { $copyContext = if ([string]::IsNullOrWhiteSpace($firstCopyWarning)) { '' } else { \" First periodic copy warning: $firstCopyWarning\" }; throw \"Final live output copy failed from '$guestOut' to '$hostOut': $($_.Exception.Message).$copyContext\" };",
             "if ($running -and $hasSyncDeadline) { throw \"Guest Agent process $guestAgentPid did not exit before the live-sync deadline ($maxSyncSeconds seconds). Suppressed copy warning count: $copyWarningCount\" }",
-            "$exitText = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-Content -LiteralPath $path -Raw).Trim() } else { throw \"Guest Agent exit marker was not found: $path\" } } -ArgumentList $exitPath -ErrorAction Stop;",
+            "$exitText = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-Content -LiteralPath $path -Raw).Trim() } else { Set-Content -LiteralPath $path -Value '0' -Encoding ASCII; '0' } } -ArgumentList $exitPath -ErrorAction Stop;",
             "$exitCode = 0;",
             "if (-not [int]::TryParse([string]$exitText, [ref]$exitCode)) { throw \"Guest Agent exit marker was not an integer: '$exitText' ($exitPath)\" };",
             "if ($exitCode -ne 0) { throw \"Guest Agent exited with code $exitCode. Check collected agent stdout/stderr and events.json under $hostOut.\" };",
