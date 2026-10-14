@@ -1,4 +1,4 @@
-#requires -RunAsAdministrator
+﻿#requires -RunAsAdministrator
 <#
 .SYNOPSIS
 Prepare a Windows 10 VMware guest for KSwordSandbox WinRM HTTPS access.
@@ -68,10 +68,17 @@ function Get-OrCreateGuestUser {
 
 function Ensure-LocalAdministrator {
     param([Parameter(Mandatory)]$User)
-    $members = @(Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop)
+    $administratorsGroup = @(Get-LocalGroup -ErrorAction Stop | Where-Object { $_.SID.Value -eq 'S-1-5-32-544' } | Select-Object -First 1)
+    if ($administratorsGroup.Count -eq 0) {
+        throw '找不到本地 Administrators 组。 / The built-in local Administrators group was not found.'
+    }
+
+    $groupName = [string]$administratorsGroup[0].Name
+    $members = @(Get-LocalGroupMember -Group $groupName -ErrorAction Stop)
     $isMember = $members | Where-Object { $_.SID.Value -eq $User.SID.Value }
     if ($null -eq $isMember) {
-        Add-LocalGroupMember -Group 'Administrators' -Member $User.SID -ErrorAction Stop
+        $memberName = "$env:COMPUTERNAME\$($User.Name)"
+        Add-LocalGroupMember -Group $groupName -Member $memberName -ErrorAction Stop
         Write-Bilingual -Chinese "已将 $GuestUserName 加入 Administrators" -English "Added $GuestUserName to the Administrators group"
     }
     else {
@@ -163,4 +170,3 @@ Write-Bilingual -Chinese '来宾 bootstrap 完成。请在宿主 WebUI 中选择
 Write-Bilingual -Chinese "WinRM HTTPS 端口：$Port；证书指纹：$($certificate.Thumbprint)" -English "WinRM HTTPS port: $Port; certificate thumbprint: $($certificate.Thumbprint)"
 Write-Bilingual -Chinese ("来宾 IPv4：" + ($(if ($addresses.Count -gt 0) { $addresses -join ', ' } else { '未发现，请稍后查看 ipconfig' }))) -English ("Guest IPv4: " + ($(if ($addresses.Count -gt 0) { $addresses -join ', ' } else { 'not found; check ipconfig later' })))
 Write-Bilingual -Chinese '如果这是基线虚拟机，请现在关机并在 VMware 中创建 powered-off 的 Clean 快照。' -English 'If this is the baseline VM, power it off now and create a powered-off Clean snapshot in VMware.'
-
