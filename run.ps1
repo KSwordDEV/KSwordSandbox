@@ -317,7 +317,37 @@ function Get-EffectiveRuntimeRoot {
         return [System.IO.Path]::GetFullPath($RuntimeRoot)
     }
 
-    return [System.IO.Path]::GetFullPath((Get-StateString -State $State -Name 'runtimeRoot' -DefaultValue 'D:\Temp\KSwordSandbox'))
+    $stateRuntimeRoot = Get-StateString -State $State -Name 'runtimeRoot' -DefaultValue ''
+    if (-not [string]::IsNullOrWhiteSpace($stateRuntimeRoot)) {
+        $resolvedStateRoot = [System.IO.Path]::GetFullPath($stateRuntimeRoot)
+        $stateDrive = [System.IO.Path]::GetPathRoot($resolvedStateRoot)
+        if ([string]::IsNullOrWhiteSpace($stateDrive) -or
+            (Test-Path -LiteralPath $stateDrive -PathType Container)) {
+            return $resolvedStateRoot
+        }
+
+        # Keep install-state fallback aligned with the Web host when a prior
+        # machine's configured drive is absent on this computer.
+        $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+        if ([string]::IsNullOrWhiteSpace($localAppData)) {
+            $localAppData = $env:USERPROFILE
+        }
+
+        return [System.IO.Path]::GetFullPath((Join-Path $localAppData 'KSwordSandbox'))
+    }
+
+    $defaultRuntimeRoot = 'D:\Temp\KSwordSandbox'
+    $defaultDrive = [System.IO.Path]::GetPathRoot($defaultRuntimeRoot)
+    if (-not [string]::IsNullOrWhiteSpace($defaultDrive) -and (Test-Path -LiteralPath $defaultDrive -PathType Container)) {
+        return [System.IO.Path]::GetFullPath($defaultRuntimeRoot)
+    }
+
+    $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+    if ([string]::IsNullOrWhiteSpace($localAppData)) {
+        $localAppData = $env:USERPROFILE
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $localAppData 'KSwordSandbox'))
 }
 
 function Get-EffectiveConfigPath {

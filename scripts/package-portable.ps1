@@ -1729,9 +1729,9 @@ function Update-PackageOperatorDiagnostics {
             generated = $false
             claimAllowedWithoutAllProviders = $false
             requiredProviders = @('HyperV', 'VMware', 'Qemu')
-            evidencePerProvider = @($script:operatorDiagnostics.requiredEvidenceFields.providerParityLiveClaim.evidencePerProvider)
-            crossProviderInvariants = @($script:operatorDiagnostics.requiredEvidenceFields.providerParityLiveClaim.crossProviderInvariants)
-            aggregateValidation = @($script:operatorDiagnostics.requiredEvidenceFields.providerParityLiveClaim.aggregateValidation)
+            evidencePerProvider = @($requiredEvidenceFields.providerParityLiveClaim.evidencePerProvider)
+            crossProviderInvariants = @($requiredEvidenceFields.providerParityLiveClaim.crossProviderInvariants)
+            aggregateValidation = @($requiredEvidenceFields.providerParityLiveClaim.aggregateValidation)
             liveCommands = [ordered]@{
                 HyperV = '.\scripts\Invoke-WebUIApiE2E.ps1 -BaseUrl http://127.0.0.1:18082 -StartWebUI -StopWebUIOnExit -Provider HyperV -SamplePath C:\Windows\System32\notepad.exe -Live -RequireCleanSource -DurationSeconds 5 -StepTimeoutSeconds 900 -SummaryPath D:\Temp\KSwordSandbox\parity\hyperv-summary.json'
                 VMware = '.\scripts\Invoke-WebUIApiE2E.ps1 -BaseUrl http://127.0.0.1:18082 -StartWebUI -StopWebUIOnExit -Provider VMware -SamplePath C:\Windows\System32\notepad.exe -Live -RequireCleanSource -DurationSeconds 5 -StepTimeoutSeconds 900 -SummaryPath D:\Temp\KSwordSandbox\parity\vmware-summary.json'
