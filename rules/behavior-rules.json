@@ -36265,7 +36265,7 @@
         "behavior.download_execute"
       ],
       "commandLineRegex": [
-        "(?i)\\bcertutil(?:\\.exe)?\\b.*\\b-urlcache\\b.*\\b-f\\b.*https?://[^\\s]+.*(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll|ps1|bat|cmd)"
+        "(?i)\\bcertutil(?:\\.exe)?\\b.*(?<!\\w)-urlcache\\b.*(?<!\\w)-f\\b.*https?://[^\\s]+.*(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll|ps1|bat|cmd)"
       ],
       "allDataRegex": {
         "sourceUrl": [
