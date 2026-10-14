@@ -1728,11 +1728,11 @@
     {
       "id": "static-import-resource-api",
       "title": "Resource extraction API imports",
-      "titleZh": "资源 extraction API 导入",
+      "titleZh": "资源提取 API 导入",
       "severity": "medium",
       "confidence": "low",
       "summary": "Static analysis found imports commonly used to find, load, lock, or size PE resources before extracting embedded content.",
-      "summaryZh": "静态分析发现“资源 extraction API 导入”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现资源提取相关 API 导入；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
       "mitreTechniqueId": "T1027.009",
       "mitreTechniqueName": "Embedded Payloads",
       "eventTypes": [
@@ -2233,11 +2233,11 @@
     {
       "id": "static-domain-indicator",
       "title": "Embedded domain string observed",
-      "titleZh": "Embedded domain 字符串已观察",
+      "titleZh": "观察到内嵌域名字符串",
       "severity": "info",
       "confidence": "low",
       "summary": "Static analysis extracted a bare domain-like string after suppressing common framework references and file-extension false positives. This is triage metadata unless runtime DNS/HTTP/TLS activity corroborates it.",
-      "summaryZh": "静态分析发现“Embedded domain 字符串已观察”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现内嵌域名类字符串；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
       "eventTypes": [
         "static.analysis.completed",
         "static.string.indicator"
@@ -2447,11 +2447,11 @@
     {
       "id": "static-import-credential-access-api",
       "title": "Credential-access API imports",
-      "titleZh": "Credential-access API 导入",
+      "titleZh": "凭据访问 API 导入",
       "severity": "low",
       "confidence": "low",
       "summary": "Static analysis found imports associated with minidumps, Windows credential APIs, DPAPI, Vault, LSA, SAM, or token impersonation. This is import-only triage, not observed credential theft.",
-      "summaryZh": "静态分析发现“Credential-access API 导入”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现凭据访问相关 API 导入；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
       "mitreTechniqueId": "T1003",
       "mitreTechniqueName": "OS Credential Dumping",
       "eventTypes": [
@@ -2493,11 +2493,11 @@
     {
       "id": "static-import-defense-evasion-api",
       "title": "Defense-evasion API imports",
-      "titleZh": "Defense-evasion API 导入",
+      "titleZh": "防御规避 API 导入",
       "severity": "low",
       "confidence": "low",
       "summary": "Static analysis found imports associated with AMSI/ETW/event-log, service-control, file-attribute, or filesystem-redirection tampering. This is import-only triage, not proof of defense evasion.",
-      "summaryZh": "静态分析发现“Defense-evasion API 导入”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现防御规避相关 API 导入；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
       "mitreTechniqueId": "T1562.001",
       "mitreTechniqueName": "Disable or Modify Tools",
       "eventTypes": [

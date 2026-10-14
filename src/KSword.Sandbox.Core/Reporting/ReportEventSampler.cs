@@ -76,6 +76,39 @@ public static class ReportEventSampler
         ReportSamplingBucket.Diagnostics
     ];
 
+    // Failure summaries are operator-facing evidence. Keep their diagnosis
+    // visible even when the rest of a host-control-plane event is compacted.
+    private static readonly string[] OperationalFailurePriorityDataKeys =
+    [
+        "success",
+        "failedStepIndex",
+        "failedStepId",
+        "message",
+        "error",
+        "failureReason",
+        "reason",
+        "cleanupFailures",
+        "totalSteps",
+        "executedSteps",
+        "duration",
+        "resultPath",
+        "failureHint"
+    ];
+
+    // Guest import markers are operator-facing collection outcomes. Keep the
+    // count and terminal state visible when the host metadata envelope is
+    // larger than the bounded event-data budget.
+    private static readonly string[] GuestImportPriorityDataKeys =
+    [
+        "eventCount",
+        "guestImportOutcome",
+        "guestImportMarker",
+        "guestImportMessage",
+        "terminalStatus",
+        "importMode",
+        "resultPath"
+    ];
+
     private static readonly string[] PriorityDataKeys =
     [
         "collectionName",
@@ -1155,6 +1188,23 @@ public static class ReportEventSampler
 
     private static IEnumerable<string> BuildPriorityDataKeys(SandboxEvent evt)
     {
+        if (evt.EventType.EndsWith(".runbook.executed", StringComparison.OrdinalIgnoreCase) &&
+            TextEqualsAny(DataValue(evt.Data, "success"), "false", "0", "no", "failed"))
+        {
+            foreach (var key in OperationalFailurePriorityDataKeys)
+            {
+                yield return key;
+            }
+        }
+
+        if ((evt.EventType ?? string.Empty).StartsWith("guest.events.", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var key in GuestImportPriorityDataKeys)
+            {
+                yield return key;
+            }
+        }
+
         if ((evt.EventType ?? string.Empty).StartsWith("static.", StringComparison.OrdinalIgnoreCase))
         {
             foreach (var key in StaticPriorityDataKeys)

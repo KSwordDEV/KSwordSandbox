@@ -186,6 +186,39 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
                 ["zhHint"] = "WFP/ALE 网络状态。"
             }
         });
+        var failedRunbook = new SandboxEvent
+        {
+            EventType = "vmware.runbook.executed",
+            Timestamp = timestamp.AddSeconds(5),
+            Source = "host",
+            Data =
+            {
+                ["success"] = "false",
+                ["failedStepIndex"] = "5",
+                ["failedStepId"] = "wait-guest-remoting",
+                ["message"] = "Live runbook execution stopped at step 6.",
+                ["failureReason"] = "PowerShell exited with code 1",
+                ["totalSteps"] = "18",
+                ["executedSteps"] = "6",
+                ["unimportant"] = new string('x', 1024)
+            }
+        };
+        events.Add(failedRunbook);
+        events.Add(new SandboxEvent
+        {
+            EventType = "guest.events.imported",
+            Timestamp = timestamp.AddSeconds(5.1),
+            Source = "host",
+            Path = @"D:\Temp\guest\events.jsonl",
+            Data =
+            {
+                ["eventCount"] = "37",
+                ["guestImportOutcome"] = "imported",
+                ["guestImportMarker"] = "true",
+                ["terminalStatus"] = "Completed",
+                ["unimportant"] = new string('x', 1024)
+            }
+        });
 
         var result = ReportEventSampler.SampleForReport(
             events,
@@ -254,6 +287,19 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(r0NetworkStatusEvent, "todoMaskHex", "0x00000008");
         RequireData(r0NetworkStatusEvent, "classifyCount", "12");
         RequireData(r0NetworkStatusEvent, "lastDegradeReasonName", "wfpAleConnectTodo");
+
+        var failureEvent = RequireEvent(result.Events, "vmware.runbook.executed");
+        RequireData(failureEvent, "success", "false");
+        RequireData(failureEvent, "failedStepIndex", "5");
+        RequireData(failureEvent, "failedStepId", "wait-guest-remoting");
+        RequireData(failureEvent, "message", "Live runbook execution stopped at step 6.");
+        RequireData(failureEvent, "failureReason", "PowerShell exited with code 1");
+
+        var guestImportEvent = RequireEvent(result.Events, "guest.events.imported");
+        RequireData(guestImportEvent, "eventCount", "37");
+        RequireData(guestImportEvent, "guestImportOutcome", "imported");
+        RequireData(guestImportEvent, "guestImportMarker", "true");
+        RequireData(guestImportEvent, "terminalStatus", "Completed");
 
         return Task.FromResult(new SmokeTestResult
         {
