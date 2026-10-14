@@ -149,8 +149,8 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
     /// </summary>
     private static IReadOnlyList<SandboxEvent> BuildStructuredStaticEvents()
     {
-        return
-        [
+        var events = new List<SandboxEvent>
+        {
             new SandboxEvent
             {
                 EventType = "static.pe.section",
@@ -479,7 +479,13 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
                     ["tags"] = "static.yara.match,static.yara.engine.builtin"
                 }
             }
-        ];
+        };
+        foreach (var evt in events)
+        {
+            evt.Data["promoteStaticMetadataFinding"] = "true";
+        }
+
+        return events;
     }
 
     /// <summary>
