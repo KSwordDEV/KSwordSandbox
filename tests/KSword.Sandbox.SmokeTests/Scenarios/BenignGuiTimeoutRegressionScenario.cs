@@ -56,7 +56,7 @@ internal sealed class BenignGuiTimeoutRegressionScenario : ISmokeTestScenario
             "Completed benign GUI timeout report should keep an info verdict.");
         RequireContains(
             html,
-            "<span class=\"muted\">High risk</span><b class=\"risk-high\">0</b>",
+            "<span class=\"muted\">Critical / high risk</span><b class=\"risk-high\">0</b>",
             "Completed benign GUI timeout report should count zero high-risk behavior findings.");
         RequireContains(
             html,
@@ -72,7 +72,7 @@ internal sealed class BenignGuiTimeoutRegressionScenario : ISmokeTestScenario
             "Completed benign GUI timeout report should not render a medium-risk verdict.");
         RequireContains(html, "notepad.exe", "Report should still show the timed-out benign GUI process name.");
         RequireContains(html, "Windows GUI", "Report should still show GUI subsystem context.");
-        RequireContains(html, "Sample still running at timeout", "Report should preserve the timeout metadata finding.");
+        RequireContains(html, "Sleep-evasion timeout signal", "Report should preserve the timeout metadata finding.");
 
         return Task.FromResult(new SmokeTestResult
         {
@@ -99,7 +99,10 @@ internal sealed class BenignGuiTimeoutRegressionScenario : ISmokeTestScenario
             Data =
             {
                 ["timeoutSeconds"] = "5",
-                ["subsystem"] = "Windows GUI"
+                ["subsystem"] = "Windows GUI",
+                // The collector explicitly marks the timeout as a low-confidence
+                // execution-state candidate; this must not imply anti-analysis.
+                ["sleepEvasionCandidate"] = "true"
             }
         };
     }
