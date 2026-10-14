@@ -3043,6 +3043,7 @@ function Show-RunEnvironmentCheck {
         AnalyzeHarmlessSamplePlanCommand = '.\run.ps1 -Mode Analyze -SamplePreset HarmlessSample'
         AnalyzeHarmlessSampleLiveCommand = '.\run.ps1 -Mode Analyze -SamplePreset HarmlessSample -Live'
         ReadinessCommand = '.\run.ps1 -Mode CheckEnvironment'
+        ProviderReadinessCommand = '.\run.ps1 -Mode CheckEnvironment -Provider <HyperV|VMware|Qemu>'
         ChineseGuidance = '中文提示：默认 .\run.ps1 只启动 WebUI，不修改 VM；Analyze/Plan 不加 -Live 时不会启动、还原或停止 VM；Analyze -Live 才可能修改已配置 VM。所有凭据只读取环境变量且不打印值。'
         WhatIfSupported = $true
         DefaultStartsVm = $false

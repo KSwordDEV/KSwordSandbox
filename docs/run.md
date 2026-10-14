@@ -174,7 +174,7 @@ config 时，仍可显式传入 `-ConfigPath`。
 - 可选 `KSWORDBOX_VIRUSTOTAL_API_KEY`：若 User/Machine 环境变量存在，会镜像到子进程的
   process scope。
 
-密码值永不打印；可选 VT key 值也永不打印 / never printed。
+密码值永不打印；可选 VT key 值也永不打印 / never printed。 The password value is never printed.
 WebUI 启动路径只打印简短状态、选定 URL 和修复提示；不会向操作者输出一长串命令墙。
 
 如果 `D:` 盘或旧 install-state 中的路径在当前机器不存在，启动器会回退到
@@ -214,6 +214,7 @@ WebUI 启动路径只打印简短状态、选定 URL 和修复提示；不会向
 `RuntimeRoot` 下发布测试 EXE，输出位于仓库外。
 
 `-Mode Plan` 是 PlanOnly 且不修改 VM：不会启动、还原、停止 VM，也不会复制文件进 VM；
+PlanOnly: guest payload preparation skipped； PlanOnly skips guest payload preparation.
 它还会跳过 guest payload preparation。生成的 provider plan 会记录 missing/stale payload
 files，并给出修复建议，例如运行 `.\scripts\Prepare-GuestPayload.ps1 -SelfContained`。
 

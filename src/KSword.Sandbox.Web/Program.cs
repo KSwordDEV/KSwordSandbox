@@ -11,6 +11,7 @@ using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Web.Contracts;
 using KSword.Sandbox.Web.Dashboard;
 using KSword.Sandbox.Web.Infrastructure;
+using Microsoft.AspNetCore.Mvc;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -59,8 +60,8 @@ app.MapGet("/", () => firstRunNeedsSetup
     : Results.Content(DashboardExperiencePage.Render(), "text/html"));
 app.MapGet("/setup", (SandboxConfig currentConfig, BackendProfileStore profiles) =>
     Results.Content(BackendSetupPage.Render(currentConfig, profiles.ConfigPath, firstRunNeedsSetup), "text/html; charset=utf-8"));
-app.MapGet("/rules", (BehaviorRuleSet currentRules) =>
-    Results.Content(RulesEditorPage.Render(currentRules, rulesPath), "text/html; charset=utf-8"));
+app.MapGet("/rules", () =>
+    Results.Content(RulesEditorPage.Render(rules, rulesPath), "text/html; charset=utf-8"));
 app.MapGet("/settings", (VirusTotalSettingsStore settingsStore) =>
     Results.Content(SettingsPage.Render(settingsStore.GetState()), "text/html; charset=utf-8"));
 app.MapGet("/jobs/{jobId:guid}/execution-flow", (Guid jobId, SandboxJobService service) =>
@@ -108,6 +109,13 @@ app.MapGet("/api/setup/status", (SandboxConfig currentConfig, BackendProfileStor
     restartRequired = false
 }));
 app.MapGet("/api/setup/profile", (SandboxConfig currentConfig, BackendProfileStore profiles) => Results.Ok(profiles.Read(currentConfig)));
+app.MapGet("/api/setup/guest-bootstrap", () =>
+{
+    var bootstrapPath = Path.Combine(repositoryRoot, "scripts", "Bootstrap-VMwareGuest.ps1");
+    return File.Exists(bootstrapPath)
+        ? Results.File(bootstrapPath, "text/plain; charset=utf-8", "Bootstrap-VMwareGuest.ps1")
+        : Results.NotFound(new { error = "Guest bootstrap script is missing from this package." });
+});
 app.MapPost("/api/setup/profile", (BackendProfileUpdateRequest request, SandboxConfig currentConfig, BackendProfileStore profiles) =>
 {
     try
@@ -153,8 +161,8 @@ app.MapPost("/api/setup/guest-secret", (GuestSecretUpdateRequest request, Sandbo
     Environment.SetEnvironmentVariable(secretName, request.Password, EnvironmentVariableTarget.User);
     return Results.Ok(new { configured = true, secretName });
 });
-app.MapGet("/api/rules", (BehaviorRuleSet currentRules) => Results.Ok(currentRules));
-app.MapPut("/api/rules", (BehaviorRuleSet updatedRules, SandboxJobService service) =>
+app.MapGet("/api/rules", () => Results.Ok(rules));
+app.MapPut("/api/rules", ([FromBody] BehaviorRuleSet updatedRules, SandboxJobService service) =>
 {
     try
     {
@@ -173,6 +181,7 @@ app.MapPut("/api/rules", (BehaviorRuleSet updatedRules, SandboxJobService servic
         }
 
         service.ReplaceRules(updatedRules);
+        rules = updatedRules;
         return Results.Ok(updatedRules);
     }
     catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException)

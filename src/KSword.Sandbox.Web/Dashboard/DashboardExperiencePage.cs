@@ -363,7 +363,7 @@ internal static class DashboardExperiencePage
               </div>
               <details class="vm-config">
                 <summary data-zh="本次任务：虚拟机运行配置" data-en="This job: VM run configuration">本次任务：虚拟机运行配置</summary>
-                <p class="hint" data-zh="页面先只读检测所选后端的 VM、干净基线和 Payload；基线按后端对应 Hyper-V 检查点、VMware 快照或 QEMU overlay/内部快照。检测结果与 config/浏览器候选值会分别标记，配置值不会冒充本机检测。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。" data-en="The page first performs read-only detection of the selected provider's VM, clean baseline, and payload. The baseline maps to a Hyper-V checkpoint, VMware snapshot, or QEMU overlay/internal snapshot. Detected results and config/browser candidates are labeled separately, so configured values never pretend to be local detections. Guest account and working folder cannot be inferred reliably from an offline host, so they are labeled separately as active job config.">页面先只读检测所选后端的 VM、干净基线和 Payload；基线按后端对应 Hyper-V 检查点、VMware 快照或 QEMU overlay/内部快照。检测结果与 config/浏览器候选值会分别标记，配置值不会冒充本机检测。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。</p>
+              <p class="hint" data-zh="页面先只读检测所选后端的 VM、干净基线和 Payload；基线按后端对应 Hyper-V 检查点、VMware 快照或 QEMU overlay/内部快照。检测结果与 config/浏览器候选值会分别标记，不会用 config 或浏览器预设冒充真实状态。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。" data-en="The page first performs read-only detection of the selected provider's VM, clean baseline, and payload. The baseline maps to a Hyper-V checkpoint, VMware snapshot, or QEMU overlay/internal snapshot. Detected results and config/browser candidates are labeled separately; config and browser presets are never used to impersonate real state. Guest account and working folder cannot be inferred reliably from an offline host, so they are labeled separately as active job config.">页面先只读检测所选后端的 VM、干净基线和 Payload；基线按后端对应 Hyper-V 检查点、VMware 快照或 QEMU overlay/内部快照。检测结果与 config/浏览器候选值会分别标记，不会用 config 或浏览器预设冒充真实状态。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。</p>
                 <div id="localDetectionBar" class="local-detection-bar" data-copy="" data-copy-label="local host detection status">
                   <div>
                     <strong data-zh="本机自动检测" data-en="Local auto-detection">本机自动检测</strong>
@@ -2364,7 +2364,7 @@ internal static class DashboardExperiencePage
               // Processing: summarizes only operator-safe VM choices, avoiding
               // command-line or executor output details. Return: copyable text.
               const submission = job.submission || {};
-              const provider = job.runbook?.provider || submission.provider || runtimeConfigDefaults?.virtualization?.provider || 'HyperV';
+              const provider = submission.provider || job.runbook?.provider || runtimeConfigDefaults?.virtualization?.provider || 'HyperV';
               const providerConfig = provider === 'VMware'
                 ? runtimeConfigDefaults?.vmware
                 : provider === 'Qemu'
@@ -2871,7 +2871,7 @@ internal static class DashboardExperiencePage
                     ? t('分析已停止', 'Analysis stopped')
                     : t(`分析进度约 ${percent}%`, `Analysis about ${percent}%`);
                 meta.textContent = label;
-                meta.setAttribute('data-copy', `${label}; 已耗时 / elapsed=${elapsed}; 已执行 / executed=${executed}; 状态 / state=${state}; 问题 / issue=${failureReason || '-'}`);
+                meta.setAttribute('data-copy', `elapsed=${elapsed}; executed=${executed}; state=${state}; issue=${failureReason || '-'}; ${label}`);
               }
 
               const currentPrefix = done

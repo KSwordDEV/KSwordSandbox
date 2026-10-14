@@ -1485,7 +1485,11 @@ public sealed class HyperVRunbookBuilder
                 "$agentStablePath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.exe'; $runtimePath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.runtimeconfig.json'; $depsPath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.deps.json'; $agentStableTemp = \"$agentStablePath.refresh\"; $runtimeTemp = \"$runtimePath.refresh\"; $depsTemp = \"$depsPath.refresh\"; [IO.File]::WriteAllBytes($agentStableTemp, [Convert]::FromBase64String($agentExeBase64)); [IO.File]::WriteAllBytes($runtimeTemp, [Convert]::FromBase64String($runtimeConfigBase64)); [IO.File]::WriteAllBytes($depsTemp, [Convert]::FromBase64String($depsBase64)); Move-Item -LiteralPath $agentStableTemp -Destination $agentStablePath -Force; Move-Item -LiteralPath $runtimeTemp -Destination $runtimePath -Force; Move-Item -LiteralPath $depsTemp -Destination $depsPath -Force;",
                 "$stablePayloadChecks = 0; for ($payloadAttempt = 0; $payloadAttempt -lt 20 -and $stablePayloadChecks -lt 3; $payloadAttempt++) { Start-Sleep -Milliseconds 500; $agentBytes = [IO.File]::ReadAllBytes($agentStablePath); $runtimeBytes = [IO.File]::ReadAllBytes($runtimePath); $depsBytes = [IO.File]::ReadAllBytes($depsPath); if ($agentBytes.Length -gt 0 -and $runtimeBytes.Length -gt 0 -and $depsBytes.Length -gt 0 -and $runtimeBytes[0] -eq 0x7B -and $depsBytes[0] -eq 0x7B) { $stablePayloadChecks++; } else { $stablePayloadChecks = 0; [IO.File]::WriteAllBytes($agentStableTemp, [Convert]::FromBase64String($agentExeBase64)); [IO.File]::WriteAllBytes($runtimeTemp, [Convert]::FromBase64String($runtimeConfigBase64)); [IO.File]::WriteAllBytes($depsTemp, [Convert]::FromBase64String($depsBase64)); Move-Item -LiteralPath $agentStableTemp -Destination $agentStablePath -Force; Move-Item -LiteralPath $runtimeTemp -Destination $runtimePath -Force; Move-Item -LiteralPath $depsTemp -Destination $depsPath -Force; } }; if ($stablePayloadChecks -lt 3) { throw 'Guest Agent stable payload did not remain valid before launch.' };",
                 "$fallbackArgs = @('-NoLogo', '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand);",
-                "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $fallbackArgs -WorkingDirectory $workingDirectory -PassThru;",
+                // Keep the mock collector wrapper attached to this remoting step.
+                // A detached Start-Process can let the step finish before the
+                // Guest Agent has flushed events.json, leaving only agent.exit
+                // for the later collect-output step to copy.
+                "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $fallbackArgs -WorkingDirectory $workingDirectory -Wait -PassThru;",
                 "$deadline = (Get-Date).AddSeconds(30);",
                 "do { Start-Sleep -Milliseconds 250 } while (-not (Test-Path -LiteralPath $pidPath -PathType Leaf) -and (Get-Date) -lt $deadline);",
                 "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw \"Guest Agent process did not create its pid marker: $pidPath\" };",
@@ -1550,6 +1554,10 @@ public sealed class HyperVRunbookBuilder
         arguments.AddRange(BuildArtifactCollectionAgentArguments(config));
         arguments.AddRange(BuildDriverAgentArguments(config, driverEventsPath));
 
+        var guestOutputDirectory = Path.GetDirectoryName(agentExitPath) ?? guestOut;
+        var agentStdoutPath = Path.Combine(guestOutputDirectory, "agent.stdout.log").Replace('/', '\\');
+        var agentStderrPath = Path.Combine(guestOutputDirectory, "agent.stderr.log").Replace('/', '\\');
+        var agentEventsPath = Path.Combine(guestOutputDirectory, "events.json").Replace('/', '\\');
         var stableRuntimePath = Path.Combine(Path.GetDirectoryName(agentPath) ?? string.Empty, "KSword.Sandbox.Agent.stable.runtimeconfig.json").Replace('/', '\\');
         var stableDepsPath = Path.Combine(Path.GetDirectoryName(agentPath) ?? string.Empty, "KSword.Sandbox.Agent.stable.deps.json").Replace('/', '\\');
         var stableAgentExePath = Path.Combine(Path.GetDirectoryName(agentPath) ?? string.Empty, "KSword.Sandbox.AgentStable.exe").Replace('/', '\\');
@@ -1558,8 +1566,8 @@ public sealed class HyperVRunbookBuilder
             : "& " + Q(agentPath) + " " + string.Join(' ', arguments);
         return string.Join("; ", new[]
         {
-            executableInvocation,
-            "$exitCode = if ($global:LASTEXITCODE -is [int]) { $global:LASTEXITCODE } else { 0 }",
+            $"$exitCode = 1; try {{ {executableInvocation} 1> {Q(agentStdoutPath)} 2> {Q(agentStderrPath)}; $exitCode = if ($global:LASTEXITCODE -is [int]) {{ [int]$global:LASTEXITCODE }} else {{ 1 }} }} catch {{ $_ | Out-File -LiteralPath {Q(agentStderrPath)} -Encoding utf8; $exitCode = 1 }}",
+            $"if ($exitCode -eq 0 -and -not (Test-Path -LiteralPath {Q(agentEventsPath)} -PathType Leaf)) {{ 'Guest Agent exited 0 but did not write events.json.' | Add-Content -LiteralPath {Q(agentStderrPath)} -Encoding utf8; $exitCode = 1 }}",
             $"Set-Content -Path {Q(agentExitPath)} -Value $exitCode -Encoding ASCII",
             "exit $exitCode"
         });

@@ -140,7 +140,11 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "fetch(`/api/host/readiness${suffix}`)", "Dashboard should populate VM readiness from the host detection endpoint.");
         RequireContains(dashboard, "不会用 config 或浏览器预设冒充真实状态", "Dashboard should state that presets do not impersonate detected host state.");
         RequireContains(dashboard, "loadVmPresetExplicitly", "Browser overrides should require an explicit operator action.");
-        RequireNotContains(dashboard, "applyOperatorVmPreset();", "Dashboard should not automatically apply browser VM presets during config load.");
+        var configLoadStart = dashboard.IndexOf("async function loadConfigDefaults()", StringComparison.Ordinal);
+        SmokeAssert.True(configLoadStart >= 0, "Dashboard should expose its config loading function.");
+        var configLoadEnd = dashboard.IndexOf("async function refreshLocalHostReadiness(", configLoadStart, StringComparison.Ordinal);
+        SmokeAssert.True(configLoadEnd > configLoadStart, "Dashboard should expose its host readiness function.");
+        RequireNotContains(dashboard[configLoadStart..configLoadEnd], "applyOperatorVmPreset(", "Dashboard should not automatically apply browser VM presets during config load.");
         RequireContains(dashboard, ".preset-actions { align-items:stretch; display:grid", "VM preset actions should use a stable aligned grid.");
         RequireContains(dashboard, "min-height:42px", "VM preset buttons and links should share a consistent minimum height.");
 

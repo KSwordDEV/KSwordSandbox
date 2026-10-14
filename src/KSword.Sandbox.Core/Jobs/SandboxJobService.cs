@@ -1392,7 +1392,8 @@ public sealed partial class SandboxJobService
                     ["failedStepIndex"] = result.FailedStepIndex?.ToString() ?? string.Empty,
                     ["duration"] = result.Duration.ToString(),
                     ["resultPath"] = resultPath,
-                    ["message"] = result.Message ?? string.Empty
+                    ["message"] = result.Message ?? string.Empty,
+                    ["failureHint"] = BuildSafeRunbookFailureHint(result)
                 })
             });
         }
@@ -1415,6 +1416,40 @@ public sealed partial class SandboxJobService
                 })
             });
         }
+    }
+
+    private static string BuildSafeRunbookFailureHint(SandboxRunbookExecutionResult result)
+    {
+        if (result.Success)
+        {
+            return string.Empty;
+        }
+
+        foreach (var step in result.StepResults.Where(step => !step.Success).OrderBy(step => step.StepIndex))
+        {
+            var output = $"{step.StandardOutput}\n{step.StandardError}";
+            if (output.Contains("拒绝访问", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("access is denied", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("access denied", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Guest WinRM rejected the configured account (access denied). Re-run the guest bootstrap with the same username and password, then verify the account has WinRM/Administrators access.";
+            }
+
+            if (output.Contains("VMware Tools are not running", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("Tools are not running", StringComparison.OrdinalIgnoreCase))
+            {
+                return "VMware Tools did not report a guest address after restore. Start VMware Tools in the baseline guest and retry address discovery.";
+            }
+
+            if (output.Contains("cannot connect", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("目标服务不可达", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("WinRM 无法完成", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Guest WinRM endpoint was unreachable. Verify the guest firewall, HTTPS listener, address, and TCP 5986 before retrying.";
+            }
+        }
+
+        return string.Empty;
     }
 
     /// <summary>

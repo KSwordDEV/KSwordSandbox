@@ -182,7 +182,7 @@ public sealed class HtmlReportRenderer
     };
 
     private static readonly Regex ChineseRawEvidenceFragmentRegex = new(
-        "<style\\b[^>]*>.*?</style>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|\\sdata-copy=\"[^\"]*\"",
+        "<style\\b[^>]*>.*?</style>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
@@ -539,7 +539,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var staticFindings = StaticTriageFindings(report).ToList();
         var diagnosticFindings = DiagnosticFindings(report).ToList();
         html.AppendLine("<section id=\"risk\" class=\"card\"><h2>Risk summary</h2><div class=\"grid\">");
-        Metric(html, "Critical / high risk", (CountSeverity(primaryFindings, "critical") + CountSeverity(primaryFindings, "high")).ToString(), "risk-high");
+        Metric(html, "High risk", (CountSeverity(primaryFindings, "critical") + CountSeverity(primaryFindings, "high")).ToString(), "risk-high");
         Metric(html, "Suspicious", CountSeverity(primaryFindings, "medium").ToString(), "risk-medium");
         Metric(html, "General / info", (CountSeverity(primaryFindings, "low") + CountSeverity(primaryFindings, "info")).ToString(), "risk-info");
         Metric(html, "Static triage", staticFindings.Count.ToString(), staticFindings.Any(f => SeverityRank(f.Severity) <= SeverityRank("medium")) ? "risk-medium" : "risk-info");

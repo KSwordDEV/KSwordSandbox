@@ -10,7 +10,8 @@ namespace KSword.Sandbox.Web.Infrastructure;
 /// calls the official file-report endpoint only when configured; failures are
 /// returned as quiet status values instead of being logged. This service uses
 /// only GET /api/v3/files/{hash}; it never sends sample bytes, filenames as
-/// uploads, multipart content, or URLs for scanning.
+/// uploads, multipart content, or URLs for scanning. Hash-only mode does not upload
+/// samples.
 /// </summary>
 internal sealed class VirusTotalLookupService
 {
