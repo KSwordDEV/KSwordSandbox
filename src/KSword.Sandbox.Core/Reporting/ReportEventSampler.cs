@@ -951,6 +951,11 @@ public static class ReportEventSampler
             return ReportSamplingBucket.GeneralBehaviorEvidence;
         }
 
+        if (evt.EventType.StartsWith("guest.events.", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReportSamplingBucket.GeneralBehaviorEvidence;
+        }
+
         if (IsDiagnosticReportEvent(evt))
         {
             return ReportSamplingBucket.Diagnostics;
