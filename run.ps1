@@ -362,15 +362,37 @@ function Get-EffectiveConfigPath {
 
     $stateConfig = Get-StateString -State $State -Name 'localConfigPath' -DefaultValue ''
     if (-not [string]::IsNullOrWhiteSpace($stateConfig)) {
-        return Resolve-FullPathIfPresent -Path $stateConfig
+        $resolvedStateConfig = Resolve-FullPathIfPresent -Path $stateConfig
+        if (Test-Path -LiteralPath $resolvedStateConfig -PathType Leaf) {
+            return $resolvedStateConfig
+        }
+
+        # A copied install-state may still point at a drive that is unavailable
+        # on this machine. Continue through the runtime-root fallback instead
+        # of failing on the stale path before LocalAppData can be considered.
+        $stateConfigRoot = [System.IO.Path]::GetPathRoot($resolvedStateConfig)
+        if ([string]::IsNullOrWhiteSpace($stateConfigRoot) -or
+            (Test-Path -LiteralPath $stateConfigRoot -PathType Container)) {
+            return $resolvedStateConfig
+        }
     }
 
-    $envConfig = [Environment]::GetEnvironmentVariable($script:WebConfigPathEnvironmentName, 'Process')
-    if ([string]::IsNullOrWhiteSpace($envConfig)) {
-        $envConfig = [Environment]::GetEnvironmentVariable($script:WebConfigPathEnvironmentName, 'User')
-    }
-    if (-not [string]::IsNullOrWhiteSpace($envConfig)) {
-        return Resolve-FullPathIfPresent -Path $envConfig
+    foreach ($scope in @('Process', 'User')) {
+        $envConfig = [Environment]::GetEnvironmentVariable($script:WebConfigPathEnvironmentName, $scope)
+        if ([string]::IsNullOrWhiteSpace($envConfig)) {
+            continue
+        }
+
+        $resolvedEnvConfig = Resolve-FullPathIfPresent -Path $envConfig
+        if (Test-Path -LiteralPath $resolvedEnvConfig -PathType Leaf) {
+            return $resolvedEnvConfig
+        }
+
+        $envConfigRoot = [System.IO.Path]::GetPathRoot($resolvedEnvConfig)
+        if ([string]::IsNullOrWhiteSpace($envConfigRoot) -or
+            (Test-Path -LiteralPath $envConfigRoot -PathType Container)) {
+            return $resolvedEnvConfig
+        }
     }
 
     $runtimeConfig = Join-Path $EffectiveRuntimeRoot 'config\sandbox.local.json'

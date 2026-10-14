@@ -39,7 +39,7 @@ builder.Services.AddSingleton(config);
 builder.Services.AddSingleton(rules);
 builder.Services.AddSingleton(jobService);
 builder.Services.AddSingleton(targetScanner);
-builder.Services.AddSingleton(new BackendProfileStore(profilePath));
+builder.Services.AddSingleton(new BackendProfileStore(profilePath, repositoryRoot));
 builder.Services.AddSingleton<RunbookProgressStore>();
 builder.Services.AddSingleton<RunbookBackgroundExecutionStore>();
 builder.Services.AddSingleton<VirusTotalSettingsStore>();

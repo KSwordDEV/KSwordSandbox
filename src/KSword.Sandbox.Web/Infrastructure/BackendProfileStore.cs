@@ -19,11 +19,13 @@ internal sealed class BackendProfileStore
     };
 
     private readonly string configPath;
+    private readonly string packageRoot;
     private readonly object gate = new();
 
-    public BackendProfileStore(string configPath)
+    public BackendProfileStore(string configPath, string packageRoot)
     {
         this.configPath = Path.GetFullPath(configPath);
+        this.packageRoot = Path.GetFullPath(packageRoot);
     }
 
     public string ConfigPath => configPath;
@@ -118,14 +120,14 @@ internal sealed class BackendProfileStore
         };
     }
 
-    private static string ResolvePayloadRoot(string runtimeRoot, string currentPayloadRoot)
+    private string ResolvePayloadRoot(string runtimeRoot, string currentPayloadRoot)
     {
         if (!string.IsNullOrWhiteSpace(currentPayloadRoot) && File.Exists(Path.Combine(currentPayloadRoot, "payload-manifest.json")))
         {
             return currentPayloadRoot;
         }
 
-        var packagedPayloadRoot = Path.Combine(Directory.GetCurrentDirectory(), "payload", "guest-tools");
+        var packagedPayloadRoot = Path.Combine(packageRoot, "payload", "guest-tools");
         if (File.Exists(Path.Combine(packagedPayloadRoot, "payload-manifest.json")))
         {
             return packagedPayloadRoot;
