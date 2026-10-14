@@ -16,8 +16,10 @@ namespace KSword.Sandbox.SmokeTests.Scenarios;
 
 /// <summary>
 /// Verifies that packet-capture artifacts are no longer only downloadable files:
-/// host import can parse bounded PCAP rows into normalized pcap.* events, merge
-/// them into report.json, and trigger behavior rules.
+/// host import can parse bounded PCAP rows into normalized pcap.* events and
+/// merge them into report.json. Unattributed external PCAP rows remain visible
+/// evidence, while sample behavior findings require an owner/process
+/// correlation so environmental traffic is not promoted to sample behavior.
 /// </summary>
 internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
 {
@@ -414,10 +416,27 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         SmokeAssert.True(sidecarFlow.Data.TryGetValue("collectionName", out var sidecarCollection) && sidecarCollection == "network-sidecars", "Sidecar network events should preserve network-sidecars collection context.");
         SmokeAssert.True(sidecarFlow.Data.TryGetValue("evidenceRole", out var sidecarRole) && sidecarRole == "network-telemetry-sidecar", "Sidecar network events should preserve sidecar evidence role.");
         SmokeAssert.True(sidecarFlow.Data.TryGetValue("sourceArtifactRelativePath", out var sidecarRelativePath) && sidecarRelativePath == "packet-captures/sample.conn.jsonl", "Sidecar network events should preserve sidecar source artifact relative path.");
-        SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "pcap-http-request-observed"), "PCAP HTTP rule should match imported pcap.http rows.");
-        SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "pcap-dns-query-observed"), "PCAP DNS rule should match imported pcap.dns rows.");
-        SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "pcap-tls-clienthello-observed"), "PCAP TLS rule should match imported pcap.tls rows.");
-        SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "pcap-protocol-summary-placeholder"), "PCAP protocol summary rule should match imported pcap.summary protocol rollups.");
+        var importedPcapRows = report.Events
+            .Where(evt => evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        SmokeAssert.True(importedPcapRows.Count > 0, "Imported PCAP rows should remain visible in the bounded report.");
+        SmokeAssert.True(
+            importedPcapRows.All(evt =>
+                evt.Data.TryGetValue("behaviorCounted", out var counted) && counted == "false" &&
+                evt.Data.TryGetValue("nonbehavior", out var nonbehavior) && nonbehavior == "true"),
+            "Unattributed external PCAP rows should be retained as nonbehavior evidence until a sample owner/process correlation exists.");
+        foreach (var ruleId in new[]
+                 {
+                     "pcap-http-request-observed",
+                     "pcap-dns-query-observed",
+                     "pcap-tls-clienthello-observed",
+                     "pcap-protocol-summary-placeholder"
+                 })
+        {
+            SmokeAssert.True(
+                !report.Findings.Any(finding => finding.RuleId == ruleId),
+                $"Unattributed imported PCAP rows must not promote '{ruleId}' to a sample behavior finding.");
+        }
     }
 
     private static async Task AssertSidecarOnlyNetworkImportAsync(SmokeTestContext context, CancellationToken cancellationToken)
