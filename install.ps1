@@ -1549,7 +1549,7 @@ function New-InstallEntrypointDiagnostics {
         PreparesGuestPayload = $createOrPrepareRequested -and [bool]$PrepareGuestPayload -and -not $diagnosticWhatIf
         CreatesOrImportsVm = $false
         CreatesCheckpointSnapshot = $false
-        CallsCSignTool = $false
+        LegacySignerInvoked = $false
         ExecutesSample = $false
         CreateOrPreparePlanActions = @($createPlanActions)
         ReadOnlyAssertions = [pscustomobject][ordered]@{
@@ -1560,7 +1560,7 @@ function New-InstallEntrypointDiagnostics {
             DidNotCreateVm = $true
             DidNotCreateCheckpoint = $true
             DidNotSignDriver = $true
-            DidNotCallCSignTool = $true
+            LegacySignerBoundary = 'forbidden'
             DidNotExecuteSample = $true
             SecretValuePrinted = $false
         }
@@ -3114,7 +3114,7 @@ function Invoke-GuidedFirstRunSetup {
     Write-Host ''
     Write-Host 'KSwordSandbox 推荐安装向导 / Recommended setup wizard'
     Write-Host '中文提示：直接运行 install.ps1 会在这里询问常用设置；不需要记命令行参数。'
-    Write-Host '边界：本向导只写本机 runtime/config/secret，不创建 VM、不创建 clean baseline、不还原快照、不签名 driver、不调用 CSignTool。'
+    Write-Host '边界：本向导只写本机 runtime/config/secret，不创建 VM、不创建 clean baseline、不还原快照、不签名 driver、不调用外部 legacy signer。'
     Write-Host ''
 
     Select-VirtualizationProviderInteractive

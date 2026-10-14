@@ -27,6 +27,7 @@ transport 细节仍包含 Hyper-V 专项维护说明；三种 provider 共用的
    安装器不会扩大宿主机全局 `TrustedHosts`。
 4. 缺少 Guest Agent/R0Collector payload 时，运行
    `.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <payloadRoot> -GuestWorkingDirectory <guestRoot> -SelfContained`。
+   This prepares the self-contained Guest Agent/R0Collector payload outside the repository.
 5. 真实 R0 采集缺少 driver path 时，运行
    `.\install.ps1 -Mode Change -UpdateVirtualizationConfig -DriverHostPath <test-signed .sys>`；
    只验证链路时可在本机 `sandbox.local.json` 设置
@@ -50,7 +51,7 @@ driver，不使用 GUI signing fallback，不调用 `CSignTool.exe`，也不会�
 
 先选路径，再执行命令。不要把日常启动、恢复 checkpoint/snapshot、首次创建 VM
 混成一条“万能安装”流程。下面的验证命令都是低副作用：不启动、不还原、不停止 VM，
-不签名 driver，不调用 `CSignTool.exe`，不上传样本，也不会生成 fresh live evidence。
+不签名 driver，不调用 `CSignTool.exe`，不上传样本，也不会生成 fresh live evidence。The installer must not call `CSignTool.exe`.
 
 release UX 约定 / release UX contract：
 
