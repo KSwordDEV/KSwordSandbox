@@ -258,6 +258,9 @@ function Invoke-JobToolCommand {
     }
 
     if ($exitCode -ne 0 -and $Json) {
+        # Failure envelopes are diagnostic-only and must never claim a VM
+        # mutation; successful live execution has its own result contract.
+        $willMutateVm = $false
         [pscustomobject][ordered]@{
             contractVersion = 1
             kind = 'KSwordSandbox.OperatorCliResult'
@@ -271,8 +274,8 @@ function Invoke-JobToolCommand {
             runtimeRoot = $script:ResolvedRuntimeRoot
             jobId = $JobId
             jobRoot = $JobRoot
-            vmAction = if ($JobToolCommand -eq 'execute' -and $Live) { 'provider-runbook' } else { 'none' }
-            willMutateVm = $JobToolCommand -eq 'execute' -and [bool]$Live
+            vmAction = 'none'
+            willMutateVm = $willMutateVm
             noBuild = [bool]$NoBuild
             rawOutput = @($output)
             remediationHints = @(
