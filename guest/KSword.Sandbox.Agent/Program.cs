@@ -123,7 +123,10 @@ internal static class AgentProgram
             {
                 FileName = options.SamplePath,
                 WorkingDirectory = workingDirectory,
-                UseShellExecute = true,
+                // The submitted sample is a concrete guest executable. Direct
+                // CreateProcess avoids ShellExecute association/UWP indirection
+                // and gives the agent a real process handle for start/exit rows.
+                UseShellExecute = false,
                 CreateNoWindow = false,
                 WindowStyle = ProcessWindowStyle.Normal
             };

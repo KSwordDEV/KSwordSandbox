@@ -19,7 +19,11 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
         {
             FileName = plan.SamplePath,
             WorkingDirectory = plan.WorkingDirectory,
-            UseShellExecute = true,
+            // Samples are copied as executable files into the guest. Launch them
+            // directly instead of going through ShellExecute/file associations;
+            // this keeps Process.Start diagnostics tied to the submitted binary
+            // and works for native helpers such as cmd.exe/whoami.exe.
+            UseShellExecute = false,
             CreateNoWindow = false,
             WindowStyle = ProcessWindowStyle.Normal
         };

@@ -972,6 +972,15 @@ public static class ReportEventSampler
             return ReportSamplingBucket.GeneralBehaviorEvidence;
         }
 
+        // A sample launch failure is operator-facing evidence even when the
+        // correlation policy classifies benign GUI startup as nonbehavior. Keep
+        // it ahead of the diagnostic quota so a report cannot hide the one row
+        // explaining why process.start/process.exit are absent.
+        if (IsSampleExecutionFailureEvent(evt))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
         if (string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "pcap.import.summary", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "network.import.summary", StringComparison.OrdinalIgnoreCase))
@@ -1026,6 +1035,21 @@ public static class ReportEventSampler
              EventDataEqualsAny(evt, "sampleCorrelation", "confirmed") ||
              EventDataEqualsAny(evt, "sampleCorrelationStatus", "correlated", "confirmed") ||
              EventDataEqualsAny(evt, "sampleCorrelationStrength", "strong"));
+    }
+
+    private static bool IsSampleExecutionFailureEvent(SandboxEvent evt)
+    {
+        if (!string.Equals(NormalizeEventType(evt.EventType), "process.start_failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // The Guest Agent emits this event only for the submitted sample. The
+        // path/process guard keeps malformed generic diagnostic rows out of the
+        // priority lane while allowing baseline GUI failures to remain visible.
+        return EventDataEqualsAny(evt, "sampleCorrelationStatus", "correlated", "confirmed", "probable", "candidate") ||
+            EventDataBoolTrue(evt, "sampleBehaviorCandidate", "baselineSampleEvidence") ||
+            (evt.Path?.Contains("\\incoming\\", StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
     private static bool IsProbableSampleEvidenceEvent(SandboxEvent evt)
