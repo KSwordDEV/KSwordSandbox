@@ -3110,6 +3110,7 @@ else {
     @(Get-RuntimeHandoffNextActionsZh)
 }
 $installModeContractSummary = Get-InstallModeContractSnapshot
+$requiredEvidenceFields = Get-ReleaseRequiredEvidenceFields
 
 $summary = [pscustomobject][ordered]@{
     contractVersion       = 1
@@ -3151,7 +3152,7 @@ $summary = [pscustomobject][ordered]@{
     requireCompleteRuntimePackage = [bool]$RequireCompleteRuntimePackage
     includeBuild          = [bool]$IncludeBuild
     executionBoundaries   = Get-ReleaseExecutionBoundaries
-    requiredEvidenceFields = Get-ReleaseRequiredEvidenceFields
+    requiredEvidenceFields = $requiredEvidenceFields
     installModeContract   = $installModeContractSummary
     installContractGapDetected = [bool]$installModeContractSummary.gapDetected
     installContractGaps   = @($installModeContractSummary.gaps)

@@ -848,7 +848,7 @@ function Invoke-VMwareOfflinePasswordRecovery {
         finally {
             [Environment]::SetEnvironmentVariable($NewPasswordSecretName, $null, 'Process')
         }
-        if ($injectExitCode -ne 0) { throw "Offline guest password injection failed with exit code $injectExitCode: $($injectOutput -join ' ')" }
+        if ($injectExitCode -ne 0) { throw "Offline guest password injection failed with exit code ${injectExitCode}: $($injectOutput -join ' ')" }
         try { $injectResult = ($injectOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop }
         catch { throw "Offline guest password injection returned invalid JSON: $($_.Exception.Message)" }
         if (-not [bool]$injectResult.Injected -or -not [bool]$injectResult.ProviderChildSecretEnvironmentCleared -or [bool]$injectResult.SecretValuePrinted) {
@@ -1111,7 +1111,7 @@ function Invoke-QemuOfflinePasswordRecovery {
             [Environment]::SetEnvironmentVariable($NewPasswordSecretName, $null, 'Process')
         }
         if ($injectExitCode -ne 0) {
-            throw "Offline guest password injection failed with exit code $injectExitCode: $($injectOutput -join ' ')"
+            throw "Offline guest password injection failed with exit code ${injectExitCode}: $($injectOutput -join ' ')"
         }
         try {
             $injectResult = ($injectOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
