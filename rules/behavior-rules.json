@@ -37429,7 +37429,8 @@
         "yara",
         "signature",
         "triage",
-        "metadata"
+        "metadata",
+        "structured-static"
       ]
     },
     {

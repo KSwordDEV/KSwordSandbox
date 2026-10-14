@@ -229,6 +229,7 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
                     ["downloadExecCandidate"] = "true",
                     ["hasProcessInjectionApi"] = "true",
                     ["hasAntiDebugApi"] = "true",
+                    ["promoteStaticMetadataFinding"] = "true",
                     ["behaviorFamily"] = "process-injection",
                     ["tags"] = "imports_present,import_suspicious_api,import_process_injection_api,import_dynamic_code_api,import_network_api,import_download_api,import_persistence_api,import_registry_persistence_api,import_service_persistence_api,import_resource_api,import_file_drop_api,import_script_execution_api,import_anti_analysis_api,import_credential_access_api,import_exfil_api,import_defense_evasion_api"
                 }
