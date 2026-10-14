@@ -328,6 +328,18 @@
     },
     {
       "sourceType": "repository",
+      "source": "docs/first-run-webui-flow.md",
+      "target": "docs/first-run-webui-flow.md",
+      "required": true
+    },
+    {
+      "sourceType": "repository",
+      "source": "docs/vmware-first-run.md",
+      "target": "docs/vmware-first-run.md",
+      "required": true
+    },
+    {
+      "sourceType": "repository",
       "source": "docs/vmware-qemu.md",
       "target": "docs/vmware-qemu.md",
       "required": true
@@ -396,6 +408,12 @@
       "sourceType": "repository",
       "source": "scripts/Prepare-GuestPayload.ps1",
       "target": "scripts/Prepare-GuestPayload.ps1",
+      "required": true
+    },
+    {
+      "sourceType": "repository",
+      "source": "scripts/Bootstrap-VMwareGuest.ps1",
+      "target": "scripts/Bootstrap-VMwareGuest.ps1",
       "required": true
     },
     {

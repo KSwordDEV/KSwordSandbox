@@ -14,9 +14,10 @@ DPAPI 备份、`.env`、样本、报告、VM 磁盘/快照、仓库二进制、�
   binaries。runtime manifest 包含 root wrappers 和 `scripts/` wrappers（包括
   driver status management、三 provider Web API E2E 和只读聚合证据校验器），但绝不复制仓库内 `bin/`、`obj/`、`x64/`、VM、
   report、sample 或本机 secret files。
-- runtime 便携包面向普通操作者的入口是包根 `install.ps1`：无参数运行会进入推荐安装向导，
-  逐项询问 runtime root、已有 VM/checkpoint、guest 用户、guest 密码、可选 driver path、
-  可选 VT key 和 WebUI 启动选择；显式参数主要保留给自动化/CI。
+- runtime 便携包面向普通操作者的入口是包根 `Start-KSwordSandbox.cmd`：双击后打开双语 WebUI，
+  没有本机配置时进入后端设置。来宾初始化脚本 `scripts/Bootstrap-VMwareGuest.ps1` 和
+  `docs/vmware-first-run.md` 一同打包，页面可直接下载该脚本。需要控制台配置时仍可运行
+  `install.ps1` 的安装向导；显式参数主要保留给自动化/CI。
 
 使用 `scripts/package-portable.ps1` staging 本地 package tree，并可选择在仓库外
 output directory 创建 `.zip`。脚本只做 local-only 操作，故意没有 push/publish 步骤。

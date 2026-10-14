@@ -3192,17 +3192,31 @@ function Invoke-WebUi {
 
     $env:ASPNETCORE_URLS = $effectiveUrl
 
-    if ($OpenBrowser) {
-        Write-RunInfo "将自动打开浏览器：$effectiveUrl / Browser will open automatically."
-        Start-Job -ScriptBlock {
-            param([string]$TargetUrl)
-            Start-Sleep -Seconds 2
-            Start-Process $TargetUrl
-        } -ArgumentList $effectiveUrl | Out-Null
-    }
-
     if ($launchTarget.RequiresDotNet -and $null -eq (Get-Command dotnet -ErrorAction SilentlyContinue)) {
         throw "错误：WebUI 启动目标 '$($launchTarget.Kind)' 需要 dotnet，但当前 PATH 找不到 dotnet。下一步：安装 .NET SDK/Runtime，或使用包含 self-contained exe 的便携包。"
+    }
+
+    if ($OpenBrowser) {
+        Write-RunInfo "WebUI 就绪后自动打开浏览器：$effectiveUrl / Browser will open when WebUI is ready."
+        Start-Job -ScriptBlock {
+            param([string]$TargetUrl)
+            $healthUrl = [Uri]::new([Uri]$TargetUrl, '/health').AbsoluteUri
+            $waitTimer = [Diagnostics.Stopwatch]::StartNew()
+            while ($waitTimer.Elapsed.TotalSeconds -lt 120) {
+                try {
+                    $health = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                    if ($health.StatusCode -eq 200) {
+                        Start-Process $TargetUrl
+                        return
+                    }
+                }
+                catch {
+                    # A source checkout may still be building before Kestrel binds.
+                }
+                Start-Sleep -Milliseconds 500
+            }
+            Write-Warning "浏览器自动打开等待超时；WebUI 启动后可手动打开 $TargetUrl / Browser wait timed out; open the URL after WebUI starts."
+        } -ArgumentList $effectiveUrl | Out-Null
     }
 
     if ($NoBuild -and -not $launchTarget.SupportsNoBuild) {
