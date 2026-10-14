@@ -109,6 +109,19 @@ public static class ReportEventSampler
         "resultPath"
     ];
 
+    private static readonly string[] CollectionHealthPriorityDataKeys =
+    [
+        "healthStatus",
+        "artifactMissing",
+        "sourceEventType",
+        "collectionName",
+        "status",
+        "captureState",
+        "reason",
+        "zhMessage",
+        "zhHint"
+    ];
+
     // Synthetic R0 rows are plumbing evidence used to verify JSONL import and
     // must retain their source marker even when host metadata is verbose.
     private static readonly string[] R0MockPriorityDataKeys =
@@ -292,6 +305,12 @@ public static class ReportEventSampler
         "noiseClass",
         "noiseScope",
         "hostOperationalKind",
+        "healthStatus",
+        "artifactMissing",
+        "sourceEventType",
+        "status",
+        "captureState",
+        "reason",
         "guestImportOutcome",
         "guestImportMarker",
         "operatorHint",
@@ -924,6 +943,14 @@ public static class ReportEventSampler
             return ReportSamplingBucket.Excluded;
         }
 
+        // Every indexed sensitive artifact needs a visible download/evidence
+        // row; treating these rows as diagnostics would cap one collection
+        // type at two and silently hide screenshots or packet captures.
+        if (string.Equals(evt.EventType, "artifact.host_imported", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReportSamplingBucket.GeneralBehaviorEvidence;
+        }
+
         if (IsDiagnosticReportEvent(evt))
         {
             return ReportSamplingBucket.Diagnostics;
@@ -1317,6 +1344,18 @@ public static class ReportEventSampler
             TextEqualsAny(DataValue(evt.Data, "success"), "false", "0", "no", "failed"))
         {
             foreach (var key in OperationalFailurePriorityDataKeys)
+            {
+                yield return key;
+            }
+        }
+
+        if (string.Equals(evt.EventType, "collection.health", StringComparison.OrdinalIgnoreCase) ||
+            (evt.EventType ?? string.Empty).StartsWith("collection-health.", StringComparison.OrdinalIgnoreCase) ||
+            evt.Data.Keys.Any(key => string.Equals(key, "artifactMissing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(key, "healthStatus", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(key, "sourceEventType", StringComparison.OrdinalIgnoreCase)))
+        {
+            foreach (var key in CollectionHealthPriorityDataKeys)
             {
                 yield return key;
             }

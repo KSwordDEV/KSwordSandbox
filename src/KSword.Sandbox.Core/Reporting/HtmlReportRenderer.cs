@@ -3964,7 +3964,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         {
             foreach (var failure in failures)
             {
-                var message = FirstEventDataValue(failure, "message", "error", "failureReason", "reason");
+                var message = FirstEventDataValue(failure, "failureHint", "message", "error", "failureReason", "reason");
                 if (!string.IsNullOrWhiteSpace(message))
                 {
                     html.AppendLine($"<div class=\"section-note\"><strong>Runbook failure detail.</strong> {E(message)}</div>");
@@ -8779,6 +8779,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Failure reasons", "失败原因"),
         ("No operational failure markers were collected for this job.", "本作业未采集到运行失败标记。"),
         ("Runbook failure detail.", "运行手册失败详情。"),
+        ("Guest WinRM rejected the configured account (access denied). Re-run the guest bootstrap with the same username and password, then verify the account has WinRM/Administrators access.", "来宾 WinRM 拒绝了配置的账户（访问被拒绝）。请使用相同用户名和密码重新运行来宾引导，然后确认该账户具有 WinRM/Administrators 访问权限。"),
+        ("VMware Tools did not report a guest address after restore. Start VMware Tools in the baseline guest and retry address discovery.", "还原后 VMware Tools 未返回来宾地址。请在基线来宾中启动 VMware Tools，然后重试地址发现。"),
+        ("Guest WinRM endpoint was unreachable. Verify the guest firewall, HTTPS listener, address, and TCP 5986 before retrying.", "来宾 WinRM 端点不可达。请检查来宾防火墙、HTTPS 监听器、地址和 TCP 5986 后再重试。"),
         ("Raw normalized events", "原始事件"),
         ("Slim raw event sample.", "精简原始事件样本。"),
         ("Inline raw pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row.", "内联原始事件页使用原生 details；command、stdout、stderr、PowerShell、script block 和超大载荷会在每行中保持折叠。"),
