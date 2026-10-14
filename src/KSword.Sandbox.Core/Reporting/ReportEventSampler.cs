@@ -109,6 +109,131 @@ public static class ReportEventSampler
         "resultPath"
     ];
 
+    // Synthetic R0 rows are plumbing evidence used to verify JSONL import and
+    // must retain their source marker even when host metadata is verbose.
+    private static readonly string[] R0MockPriorityDataKeys =
+    [
+        "mock",
+        "stress",
+        "driverEventPath",
+        "typedPayloadStatus",
+        "collectorAbiVersion",
+        "syntheticSampleProcessId",
+        "selfNoiseFilterMatched"
+    ];
+
+    // Keep malformed JSONL content available to the operator. The original
+    // line identifies the producer/parser boundary and is required for repair.
+    private static readonly string[] DriverParseErrorPriorityDataKeys =
+    [
+        "line",
+        "driverEventPath",
+        "parseError",
+        "error",
+        "reason"
+    ];
+
+    private static readonly string[] R0CapabilitiesPriorityDataKeys =
+    [
+        "abiVersionMajor",
+        "abiVersionMinor",
+        "eventHeaderVersion",
+        "supportedProducerMaskHex",
+        "eventSchemaName"
+    ];
+
+    private static readonly string[] R0ProducerMaskPriorityDataKeys =
+    [
+        "requestedEnableMaskHex",
+        "effectiveEnableMaskHex",
+        "supportedProducerMaskHex"
+    ];
+
+    private static readonly string[] R0StatusPriorityDataKeys =
+    [
+        "phase",
+        "queueCapacity",
+        "queueDepth",
+        "queueHighWatermark",
+        "highWatermark",
+        "nextSequence",
+        "sequence",
+        "sequenceMeaning",
+        "totalEventsDropped",
+        "lostCount",
+        "totalEventsSuppressed",
+        "totalEventsBackpressured",
+        "producerDroppedMaskHex",
+        "producerSuppressedMaskHex",
+        "producerBackpressureMaskHex",
+        "lastEnqueueFailureStatus",
+        "lastEnqueueFailureStatusHex",
+        "effectiveProducerMaskHex"
+    ];
+
+    private static readonly string[] R0ReadEventsPriorityDataKeys =
+    [
+        "recordsProcessed",
+        "eventsWritten",
+        "lostCount",
+        "highWatermark",
+        "lastEnqueueFailureStatusHex",
+        "sequence",
+        "sequenceMeaning",
+        "processed",
+        "eligible",
+        "eligibleEvents",
+        "emitted",
+        "suppressed",
+        "skipped",
+        "head",
+        "tail",
+        "eventsDropped",
+        "loss",
+        "lossObserved",
+        "backpressure",
+        "backpressureObserved",
+        "backpressureReason",
+        "sampling"
+    ];
+
+    private static readonly string[] R0StartedPriorityDataKeys =
+    [
+        "mockMode",
+        "syntheticMode",
+        "injectJsonlNoise",
+        "stressCount",
+        "StressJsonlExpectedDriverRows",
+        "StressJsonlSequenceStart",
+        "StressJsonlSequenceEnd",
+        "StressJsonlSequenceGapCount",
+        "StressJsonlLossEvidence",
+        "StressJsonlBackpressureEvidence"
+    ];
+
+    private static readonly string[] R0StoppedPriorityDataKeys =
+    [
+        "reason",
+        "ioctlIssued",
+        "stressCount",
+        "injectJsonlNoise",
+        "driverEvents",
+        "driverRecordsProcessed",
+        "collectorSuppressedEvents",
+        "collectorSkippedEvents"
+    ];
+
+    private static readonly string[] R0DriverEventPriorityDataKeys =
+    [
+        "producer",
+        "schema",
+        "sequence",
+        "stress",
+        "collectorAbiVersion",
+        "syntheticSampleProcessId",
+        "selfNoiseFilterMatched"
+    ];
+
     private static readonly string[] PriorityDataKeys =
     [
         "collectionName",
@@ -1205,6 +1330,41 @@ public static class ReportEventSampler
             }
         }
 
+        if (string.Equals(evt.EventType, "r0collector.mockDriverEvent", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var key in R0MockPriorityDataKeys)
+            {
+                yield return key;
+            }
+        }
+
+        if (string.Equals(evt.EventType, "driver.parse_error", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var key in DriverParseErrorPriorityDataKeys)
+            {
+                yield return key;
+            }
+        }
+
+        var r0EventType = evt.EventType ?? string.Empty;
+        var r0Keys = r0EventType switch
+        {
+            "r0collector.driverCapabilities" => R0CapabilitiesPriorityDataKeys,
+            "r0collector.driverProducerMask" => R0ProducerMaskPriorityDataKeys,
+            "r0collector.driverStatus" => R0StatusPriorityDataKeys,
+            "r0collector.driverReadEvents" => R0ReadEventsPriorityDataKeys,
+            "r0collector.started" => R0StartedPriorityDataKeys,
+            "r0collector.stopped" => R0StoppedPriorityDataKeys,
+            _ when r0EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) ||
+                    r0EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase)
+                => R0DriverEventPriorityDataKeys,
+            _ => Array.Empty<string>()
+        };
+        foreach (var key in r0Keys)
+        {
+            yield return key;
+        }
+
         if ((evt.EventType ?? string.Empty).StartsWith("static.", StringComparison.OrdinalIgnoreCase))
         {
             foreach (var key in StaticPriorityDataKeys)
@@ -1237,8 +1397,7 @@ public static class ReportEventSampler
 
             var eventKind = DataValue(evt.Data, "eventKind");
             var serviceHint = DataValue(evt.Data, "serviceHint");
-            var eventType = evt.EventType ?? string.Empty;
-            foreach (var key in NetworkKindPriorityKeys(eventType, eventKind, serviceHint))
+            foreach (var key in NetworkKindPriorityKeys(evt.EventType ?? string.Empty, eventKind, serviceHint))
             {
                 yield return key;
             }
