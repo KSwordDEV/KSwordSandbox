@@ -1318,14 +1318,19 @@ public sealed class HyperVRunbookBuilder
         var guestAgentDirectory = $"{guestRoot}\\agent";
         var guestCollectorDirectory = $"{guestRoot}\\r0collector";
         var guestDriverDirectory = Path.GetDirectoryName(config.Driver.DriverPathInGuest)?.Replace('/', '\\') ?? $"{guestRoot}\\driver";
+        var guestRuntimeConfigPath = $"{guestAgentDirectory}\\KSword.Sandbox.Agent.runtimeconfig.json";
+        var guestDepsPath = $"{guestAgentDirectory}\\KSword.Sandbox.Agent.deps.json";
+        var guestAgentExecutablePath = $"{guestAgentDirectory}\\{config.Guest.AgentExecutableName}";
         var requiredGuestPaths = new List<string>
         {
-            $"{guestAgentDirectory}\\{config.Guest.AgentExecutableName}"
+            $"{guestAgentDirectory}\\{config.Guest.AgentExecutableName}",
+            $"{guestAgentDirectory}\\KSword.Sandbox.Agent.runtimeconfig.json",
+            $"{guestAgentDirectory}\\KSword.Sandbox.Agent.deps.json"
         };
         var commands = new List<string>
         {
             $"$payloadRoot = {Q(config.Paths.GuestPayloadRoot)};",
-            "$agentSource = Join-Path $payloadRoot 'agent\\*';",
+            "$agentSource = @(Get-ChildItem -LiteralPath (Join-Path $payloadRoot 'agent') -File | Where-Object { $_.Name -notin @('KSword.Sandbox.Agent.runtimeconfig.json', 'KSword.Sandbox.Agent.deps.json') } | Select-Object -ExpandProperty FullName);",
             "$collectorSource = Join-Path $payloadRoot 'r0collector\\*';",
             $"$driverSource = {Q(config.Driver.HostDriverPath ?? string.Empty)};",
             "$session = $null;",
@@ -1333,7 +1338,18 @@ public sealed class HyperVRunbookBuilder
             "try {",
             $"Invoke-Command -Session $session -ScriptBlock {{ New-Item -ItemType Directory -Force -Path {Q(guestAgentDirectory)}, {Q(guestCollectorDirectory)}, {Q(guestDriverDirectory)}, {Q($"{guestRoot}\\incoming")}, {Q($"{guestRoot}\\out")} | Out-Null }};",
             "if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot 'agent'))) { throw \"Guest Agent payload folder was not found: $(Join-Path $payloadRoot 'agent')\" }",
-            $"Copy-Item -ToSession $session -Path $agentSource -Destination {Q(guestAgentDirectory)} -Recurse -Force;"
+            "$agentRuntimeConfig = Join-Path $payloadRoot 'agent\\KSword.Sandbox.Agent.runtimeconfig.json';",
+            "$agentDeps = Join-Path $payloadRoot 'agent\\KSword.Sandbox.Agent.deps.json';",
+            "foreach ($payloadFile in @($agentRuntimeConfig, $agentDeps)) { if (-not (Test-Path -LiteralPath $payloadFile -PathType Leaf)) { throw \"Required host guest payload file was not found: $payloadFile\" }; if ((Get-Item -LiteralPath $payloadFile).Length -le 0) { throw \"Required host guest payload file is empty: $payloadFile\" } }",
+            $"$guestAgentReady = [bool](Invoke-Command -Session $session -ScriptBlock {{ (Test-Path -LiteralPath {Q(guestAgentExecutablePath)}) -and (Test-Path -LiteralPath {Q(guestRuntimeConfigPath)}) -and (Test-Path -LiteralPath {Q(guestDepsPath)}) -and ((Get-Item -LiteralPath {Q(guestRuntimeConfigPath)}).Length -gt 0) -and ((Get-Item -LiteralPath {Q(guestDepsPath)}).Length -gt 0) }} -ErrorAction Stop); if (-not $guestAgentReady) {{ Copy-Item -ToSession $session -Path $agentSource -Destination {Q(guestAgentDirectory)} -Recurse -Force }} else {{ Write-Host 'Guest Agent payload already present; skipped bulk VMware Tools copy.' }};",
+            $"$runtimeConfigBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($agentRuntimeConfig)); Invoke-Command -Session $session -ScriptBlock {{ param($path, $content) [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($content)) }} -ArgumentList {Q(guestRuntimeConfigPath)}, $runtimeConfigBase64 -ErrorAction Stop;",
+            $"$depsBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($agentDeps)); Invoke-Command -Session $session -ScriptBlock {{ param($path, $content) [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($content)) }} -ArgumentList {Q(guestDepsPath)}, $depsBase64 -ErrorAction Stop;",
+            $"$expectedRuntimeLength = (Get-Item -LiteralPath $agentRuntimeConfig).Length; $guestRuntimeLength = 0; for ($copyAttempt = 0; $copyAttempt -lt 3; $copyAttempt++) {{ Start-Sleep -Milliseconds 500; $guestRuntimeLength = [int64](Invoke-Command -Session $session -ScriptBlock {{ (Get-Item -LiteralPath {Q(guestRuntimeConfigPath)}).Length }} -ErrorAction Stop); if ($guestRuntimeLength -eq $expectedRuntimeLength) {{ break }}; Invoke-Command -Session $session -ScriptBlock {{ param($path, $content) [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($content)) }} -ArgumentList {Q(guestRuntimeConfigPath)}, $runtimeConfigBase64 -ErrorAction Stop }}; if ($guestRuntimeLength -ne $expectedRuntimeLength) {{ throw \"Guest runtimeconfig copy length mismatch: expected $expectedRuntimeLength, got $guestRuntimeLength\" }};",
+            $"$expectedDepsLength = (Get-Item -LiteralPath $agentDeps).Length; $guestDepsLength = 0; for ($copyAttempt = 0; $copyAttempt -lt 3; $copyAttempt++) {{ Start-Sleep -Milliseconds 500; $guestDepsLength = [int64](Invoke-Command -Session $session -ScriptBlock {{ (Get-Item -LiteralPath {Q(guestDepsPath)}).Length }} -ErrorAction Stop); if ($guestDepsLength -eq $expectedDepsLength) {{ break }}; Invoke-Command -Session $session -ScriptBlock {{ param($path, $content) [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($content)) }} -ArgumentList {Q(guestDepsPath)}, $depsBase64 -ErrorAction Stop }}; if ($guestDepsLength -ne $expectedDepsLength) {{ throw \"Guest deps copy length mismatch: expected $expectedDepsLength, got $guestDepsLength\" }};",
+            "Start-Sleep -Seconds 5;",
+            $"$runtimeConfigBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($agentRuntimeConfig)); Invoke-Command -Session $session -ScriptBlock {{ param($path, $content) [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($content)) }} -ArgumentList {Q(guestRuntimeConfigPath)}, $runtimeConfigBase64 -ErrorAction Stop;",
+            $"$depsBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($agentDeps)); Invoke-Command -Session $session -ScriptBlock {{ param($path, $content) [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($content)) }} -ArgumentList {Q(guestDepsPath)}, $depsBase64 -ErrorAction Stop;",
+            $"$finalRuntimeLength = [int64](Invoke-Command -Session $session -ScriptBlock {{ (Get-Item -LiteralPath {Q(guestRuntimeConfigPath)}).Length }} -ErrorAction Stop); $finalDepsLength = [int64](Invoke-Command -Session $session -ScriptBlock {{ (Get-Item -LiteralPath {Q(guestDepsPath)}).Length }} -ErrorAction Stop); if ($finalRuntimeLength -ne $expectedRuntimeLength -or $finalDepsLength -ne $expectedDepsLength) {{ throw \"Final guest runtime payload length mismatch: runtimeconfig=$finalRuntimeLength/$expectedRuntimeLength deps=$finalDepsLength/$expectedDepsLength\" }};"
         };
 
         if (config.Driver.Enabled && !config.Driver.UseMockCollector && string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
@@ -1355,7 +1371,7 @@ public sealed class HyperVRunbookBuilder
             commands.Add($"Copy-Item -ToSession $session -Path $driverSource -Destination {Q(config.Driver.DriverPathInGuest)} -Force;");
         }
 
-        commands.Add($"Invoke-Command -Session $session -ScriptBlock {{ foreach ($path in @({string.Join(", ", requiredGuestPaths.Select(Q))})) {{ if (-not (Test-Path -LiteralPath $path)) {{ throw \"Required guest payload path is missing: $path\" }} }} }};");
+        commands.Add($"Invoke-Command -Session $session -ScriptBlock {{ foreach ($path in @({string.Join(", ", requiredGuestPaths.Select(Q))})) {{ if (-not (Test-Path -LiteralPath $path)) {{ throw \"Required guest payload path is missing: $path\" }}; if ($path -like '*.json' -and (Get-Item -LiteralPath $path).Length -le 0) {{ throw \"Required guest payload file is empty: $path\" }} }} }};");
         commands.Add("}");
         commands.Add("finally { if ($session) { try { Remove-PSSession $session -ErrorAction Stop } catch { Write-Warning \"Guest PowerShell session cleanup failed after payload staging; primary step status is preserved: $($_.Exception.Message)\" } } }");
 
@@ -1449,9 +1465,36 @@ public sealed class HyperVRunbookBuilder
         string agentExitPath,
         string agentTaskName)
     {
-        var agentCommand = BuildGuestAgentInvocation(config, agentPath, guestSample, guestOut, driverEventsPath, agentExitPath);
+        var agentCommand = BuildGuestAgentInvocation(config, agentPath, guestSample, guestOut, driverEventsPath, agentExitPath, config.Driver.UseMockCollector);
         var interactiveCommand = $"$PID | Set-Content -LiteralPath {Q(agentPidPath)} -Encoding ASCII; {agentCommand}";
         var encodedCommand = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(interactiveCommand));
+        if (config.Driver.UseMockCollector)
+        {
+            var hostRuntimeConfigPath = Path.Combine(config.Paths.GuestPayloadRoot, "agent", "KSword.Sandbox.Agent.runtimeconfig.json");
+            var hostDepsPath = Path.Combine(config.Paths.GuestPayloadRoot, "agent", "KSword.Sandbox.Agent.deps.json");
+            var hostAgentPath = Path.Combine(config.Paths.GuestPayloadRoot, "agent", config.Guest.AgentExecutableName);
+            var directCommand = string.Join(" ", new[]
+            {
+                "$session = $null;",
+                BuildGuestSessionAssignment(config, provider, targetVmName),
+                "try {",
+                $"$agentExeSource = {Q(hostAgentPath)}; $runtimeConfigSource = {Q(hostRuntimeConfigPath)}; $depsSource = {Q(hostDepsPath)}; $agentExeBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($agentExeSource)); $runtimeConfigBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($runtimeConfigSource)); $depsBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($depsSource));",
+                "Invoke-Command -Session $session -ScriptBlock {",
+                "param($workingDirectory, $pidPath, $encodedCommand, $agentExeBase64, $runtimeConfigBase64, $depsBase64)",
+                "Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue;",
+                "$agentStablePath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.exe'; $runtimePath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.runtimeconfig.json'; $depsPath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.deps.json'; $agentStableTemp = \"$agentStablePath.refresh\"; $runtimeTemp = \"$runtimePath.refresh\"; $depsTemp = \"$depsPath.refresh\"; [IO.File]::WriteAllBytes($agentStableTemp, [Convert]::FromBase64String($agentExeBase64)); [IO.File]::WriteAllBytes($runtimeTemp, [Convert]::FromBase64String($runtimeConfigBase64)); [IO.File]::WriteAllBytes($depsTemp, [Convert]::FromBase64String($depsBase64)); Move-Item -LiteralPath $agentStableTemp -Destination $agentStablePath -Force; Move-Item -LiteralPath $runtimeTemp -Destination $runtimePath -Force; Move-Item -LiteralPath $depsTemp -Destination $depsPath -Force;",
+                "$stablePayloadChecks = 0; for ($payloadAttempt = 0; $payloadAttempt -lt 20 -and $stablePayloadChecks -lt 3; $payloadAttempt++) { Start-Sleep -Milliseconds 500; $agentBytes = [IO.File]::ReadAllBytes($agentStablePath); $runtimeBytes = [IO.File]::ReadAllBytes($runtimePath); $depsBytes = [IO.File]::ReadAllBytes($depsPath); if ($agentBytes.Length -gt 0 -and $runtimeBytes.Length -gt 0 -and $depsBytes.Length -gt 0 -and $runtimeBytes[0] -eq 0x7B -and $depsBytes[0] -eq 0x7B) { $stablePayloadChecks++; } else { $stablePayloadChecks = 0; [IO.File]::WriteAllBytes($agentStableTemp, [Convert]::FromBase64String($agentExeBase64)); [IO.File]::WriteAllBytes($runtimeTemp, [Convert]::FromBase64String($runtimeConfigBase64)); [IO.File]::WriteAllBytes($depsTemp, [Convert]::FromBase64String($depsBase64)); Move-Item -LiteralPath $agentStableTemp -Destination $agentStablePath -Force; Move-Item -LiteralPath $runtimeTemp -Destination $runtimePath -Force; Move-Item -LiteralPath $depsTemp -Destination $depsPath -Force; } }; if ($stablePayloadChecks -lt 3) { throw 'Guest Agent stable payload did not remain valid before launch.' };",
+                "$fallbackArgs = @('-NoLogo', '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand);",
+                "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $fallbackArgs -WorkingDirectory $workingDirectory -PassThru;",
+                "$deadline = (Get-Date).AddSeconds(30);",
+                "do { Start-Sleep -Milliseconds 250 } while (-not (Test-Path -LiteralPath $pidPath -PathType Leaf) -and (Get-Date) -lt $deadline);",
+                "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw \"Guest Agent process did not create its pid marker: $pidPath\" };",
+                $"}} -ArgumentList {Q(guestRoot)}, {Q(agentPidPath)}, {Q(encodedCommand)}, $agentExeBase64, $runtimeConfigBase64, $depsBase64 -ErrorAction Stop;",
+                "}",
+                "finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
+            });
+            return WithGuestCredential(config, directCommand);
+        }
         var command = string.Join(" ", new[]
         {
             "$session = $null;",
@@ -1476,7 +1519,8 @@ public sealed class HyperVRunbookBuilder
             "catch {",
             "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue;",
             "Write-Warning 'Interactive desktop is unavailable; starting Guest Agent in the remoting session.';",
-            "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $actionArguments -WorkingDirectory $workingDirectory -PassThru;",
+            "$fallbackArgs = @('-NoLogo', '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand);",
+            "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $fallbackArgs -WorkingDirectory $workingDirectory -PassThru;",
             "$fallback.Id | Set-Content -LiteralPath $pidPath -Encoding ASCII;",
             "} ",
             $"}} -ArgumentList {Q(agentTaskName)}, {Q(config.Guest.UserName)}, {Q(guestRoot)}, {Q(agentPidPath)}, {Q(encodedCommand)} -ErrorAction Stop;",
@@ -1492,7 +1536,7 @@ public sealed class HyperVRunbookBuilder
     /// formats the Guest Agent CLI and records its exit code; the method returns
     /// a command string passed to guest powershell.exe -Command.
     /// </summary>
-    private static string BuildGuestAgentInvocation(SandboxConfig config, string agentPath, string guestSample, string guestOut, string driverEventsPath, string agentExitPath)
+    private static string BuildGuestAgentInvocation(SandboxConfig config, string agentPath, string guestSample, string guestOut, string driverEventsPath, string agentExitPath, bool useStableRuntime = false)
     {
         var arguments = new List<string>
         {
@@ -1506,9 +1550,15 @@ public sealed class HyperVRunbookBuilder
         arguments.AddRange(BuildArtifactCollectionAgentArguments(config));
         arguments.AddRange(BuildDriverAgentArguments(config, driverEventsPath));
 
+        var stableRuntimePath = Path.Combine(Path.GetDirectoryName(agentPath) ?? string.Empty, "KSword.Sandbox.Agent.stable.runtimeconfig.json").Replace('/', '\\');
+        var stableDepsPath = Path.Combine(Path.GetDirectoryName(agentPath) ?? string.Empty, "KSword.Sandbox.Agent.stable.deps.json").Replace('/', '\\');
+        var stableAgentExePath = Path.Combine(Path.GetDirectoryName(agentPath) ?? string.Empty, "KSword.Sandbox.AgentStable.exe").Replace('/', '\\');
+        var executableInvocation = useStableRuntime
+            ? "& " + Q(stableAgentExePath) + " " + string.Join(' ', arguments)
+            : "& " + Q(agentPath) + " " + string.Join(' ', arguments);
         return string.Join("; ", new[]
         {
-            $"& {Q(agentPath)} {string.Join(' ', arguments)}",
+            executableInvocation,
             "$exitCode = if ($global:LASTEXITCODE -is [int]) { $global:LASTEXITCODE } else { 0 }",
             $"Set-Content -Path {Q(agentExitPath)} -Value $exitCode -Encoding ASCII",
             "exit $exitCode"
