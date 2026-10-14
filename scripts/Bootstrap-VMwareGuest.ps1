@@ -54,12 +54,12 @@ function Get-OrCreateGuestUser {
     }
 
     if ($null -eq $existing) {
-        New-LocalUser -Name $GuestUserName -Password $securePassword -Description 'KSwordSandbox VMware guest operator' -PasswordNeverExpires:$true -AccountNeverExpires:$true -UserMayNotChangePassword:$false | Out-Null
+        New-LocalUser -Name $GuestUserName -Password $securePassword -Description 'KSwordSandbox VMware guest operator' -PasswordNeverExpires:$true -AccountNeverExpires:$true | Out-Null
         $existing = Get-LocalUser -Name $GuestUserName -ErrorAction Stop
         Write-Bilingual -Chinese "已创建本地账户 $GuestUserName" -English "Created local account $GuestUserName"
     }
     else {
-        Set-LocalUser -Name $GuestUserName -Password $securePassword -PasswordNeverExpires:$true -UserMayNotChangePassword:$false
+        Set-LocalUser -Name $GuestUserName -Password $securePassword -PasswordNeverExpires:$true
         Enable-LocalUser -Name $GuestUserName -ErrorAction SilentlyContinue
         Write-Bilingual -Chinese "已更新本地账户密码 $GuestUserName" -English "Updated the local account password for $GuestUserName"
     }
