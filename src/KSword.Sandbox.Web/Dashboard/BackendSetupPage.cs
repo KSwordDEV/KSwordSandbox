@@ -15,6 +15,8 @@ internal static class BackendSetupPage
 
         var virtualization = config.Virtualization;
         var vmware = config.VMware;
+        var hyperV = config.HyperV;
+        var qemu = config.Qemu;
         var guest = vmware.GuestRemoting;
         var path = string.IsNullOrWhiteSpace(configPath) ? "config/sandbox.local.json" : configPath;
         var selectedProvider = preferVmware ? VirtualizationProvider.VMware : virtualization.Provider;
@@ -23,6 +25,9 @@ internal static class BackendSetupPage
         var vmrun = vmware.VmrunPath ?? "vmrun.exe";
         var address = guest.Address ?? string.Empty;
         var port = guest.Port == 0 ? 5986 : guest.Port;
+        var guestUserName = config.Guest.UserName;
+        var guestWorkingDirectory = config.Guest.WorkingDirectory;
+        var qemuGuest = qemu.GuestRemoting;
 
         return $$"""
         <!doctype html>
@@ -62,6 +67,11 @@ internal static class BackendSetupPage
             .hint,.footer-note { color:var(--muted); font-size:12px; margin:4px 0 0; }
             .checks label { background:var(--subtle); border:1px solid var(--line); flex:1 1 200px; padding:11px; }
             .checks input { width:auto; margin-right:7px; }
+            .checklist { display:grid; gap:8px; grid-template-columns:repeat(2,minmax(0,1fr)); margin:14px 0 0; }
+            .check-item { align-items:flex-start; background:var(--subtle); border:1px solid var(--line); display:flex; gap:9px; padding:10px 12px; }
+            .check-item .mark { color:var(--success); font-weight:700; }
+            .check-item strong { display:block; font-size:13px; }
+            .check-item span { color:var(--muted); display:block; font-size:12px; margin-top:2px; }
             button,.button { align-items:center; background:var(--accent); border:1px solid var(--accent); color:#fff; cursor:pointer; display:inline-flex; font:inherit; font-weight:600; justify-content:center; line-height:1.25; padding:9px 14px; text-decoration:none; }
             button:hover,.button:hover { background:#155fc9; border-color:#155fc9; }
             button.secondary,.button.secondary { background:var(--surface); border-color:#cbd5e1; color:var(--ink); }
@@ -74,6 +84,7 @@ internal static class BackendSetupPage
             pre { background:var(--subtle); border:1px solid var(--line); font:12px Consolas,"JetBrains Mono",monospace; margin:10px 0 0; max-height:340px; overflow:auto; padding:11px; }
             .hidden { display:none !important; }
             @media(max-width:760px) { .topline { flex-direction:column; } .steps { grid-template-columns:1fr; } .steps li { border-bottom:0; border-right:1px solid var(--line); } .steps li:last-child { border-bottom:1px solid var(--line); } .grid { grid-template-columns:1fr; } main { padding-left:14px; padding-right:14px; } header { padding-left:14px; padding-right:14px; } }
+            @media(max-width:620px) { .checklist { grid-template-columns:1fr; } }
           </style>
         </head>
         <body data-config-path="{{Attr(path)}}">
@@ -96,6 +107,17 @@ internal static class BackendSetupPage
             </ol>
 
             <section>
+              <h2 data-zh="开始前：准备一台可丢弃的 Windows 10" data-en="Before you start: prepare a disposable Windows 10 guest">开始前：准备一台可丢弃的 Windows 10</h2>
+              <p class="subtle" data-zh="向导不会替你创建虚拟机、安装 VMware Tools 或配置 WinRM。按下面顺序准备一次，之后每个样本都会从干净快照启动并在结束时清理。" data-en="The wizard does not create the VM, install VMware Tools, or configure WinRM for you. Complete this checklist once; each sample then starts from the clean snapshot and is cleaned up afterwards.">向导不会替你创建虚拟机、安装 VMware Tools 或配置 WinRM。按下面顺序准备一次，之后每个样本都会从干净快照启动并在结束时清理。</p>
+              <div class="checklist" role="list">
+                <div class="check-item" role="listitem"><span class="mark">1</span><div><strong data-zh="创建 Windows 10 x64 VM" data-en="Create a Windows 10 x64 VM">创建 Windows 10 x64 VM</strong><span data-zh="使用 NAT 或确保主机可访问来宾；不要放个人数据。" data-en="Use NAT or make sure the host can reach the guest; keep personal data out.">使用 NAT 或确保主机可访问来宾；不要放个人数据。</span></div></div>
+                <div class="check-item" role="listitem"><span class="mark">2</span><div><strong data-zh="安装 VMware Tools" data-en="Install VMware Tools">安装 VMware Tools</strong><span data-zh="用于发现来宾 IP 和可靠传输。" data-en="Used for guest IP discovery and reliable transfer.">用于发现来宾 IP 和可靠传输。</span></div></div>
+                <div class="check-item" role="listitem"><span class="mark">3</span><div><strong data-zh="配置 SandboxUser + WinRM HTTPS" data-en="Configure SandboxUser + WinRM HTTPS">配置 SandboxUser + WinRM HTTPS</strong><span data-zh="在 Windows 10 虚拟机内以管理员身份运行发行包脚本；脚本只修改来宾 VM。" data-en="Run the package script as Administrator inside the Windows 10 VM; it changes only the guest VM.">在 Windows 10 虚拟机内以管理员身份运行发行包脚本；脚本只修改来宾 VM。</span><a class="button secondary" href="/api/setup/guest-bootstrap" download="Bootstrap-VMwareGuest.ps1" data-zh="下载来宾初始化脚本" data-en="Download guest bootstrap">下载来宾初始化脚本</a></div></div>
+                <div class="check-item" role="listitem"><span class="mark">4</span><div><strong data-zh="关机后创建 Clean 快照" data-en="Power off and create a Clean snapshot">关机后创建 Clean 快照</strong><span data-zh="快照必须是可回滚的干净基线，名称可在下方修改。" data-en="The snapshot must be a disposable clean baseline; its name can be changed below.">快照必须是可回滚的干净基线，名称可在下方修改。</span></div></div>
+              </div>
+            </section>
+
+            <section>
               <h2 data-zh="1. 选择虚拟化后端" data-en="1. Choose a virtualization backend">1. 选择虚拟化后端</h2>
               <div class="choice-row">
                 <label class="choice"><input type="radio" name="provider" value="VMware"{{(selectedProvider == VirtualizationProvider.VMware ? " checked" : "")}}>VMware Workstation Pro<div class="hint" data-zh="推荐：自动开机、传样本、采集、还原快照并关机。" data-en="Recommended: boot, transfer, collect, restore snapshot, and shut down automatically.">推荐：自动开机、传样本、采集、还原快照并关机。</div></label>
@@ -113,7 +135,7 @@ internal static class BackendSetupPage
                 <div><label for="vmName" data-zh="虚拟机显示名称" data-en="VM display name">虚拟机显示名称</label><input id="vmName" name="vmName" value="{{Attr(vmware.VmName)}}"></div>
               </div>
               <div class="checks">
-                <label><input id="tools" type="checkbox" checked>VMware Tools<div class="hint" data-zh="用于发现来宾 IP 与可靠传输。" data-en="Used to discover the guest IP and transfer reliably.">用于发现来宾 IP 与可靠传输。</div></label>
+                <label><input id="tools" type="checkbox" checked disabled>VMware Tools<div class="hint" data-zh="必需：向导使用 VMware Tools 发现来宾 IP；请在虚拟机内安装并保持运行。" data-en="Required: the wizard uses VMware Tools for guest IP discovery; install it in the VM and keep it running.">必需：向导使用 VMware Tools 发现来宾 IP；请在虚拟机内安装并保持运行。</div></label>
                 <label><input id="ssl" type="checkbox"{{(guest.UseSsl ? " checked" : "")}}>WinRM HTTPS<div class="hint" data-zh="默认端口 5986；可跳过自签名证书校验。" data-en="Port 5986 by default; self-signed certificate checks may be skipped.">默认端口 5986；可跳过自签名证书校验。</div></label>
                 <label><input id="skipCert" type="checkbox"{{(guest.SkipCertificateChecks ? " checked" : "")}}>跳过证书校验 / Skip certificate checks</label>
               </div>
@@ -129,9 +151,42 @@ internal static class BackendSetupPage
             </section>
 
             <section>
+              <h2 data-zh="来宾身份与工作目录" data-en="Guest identity and working folder">来宾身份与工作目录</h2>
+              <div class="grid">
+                <div><label for="guestUserName" data-zh="来宾管理员用户名" data-en="Guest administrator username">来宾管理员用户名</label><input id="guestUserName" value="{{Attr(guestUserName)}}" placeholder="SandboxUser"><p class="hint" data-zh="必须与来宾 VM 内 bootstrap 脚本创建的账户一致。" data-en="Must match the account created by the bootstrap script inside the guest VM.">必须与来宾 VM 内 bootstrap 脚本创建的账户一致。</p></div>
+                <div><label for="guestWorkingDirectory" data-zh="来宾工作目录" data-en="Guest working directory">来宾工作目录</label><input id="guestWorkingDirectory" value="{{Attr(guestWorkingDirectory)}}" placeholder="C:\\KSwordSandbox"><p class="hint" data-zh="使用绝对 Windows 路径；分析任务会在其中暂存 payload 和输出。" data-en="Use an absolute Windows path; analysis stages payload and output there.">使用绝对 Windows 路径；分析任务会在其中暂存 payload 和输出。</p></div>
+              </div>
+            </section>
+
+            <section id="hypervFields" class="hidden">
+              <h2 data-zh="2. Hyper-V 配置" data-en="2. Hyper-V configuration">2. Hyper-V 配置</h2>
+              <div class="grid">
+                <div><label for="hypervVmName" data-zh="黄金 VM 名称" data-en="Golden VM name">黄金 VM 名称</label><input id="hypervVmName" value="{{Attr(hyperV.GoldenVmName)}}"></div>
+                <div><label for="hypervSnapshot" data-zh="干净检查点" data-en="Clean checkpoint">干净检查点</label><input id="hypervSnapshot" value="{{Attr(hyperV.GoldenSnapshotName)}}"></div>
+              </div>
+            </section>
+
+            <section id="qemuFields" class="hidden">
+              <h2 data-zh="2. QEMU 配置" data-en="2. QEMU configuration">2. QEMU 配置</h2>
+              <div class="grid">
+                <div><label for="qemuVmName" data-zh="虚拟机名称" data-en="VM name">虚拟机名称</label><input id="qemuVmName" value="{{Attr(qemu.VmName)}}"></div>
+                <div><label for="qemuDisk" data-zh="基础磁盘路径" data-en="Base disk path">基础磁盘路径</label><input id="qemuDisk" value="{{Attr(qemu.DiskImagePath)}}" placeholder="D:\\VMs\\Win10\\base.qcow2"></div>
+                <div><label for="qemuSystem" data-zh="qemu-system 路径" data-en="qemu-system path">qemu-system 路径</label><input id="qemuSystem" value="{{Attr(qemu.QemuSystemPath)}}"></div>
+                <div><label for="qemuImg" data-zh="qemu-img 路径" data-en="qemu-img path">qemu-img 路径</label><input id="qemuImg" value="{{Attr(qemu.QemuImgPath)}}"></div>
+                <div><label for="qemuFormat" data-zh="磁盘格式" data-en="Disk format">磁盘格式</label><select id="qemuFormat"><option value="qcow2"{{(string.Equals(qemu.DiskFormat, "qcow2", StringComparison.OrdinalIgnoreCase) ? " selected" : "")}}>qcow2</option><option value="raw"{{(string.Equals(qemu.DiskFormat, "raw", StringComparison.OrdinalIgnoreCase) ? " selected" : "")}}>raw</option><option value="vhdx"{{(string.Equals(qemu.DiskFormat, "vhdx", StringComparison.OrdinalIgnoreCase) ? " selected" : "")}}>vhdx</option><option value="vmdk"{{(string.Equals(qemu.DiskFormat, "vmdk", StringComparison.OrdinalIgnoreCase) ? " selected" : "")}}>vmdk</option></select></div>
+                <div><label for="qemuInterface" data-zh="磁盘接口" data-en="Disk interface">磁盘接口</label><select id="qemuInterface"><option value="virtio"{{(qemu.DiskInterface == "virtio" ? " selected" : "")}}>virtio</option><option value="ide"{{(qemu.DiskInterface == "ide" ? " selected" : "")}}>ide</option><option value="scsi"{{(qemu.DiskInterface == "scsi" ? " selected" : "")}}>scsi</option></select></div>
+                <div><label for="qemuMemory" data-zh="内存 MB" data-en="Memory MB">内存 MB</label><input id="qemuMemory" type="number" min="1024" max="65536" value="{{qemu.MemoryMegabytes}}"></div>
+                <div><label for="qemuSnapshot" data-zh="内部快照名称（overlay 可留空）" data-en="Internal snapshot name (optional with overlay)">内部快照名称（overlay 可留空）</label><input id="qemuSnapshot" value="{{Attr(qemu.SnapshotName)}}"></div>
+              </div>
+              <div class="checks"><label><input id="qemuOverlay" type="checkbox"{{(qemu.UseOverlayDisk ? " checked" : "")}}>每任务 overlay / Per-job overlay<div class="hint" data-zh="推荐：不会修改基础磁盘；每个任务使用一次性隔离层。" data-en="Recommended: keeps the base disk unchanged and uses a disposable layer per job.">推荐：不会修改基础磁盘；每个任务使用一次性隔离层。</div></label><label><input id="qemuHeadless" type="checkbox"{{(qemu.Headless ? " checked" : "")}}>无窗口 / Headless</label></div>
+              <div><label for="qemuAddress" data-zh="来宾地址（QemuUserNat 可留空）" data-en="Guest address (leave blank for QemuUserNat)">来宾地址（QemuUserNat 可留空）</label><input id="qemuAddress" value="{{Attr(qemuGuest.Address)}}" placeholder="192.168.122.10"></div>
+            </section>
+
+            <section>
               <h2 data-zh="3. 只读预检" data-en="3. Read-only preflight">3. 只读预检</h2>
                <p data-zh="预检只读取 vmrun、VMX、快照、VMware Tools 元数据和通信配置，不启动或修改虚拟机；真实 WinRM 登录会在 Live 前再次验证。" data-en="Preflight reads vmrun, VMX, snapshot, VMware Tools metadata, and transport configuration; it does not start or modify the VM. Live verifies the actual WinRM login again.">预检只读取 vmrun、VMX、快照、VMware Tools 元数据和通信配置，不启动或修改虚拟机；真实 WinRM 登录会在 Live 前再次验证。</p>
               <div id="preflight" class="status" data-zh="尚未检查。" data-en="Not checked yet.">尚未检查。</div>
+              <div id="preflightChecks" class="checklist hidden" aria-live="polite"></div>
               <div class="actions"><button type="button" class="secondary" onclick="runPreflight()" data-zh="运行只读预检" data-en="Run read-only preflight">运行只读预检</button><button type="button" class="secondary" onclick="loadProfile()" data-zh="重新读取配置" data-en="Reload profile">重新读取配置</button></div>
               <pre id="readinessDetail" class="hidden"></pre>
             </section>
@@ -140,7 +195,7 @@ internal static class BackendSetupPage
               <h2 data-zh="4. 保存配置并进入样本选择" data-en="4. Save and continue to sample selection">4. 保存配置并进入样本选择</h2>
               <p data-zh="保存会调用本机 setup profile 接口。配置文件路径仅供本机 Web Host 使用；不会推送远程仓库。保存后请重新启动 WebUI，让新配置成为运行时配置。" data-en="Save calls the local setup profile endpoint. The config path is used only by this Web Host; nothing is pushed to a remote repository. Restart the WebUI after saving so the new profile becomes active.">保存会调用本机 setup profile 接口。配置文件路径仅供本机 Web Host 使用；不会推送远程仓库。保存后请重新启动 WebUI，让新配置成为运行时配置。</p>
               <div id="saveStatus" class="status" data-zh="请先完成预检。" data-en="Run preflight first.">请先完成预检。</div>
-              <div class="actions"><button type="button" onclick="saveProfile()" data-zh="保存 VMware 配置" data-en="Save VMware configuration">保存 VMware 配置</button><a class="button secondary" href="/" data-zh="进入样本选择" data-en="Continue to sample selection">进入样本选择</a></div>
+              <div class="actions"><button type="button" onclick="saveProfile()" data-zh="保存后端配置" data-en="Save backend configuration">保存后端配置</button><a class="button secondary" href="/" data-zh="进入样本选择" data-en="Continue to sample selection">进入样本选择</a></div>
               <p class="footer-note" data-zh="当前配置文件：{{Attr(path)}}" data-en="Current config file: {{Attr(path)}}">当前配置文件：{{Attr(path)}}</p>
             </section>
           </main>
@@ -153,17 +208,26 @@ internal static class BackendSetupPage
               document.querySelectorAll('[data-zh][data-en]').forEach(x => { x.textContent = language === 'en' ? x.dataset.en : x.dataset.zh; });
             }
             function selectedProvider() { return document.querySelector('input[name=provider]:checked')?.value || 'VMware'; }
+            const val = id => (document.getElementById(id)?.value || '').trim();
+            const checked = id => Boolean(document.getElementById(id)?.checked);
             function formProfile() {
-              return { provider: selectedProvider(), vmxPath: document.getElementById('vmxPath').value.trim(), snapshotName: document.getElementById('snapshot').value.trim(), vmrunPath: document.getElementById('vmrun').value.trim(), vmName: document.getElementById('vmName').value.trim(), addressMode: document.getElementById('guestAddress').value.trim() ? 'Configured' : 'VMwareTools', address: document.getElementById('guestAddress').value.trim() || null, authentication: 'Negotiate', useSsl: document.getElementById('ssl').checked, port: Number(document.getElementById('guestPort').value || 5986), skipCertificateChecks: document.getElementById('skipCert').checked };
+              const provider = selectedProvider();
+              const address = provider === 'Qemu' ? val('qemuAddress') : val('guestAddress');
+              const addressMode = provider === 'VMware' ? (address ? 'Configured' : 'VMwareTools') : provider === 'Qemu' ? (address ? 'Configured' : 'QemuUserNat') : 'Configured';
+              return { provider, vmxPath: val('vmxPath'), snapshotName: provider === 'HyperV' ? val('hypervSnapshot') : provider === 'Qemu' ? val('qemuSnapshot') : val('snapshot'), vmrunPath: val('vmrun'), vmName: provider === 'HyperV' ? val('hypervVmName') : provider === 'Qemu' ? val('qemuVmName') : val('vmName'), addressMode, address: address || null, authentication: 'Negotiate', useSsl: provider === 'HyperV' ? false : checked('ssl'), port: Number(val('guestPort') || 5986), skipCertificateChecks: provider === 'HyperV' ? false : checked('skipCert'), guestUserName: val('guestUserName'), guestWorkingDirectory: val('guestWorkingDirectory'), qemuSystemPath: val('qemuSystem'), qemuImgPath: val('qemuImg'), diskImagePath: val('qemuDisk'), diskFormat: val('qemuFormat') || 'qcow2', diskInterface: val('qemuInterface') || 'virtio', useOverlayDisk: checked('qemuOverlay'), memoryMegabytes: Number(val('qemuMemory') || 4096), headless: provider === 'Qemu' ? checked('qemuHeadless') : false, additionalArguments: ['-accel', 'whpx'] };
             }
             async function json(url, options) { const response = await fetch(url, options); const text = await response.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch { data = { raw:text }; } if (!response.ok) throw new Error(`${response.status}: ${data.error || data.title || data.detail || text}`); return data; }
-            async function loadProfile() { const target = document.getElementById('preflight'); target.className = 'status'; target.textContent = t('正在读取 setup profile…', 'Loading setup profile…'); try { const data = await json('/api/setup/profile'); const vmware = data.config?.vmware || data.config?.vMware || data.vmware || data.vMware; if (vmware?.vmxPath) document.getElementById('vmxPath').value = vmware.vmxPath; if (vmware?.snapshotName) document.getElementById('snapshot').value = vmware.snapshotName; if (vmware?.vmrunPath) document.getElementById('vmrun').value = vmware.vmrunPath; target.className = 'status ok'; target.textContent = t('已读取本机配置。', 'Local profile loaded.'); } catch (e) { target.className = 'status warn'; target.textContent = t(`读取失败：${e.message}`, `Load failed: ${e.message}`); } }
-            async function runPreflight() { const target = document.getElementById('preflight'), saveStatus = document.getElementById('saveStatus'), detail = document.getElementById('readinessDetail'); target.className = 'status'; target.textContent = t('检查中…', 'Checking…'); saveStatus.className = 'status'; saveStatus.textContent = t('预检完成后即可保存。', 'Save will be available after preflight.'); try { const preview = await json('/api/setup/preview', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(formProfile()) }); const ready = preview.readiness || {}; detail.classList.remove('hidden'); detail.textContent = JSON.stringify(preview, null, 2); const vm = ready.virtualization || ready.Virtualization || {}; const configReady = vm.configurationReady ?? vm.ConfigurationReady ?? ((vm.managementAvailable ?? vm.ManagementAvailable) && (vm.vmExists ?? vm.VmExists)); const queryOk = vm.querySucceeded ?? vm.QuerySucceeded ?? false; const baselineOk = vm.baselineExists ?? vm.BaselineExists ?? false; const ok = Boolean(configReady && queryOk && baselineOk); target.className = `status ${ok ? 'ok' : 'warn'}`; target.textContent = ok ? t('宿主侧配置预检通过，可以保存；Live 前会再次验证来宾 WinRM。', 'Host-side configuration preflight passed; Live will verify guest WinRM again.') : t('当前表单配置仍有待处理项目，请查看详情。', 'The values currently in this form have pending items; inspect details.'); saveStatus.className = `status ${ok ? 'ok' : 'warn'}`; saveStatus.textContent = ok ? t('宿主侧预检通过，可以保存；来宾登录仍需在 Live 前验证。', 'Host-side preflight passed; guest login is still verified before Live.') : t('预检未完全通过，请先处理详情中的项目。', 'Preflight is incomplete; resolve the details before saving.'); } catch (e) { target.className = 'status bad'; target.textContent = t(`预检失败：${e.message}`, `Preflight failed: ${e.message}`); saveStatus.className = 'status bad'; saveStatus.textContent = t('预检失败，暂不建议保存。', 'Preflight failed; saving is not recommended yet.'); } }
-            async function saveProfile() { const target = document.getElementById('saveStatus'); target.className = 'status'; target.textContent = t('保存中…', 'Saving…'); try { const data = await json('/api/setup/profile', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(formProfile()) }); target.className = 'status ok'; target.textContent = t('已保存。请重新启动 WebUI，再进入样本选择。', 'Saved. Restart the WebUI, then continue to sample selection.'); if (data) document.getElementById('readinessDetail').textContent = JSON.stringify(data, null, 2); } catch (e) { target.className = 'status bad'; target.textContent = t(`保存失败：${e.message}`, `Save failed: ${e.message}`); } }
+            const prop = (obj, name) => obj?.[name] ?? obj?.[name[0].toLowerCase() + name.slice(1)];
+            function setProviderFields() { const p = selectedProvider(); document.getElementById('vmwareFields').classList.toggle('hidden', p !== 'VMware'); document.getElementById('hypervFields').classList.toggle('hidden', p !== 'HyperV'); document.getElementById('qemuFields').classList.toggle('hidden', p !== 'Qemu'); }
+            async function loadProfile() { const target = document.getElementById('preflight'); target.className = 'status'; target.textContent = t('正在读取 setup profile…', 'Loading setup profile…'); try { const data = await json('/api/setup/profile'); const c = data.config || {}; const vmware = c.vmware || c.vMware || {}; const hyperv = c.hyperV || c.hyperv || {}; const qemu = c.qemu || {}; const guest = c.guest || {}; if (vmware.vmxPath) document.getElementById('vmxPath').value = vmware.vmxPath; if (vmware.snapshotName) document.getElementById('snapshot').value = vmware.snapshotName; if (vmware.vmrunPath) document.getElementById('vmrun').value = vmware.vmrunPath; if (vmware.vmName) document.getElementById('vmName').value = vmware.vmName; if (hyperv.goldenVmName) document.getElementById('hypervVmName').value = hyperv.goldenVmName; if (hyperv.goldenSnapshotName) document.getElementById('hypervSnapshot').value = hyperv.goldenSnapshotName; if (qemu.vmName) document.getElementById('qemuVmName').value = qemu.vmName; if (qemu.diskImagePath) document.getElementById('qemuDisk').value = qemu.diskImagePath; if (guest.userName) document.getElementById('guestUserName').value = guest.userName; if (guest.workingDirectory) document.getElementById('guestWorkingDirectory').value = guest.workingDirectory; target.className = 'status ok'; target.textContent = t('已读取本机配置。', 'Local profile loaded.'); } catch (e) { target.className = 'status warn'; target.textContent = t(`读取失败：${e.message}`, `Load failed: ${e.message}`); } }
+            function renderCheck(label, ok, detail) { const item = document.createElement('div'); item.className = 'check-item'; item.innerHTML = `<span class="mark">${ok ? '✓' : '!'}</span><div><strong>${label}</strong><span>${detail}</span></div>`; return item; }
+            async function runPreflight() { const target = document.getElementById('preflight'), saveStatus = document.getElementById('saveStatus'), detail = document.getElementById('readinessDetail'), checks = document.getElementById('preflightChecks'); preflightPassed = false; checks.innerHTML = ''; checks.classList.remove('hidden'); target.className = 'status'; target.textContent = t('检查中…', 'Checking…'); saveStatus.className = 'status'; saveStatus.textContent = t('预检完成后即可保存。', 'Save will be available after preflight.'); try { const preview = await json('/api/setup/preview', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(formProfile()) }); const ready = preview.readiness || {}; const vm = prop(ready, 'Virtualization') || {}; const host = prop(ready, 'HostVirtualization') || {}; const guest = prop(ready, 'Guest') || {}; const paths = prop(ready, 'Paths') || {}; const configReady = Boolean(prop(vm, 'ManagementAvailable') && prop(vm, 'VmExists')); const queryOk = Boolean(prop(vm, 'QuerySucceeded')); const baselineOk = Boolean(prop(vm, 'BaselineExists')); const endpointOk = Boolean(prop(vm, 'GuestEndpointReady') && prop(vm, 'GuestTransportSecure')); const secretOk = Boolean(prop(guest, 'PasswordSecretAvailable')); const manifest = prop(paths, 'PayloadManifest') || {}; const agent = prop(paths, 'AgentExecutable') || {}; const payloadOk = Boolean(prop(manifest, 'Exists') && prop(agent, 'Exists')); const accelerationOk = prop(host, 'HardwareAccelerationReady') === true; const hostOk = configReady && queryOk && baselineOk && endpointOk; preflightPassed = hostOk; checks.append(renderCheck(t('管理工具 / VMX / 磁盘', 'Management tool / VMX / disk'), configReady, prop(vm, 'DiagnosticMessage') || t('未检测到完整后端配置。', 'Provider configuration is incomplete.'))); checks.append(renderCheck(t('查询与干净基线', 'Inventory and clean baseline'), queryOk && baselineOk, prop(vm, 'DiagnosticCode') || 'not checked')); checks.append(renderCheck(t('来宾端点与 HTTPS', 'Guest endpoint and HTTPS'), endpointOk, endpointOk ? t('只读配置满足安全通信要求；未登录来宾。', 'Secure endpoint configuration found; guest login was not attempted.') : t('端点配置不完整或通信不安全。', 'Endpoint configuration is incomplete or insecure.'))); checks.append(renderCheck(t('来宾 secret', 'Guest secret'), secretOk, secretOk ? t('当前 Web Host 可读取 secret。', 'The current Web Host can read the secret.') : t('保存来宾密码后再运行 Live。', 'Save the guest password before Live.'))); checks.append(renderCheck(t('Guest payload', 'Guest payload'), payloadOk, payloadOk ? t('manifest 与 agent 已存在。', 'Manifest and agent are present.') : t('保存 profile 后重启 WebUI 以准备 payload。', 'Save the profile and restart WebUI to prepare payload.'))); checks.append(renderCheck(t('主机加速', 'Host acceleration'), accelerationOk, prop(host, 'DiagnosticMessage') || t('未确认；Live 可能不可用。', 'Not confirmed; Live may be unavailable.'))); detail.classList.remove('hidden'); detail.textContent = JSON.stringify(preview, null, 2); target.className = `status ${hostOk ? 'ok' : 'warn'}`; target.textContent = hostOk ? t('宿主配置预检通过，可以保存。secret、payload 和真实 WinRM 仍需单独满足；预检不会开机或登录来宾。', 'Host configuration preflight passed; secret, payload, and real WinRM still need to be ready. No VM was started and no guest login was attempted.') : t('预检未通过宿主配置门槛，请先处理带 ! 的项目。', 'Host configuration preflight did not pass; fix items marked ! first.'); saveStatus.className = `status ${hostOk ? 'ok' : 'warn'}`; saveStatus.textContent = hostOk ? t('可以保存配置；这不代表 Live 已成功。保存后请重启 WebUI。', 'You can save the profile; this does not mean Live is ready. Restart WebUI after saving.') : t('宿主配置未通过，暂不能保存。', 'Host configuration is incomplete; saving is blocked.'); } catch (e) { target.className = 'status bad'; target.textContent = t(`预检失败：${e.message}`, `Preflight failed: ${e.message}`); saveStatus.className = 'status bad'; saveStatus.textContent = t('预检失败，请修复字段后重试。', 'Preflight failed; fix the fields and retry.'); } }
+            let preflightPassed = false;
+            async function saveProfile() { const target = document.getElementById('saveStatus'); if (!preflightPassed) { target.className = 'status warn'; target.textContent = t('请先运行并通过只读预检；保存按钮不会替代来宾通信验证。', 'Run and pass the read-only preflight first; saving does not replace guest communication validation.'); return; } target.className = 'status'; target.textContent = t('保存中…', 'Saving…'); try { const data = await json('/api/setup/profile', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(formProfile()) }); target.className = 'status ok'; target.textContent = t('已保存。请重新启动 WebUI，再进入样本选择。', 'Saved. Restart the WebUI, then continue to sample selection.'); if (data) document.getElementById('readinessDetail').textContent = JSON.stringify(data, null, 2); } catch (e) { target.className = 'status bad'; target.textContent = t(`保存失败：${e.message}`, `Save failed: ${e.message}`); } }
             async function saveGuestSecret() { const target = document.getElementById('secretStatus'), password = document.getElementById('guestPassword').value; target.className = 'status'; target.textContent = t('保存 secret 中…', 'Saving secret…'); try { const data = await json('/api/setup/guest-secret', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ password, clear:false }) }); document.getElementById('guestPassword').value = ''; target.className = 'status ok'; target.textContent = t(`已保存到本机 secret：${data.secretName}。`, `Saved to local secret: ${data.secretName}.`); } catch (e) { target.className = 'status bad'; target.textContent = t(`保存失败：${e.message}`, `Save failed: ${e.message}`); } }
             async function clearGuestSecret() { const target = document.getElementById('secretStatus'); if (!confirm(t('清除当前用户的来宾 secret？','Clear the current-user guest secret?'))) return; try { const data = await json('/api/setup/guest-secret', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ clear:true }) }); target.className = 'status warn'; target.textContent = t(`已清除：${data.secretName}。`, `Cleared: ${data.secretName}.`); } catch (e) { target.className = 'status bad'; target.textContent = t(`清除失败：${e.message}`, `Clear failed: ${e.message}`); } }
-            document.querySelectorAll('input[name=provider]').forEach(x => x.addEventListener('change', () => { document.getElementById('vmwareFields').classList.toggle('hidden', selectedProvider() !== 'VMware'); }));
-            applyLanguage(); loadProfile();
+            document.querySelectorAll('input[name=provider]').forEach(x => x.addEventListener('change', () => { setProviderFields(); preflightPassed = false; }));
+            applyLanguage(); setProviderFields(); loadProfile();
           </script>
         </body>
         </html>

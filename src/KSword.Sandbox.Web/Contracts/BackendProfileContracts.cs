@@ -30,6 +30,23 @@ public sealed record BackendProfileUpdateRequest
     public bool UseSsl { get; init; } = true;
 
     public bool SkipCertificateChecks { get; init; } = true;
+
+    public string GuestUserName { get; init; } = "SandboxUser";
+
+    public string GuestWorkingDirectory { get; init; } = "C:\\KSwordSandbox";
+
+    public string QemuSystemPath { get; init; } = "qemu-system-x86_64.exe";
+    public string QemuImgPath { get; init; } = "qemu-img.exe";
+    public string DiskImagePath { get; init; } = string.Empty;
+    public string DiskFormat { get; init; } = "qcow2";
+    public string DiskInterface { get; init; } = "virtio";
+    public bool UseOverlayDisk { get; init; } = true;
+    public int MemoryMegabytes { get; init; } = 4096;
+    public List<string> AdditionalArguments { get; init; } = ["-accel", "whpx"];
+    public bool Headless { get; init; }
+    public bool DriverEnabled { get; init; } = true;
+    public bool UseMockCollector { get; init; }
+    public string? HostDriverPath { get; init; }
 }
 
 public sealed record BackendProfileResponse

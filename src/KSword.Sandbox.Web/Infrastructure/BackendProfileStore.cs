@@ -85,32 +85,66 @@ internal sealed class BackendProfileStore
             ? current.Paths.GuestPayloadRoot
             : ResolvePayloadRoot(runtimeRoot, current.Paths.GuestPayloadRoot);
 
-        return current with
+        var remoting = new GuestRemotingConfig
+        {
+            AddressMode = request.AddressMode,
+            Address = string.IsNullOrWhiteSpace(request.Address) ? null : request.Address.Trim(),
+            Authentication = request.Authentication.Trim(),
+            Port = request.Port,
+            UseSsl = request.UseSsl,
+            SkipCertificateChecks = request.SkipCertificateChecks
+        };
+        var updated = current with
         {
             Virtualization = current.Virtualization with { Provider = request.Provider },
-            VMware = current.VMware with
+            HyperV = request.Provider == VirtualizationProvider.HyperV ? current.HyperV with
+            {
+                GoldenVmName = request.VmName.Trim(),
+                GoldenSnapshotName = request.SnapshotName.Trim(),
+                UseDifferencingDisk = false,
+                OpenVmConsoleOnLiveStart = !request.Headless
+            } : current.HyperV,
+            VMware = request.Provider == VirtualizationProvider.VMware ? current.VMware with
             {
                 VmName = request.VmName.Trim(),
                 VmxPath = request.VmxPath.Trim(),
                 SnapshotName = request.SnapshotName.Trim(),
                 VmrunPath = request.VmrunPath.Trim(),
-                GuestRemoting = current.VMware.GuestRemoting with
-                {
-                    AddressMode = request.AddressMode,
-                    Address = string.IsNullOrWhiteSpace(request.Address) ? null : request.Address.Trim(),
-                    Authentication = request.Authentication.Trim(),
-                    Port = request.Port,
-                    UseSsl = request.UseSsl,
-                    SkipCertificateChecks = request.SkipCertificateChecks
-                }
-            },
+                VmType = "ws",
+                Headless = request.Headless,
+                GuestRemoting = remoting
+            } : current.VMware,
+            Qemu = request.Provider == VirtualizationProvider.Qemu ? current.Qemu with
+            {
+                VmName = request.VmName.Trim(),
+                SnapshotName = request.SnapshotName.Trim(),
+                QemuSystemPath = request.QemuSystemPath.Trim(),
+                QemuImgPath = request.QemuImgPath.Trim(),
+                DiskImagePath = request.DiskImagePath.Trim(),
+                DiskFormat = request.DiskFormat.Trim().ToLowerInvariant(),
+                DiskInterface = request.DiskInterface.Trim().ToLowerInvariant(),
+                UseOverlayDisk = request.UseOverlayDisk,
+                MemoryMegabytes = request.MemoryMegabytes,
+                AdditionalArguments = request.AdditionalArguments,
+                Headless = request.Headless,
+                GuestRemoting = remoting
+            } : current.Qemu,
             Guest = current.Guest with
             {
+                UserName = request.GuestUserName.Trim(),
+                WorkingDirectory = request.GuestWorkingDirectory.Trim(),
+                EnablePowerShellDirect = request.Provider == VirtualizationProvider.HyperV,
                 PowerShellRemotingAddress = string.IsNullOrWhiteSpace(request.Address) ? null : request.Address.Trim(),
                 PowerShellRemotingAuthentication = request.Authentication.Trim(),
                 PowerShellRemotingUseSsl = request.UseSsl,
                 PowerShellRemotingPort = request.Port,
                 PowerShellRemotingSkipCertificateChecks = request.SkipCertificateChecks
+            },
+            Driver = current.Driver with
+            {
+                Enabled = request.DriverEnabled,
+                UseMockCollector = request.UseMockCollector,
+                HostDriverPath = string.IsNullOrWhiteSpace(request.HostDriverPath) ? null : request.HostDriverPath.Trim()
             },
             Paths = current.Paths with
             {
@@ -118,6 +152,7 @@ internal sealed class BackendProfileStore
                 GuestPayloadRoot = payloadRoot
             }
         };
+        return updated;
     }
 
     private string ResolvePayloadRoot(string runtimeRoot, string currentPayloadRoot)
@@ -138,6 +173,22 @@ internal sealed class BackendProfileStore
 
     private static void Validate(BackendProfileUpdateRequest request)
     {
+        if (!Enum.IsDefined(request.Provider)) throw new ArgumentException("Unknown backend / 未知后端。");
+        if (string.IsNullOrWhiteSpace(request.VmName)) throw new ArgumentException("VM name is required / 请填写虚拟机名称。");
+        if ((request.Provider != VirtualizationProvider.Qemu || !request.UseOverlayDisk) && string.IsNullOrWhiteSpace(request.SnapshotName))
+            throw new ArgumentException("Clean baseline name is required / 请填写干净基线名称。");
+        if (string.IsNullOrWhiteSpace(request.GuestUserName)) throw new ArgumentException("Guest username is required / 请填写来宾用户名。");
+        if (!Path.IsPathFullyQualified(request.GuestWorkingDirectory) || request.GuestWorkingDirectory.TrimEnd('\\').Length <= 3)
+            throw new ArgumentException("Use an absolute guest working folder such as C:\\KSwordSandbox / 请填写完整的来宾工作目录。");
+        if (request.Provider == VirtualizationProvider.Qemu)
+        {
+            if (string.IsNullOrWhiteSpace(request.QemuSystemPath) || string.IsNullOrWhiteSpace(request.QemuImgPath) || string.IsNullOrWhiteSpace(request.DiskImagePath))
+                throw new ArgumentException("QEMU tools and base disk are required / 请填写 QEMU 工具和基础磁盘路径。");
+            if (request.MemoryMegabytes < 1024 || request.MemoryMegabytes > 65536) throw new ArgumentException("QEMU memory must be 1024–65536 MB.");
+            if (request.AdditionalArguments is null) throw new ArgumentException("QEMU arguments must be a JSON string array.");
+            if (request.AddressMode is not (GuestRemotingAddressMode.Configured or GuestRemotingAddressMode.QemuUserNat))
+                throw new ArgumentException("QEMU supports Configured or QemuUserNat address mode.");
+        }
         if (request.Provider == VirtualizationProvider.VMware)
         {
             if (string.IsNullOrWhiteSpace(request.VmName))
@@ -166,7 +217,7 @@ internal sealed class BackendProfileStore
             }
         }
 
-        if (request.AddressMode == GuestRemotingAddressMode.Configured && string.IsNullOrWhiteSpace(request.Address))
+        if (request.Provider != VirtualizationProvider.HyperV && request.AddressMode == GuestRemotingAddressMode.Configured && string.IsNullOrWhiteSpace(request.Address))
         {
             throw new ArgumentException("Configured guest address mode requires an address.", nameof(request));
         }
