@@ -8969,7 +8969,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Command line hidden by default", "命令行默认隐藏"),
         ("Command/stdout/stderr/PowerShell fields hidden by default", "command/stdout/stderr/PowerShell 字段默认隐藏"),
         ("Hidden technical field", "隐藏技术字段"),
-        ("chars", "字符"),
+        // Keep replacements scoped to visible suffixes: replacing bare
+        // `chars` would corrupt the `<meta charset>` attribute (`字符et`).
+        ("chars)", "字符)"),
+        ("chars>", "字符>"),
         ("Process tree", "进程树"),
         ("Process tree nodes", "进程树节点"),
         ("High-signal nodes", "高信号节点"),
