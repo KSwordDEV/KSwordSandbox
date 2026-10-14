@@ -387,13 +387,16 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         foreach (var importedPcapEvent in report.Events.Where(evt => evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase)))
         {
             SmokeAssert.True(importedPcapEvent.Data.TryGetValue("collectionName", out var eventCollection) && eventCollection == "packet-captures", $"{importedPcapEvent.EventType} should carry packet-captures collection context.");
-            SmokeAssert.True(importedPcapEvent.Data.TryGetValue("importMode", out var eventImportMode) && eventImportMode == "external-artifact", $"{importedPcapEvent.EventType} should carry external artifact import mode.");
+            SmokeAssert.True(importedPcapEvent.Data.TryGetValue("importMode", out var eventImportMode) &&
+                (eventImportMode == "external-artifact" || eventImportMode == "pcap-artifact"),
+                $"{importedPcapEvent.EventType} should carry an external PCAP artifact import mode.");
             SmokeAssert.True(importedPcapEvent.Data.TryGetValue("sourceArtifactRelativePath", out var eventRelativePath) && eventRelativePath == "packet-captures/sample.pcap", $"{importedPcapEvent.EventType} should carry source artifact relative path.");
             SmokeAssert.True(importedPcapEvent.Data.TryGetValue("sourceArtifactSha256", out var eventSha256) && eventSha256.Length == 64, $"{importedPcapEvent.EventType} should carry source artifact SHA-256.");
         }
 
         SmokeAssert.True(importedPcapSummary.Data.TryGetValue("collectionName", out var pcapCollection) && pcapCollection == "packet-captures", "Imported PCAP events should carry packet-captures collection context.");
-        SmokeAssert.True(importedPcapSummary.Data.TryGetValue("importMode", out var pcapImportMode) && pcapImportMode == "external-artifact", "Imported PCAP events should carry external artifact import mode.");
+        SmokeAssert.True(importedPcapSummary.Data.TryGetValue("importMode", out var pcapImportMode) &&
+            (pcapImportMode == "external-artifact" || pcapImportMode == "pcap-artifact"), "Imported PCAP events should carry an external PCAP artifact import mode.");
         SmokeAssert.True(importedPcapSummary.Data.TryGetValue("sourceArtifactRelativePath", out var pcapRelativePath) && pcapRelativePath == "packet-captures/sample.pcap", "Imported PCAP events should carry source artifact relative path.");
         SmokeAssert.True(importedPcapSummary.Data.TryGetValue("sourceArtifactSizeBytes", out var pcapSize) && long.Parse(pcapSize) > 0, "Imported PCAP events should carry source artifact size.");
         SmokeAssert.True(importedPcapSummary.Data.TryGetValue("sourceArtifactSha256", out var pcapSha256) && pcapSha256.Length == 64, "Imported PCAP events should carry source artifact SHA-256.");
