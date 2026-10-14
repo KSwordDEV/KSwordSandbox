@@ -297,7 +297,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
     private static void RequireContainsNormalized(string content, string expected, string message)
     {
         var normalized = new string(content.Where(c => !char.IsWhiteSpace(c)).ToArray());
-        SmokeAssert.True(normalized.Contains(expected, StringComparison.Ordinal), message);
+        var normalizedExpected = new string(expected.Where(c => !char.IsWhiteSpace(c)).ToArray());
+        SmokeAssert.True(normalized.Contains(normalizedExpected, StringComparison.Ordinal), message);
     }
 
     /// <summary>
@@ -383,7 +384,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Hidden raw events", "Rendered raw event overview should show the hidden count label.");
         RequireContains(englishHtml, "Raw source paths", "Rendered raw event section should show source path hints.");
         RequireContains(englishHtml, "report.json", "Rendered raw event section should link or hint report.json.");
-        RequireContains(englishHtml, "No raw source artifacts were indexed; report.json remains the complete normalized source.", "Rendered raw source hints should explain missing raw artifacts.");
+        RequireContains(englishHtml, "No raw source artifacts were indexed; report.json remains the sampled normalized report view, not proof that no additional raw telemetry existed.", "Rendered raw source hints should explain missing raw artifacts without overstating report.json completeness.");
         RequireContains(englishHtml, "class=\"artifact-btn artifact-open\" href=\"artifacts/contract-drop.bin\"", "Rendered artifact links should expose a safe Open button.");
         RequireContains(englishHtml, "class=\"artifact-btn download\" href=\"artifacts/contract-drop.bin\" download=\"contract-drop.bin\"", "Rendered artifact links should expose a safe Download button.");
         RequireContains(englishHtml, "Host/local path (copy only)", "Rendered artifact full paths should be copy-only text evidence.");
@@ -441,7 +442,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Network relationship cards", "Rendered HTML should include network relationship cards.");
         RequireContains(englishHtml, "Copy network card", "Rendered HTML should include copyable network relationship cards.");
         RequireContains(englishHtml, "Endpoint-centric view.", "Rendered HTML should include cloud-sandbox-style network relationship guidance.");
-        RequireContains(englishHtml, "Network category view.", "Rendered HTML should include network category guidance.");
+        RequireContains(englishHtml, "Network category view / 网络分类视图.", "Rendered HTML should include network category guidance.");
         RequireContains(englishHtml, "Endpoint groups", "Rendered HTML should include endpoint overview cards.");
         RequireContains(englishHtml, "DNS / HTTP / TLS", "Rendered HTML should include protocol category counts.");
         RequireContains(englishHtml, "<section id=\"timeline\" class=\"card\"><h2>Timeline</h2>", "Rendered HTML should include the timeline section.");
