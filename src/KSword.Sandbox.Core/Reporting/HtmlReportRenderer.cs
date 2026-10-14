@@ -1387,6 +1387,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// </summary>
     private static void AppendDynamicAnalysis(StringBuilder html, AnalysisReport report)
     {
+        var dynamicEventCount = report.Events.Count(IsDynamicEvidenceEvent);
         html.AppendLine("<section id=\"dynamic\" class=\"card\"><h2>Dynamic analysis</h2><div class=\"grid\">");
         Metric(html, "Process starts", CountSampleBehaviorEvents(report, "process.start").ToString(), "risk-info");
         Metric(html, "Process exits", CountSampleBehaviorEvents(report, "process.exit").ToString(), "risk-info");
@@ -1400,9 +1401,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         Metric(html, "VT lookups", report.Events.Count(IsVirusTotalEvent).ToString(), "risk-info");
         Metric(html, "Failure markers", report.Events.Count(IsOperationalFailureEvent).ToString(), "risk-high");
         html.AppendLine("</div>");
-        if (report.Events.Count == 0)
+        if (dynamicEventCount == 0)
         {
-            Empty(html, "No dynamic events were collected. Zero counters mean telemetry was not collected or imported for this section; they are not proof that the sample had no behavior.");
+            Empty(html, "No guest/runtime events were collected. Zero counters mean dynamic telemetry was not collected or imported; this report is static-only and does not prove that the sample had no runtime behavior.");
         }
 
         html.AppendLine("</section>");
@@ -3961,6 +3962,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         }
         else
         {
+            foreach (var failure in failures)
+            {
+                var message = FirstEventDataValue(failure, "message", "error", "failureReason", "reason");
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    html.AppendLine($"<div class=\"section-note\"><strong>Runbook failure detail.</strong> {E(message)}</div>");
+                }
+            }
+
             AppendEventRows(html, failures, artifactLookup, artifacts);
         }
 
@@ -6807,6 +6817,24 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             !IsVirusTotalEvent(evt);
     }
 
+    /// <summary>
+    /// Determines whether an event is runtime telemetry rather than static PE
+    /// analysis or host planning metadata. Inputs are normalized events;
+    /// processing keeps dynamic-section zero counts honest; the method returns
+    /// true for sample process, file, registry, startup, network, security, or
+    /// R0 behavior rows.
+    /// </summary>
+    private static bool IsDynamicEvidenceEvent(SandboxEvent evt)
+    {
+        return IsSampleBehaviorProcessEvent(evt) ||
+            IsSampleBehaviorFileEvent(evt) ||
+            IsSampleBehaviorRegistryEvent(evt) ||
+            IsSampleBehaviorStartupEvent(evt) ||
+            IsSampleBehaviorNetworkEvent(evt) ||
+            IsSampleBehaviorSecurityPrivilegeEvent(evt) ||
+            IsSampleBehaviorR0Event(evt);
+    }
+
     private static bool IsSampleBehaviorFileEvent(SandboxEvent evt) => IsSampleBehaviorEvent(evt) && IsFileEvent(evt);
 
     private static bool IsSampleBehaviorRegistryEvent(SandboxEvent evt) => IsSampleBehaviorEvent(evt) && IsRegistryEvent(evt);
@@ -7278,6 +7306,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// </summary>
     private static bool IsFailureEvent(SandboxEvent evt)
     {
+        if (evt.EventType.EndsWith(".runbook.executed", StringComparison.OrdinalIgnoreCase) &&
+            TextEqualsAny(FirstEventDataValue(evt, "success") ?? string.Empty, "false", "0", "no", "failed"))
+        {
+            return true;
+        }
+
         return evt.EventType.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.Contains("error", StringComparison.OrdinalIgnoreCase);
@@ -8489,6 +8523,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("high-entropy-resource", "高熵资源"),
         ("Dynamic analysis", "动态分析"),
         ("No dynamic events were collected. Zero counters mean telemetry was not collected or imported for this section; they are not proof that the sample had no behavior.", "未采集到动态事件。本节的 0 计数表示遥测未采集或未导入，不代表样本没有行为。"),
+        ("No guest/runtime events were collected. Zero counters mean dynamic telemetry was not collected or imported; this report is static-only and does not prove that the sample had no runtime behavior.", "未采集到来宾/运行时事件。0 计数表示动态遥测未采集或未导入；本报告仅包含静态分析，不能证明样本没有运行时行为。"),
         ("VirusTotal / reputation", "VirusTotal / 信誉"),
         ("Hash-only enrichment.", "仅哈希增强。"),
         ("VirusTotal (VT) results are optional reputation evidence and are separated from sandbox behavior. Missing keys, rate limits, or not-found responses are enrichment status, not malicious sample behavior.", "VirusTotal (VT) 结果是可选信誉证据，已与沙箱行为分离。缺少密钥、限速或未找到响应属于增强状态，不是恶意样本行为。"),
@@ -8743,6 +8778,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("No R0 collection health rows were imported.", "未导入 R0 采集健康行。"),
         ("Failure reasons", "失败原因"),
         ("No operational failure markers were collected for this job.", "本作业未采集到运行失败标记。"),
+        ("Runbook failure detail.", "运行手册失败详情。"),
         ("Raw normalized events", "原始事件"),
         ("Slim raw event sample.", "精简原始事件样本。"),
         ("Inline raw pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row.", "内联原始事件页使用原生 details；command、stdout、stderr、PowerShell、script block 和超大载荷会在每行中保持折叠。"),
@@ -8894,9 +8930,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Process graph nodes", "进程图谱节点"),
         ("Evidence graph edges", "证据图谱边"),
         ("IOC summary", "IOC 摘要"),
-        ("From", "来源"),
-        ("Relation", "关系"),
-        ("To", "目标"),
+        ("<th>From</th>", "<th>来源</th>"),
+        ("<th>Relation</th>", "<th>关系</th>"),
+        ("<th>To</th>", "<th>目标</th>"),
         ("Copy graph edge", "复制图谱边"),
         ("Copy IOCs", "复制 IOC"),
         ("File/path IOCs", "文件/路径 IOC"),
@@ -9076,8 +9112,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         (">Execution<", ">执行<"),
         ("Path / safe link", "路径 / 安全链接"),
         ("MIME", "MIME"),
-        ("Time", "时间"),
-        ("Source", "来源"),
+        ("<th>Time</th>", "<th>时间</th>"),
+        ("<th>Source</th>", "<th>来源</th>"),
         ("Path / Target", "路径 / 目标"),
         ("File name", "文件名"),
         ("Full path", "完整路径"),

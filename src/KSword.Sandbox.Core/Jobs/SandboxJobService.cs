@@ -516,10 +516,18 @@ public sealed partial class SandboxJobService
 
         StoreJob(job);
         var guestEvents = LoadGuestEventsWithDriverJsonl(eventsPath);
-        var status = guestEvents.Count == 0 ? AnalysisStatus.Failed : AnalysisStatus.Completed;
+        var failureSkeleton = guestEvents.Any(evt =>
+            string.Equals(evt.EventType, "hyperv.e2e.failure_skeleton", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "vmware.e2e.failure_skeleton", StringComparison.OrdinalIgnoreCase));
+        var failedRunbook = IsFailedRunbookExecution(resultPath);
+        var status = failureSkeleton || failedRunbook || guestEvents.Count == 0
+            ? AnalysisStatus.Failed
+            : AnalysisStatus.Completed;
         var message = guestEvents.Count == 0
             ? $"External guest event import found no events in {eventsPath}."
-            : $"Imported {guestEvents.Count} external guest/driver event(s) from {eventsPath}.";
+            : failedRunbook || failureSkeleton
+                ? $"Imported {guestEvents.Count} diagnostic guest event(s) from {eventsPath}; runbook failure keeps report status Failed."
+                : $"Imported {guestEvents.Count} external guest/driver event(s) from {eventsPath}.";
         var updated = RegenerateReport(job with
         {
             Status = status,
@@ -530,6 +538,24 @@ public sealed partial class SandboxJobService
         PersistGuestImportState(updated, Path.GetFullPath(eventsPath), guestEvents.Count, status, message);
         StoreJob(updated);
         return updated;
+    }
+
+    private static bool IsFailedRunbookExecution(string? resultPath)
+    {
+        if (string.IsNullOrWhiteSpace(resultPath) || !File.Exists(resultPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<SandboxRunbookExecutionResult>(File.ReadAllText(resultPath), JsonOptions);
+            return result is not null && !result.Success;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            return false;
+        }
     }
 
     private static void EnsureExternalImportPreservesPersistedIdentity(AnalysisJob? existingJob, SandboxSubmission submission)
