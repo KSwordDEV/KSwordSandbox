@@ -56,7 +56,7 @@ public sealed class HtmlReportRenderer
     private const int RelationshipCardInlineLimit = 24;
     private const int RelationshipArtifactInlineLimit = 6;
     private const int EvidenceStoryInlineLimit = 12;
-    private const int EventExplorerInlineLimit = 240;
+    private const int EventExplorerInlineLimit = 120;
 
     private sealed record TimelineGroup(
         string Window,
@@ -311,7 +311,7 @@ public sealed class HtmlReportRenderer
         html.AppendLine("</div></aside>");
         html.AppendLine("<main class=\"report-content\">");
         AppendRiskSummary(html, report);
-        AppendReportFocus(html, report);
+        AppendReportFocus(html, report, artifactLinks);
         AppendEventExplorer(html, report, artifactLookup, artifactLinks);
         AppendBehaviorDetections(html, report);
         AppendAggregatedBehaviorFacts(html, report, artifactLinks);
@@ -580,7 +580,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// Inputs are the normalized report; processing separates sample behavior,
     /// operational noise, and failure markers; the method returns no value.
     /// </summary>
-    private static void AppendReportFocus(StringBuilder html, AnalysisReport report)
+    private static void AppendReportFocus(StringBuilder html, AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var primaryFindings = PrimaryBehaviorFindings(report)
             .OrderBy(finding => SeverityRank(finding.Severity))
@@ -590,6 +590,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var lifecycleEvents = report.Events.Count(IsAgentLifecycleEvent);
         var noiseEvents = report.Events.Count(IsExcludedFromBehaviorStoryEvent);
         var failures = report.Events.Count(IsOperationalFailureEvent);
+        var healthRows = report.Events.Count(IsCollectionHealthEvent);
+        var artifactCount = artifacts.Count;
         var topFinding = primaryFindings.FirstOrDefault();
         var verdict = DetermineVerdict(report);
         var focusCopy = string.Join(
@@ -602,6 +604,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 $"excludedNoiseEvents={noiseEvents}",
                 $"agentLifecycleEventsHidden={lifecycleEvents}",
                 $"failureEvents={failures}",
+                $"collectionHealthRows={healthRows}",
+                $"artifacts={artifactCount}",
                 $"next={topFinding?.Title ?? "Review static analysis and collection health"}"
             ]);
 
@@ -613,6 +617,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         FocusMetric(html, "Sample behavior", sampleEvents.ToString(CultureInfo.InvariantCulture), sampleEvents > 0 ? "risk-medium" : "risk-info", "Events eligible for the behavior story.");
         FocusMetric(html, "Noise / diagnostics", noiseEvents.ToString(CultureInfo.InvariantCulture), noiseEvents > 0 ? "risk-info" : "risk-low", "Operational rows retained as evidence but excluded from the verdict.");
         FocusMetric(html, "Failures", failures.ToString(CultureInfo.InvariantCulture), failures > 0 || report.Status == AnalysisStatus.Failed ? "risk-high" : "risk-low", "Open Failure reasons for the remediation hint.");
+        FocusMetric(html, "Collection health", healthRows.ToString(CultureInfo.InvariantCulture), report.Events.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-low", "Health and readiness rows explain evidence quality.");
+        FocusMetric(html, "Artifacts", artifactCount.ToString(CultureInfo.InvariantCulture), artifactCount > 0 ? "risk-low" : "risk-info", "Indexed files, screenshots, dumps, and packet captures.");
         FocusMetric(html, "Lifecycle hidden", lifecycleEvents.ToString(CultureInfo.InvariantCulture), lifecycleEvents > 0 ? "risk-info" : "risk-low", "agent.start/stop rows hidden from the main story; raw evidence remains below.");
         html.AppendLine("</div>");
         html.AppendLine("<div class=\"focus-next\">");
@@ -8755,6 +8761,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Operational rows retained as evidence but excluded from the verdict.", "保留为证据但不计入判定的运行行。"),
         ("Failures", "失败"),
         ("Open Failure reasons for the remediation hint.", "打开失败原因查看修复提示。"),
+        ("Collection health", "采集健康"),
+        ("Health and readiness rows explain evidence quality.", "健康与就绪行用于说明证据质量。"),
+        ("Artifacts", "证据文件"),
+        ("Indexed files, screenshots, dumps, and packet captures.", "已索引的文件、截图、转储和抓包。"),
         ("Lifecycle hidden", "已隐藏生命周期"),
         ("agent.start/stop rows hidden from the main story; raw evidence remains below.", "agent.start/stop 行从主叙事隐藏；原始证据仍保留在下方。"),
         ("Next review", "下一步检查"),
