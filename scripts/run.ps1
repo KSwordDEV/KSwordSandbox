@@ -14,6 +14,10 @@ is never implicit; it requires an explicit -Live option passed through to the ro
 runtime wrapper. The runtime wrapper consumes one of the three install-side
 operator paths (configured environment, rollback/restore clean baseline, or
 fresh/new-computer preparation) but does not create or restore VMs by default.
+
+Live Hyper-V execution is explicit and provider-gated; the selected provider,
+VM baseline, guest transport, and external RuntimePublishRoot are reported
+before any operator-authorized live run.
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(

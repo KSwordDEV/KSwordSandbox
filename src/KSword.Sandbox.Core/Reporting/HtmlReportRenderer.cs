@@ -131,6 +131,7 @@ public sealed class HtmlReportRenderer
     private sealed record EventExplorerRow(
         SandboxEvent Event,
         string Stage,
+        string Family,
         string Severity,
         bool SampleBehavior);
 
@@ -189,7 +190,7 @@ public sealed class HtmlReportRenderer
     };
 
     private static readonly Regex ChineseRawEvidenceFragmentRegex = new(
-        "<style\\b[^>]*>.*?</style>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
+        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<[^>]+>|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
@@ -383,9 +384,73 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
 /* Square, flat operator theme: no pill/card nesting beyond one visual layer. */
 .modern-sandbox-report header:after{display:none}.modern-sandbox-report .card,.modern-sandbox-report section.card,.modern-sandbox-report .metric,.modern-sandbox-report .quick-link,.modern-sandbox-report .language-entry a,.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .section-note,.modern-sandbox-report code,.modern-sandbox-report .toc a,.modern-sandbox-report .empty,.modern-sandbox-report .copy-btn,.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .timeline-group,.modern-sandbox-report .timeline-item,.modern-sandbox-report .timeline-overflow,.modern-sandbox-report .graph-node,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .behavior-chain li,.modern-sandbox-report .behavior-chain details,.modern-sandbox-report .ioc-card,.modern-sandbox-report .evidence-summary-card,.modern-sandbox-report .evidence-story-lane,.modern-sandbox-report .narrative-step,.modern-sandbox-report .relation-card,.modern-sandbox-report .overview-item,.modern-sandbox-report .relationship-meta span,.modern-sandbox-report .relationship-details,.modern-sandbox-report .evidence-expansion-card,.modern-sandbox-report .process-tree,.modern-sandbox-report .tree-badge,.modern-sandbox-report .evidence details,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link,.modern-sandbox-report .artifact-copy-path,.modern-sandbox-report .artifact-preview img,.modern-sandbox-report .technical-field,.modern-sandbox-report .raw-technical-fields,.modern-sandbox-report .raw-technical-field,.modern-sandbox-report .raw-events-shell,.modern-sandbox-report .raw-event-page,.modern-sandbox-report .raw-source-hints{border-radius:0!important}.modern-sandbox-report .card:before,.modern-sandbox-report .evidence-summary-card:before,.modern-sandbox-report .evidence-story-lane:before,.modern-sandbox-report .narrative-step:before,.modern-sandbox-report .relation-card:before,.modern-sandbox-report .overview-item:before{border-radius:0!important}.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link{box-shadow:none!important}.modern-sandbox-report .event-evidence-fields,.modern-sandbox-report .flat-technical-fields,.modern-sandbox-report .related-artifacts-flat{background:transparent;border:0;border-radius:0;padding:0}.modern-sandbox-report .flat-technical-fields{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}.modern-sandbox-report .related-artifacts-flat ul{border-top:1px solid var(--line);list-style:none;margin:6px 0 0 0;padding:0}.modern-sandbox-report .related-artifacts-flat li{border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px}.modern-sandbox-report .related-artifacts-flat li:first-child{border-top:0}.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .raw-events-panel,.modern-sandbox-report .process-tree,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .relation-card,.modern-sandbox-report .evidence-story-lane{overscroll-behavior:contain}.modern-sandbox-report .event-table td,.modern-sandbox-report .edge-table td{overflow-wrap:anywhere}.modern-sandbox-report .self-noise-note{background:#f8fafc;border-left:4px solid #94a3b8;color:#475569;margin:10px 0;padding:10px 12px}
+/* Evidence tables are the primary review surface. Give the detail column room
+   to breathe and use quiet row bands instead of nested, tiny cards. */
+.modern-sandbox-report .event-explorer-table{border-collapse:separate;border-spacing:0 4px;min-width:1040px}
+.modern-sandbox-report .event-explorer-table tbody tr{background:#fff}
+.modern-sandbox-report .event-explorer-table td{border-bottom:1px solid #e5edf6;padding:11px 10px}
+.modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:360px;width:34%}
+.modern-sandbox-report .event-explorer-details{display:block;min-width:320px}
+.modern-sandbox-report .event-explorer-details summary{background:#f4f9ff;border-left:3px solid #93c5fd;padding:7px 9px}
+.modern-sandbox-report .event-explorer-detail{background:#fff;border-left:3px solid #43A0FF;margin-top:4px;max-height:280px;overflow:auto;padding:10px 12px}
+.modern-sandbox-report .event-explorer-detail .event-evidence-fields{max-height:none}
+.modern-sandbox-report .evidence{max-width:none;min-width:340px}
+.modern-sandbox-report .evidence-expansion-card{display:block;width:100%}
+.modern-sandbox-report .evidence-expansion-card pre{max-height:360px;min-height:72px}
+.modern-sandbox-report .evidence-story-lane .story-evidence-list{max-height:220px;overflow:auto}
 @media print{html{scroll-behavior:auto}body{background:#fff;color:#000}header,.language-entry,.no-js-fallback{max-width:none;margin:0;padding:12px}.report-layout{display:block;margin:0;max-width:none;padding:0 12px}.report-sidebar{max-height:none;overflow:visible;position:static}.report-content{min-width:0}.copy-btn{display:none!important}section.card,.card,.event-table-wrap,.raw-events-panel,.process-tree,.behavior-chain,.relation-card,.evidence-story-lane,.evidence-summary-card,.raw-event-page{break-inside:avoid;max-height:none!important;overflow:visible!important}section.card>h2,th{position:static!important}.process-tree-path{white-space:normal}.raw-events-shell>summary:after,.raw-event-page>summary:after,.event-evidence-fields>summary:after,.technical-field>summary:after,.raw-technical-fields>summary:after{color:#64748b;content:' (folded in screen view; expand in browser for full evidence)';font-weight:400}}
 @media(max-width:1000px){.report-layout{display:block}.report-sidebar{display:grid;grid-template-columns:1fr 1fr;max-height:none;position:static}.sidebar-heading{grid-column:1/-1}.sidebar-navigation{display:contents}.sidebar-section+.sidebar-section{border-left:1px solid var(--line);border-top:0}.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.language-entry,.no-js-fallback{margin:14px}.report-layout{padding:0 14px}.report-sidebar{display:block}.sidebar-navigation{display:block}.report-js .sidebar-toggle{display:inline-flex}.report-js .report-sidebar:not(.is-open) .sidebar-navigation{display:none}.sidebar-section+.sidebar-section{border-left:0;border-top:1px solid var(--line)}.grid,.columns{grid-template-columns:1fr}.process-tree-path{white-space:normal}.focus-heading{display:block}.focus-verdict{display:inline-block;margin-top:12px}.event-explorer-toolbar label:first-child input{min-width:100%}}
 
+""");
+        html.AppendLine("</style>");
+        html.AppendLine("<style>");
+        // A final, deliberately small UX layer keeps the report readable when
+        // evidence payloads are large.  The report remains self-contained and
+        // the rules below only restyle the existing semantic elements.
+        html.AppendLine("""
+/* Analyst-first visual pass: broad content, color blocks, and readable evidence. */
+.modern-sandbox-report{background:#eef3f8;color:#172033;font-size:14px;line-height:1.5}
+.modern-sandbox-report header{background:linear-gradient(135deg,#102a43 0%,#185b83 58%,#147d92 100%);border:0;padding:38px clamp(24px,5vw,72px)}
+.modern-sandbox-report header h1{font-size:clamp(28px,3.2vw,42px);letter-spacing:-.035em}
+.modern-sandbox-report header table{background:rgba(7,24,39,.34);border:0;box-shadow:none}
+.modern-sandbox-report .report-layout{gap:20px;grid-template-columns:minmax(210px,248px) minmax(0,1fr);max-width:1760px;padding:0 20px}
+.modern-sandbox-report .report-sidebar{background:#f8fbff;border:0;border-left:0;box-shadow:none}
+.modern-sandbox-report .card,.modern-sandbox-report section.card{background:#fff;border:0;box-shadow:none;border-radius:0;padding:26px}
+.modern-sandbox-report .card:before{display:none}
+.modern-sandbox-report section.card>h2{background:linear-gradient(90deg,#f0f8ff,#fff);border:0;border-radius:0;margin:-10px -10px 18px;padding:14px 16px;position:sticky;top:-22px}
+.modern-sandbox-report section.card>h2:before{background:#2f8fbd;border-radius:0;height:10px;width:10px}
+.modern-sandbox-report section.card>h2:after{background:#2f8fbd;border-radius:0;content:'Section ' counter(report-section);font-size:10px;padding:4px 10px}
+.modern-sandbox-report .metric,.modern-sandbox-report .focus-metric,.modern-sandbox-report .evidence-summary-card,.modern-sandbox-report .evidence-story-lane,.modern-sandbox-report .relation-card,.modern-sandbox-report .overview-item{background:#f4f8fc;border:0;border-radius:0;box-shadow:none}
+.modern-sandbox-report .section-note{background:#edf7ff;border:0;border-radius:0}
+.modern-sandbox-report .event-explorer-toolbar{align-items:end;background:#e7f2fb;border:0;border-radius:0;margin-top:16px;padding:14px}
+.modern-sandbox-report .event-explorer-toolbar input,.modern-sandbox-report .event-explorer-toolbar select{border:0;border-radius:0;box-shadow:inset 0 0 0 1px #c9e0ef;min-height:36px;padding:7px 10px}
+.modern-sandbox-report .event-explorer-toolbar input:focus,.modern-sandbox-report .event-explorer-toolbar select:focus{box-shadow:0 0 0 3px rgba(47,143,189,.2);outline:0}
+.modern-sandbox-report .event-explorer-wrap{background:#eef4f8;border:0;border-radius:0;max-height:70vh;padding:10px}
+.modern-sandbox-report .event-explorer-table{border-collapse:separate;border-spacing:0 6px;min-width:1080px}
+.modern-sandbox-report .event-explorer-table th{background:#dbeef8;border:0;color:#24516b;padding:12px 11px;text-transform:none}
+.modern-sandbox-report .event-explorer-table td{background:#fff;border:0;padding:13px 11px;vertical-align:top}
+.modern-sandbox-report .event-explorer-table tbody tr[data-severity="critical"] td,.modern-sandbox-report .event-explorer-table tbody tr[data-severity="high"] td{background:#fff2f0}
+.modern-sandbox-report .event-explorer-table tbody tr[data-severity="medium"] td{background:#fff9e8}
+.modern-sandbox-report .event-explorer-table tbody tr[data-severity="low"] td{background:#effbf4}
+.modern-sandbox-report .event-explorer-table tbody tr td:first-child{border-radius:0}
+.modern-sandbox-report .event-explorer-table tbody tr td:last-child{border-radius:0}
+.modern-sandbox-report .event-explorer-details{display:block;min-width:420px}
+.modern-sandbox-report .event-explorer-details summary{background:#eaf5fb;border:0;border-radius:0;color:#1f5e7b;min-height:42px;padding:10px 12px}
+.modern-sandbox-report .event-explorer-detail{background:#f7fbfe;border:0;border-radius:0;margin-top:8px;max-height:52vh;min-height:180px;overflow:auto;padding:16px}
+.modern-sandbox-report .event-explorer-detail pre,.modern-sandbox-report .event-explorer-detail code{font-size:13px;line-height:1.6}
+.modern-sandbox-report .event-explorer-detail .event-evidence-fields{max-height:none}
+.modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:460px;width:42%}
+.modern-sandbox-report .copy-hint,.modern-sandbox-report #event-explorer>.section-note{display:none}
+.modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn{background:#e6f4fb;border:0;border-radius:0;color:#1e6385;padding:7px 11px}
+.modern-sandbox-report .badge,.modern-sandbox-report .chip{border:0;border-radius:0}
+.modern-sandbox-report .section-note{display:none}
+.modern-sandbox-report .section-note.failure-note{background:#fff5e5;border-left:0;display:block;margin:10px 0;padding:10px 12px}
+.modern-sandbox-report .raw-events-shell,.modern-sandbox-report .raw-event-page,.modern-sandbox-report .event-table-wrap{border:0}
+.modern-sandbox-report .raw-events-shell>summary,.modern-sandbox-report .raw-event-page>summary{background:#eaf4fa;border-radius:0}
+.modern-sandbox-report .language-entry{background:#e8f3f9;box-shadow:none}
+.modern-sandbox-report .language-entry .hint{display:none}
+@media(max-width:1000px){.modern-sandbox-report .report-layout{grid-template-columns:1fr}.modern-sandbox-report .report-sidebar{position:static}.modern-sandbox-report .event-explorer-details{min-width:320px}}
+@media(max-width:640px){.modern-sandbox-report .card,.modern-sandbox-report section.card{border-radius:0;padding:18px}.modern-sandbox-report .event-explorer-table{min-width:0;width:100%}.modern-sandbox-report .event-explorer-table th:nth-child(-n+6),.modern-sandbox-report .event-explorer-table td:nth-child(-n+6){display:none}.modern-sandbox-report .event-explorer-table th:nth-child(7),.modern-sandbox-report .event-explorer-table td:nth-child(7){display:table-cell;min-width:100%;width:100%}.modern-sandbox-report .event-explorer-details{min-width:0;width:100%}}
 """);
         html.AppendLine("</style></head>");
     }
@@ -619,7 +684,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         FocusMetric(html, "Failures", failures.ToString(CultureInfo.InvariantCulture), failures > 0 || report.Status == AnalysisStatus.Failed ? "risk-high" : "risk-low", "Open Failure reasons for the remediation hint.");
         FocusMetric(html, "Collection health", healthRows.ToString(CultureInfo.InvariantCulture), report.Events.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-low", "Health and readiness rows explain evidence quality.");
         FocusMetric(html, "Artifacts", artifactCount.ToString(CultureInfo.InvariantCulture), artifactCount > 0 ? "risk-low" : "risk-info", "Indexed files, screenshots, dumps, and packet captures.");
-        FocusMetric(html, "Lifecycle hidden", lifecycleEvents.ToString(CultureInfo.InvariantCulture), lifecycleEvents > 0 ? "risk-info" : "risk-low", "agent.start/stop rows hidden from the main story; raw evidence remains below.");
         html.AppendLine("</div>");
         html.AppendLine("<div class=\"focus-next\">");
         html.AppendLine($"<div class=\"focus-next-copy copyable\" data-copy=\"{A(focusCopy)}\"><strong>Next review</strong><br><span>{E(topFinding?.Title ?? "Review static analysis and collection health")}</span><small>{E(topFinding?.Summary ?? "No primary behavior rule matched; verify collection quality before concluding that the sample was quiet.")}</small></div>");
@@ -653,6 +717,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             .Select(evt => new EventExplorerRow(
                 evt,
                 EventExplorerStage(evt),
+                EventFamilyLabel(evt),
                 EventExplorerSeverity(report, evt),
                 IsSampleBehaviorEvent(evt)))
             .ToList();
@@ -661,6 +726,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var types = rows.Select(row => row.Event.EventType).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var sources = rows.Select(row => string.IsNullOrWhiteSpace(row.Event.Source) ? "unknown" : row.Event.Source).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var stages = rows.Select(row => row.Stage).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
+        var families = rows.Select(row => row.Family).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var severities = rows.Select(row => row.Severity).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(SeverityRank).ToList();
 
         html.AppendLine("<section id=\"event-explorer\" class=\"card\"><h2>Key event explorer</h2>");
@@ -669,6 +735,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("<label>Search <input type=\"search\" data-event-search placeholder=\"type, path, process, target\"></label>");
         AppendEventExplorerSelect(html, "Event type", "data-event-type", types);
         AppendEventExplorerSelect(html, "Source", "data-event-source", sources);
+        AppendEventExplorerSelect(html, "Behavior family", "data-event-family", families);
         AppendEventExplorerSelect(html, "Stage", "data-event-stage", stages);
         AppendEventExplorerSelect(html, "Severity", "data-event-severity", severities);
         html.AppendLine("<label>Sample behavior <select data-event-sample><option value=\"all\">All</option><option value=\"true\">Yes</option><option value=\"false\">No</option></select></label>");
@@ -687,9 +754,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 var evt = row.Event;
                 var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
                 var target = ExtractReadableEventTarget(evt);
-                var search = string.Join(" ", evt.EventType, evt.Source, evt.ProcessName, evt.Path, target, row.Stage, row.Severity);
+                var search = string.Join(" ", evt.EventType, evt.Source, evt.ProcessName, evt.Path, target, row.Family, row.Stage, row.Severity);
                 var plain = EventToBoundedPlainText(evt, maxDataPairs: 24, maxValueLength: 220);
-                html.AppendLine($"<tr class=\"event-explorer-row\" data-event-row data-type=\"{A(evt.EventType)}\" data-source=\"{A(evt.Source)}\" data-stage=\"{A(row.Stage)}\" data-severity=\"{A(row.Severity)}\" data-sample=\"{(row.SampleBehavior ? "true" : "false")}\" data-search=\"{A(search)}\">");
+                html.AppendLine($"<tr class=\"event-explorer-row\" data-event-row data-type=\"{A(evt.EventType)}\" data-source=\"{A(evt.Source)}\" data-family=\"{A(row.Family)}\" data-stage=\"{A(row.Stage)}\" data-severity=\"{A(row.Severity)}\" data-sample=\"{(row.SampleBehavior ? "true" : "false")}\" data-search=\"{A(search)}\">");
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
                 html.AppendLine($"<td><code>{E(evt.EventType)}</code></td><td>{E(string.IsNullOrWhiteSpace(evt.Source) ? "unknown" : evt.Source)}</td><td><span class=\"chip chip-info\">{E(row.Stage)}</span></td><td><span class=\"chip chip-{E(NormalizeSeverity(row.Severity))}\">{E(row.Severity)}</span></td><td>{(row.SampleBehavior ? "<span class=\"chip chip-medium\">Yes</span>" : "<span class=\"chip chip-info\">No</span>")}</td>");
                 html.AppendLine($"<td><details class=\"event-explorer-details\"><summary>{E(evt.ProcessName ?? target ?? "Open evidence")}</summary><div class=\"event-explorer-detail\"><div class=\"muted\">{E(target ?? "-")}</div>{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyButton("Copy event", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span></div></details></td>");
@@ -698,6 +765,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
             html.AppendLine("</tbody></table></div>");
         }
+
+        html.AppendLine("<div class=\"empty event-filter-empty\" data-event-empty hidden>No matching evidence rows. Clear a filter or open Raw normalized events.</div>");
 
         html.AppendLine("</section>");
     }
@@ -4155,7 +4224,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         }
         else if (failures.Count == 0)
         {
-            Empty(html, "Analysis status is Failed, but no timeout/error/failure event was recorded in normalized telemetry.");
+            html.AppendLine("<div class=\"section-note failure-note\"><strong>Failure attribution:</strong> Analysis environment / 分析环境. The job is marked Failed, but no normalized failure event was imported.</div>");
         }
         else
         {
@@ -4164,7 +4233,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 var message = FirstEventDataValue(failure, "failureHint", "message", "error", "failureReason", "reason");
                 if (!string.IsNullOrWhiteSpace(message))
                 {
-                    html.AppendLine($"<div class=\"section-note\"><strong>Runbook failure detail.</strong> {E(message)}</div>");
+                    html.AppendLine($"<div class=\"section-note failure-note\"><strong>Failure attribution:</strong> {E(FailureAttribution(failure))}<br>{E(message)}</div>");
                 }
             }
 
@@ -4172,6 +4241,37 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         }
 
         html.AppendLine("</section>");
+    }
+
+    private static string FailureAttribution(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        if (type.Contains("import", StringComparison.OrdinalIgnoreCase) || type.Contains("guest.events", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Evidence import";
+        }
+
+        if (type.Contains("r0", StringComparison.OrdinalIgnoreCase) || type.Contains("collector", StringComparison.OrdinalIgnoreCase) || type.Contains("driver", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Collection quality";
+        }
+
+        if (type.Contains("timeout", StringComparison.OrdinalIgnoreCase) || type.Contains("timed_out", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Timeout";
+        }
+
+        if (type.Contains("process.start_failed", StringComparison.OrdinalIgnoreCase) || type.Contains("sample", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Sample start";
+        }
+
+        if (type.Contains("vm", StringComparison.OrdinalIgnoreCase) || type.Contains("winrm", StringComparison.OrdinalIgnoreCase) || type.Contains("runbook", StringComparison.OrdinalIgnoreCase) || type.Contains("hyperv", StringComparison.OrdinalIgnoreCase) || type.Contains("qemu", StringComparison.OrdinalIgnoreCase) || type.Contains("vmware", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Analysis environment";
+        }
+
+        return "Analysis";
     }
 
     /// <summary>
@@ -8617,6 +8717,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// </summary>
     private static string LocalizeChineseHtml(string html, AnalysisReport report)
     {
+        // Keep document language metadata correct while the tag-preserving
+        // protection below prevents localization from touching CSS classes,
+        // data attributes, and JavaScript selectors.
+        html = html.Replace("<html lang=\"en\">", "<html lang=\"zh-CN\">", StringComparison.Ordinal);
         var protectedFragments = new List<string>();
         html = ProtectChineseRawEvidenceFragments(html, protectedFragments);
 
@@ -8679,6 +8783,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     private static readonly IReadOnlyList<(string English, string Chinese)> ChineseCssTranslations =
     [
         ("content:'Step ' counter(report-section)", "content:'步骤 ' counter(report-section)"),
+        ("content:'Section ' counter(report-section)", "content:'章节 ' counter(report-section)"),
         (" (folded in screen view; expand in browser for full evidence)", "（屏幕视图中折叠；在浏览器中展开查看完整证据）")
     ];
 
@@ -8723,6 +8828,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         (" (folded in screen view; expand in browser for full evidence)", "（屏幕视图中折叠；在浏览器中展开查看完整证据）"),
         ("Quick navigation", "快速导航"),
         ("Report navigation", "报告导航"),
+        ("Sections", "章节"),
         (">Sections<", ">章节<"),
         ("Sticky subnav", "固定子导航"),
         ("Sticky subnav for Process / Files / Network / R0 / VT / Artifacts quick navigation; counts show currently embedded representative evidence. R0 health, collector self-noise, and VT status rows are counted in their own lanes rather than primary behavior.", "固定子导航用于快速跳转进程 / 文件 / 网络 / R0 / VT / 证据文件；计数表示当前内联的代表性证据。R0 健康、采集器自噪声和 VT 状态行会计入各自通道，而不是主要行为。"),
@@ -8776,6 +8882,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Review the signal first.", "先查看信号。"),
         ("Search or filter by event type, source, stage, severity, and sample-behavior status. Agent lifecycle rows are omitted from this table; expand Raw normalized events for complete audit evidence.", "可按事件类型、来源、阶段、严重性和是否样本行为搜索或筛选。Agent 生命周期行不会出现在此表；展开原始规范化事件可查看完整审计证据。"),
         ("Event type", "事件类型"),
+        ("Behavior family", "行为族"),
+        ("Failure attribution", "失败归因"),
+        ("Evidence import", "证据导入"),
+        ("Collection quality", "采集质量"),
+        ("Analysis environment", "分析环境"),
+        ("Sample start", "样本启动"),
+        ("Timeout", "超时"),
+        ("Analysis", "分析流程"),
         ("Source", "来源"),
         ("Stage", "阶段"),
         ("Severity", "严重性"),
@@ -9524,7 +9638,24 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("low entropy", "熵值低"),
         ("virtual only", "仅虚拟节区"),
         ("large virtual/raw gap", "虚拟/原始大小差距大"),
-        ("UPX-like", "疑似 UPX")
+        ("UPX-like", "疑似 UPX"),
+        // Short UI labels that are easy to miss in the long translation table.
+        ("Section ", "章节 "),
+        ("Report language", "报告语言"),
+        ("English report", "英文报告"),
+        ("Default report", "默认报告"),
+        ("Search", "搜索"),
+        ("type, path, process, target", "类型、路径、进程、目标"),
+        ("unknown", "未知"),
+        ("Open evidence", "打开证据"),
+        ("Copy event", "复制事件"),
+        ("All", "全部"),
+        ("Yes", "是"),
+        ("No", "否"),
+        ("Reset filters", "重置筛选"),
+        ("Section", "章节"),
+        ("Signal filter", "信号筛选"),
+        ("Start here", "从这里开始")
     ];
 
     private static readonly IReadOnlyList<(string English, string Chinese)> ChineseRuleHtmlTranslations =
@@ -11651,10 +11782,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     var explorerRows = Array.prototype.slice.call(explorer.querySelectorAll('[data-event-row]'));
     var explorerSearch = explorer.querySelector('[data-event-search]');
     var explorerStatus = explorer.querySelector('[data-event-count]');
+    var explorerEmpty = explorer.querySelector('[data-event-empty]');
     var explorerChinese = document.documentElement.lang === 'zh-CN';
     var explorerFilters = {
       type: explorer.querySelector('[data-event-type]'),
       source: explorer.querySelector('[data-event-source]'),
+      family: explorer.querySelector('[data-event-family]'),
       stage: explorer.querySelector('[data-event-stage]'),
       severity: explorer.querySelector('[data-event-severity]'),
       sample: explorer.querySelector('[data-event-sample]')
@@ -11667,6 +11800,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var matches = (!query || (row.getAttribute('data-search') || '').toLowerCase().indexOf(query) >= 0) &&
           (explorerValue(explorerFilters.type) === 'all' || explorerValue(explorerFilters.type) === (row.getAttribute('data-type') || '').toLowerCase()) &&
           (explorerValue(explorerFilters.source) === 'all' || explorerValue(explorerFilters.source) === (row.getAttribute('data-source') || '').toLowerCase()) &&
+          (explorerValue(explorerFilters.family) === 'all' || explorerValue(explorerFilters.family) === (row.getAttribute('data-family') || '').toLowerCase()) &&
           (explorerValue(explorerFilters.stage) === 'all' || explorerValue(explorerFilters.stage) === (row.getAttribute('data-stage') || '').toLowerCase()) &&
           (explorerValue(explorerFilters.severity) === 'all' || explorerValue(explorerFilters.severity) === (row.getAttribute('data-severity') || '').toLowerCase()) &&
           (explorerValue(explorerFilters.sample) === 'all' || explorerValue(explorerFilters.sample) === (row.getAttribute('data-sample') || '').toLowerCase());
@@ -11677,6 +11811,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         explorerStatus.textContent = explorerChinese
           ? visible + ' 个匹配行；筛选器作用于可见证据表。'
           : visible + ' matching rows; filters apply to the visible evidence table.';
+      }
+      if (explorerEmpty) {
+        explorerEmpty.hidden = visible !== 0;
+        explorerEmpty.textContent = explorerChinese
+          ? '没有匹配的证据行；请清除筛选器，或打开原始标准化事件。'
+          : 'No matching evidence rows. Clear a filter or open Raw normalized events.';
       }
     }
     Object.keys(explorerFilters).forEach(function (key) {

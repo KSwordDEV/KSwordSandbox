@@ -50,7 +50,8 @@ internal sealed class BehaviorRuleSchemaCollectionHealthGuardScenario : ISmokeTe
         "excludeDataEquals",
         "excludeDataContains",
         "evidenceFields",
-        "tags"
+        "tags",
+        "includeNonBehaviorEvidence"
     };
 
     private static readonly HashSet<string> AllowedSeverities = new(StringComparer.OrdinalIgnoreCase)
@@ -186,6 +187,12 @@ internal sealed class BehaviorRuleSchemaCollectionHealthGuardScenario : ISmokeTe
             if (RuleNumericRangeMapProperties.Contains(property.Name))
             {
                 AssertNumericRangeMap(property.Value, $"rule.{property.Name}");
+            }
+
+            if (string.Equals(property.Name, "includeNonBehaviorEvidence", StringComparison.Ordinal))
+            {
+                SmokeAssert.True(property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+                    $"rule.{property.Name} should be a JSON boolean.");
             }
         }
 

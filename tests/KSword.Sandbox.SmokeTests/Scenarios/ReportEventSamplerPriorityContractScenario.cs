@@ -221,6 +221,28 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         });
         events.Add(new SandboxEvent
         {
+            EventType = "agent.start",
+            Timestamp = timestamp.AddSeconds(5.15),
+            Source = "guest",
+            Data =
+            {
+                ["message"] = "agent session started",
+                ["hostGenerated"] = "true"
+            }
+        });
+        events.Add(new SandboxEvent
+        {
+            EventType = "agent.stop",
+            Timestamp = timestamp.AddSeconds(5.16),
+            Source = "guest",
+            Data =
+            {
+                ["message"] = "agent session stopped",
+                ["hostGenerated"] = "true"
+            }
+        });
+        events.Add(new SandboxEvent
+        {
             EventType = "process.start_failed",
             Timestamp = timestamp.AddSeconds(5.2),
             Source = "guest",
@@ -264,6 +286,15 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
 
         SmokeAssert.True(result.WasSampled, "Noisy input should be sampled.");
         SmokeAssert.True(result.Events.Any(evt => string.Equals(evt.EventType, "report.events.sampled", StringComparison.OrdinalIgnoreCase)), "Sampling marker should be present.");
+        SmokeAssert.True(result.ExcludedEventCount == 2, $"Agent lifecycle rows should be excluded from the inline report policy; got {result.ExcludedEventCount}.");
+        SmokeAssert.True(!result.Events.Any(evt => evt.EventType is "agent.start" or "agent.stop"), "Agent lifecycle rows must not appear as user-facing report events.");
+        var lifecycleOnly = ReportEventSampler.SampleForReport(
+        [
+            new SandboxEvent { EventType = "agent.start", Timestamp = timestamp },
+            new SandboxEvent { EventType = "agent.stop", Timestamp = timestamp.AddSeconds(1) }
+        ]);
+        SmokeAssert.True(!lifecycleOnly.WasSampled && lifecycleOnly.Events.Count == 0 && lifecycleOnly.ExcludedEventCount == 2,
+            "Lifecycle-only input should not create a misleading sampling marker.");
 
         var staticEvent = RequireEvent(result.Events, "static.pe.import.module");
         RequireData(staticEvent, "moduleName", "wininet.dll");

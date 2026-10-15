@@ -507,6 +507,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, ">章节<", "Chinese HTML should localize the mobile sections toggle.");
         RequireContains(chineseHtml, "overflow:auto", "Chinese localization must preserve valid overflow CSS declarations.");
         RequireContains(chineseHtml, "overflow:hidden", "Chinese localization must preserve valid overflow clipping declarations.");
+        RequireContains(chineseHtml, "querySelectorAll", "Chinese localization must preserve JavaScript selectors in the report shell.");
+        RequireNotContains(chineseHtml, "querySelector全部", "Chinese localization must not rewrite JavaScript identifiers.");
         RequireNotContains(chineseHtml, "overf低：", "Chinese localization must not translate the low: token inside overflow CSS properties.");
         RequireContains(chineseHtml, "打开", "Chinese HTML should localize artifact open buttons.");
         RequireContains(chineseHtml, "下载", "Chinese HTML should localize artifact download buttons.");

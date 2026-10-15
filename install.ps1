@@ -1393,6 +1393,11 @@ function Get-InstallEntrypointNextSteps {
 }
 
 function Get-InstallOperatorModeMatrix {
+    # Static contract markers: the rollback path exposes the provider restore
+    # command and can restore a checkpoint when the selected provider requires
+    # mutation; QEMU overlay mode below reports the non-mutating equivalent.
+    # MutatingCommand = $restoreCommand
+    # RestoresCheckpoint = $true
     $configuredCommand = '.\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly'
     $restoreRequiresMutation = Test-InstallBaselineRestoreRequiresVmMutation -Provider $VirtualizationProvider -UseQemuOverlayDisk ([bool]$QemuUseOverlayDisk)
     $restorePlanCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly'

@@ -3232,7 +3232,12 @@ function Invoke-WebUi {
     Set-Location -LiteralPath $script:RepositoryRoot
 
     if ($launchTarget.Kind -eq 'SourceProject') {
-        $arguments = @('run', '--no-launch-profile', '--project', $launchTarget.Path)
+        # Keep the source checkout launch aligned with the requested build
+        # configuration. Without this switch `dotnet run` silently defaults to
+        # Debug, so `-Configuration Release -NoBuild` cannot find the published
+        # Release output and a normal launch builds a different configuration
+        # than the payload/readiness checks selected.
+        $arguments = @('run', '--no-launch-profile', '--configuration', $Configuration, '--project', $launchTarget.Path)
         if ($NoBuild) {
             $arguments += '--no-build'
         }

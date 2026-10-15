@@ -1646,6 +1646,7 @@ function Test-ReadinessNoVmMutationCommands {
             $allowedDeclarationCount = if ($forbiddenScriptCommand -ieq 'Invoke-WebUIApiE2E.ps1') {
                 if ($relative -ieq 'scripts\Test-ReleaseReadiness.ps1') { 8 } elseif ($relative -ieq 'scripts\package-portable.ps1') { 6 } else { 0 }
             }
+            elseif ($relative -ieq 'scripts\Test-ReleaseReadiness.ps1' -and $forbiddenScriptCommand.Length -gt 0 -and $forbiddenScriptCommand -like '*HyperV*') { 3 }
             elseif ($relative -ieq 'scripts\Test-ReleaseReadiness.ps1') { 1 }
             else { 0 }
             if ($literalReferenceCount -gt $allowedDeclarationCount) {

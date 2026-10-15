@@ -40,7 +40,19 @@ public sealed record ReportEventSamplingResult
 
     public int SelectedRawEventCount { get; init; }
 
-    public int OmittedEventCount => Math.Max(0, RawEventCount - SelectedRawEventCount);
+    /// <summary>
+    /// Number of rows intentionally kept out of the inline report because they
+    /// are host/agent lifecycle noise. These rows remain available in the raw
+    /// guest/driver event files and do not make the report claim that volume
+    /// sampling occurred.
+    /// </summary>
+    public int ExcludedEventCount { get; init; }
+
+    /// <summary>
+    /// Number of behavior or diagnostic rows omitted by the bounded inline
+    /// quota. Policy-excluded lifecycle rows are not counted as sampled rows.
+    /// </summary>
+    public int OmittedEventCount => Math.Max(0, RawEventCount - SelectedRawEventCount - ExcludedEventCount);
 
     public bool WasSampled => OmittedEventCount > 0;
 }
@@ -812,7 +824,8 @@ public static class ReportEventSampler
         var resolvedOptions = options ?? DefaultOptions;
         var orderedEvents = rawEvents.OrderBy(evt => evt.Timestamp).ToList();
         var findingEvidenceKeys = BuildFindingEvidenceKeys(findings);
-        var selected = SelectEvents(orderedEvents, resolvedOptions, findingEvidenceKeys)
+        var selection = SelectEvents(orderedEvents, resolvedOptions, findingEvidenceKeys);
+        var selected = selection.Events
             .Select(evt => SanitizeEvent(evt, resolvedOptions))
             .ToList();
 
@@ -820,7 +833,8 @@ public static class ReportEventSampler
         {
             Events = selected,
             RawEventCount = orderedEvents.Count,
-            SelectedRawEventCount = selected.Count
+            SelectedRawEventCount = selected.Count,
+            ExcludedEventCount = selection.ExcludedEventCount
         };
 
         if (result.WasSampled)
@@ -866,7 +880,11 @@ public static class ReportEventSampler
         };
     }
 
-    private static IEnumerable<SandboxEvent> SelectEvents(
+    private sealed record ReportSamplingSelection(
+        IReadOnlyList<SandboxEvent> Events,
+        int ExcludedEventCount);
+
+    private static ReportSamplingSelection SelectEvents(
         IReadOnlyList<SandboxEvent> orderedEvents,
         ReportEventSamplingOptions options,
         IReadOnlySet<string> findingEvidenceKeys)
@@ -876,16 +894,19 @@ public static class ReportEventSampler
             .Where(static candidate => candidate.Bucket != ReportSamplingBucket.Excluded)
             .ToList();
 
+        var excludedEventCount = orderedEvents.Count - inlineCandidates.Count;
         if (inlineCandidates.Count == 0)
         {
-            return [];
+            return new ReportSamplingSelection([], excludedEventCount);
         }
 
         var diagnosticQuota = Math.Max(0, Math.Min(options.MaxDiagnosticEvents, options.MaxInlineEvents));
         var diagnosticCount = inlineCandidates.Count(static candidate => candidate.Bucket == ReportSamplingBucket.Diagnostics);
         if (inlineCandidates.Count <= options.MaxInlineEvents && diagnosticCount <= diagnosticQuota)
         {
-            return inlineCandidates.Select(static candidate => candidate.Event);
+            return new ReportSamplingSelection(
+                inlineCandidates.Select(static candidate => candidate.Event).ToList(),
+                excludedEventCount);
         }
 
         var selectedIndexes = new HashSet<int>();
@@ -924,11 +945,13 @@ public static class ReportEventSampler
         // were one noisy type, keep the report intentionally smaller. Raw JSONL
         // remains the authority; avoiding a fill pass prevents driver.file or
         // registry noise from overwhelming user-facing reports.
-        return inlineCandidates
-            .Where(candidate => selectedIndexes.Contains(candidate.Index))
-            .OrderBy(static candidate => candidate.Index)
-            .Select(static candidate => candidate.Event)
-            .ToList();
+        return new ReportSamplingSelection(
+            inlineCandidates
+                .Where(candidate => selectedIndexes.Contains(candidate.Index))
+                .OrderBy(static candidate => candidate.Index)
+                .Select(static candidate => candidate.Event)
+                .ToList(),
+            excludedEventCount);
     }
 
     private static HashSet<string> BuildFindingEvidenceKeys(IEnumerable<BehaviorFinding>? findings)
@@ -967,6 +990,14 @@ public static class ReportEventSampler
             return ReportSamplingBucket.GeneralBehaviorEvidence;
         }
 
+        // Agent lifecycle is collection plumbing, not a sample event. Keep it
+        // out of the inline report entirely; the original guest/driver files
+        // remain the audit source for startup/stop timing.
+        if (IsAgentLifecycleEvent(evt))
+        {
+            return ReportSamplingBucket.Excluded;
+        }
+
         if (evt.EventType.StartsWith("guest.events.", StringComparison.OrdinalIgnoreCase))
         {
             return ReportSamplingBucket.GeneralBehaviorEvidence;
@@ -977,6 +1008,13 @@ public static class ReportEventSampler
         // it ahead of the diagnostic quota so a report cannot hide the one row
         // explaining why process.start/process.exit are absent.
         if (IsSampleExecutionFailureEvent(evt))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
+        // Preserve any terminal analysis/import/runbook failure ahead of the
+        // diagnostic quota so the report always explains a Failed status.
+        if (IsAnalysisFailureEvent(evt))
         {
             return ReportSamplingBucket.FindingEvidence;
         }
@@ -1058,6 +1096,21 @@ public static class ReportEventSampler
         return EventDataEqualsAny(evt, "sampleCorrelationStatus", "correlated", "confirmed", "probable", "candidate") ||
             EventDataBoolTrue(evt, "sampleBehaviorCandidate", "baselineSampleEvidence") ||
             (evt.Path?.Contains("\\incoming\\", StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static bool IsAnalysisFailureEvent(SandboxEvent evt)
+    {
+        var eventType = NormalizeEventType(evt.EventType);
+        if (eventType.Contains("failure_skeleton", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("analysis.failed", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".import_failed", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".runbook.execution_result_error", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return eventType.EndsWith(".runbook.executed", StringComparison.OrdinalIgnoreCase) &&
+            EventDataBoolFalse(evt, "success", "succeeded");
     }
 
     private static bool IsSampleExecutionLifecycleEvent(SandboxEvent evt)
@@ -1257,7 +1310,6 @@ public static class ReportEventSampler
         var eventType = NormalizeEventType(evt.EventType);
         if (TextEqualsAny(
                 eventType,
-                "agent.start",
                 "environment.snapshot",
                 "environment.detail",
                 "service.snapshot",
@@ -1287,6 +1339,21 @@ public static class ReportEventSampler
             !EventDataBoolTrue(evt, "behaviorCounted", "sampleBehaviorCandidate", "strongSampleCorrelation");
     }
 
+    private static bool IsAgentLifecycleEvent(SandboxEvent evt)
+    {
+        var eventType = NormalizeEventType(evt.EventType);
+        return TextEqualsAny(
+            eventType,
+            "agent.start",
+            "agent.stop",
+            "agent.ready",
+            "agent.exit",
+            "agent.heartbeat",
+            "agent.status",
+            "agent.initialized",
+            "agent.shutdown");
+    }
+
     private static SandboxEvent BuildSamplingMarker(
         ReportEventSamplingResult result,
         ReportEventSamplingOptions options,
@@ -1310,6 +1377,7 @@ public static class ReportEventSampler
             ["behaviorCountingPolicy"] = "report-sampling-markers-are-not-sample-behavior",
             ["rawEventCount"] = result.RawEventCount.ToString(),
             ["selectedRawEventCount"] = result.SelectedRawEventCount.ToString(),
+            ["excludedEventCount"] = result.ExcludedEventCount.ToString(),
             ["reportEventCount"] = (result.SelectedRawEventCount + 1).ToString(),
             ["omittedEventCount"] = result.OmittedEventCount.ToString(),
             ["maxInlineEvents"] = options.MaxInlineEvents.ToString(),

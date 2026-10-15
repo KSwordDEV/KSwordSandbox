@@ -11,7 +11,7 @@ pushd "%ROOT%" >nul 2>&1
 if errorlevel 1 goto :root_error
 set "ROOT_READY=1"
 
-echo [KSwordSandbox] 启动首次设置向导 / Starting the first-run setup WebUI...
+echo [KSwordSandbox] 正在启动 WebUI；首次使用时会自动进入设置页面。
 
 if not exist "%ROOT%run.ps1" (
     set "EXIT_CODE=2"
