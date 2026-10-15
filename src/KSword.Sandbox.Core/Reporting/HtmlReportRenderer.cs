@@ -56,6 +56,7 @@ public sealed class HtmlReportRenderer
     private const int RelationshipCardInlineLimit = 24;
     private const int RelationshipArtifactInlineLimit = 6;
     private const int EvidenceStoryInlineLimit = 12;
+    private const int EventExplorerInlineLimit = 240;
 
     private sealed record TimelineGroup(
         string Window,
@@ -126,6 +127,13 @@ public sealed class HtmlReportRenderer
         int EventCount,
         string Detail,
         string CopyText);
+
+    private sealed record EventExplorerRow(
+        SandboxEvent Event,
+        string Stage,
+        string Severity,
+        bool SampleBehavior,
+        bool Noise);
 
     private sealed record ArtifactEvidenceMatrixRow(
         string CollectionName,
@@ -304,6 +312,8 @@ public sealed class HtmlReportRenderer
         html.AppendLine("</div></aside>");
         html.AppendLine("<main class=\"report-content\">");
         AppendRiskSummary(html, report);
+        AppendReportFocus(html, report);
+        AppendEventExplorer(html, report, artifactLookup, artifactLinks);
         AppendBehaviorDetections(html, report);
         AppendAggregatedBehaviorFacts(html, report, artifactLinks);
         AppendMitreDetections(html, report);
@@ -361,6 +371,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .empty{background:#fff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);padding:14px}
 .copy-btn{background:#fff;border:1px solid rgba(67,160,255,.55);border-radius:2px;color:#075985;cursor:pointer;font-size:12px;font-weight:700;margin:2px 6px 2px 0;padding:4px 8px}.copyable{cursor:copy}.copy-hint{color:var(--muted);font-size:12px;margin-top:8px}.no-js-fallback{border-color:#b9ddff}.no-js-fallback:before{background:#38bdf8}.fold-label{background:#f8fbff;border:1px solid #cfe6fb;color:#075985;display:inline-block;font-size:12px;font-weight:800;margin:2px 6px 2px 0;padding:3px 7px}
 .toolbar,.inline-actions{align-items:center;display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;margin:0 0 4px}.event-table-wrap{border:1px solid var(--line);border-radius:2px;margin-top:14px;max-height:var(--subsection-max);overflow:auto}.event-table-wrap table{margin-top:0}.event-table-wrap th,.raw-events-panel th,.raw-event-page th{position:sticky;top:0;z-index:1}.bounded-list{max-height:var(--subsection-max);overflow:auto}
+.focus-panel{background:linear-gradient(180deg,#fff,#f8fbff)}.focus-heading{align-items:flex-start;display:flex;gap:16px;justify-content:space-between}.focus-heading h2{margin-bottom:6px}.eyebrow{color:#075985;font-size:11px;font-weight:900;letter-spacing:.12em;margin:0 0 4px;text-transform:uppercase}.section-lead{color:var(--muted);font-size:14px;line-height:1.5;margin:0;max-width:72ch}.focus-verdict{font-size:13px;white-space:nowrap}.focus-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-top:16px}.focus-metric{background:#fff;border:1px solid var(--line);border-left:3px solid var(--primary);display:grid;gap:5px;padding:12px}.focus-metric>span{color:#475569;font-size:12px;font-weight:800}.focus-metric>strong{font-size:25px;line-height:1}.focus-metric>small{color:var(--muted);font-size:12px;line-height:1.35}.focus-next{align-items:stretch;display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.focus-next-copy{background:#eef7ff;border:1px solid #cfe6fb;border-left:4px solid var(--primary);display:grid;flex:1 1 360px;gap:3px;padding:10px 12px}.focus-next-copy strong{color:#075985;font-size:12px}.focus-next-copy span{font-weight:900}.focus-next-copy small{color:var(--muted);font-size:12px;line-height:1.4}.focus-action{align-items:center;background:var(--primary);border:1px solid var(--primary);border-radius:2px;color:#fff;display:inline-flex;font-size:12px;font-weight:900;justify-content:center;padding:7px 10px;text-decoration:none;white-space:nowrap}.focus-action.secondary{background:#fff;border-color:#bfdbfe;color:#075985}.focus-action:hover{outline:2px solid rgba(67,160,255,.18)}.event-explorer-toolbar{align-items:end;background:#f8fbff;border:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding:10px}.event-explorer-toolbar label{color:#475569;display:grid;font-size:11px;font-weight:800;gap:4px}.event-explorer-toolbar input,.event-explorer-toolbar select{background:#fff;border:1px solid #bfdbfe;border-radius:2px;color:var(--ink);font:inherit;font-size:12px;min-height:32px;min-width:132px;padding:5px 7px}.event-explorer-toolbar input:focus,.event-explorer-toolbar select:focus{border-color:var(--primary);outline:2px solid rgba(67,160,255,.18)}.event-explorer-toolbar label:first-child{flex:1 1 220px}.event-explorer-toolbar label:first-child input{min-width:220px}.event-explorer-status{color:var(--muted);font-size:12px;margin-top:8px}.event-explorer-wrap{max-height:60vh}.event-explorer-table{min-width:940px}.event-explorer-table th{position:sticky;top:0}.event-explorer-table td{font-size:12px}.event-explorer-table td:nth-child(1){white-space:nowrap}.event-explorer-table td:nth-child(2){min-width:180px}.event-explorer-table td:nth-child(7){min-width:240px}.event-explorer-row[data-hidden=true]{display:none}.event-explorer-details summary{cursor:pointer;font-weight:800}.event-explorer-detail{background:#f8fbff;border-left:2px solid #cfe6fb;margin-top:6px;padding:7px 8px}.event-explorer-detail .event-evidence-fields{max-height:22vh;overflow:auto}.event-explorer-empty{color:var(--muted);display:none;font-size:13px;padding:12px}.event-explorer-table tbody:empty+.event-explorer-empty{display:block}
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline-groups{display:grid;gap:10px;margin-top:14px}.timeline-group{background:#fff;border:1px solid var(--line);border-radius:2px;overflow:hidden}.timeline-group>summary{align-items:flex-start;cursor:pointer;display:flex;gap:10px;justify-content:space-between;list-style:none;padding:12px 14px}.timeline-group>summary::-webkit-details-marker{display:none}.timeline-group>summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.timeline-group[open]>summary:before{content:'▼'}.timeline-group small{color:var(--muted);display:block;line-height:1.4;margin-top:3px}.timeline{border-left:3px solid rgba(67,160,255,.45);margin:0 14px 14px 20px;padding:12px 0 0 18px}.timeline-item{background:#fff;border:1px solid var(--line);border-radius:2px;margin:0 0 10px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:2px solid var(--primary-soft);border-radius:2px;content:'';height:10px;left:-25px;position:absolute;top:13px;width:10px}.timeline-overflow{background:#f1f7ff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);margin:0 0 12px;padding:9px 11px}
 .graph-map{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.behavior-chain{background:#fff;border:1px solid var(--line);border-radius:2px;counter-reset:chain;margin:12px 0;max-height:var(--subsection-max);overflow:auto;padding:8px 10px}.behavior-chain li{align-items:flex-start;background:#fff;border-bottom:1px solid #dbeafe;border-radius:0;counter-increment:chain;display:grid;gap:8px;grid-template-columns:auto 1fr;margin:0;padding:10px}.behavior-chain li:last-child{border-bottom:0}.behavior-chain li:before{align-items:center;background:var(--primary);border-radius:2px;color:white;content:counter(chain);display:inline-flex;font-weight:900;height:24px;justify-content:center;width:24px}.behavior-chain details{grid-column:2}.behavior-chain pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#fff;border:1px solid var(--line);border-radius:2px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
@@ -374,7 +385,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 /* Square, flat operator theme: no pill/card nesting beyond one visual layer. */
 .modern-sandbox-report header:after{display:none}.modern-sandbox-report .card,.modern-sandbox-report section.card,.modern-sandbox-report .metric,.modern-sandbox-report .quick-link,.modern-sandbox-report .language-entry a,.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .section-note,.modern-sandbox-report code,.modern-sandbox-report .toc a,.modern-sandbox-report .empty,.modern-sandbox-report .copy-btn,.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .timeline-group,.modern-sandbox-report .timeline-item,.modern-sandbox-report .timeline-overflow,.modern-sandbox-report .graph-node,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .behavior-chain li,.modern-sandbox-report .behavior-chain details,.modern-sandbox-report .ioc-card,.modern-sandbox-report .evidence-summary-card,.modern-sandbox-report .evidence-story-lane,.modern-sandbox-report .narrative-step,.modern-sandbox-report .relation-card,.modern-sandbox-report .overview-item,.modern-sandbox-report .relationship-meta span,.modern-sandbox-report .relationship-details,.modern-sandbox-report .evidence-expansion-card,.modern-sandbox-report .process-tree,.modern-sandbox-report .tree-badge,.modern-sandbox-report .evidence details,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link,.modern-sandbox-report .artifact-copy-path,.modern-sandbox-report .artifact-preview img,.modern-sandbox-report .technical-field,.modern-sandbox-report .raw-technical-fields,.modern-sandbox-report .raw-technical-field,.modern-sandbox-report .raw-events-shell,.modern-sandbox-report .raw-event-page,.modern-sandbox-report .raw-source-hints{border-radius:0!important}.modern-sandbox-report .card:before,.modern-sandbox-report .evidence-summary-card:before,.modern-sandbox-report .evidence-story-lane:before,.modern-sandbox-report .narrative-step:before,.modern-sandbox-report .relation-card:before,.modern-sandbox-report .overview-item:before{border-radius:0!important}.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link{box-shadow:none!important}.modern-sandbox-report .event-evidence-fields,.modern-sandbox-report .flat-technical-fields,.modern-sandbox-report .related-artifacts-flat{background:transparent;border:0;border-radius:0;padding:0}.modern-sandbox-report .flat-technical-fields{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}.modern-sandbox-report .related-artifacts-flat ul{border-top:1px solid var(--line);list-style:none;margin:6px 0 0 0;padding:0}.modern-sandbox-report .related-artifacts-flat li{border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px}.modern-sandbox-report .related-artifacts-flat li:first-child{border-top:0}.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .raw-events-panel,.modern-sandbox-report .process-tree,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .relation-card,.modern-sandbox-report .evidence-story-lane{overscroll-behavior:contain}.modern-sandbox-report .event-table td,.modern-sandbox-report .edge-table td{overflow-wrap:anywhere}.modern-sandbox-report .self-noise-note{background:#f8fafc;border-left:4px solid #94a3b8;color:#475569;margin:10px 0;padding:10px 12px}
 @media print{html{scroll-behavior:auto}body{background:#fff;color:#000}header,.language-entry,.no-js-fallback{max-width:none;margin:0;padding:12px}.report-layout{display:block;margin:0;max-width:none;padding:0 12px}.report-sidebar{max-height:none;overflow:visible;position:static}.report-content{min-width:0}.copy-btn{display:none!important}section.card,.card,.event-table-wrap,.raw-events-panel,.process-tree,.behavior-chain,.relation-card,.evidence-story-lane,.evidence-summary-card,.raw-event-page{break-inside:avoid;max-height:none!important;overflow:visible!important}section.card>h2,th{position:static!important}.process-tree-path{white-space:normal}.raw-events-shell>summary:after,.raw-event-page>summary:after,.event-evidence-fields>summary:after,.technical-field>summary:after,.raw-technical-fields>summary:after{color:#64748b;content:' (folded in screen view; expand in browser for full evidence)';font-weight:400}}
-@media(max-width:1000px){.report-layout{display:block}.report-sidebar{display:grid;grid-template-columns:1fr 1fr;max-height:none;position:static}.sidebar-heading{grid-column:1/-1}.sidebar-navigation{display:contents}.sidebar-section+.sidebar-section{border-left:1px solid var(--line);border-top:0}.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.language-entry,.no-js-fallback{margin:14px}.report-layout{padding:0 14px}.report-sidebar{display:block}.sidebar-navigation{display:block}.report-js .sidebar-toggle{display:inline-flex}.report-js .report-sidebar:not(.is-open) .sidebar-navigation{display:none}.sidebar-section+.sidebar-section{border-left:0;border-top:1px solid var(--line)}.grid,.columns{grid-template-columns:1fr}.process-tree-path{white-space:normal}}
+@media(max-width:1000px){.report-layout{display:block}.report-sidebar{display:grid;grid-template-columns:1fr 1fr;max-height:none;position:static}.sidebar-heading{grid-column:1/-1}.sidebar-navigation{display:contents}.sidebar-section+.sidebar-section{border-left:1px solid var(--line);border-top:0}.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.language-entry,.no-js-fallback{margin:14px}.report-layout{padding:0 14px}.report-sidebar{display:block}.sidebar-navigation{display:block}.report-js .sidebar-toggle{display:inline-flex}.report-js .report-sidebar:not(.is-open) .sidebar-navigation{display:none}.sidebar-section+.sidebar-section{border-left:0;border-top:1px solid var(--line)}.grid,.columns{grid-template-columns:1fr}.process-tree-path{white-space:normal}.focus-heading{display:block}.focus-verdict{display:inline-block;margin-top:12px}.event-explorer-toolbar label:first-child input{min-width:100%}}
 
 """);
         html.AppendLine("</style></head>");
@@ -470,6 +481,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         {
             ("cover", "Cover"),
             ("risk", "Risk summary"),
+            ("focus", "Analyst focus"),
+            ("event-explorer", "Key event explorer"),
             ("behavior", "Behavior detections"),
             ("facts", "Aggregated behavior facts"),
             ("mitre", "Multi-dimensional / MITRE"),
@@ -509,6 +522,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("<h2 id=\"quick-nav-title\">Quick navigation</h2>");
         html.AppendLine("<div class=\"quick-links\">");
         QuickLink(html, "risk", "Risk summary", PrimaryBehaviorFindings(report).Count().ToString());
+        QuickLink(html, "focus", "Analyst focus", report.Events.Count(IsSampleBehaviorEvent).ToString());
+        QuickLink(html, "event-explorer", "Key event explorer", report.Events.Count(evt => !IsLowValueOperationalEvent(evt)).ToString());
         QuickLink(html, "facts", "Behavior facts", BuildBehaviorFactCards(report, artifacts).Count(card => card.EvidenceLines.Count > 0).ToString());
         QuickLink(html, "process", "Process details", report.Events.Count(IsSampleBehaviorProcessEvent).ToString());
         QuickLink(html, "security", "Security / privilege", report.Events.Count(IsSampleBehaviorSecurityPrivilegeEvent).ToString());
@@ -559,6 +574,176 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("</div>");
         AppendCollectionSelfNoisePolicySummary(html, report);
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends a short analyst-first landing panel before the detailed chapters.
+    /// Inputs are the normalized report; processing separates sample behavior,
+    /// operational noise, and failure markers; the method returns no value.
+    /// </summary>
+    private static void AppendReportFocus(StringBuilder html, AnalysisReport report)
+    {
+        var primaryFindings = PrimaryBehaviorFindings(report)
+            .OrderBy(finding => SeverityRank(finding.Severity))
+            .ThenBy(finding => finding.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var sampleEvents = report.Events.Count(IsSampleBehaviorEvent);
+        var lifecycleEvents = report.Events.Count(IsAgentLifecycleEvent);
+        var noiseEvents = report.Events.Count(IsExcludedFromBehaviorStoryEvent);
+        var failures = report.Events.Count(IsOperationalFailureEvent);
+        var topFinding = primaryFindings.FirstOrDefault();
+        var verdict = DetermineVerdict(report);
+        var focusCopy = string.Join(
+            Environment.NewLine,
+            [
+                "Analyst focus",
+                $"verdict={verdict.Label}",
+                $"primaryFindings={primaryFindings.Count}",
+                $"sampleBehaviorEvents={sampleEvents}",
+                $"excludedNoiseEvents={noiseEvents}",
+                $"agentLifecycleEventsHidden={lifecycleEvents}",
+                $"failureEvents={failures}",
+                $"next={topFinding?.Title ?? "Review static analysis and collection health"}"
+            ]);
+
+        html.AppendLine("<section id=\"focus\" class=\"card focus-panel\">");
+        html.AppendLine("<div class=\"focus-heading\"><div><p class=\"eyebrow\">Start here</p><h2>Analyst focus</h2><p class=\"section-lead\">Read the verdict and high-signal evidence first. Collection plumbing and lifecycle rows stay available in the detailed evidence sections.</p></div>");
+        html.AppendLine($"<div class=\"focus-verdict badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</div></div>");
+        html.AppendLine("<div class=\"focus-grid\">");
+        FocusMetric(html, "Primary findings", primaryFindings.Count.ToString(CultureInfo.InvariantCulture), primaryFindings.Count > 0 ? "risk-medium" : "risk-low", "Rules that contribute to the sample verdict.");
+        FocusMetric(html, "Sample behavior", sampleEvents.ToString(CultureInfo.InvariantCulture), sampleEvents > 0 ? "risk-medium" : "risk-info", "Events eligible for the behavior story.");
+        FocusMetric(html, "Noise / diagnostics", noiseEvents.ToString(CultureInfo.InvariantCulture), noiseEvents > 0 ? "risk-info" : "risk-low", "Operational rows retained as evidence but excluded from the verdict.");
+        FocusMetric(html, "Failures", failures.ToString(CultureInfo.InvariantCulture), failures > 0 || report.Status == AnalysisStatus.Failed ? "risk-high" : "risk-low", "Open Failure reasons for the remediation hint.");
+        FocusMetric(html, "Lifecycle hidden", lifecycleEvents.ToString(CultureInfo.InvariantCulture), lifecycleEvents > 0 ? "risk-info" : "risk-low", "agent.start/stop rows hidden from the main story; raw evidence remains below.");
+        html.AppendLine("</div>");
+        html.AppendLine("<div class=\"focus-next\">");
+        html.AppendLine($"<div class=\"focus-next-copy copyable\" data-copy=\"{A(focusCopy)}\"><strong>Next review</strong><br><span>{E(topFinding?.Title ?? "Review static analysis and collection health")}</span><small>{E(topFinding?.Summary ?? "No primary behavior rule matched; verify collection quality before concluding that the sample was quiet.")}</small></div>");
+        html.AppendLine($"<a class=\"focus-action\" href=\"#event-explorer\">Open filtered event table</a><a class=\"focus-action secondary\" href=\"#failure\">Open failure log</a>");
+        html.AppendLine("</div>");
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy analyst focus", focusCopy)}</div>");
+        html.AppendLine("</section>");
+    }
+
+    private static void FocusMetric(StringBuilder html, string label, string value, string css, string detail)
+    {
+        html.AppendLine($"<div class=\"focus-metric\"><span>{E(label)}</span><strong class=\"{E(css)}\">{E(value)}</strong><small>{E(detail)}</small></div>");
+    }
+
+    /// <summary>
+    /// Appends a compact, client-filterable event table. Inputs are normalized
+    /// events and artifact lookup data; processing hides lifecycle noise from
+    /// the default view while preserving folded evidence in each row.
+    /// </summary>
+    private static void AppendEventExplorer(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var rows = report.Events
+            .Where(evt => !IsLowValueOperationalEvent(evt))
+            .OrderByDescending(IsKeyOperationalEvent)
+            .ThenBy(evt => evt.Timestamp)
+            .Take(EventExplorerInlineLimit)
+            .Select(evt => new EventExplorerRow(
+                evt,
+                EventExplorerStage(evt),
+                EventExplorerSeverity(report, evt),
+                IsSampleBehaviorEvent(evt),
+                IsExcludedFromBehaviorStoryEvent(evt)))
+            .ToList();
+        var hidden = Math.Max(0, report.Events.Count(evt => !IsLowValueOperationalEvent(evt)) - rows.Count);
+        var lifecycle = report.Events.Count(IsLowValueOperationalEvent);
+        var types = rows.Select(row => row.Event.EventType).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
+        var sources = rows.Select(row => string.IsNullOrWhiteSpace(row.Event.Source) ? "unknown" : row.Event.Source).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
+        var stages = rows.Select(row => row.Stage).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
+        var severities = rows.Select(row => row.Severity).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(SeverityRank).ToList();
+
+        html.AppendLine("<section id=\"event-explorer\" class=\"card\"><h2>Key event explorer</h2>");
+        html.AppendLine("<div class=\"section-note\"><strong>Review the signal first.</strong> Search or filter by event type, source, stage, severity, and sample-behavior status. Agent lifecycle rows are omitted from this table; expand Raw normalized events for complete audit evidence.</div>");
+        html.AppendLine("<div class=\"event-explorer-toolbar\">");
+        html.AppendLine("<label>Search <input type=\"search\" data-event-search placeholder=\"type, path, process, target\"></label>");
+        AppendEventExplorerSelect(html, "Event type", "data-event-type", types);
+        AppendEventExplorerSelect(html, "Source", "data-event-source", sources);
+        AppendEventExplorerSelect(html, "Stage", "data-event-stage", stages);
+        AppendEventExplorerSelect(html, "Severity", "data-event-severity", severities);
+        html.AppendLine("<label>Sample behavior <select data-event-sample><option value=\"all\">All</option><option value=\"true\">Yes</option><option value=\"false\">No</option></select></label>");
+        html.AppendLine("<button type=\"button\" class=\"focus-action secondary\" data-event-reset>Reset filters</button>");
+        html.AppendLine("</div>");
+        html.AppendLine($"<div class=\"event-explorer-status\" data-event-count>{E(rows.Count.ToString(CultureInfo.InvariantCulture))} visible rows; {E(hidden.ToString(CultureInfo.InvariantCulture))} report-only rows; {E(lifecycle.ToString(CultureInfo.InvariantCulture))} lifecycle rows folded in Raw normalized events.</div>");
+        if (rows.Count == 0)
+        {
+            Empty(html, "No user-facing events were retained for the event explorer.");
+        }
+        else
+        {
+            html.AppendLine("<div class=\"event-table-wrap event-explorer-wrap\"><table class=\"event-explorer-table\"><thead><tr><th>Time</th><th>Event type</th><th>Source</th><th>Stage</th><th>Severity</th><th>Sample behavior</th><th>Evidence</th></tr></thead><tbody>");
+            foreach (var row in rows)
+            {
+                var evt = row.Event;
+                var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
+                var target = ExtractReadableEventTarget(evt);
+                var search = string.Join(" ", evt.EventType, evt.Source, evt.ProcessName, evt.Path, target, row.Stage, row.Severity);
+                var plain = EventToBoundedPlainText(evt, maxDataPairs: 24, maxValueLength: 220);
+                html.AppendLine($"<tr class=\"event-explorer-row\" data-event-row data-type=\"{A(evt.EventType)}\" data-source=\"{A(evt.Source)}\" data-stage=\"{A(row.Stage)}\" data-severity=\"{A(row.Severity)}\" data-sample=\"{(row.SampleBehavior ? "true" : "false")}\" data-search=\"{A(search)}\">");
+                html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
+                html.AppendLine($"<td><code>{E(evt.EventType)}</code></td><td>{E(string.IsNullOrWhiteSpace(evt.Source) ? "unknown" : evt.Source)}</td><td><span class=\"chip chip-info\">{E(row.Stage)}</span></td><td><span class=\"chip chip-{E(NormalizeSeverity(row.Severity))}\">{E(row.Severity)}</span></td><td>{(row.SampleBehavior ? "<span class=\"chip chip-medium\">Yes</span>" : "<span class=\"chip chip-info\">No</span>")}</td>");
+                html.AppendLine($"<td><details class=\"event-explorer-details\"><summary>{E(evt.ProcessName ?? target ?? "Open evidence")}</summary><div class=\"event-explorer-detail\"><div class=\"muted\">{E(target ?? "-")}</div>{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyButton("Copy event", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span></div></details></td>");
+                html.AppendLine("</tr>");
+            }
+
+            html.AppendLine("</tbody></table></div>");
+        }
+
+        html.AppendLine("</section>");
+    }
+
+    private static void AppendEventExplorerSelect(StringBuilder html, string label, string attribute, IEnumerable<string> values)
+    {
+        html.Append($"<label>{E(label)} <select {attribute}><option value=\"all\">All</option>");
+        foreach (var value in values)
+        {
+            html.Append($"<option value=\"{A(value)}\">{E(value)}</option>");
+        }
+
+        html.AppendLine("</select></label>");
+    }
+
+    private static string EventExplorerStage(SandboxEvent evt)
+    {
+        var eventType = evt.EventType ?? string.Empty;
+        if (eventType.StartsWith("static.", StringComparison.OrdinalIgnoreCase)) return "static";
+        if (eventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase)) return "execution";
+        if (IsFileEvent(evt)) return "storage";
+        if (IsRegistryEvent(evt) || IsStartupEvent(evt)) return "persistence";
+        if (IsNetworkEvent(evt)) return "network";
+        if (IsFailureEvent(evt)) return "failure";
+        if (IsCollectionHealthEvent(evt) || IsR0CollectionHealthEvent(evt)) return "collection";
+        if (IsVirusTotalEvent(evt)) return "reputation";
+        return "other";
+    }
+
+    private static string EventExplorerSeverity(AnalysisReport report, SandboxEvent evt)
+    {
+        var matching = report.Findings
+            .Where(finding => finding.Evidence.Any(evidence => EventsMatch(evidence, evt)))
+            .Select(finding => NormalizeSeverity(finding.Severity))
+            .OrderBy(SeverityRank)
+            .FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(matching)) return matching;
+        if (IsOperationalFailureEvent(evt)) return "high";
+        if (IsSampleBehaviorEvent(evt)) return "medium";
+        return "info";
+    }
+
+    private static bool EventsMatch(SandboxEvent left, SandboxEvent right)
+    {
+        return ReferenceEquals(left, right) ||
+            left.Timestamp == right.Timestamp &&
+            string.Equals(left.EventType, right.EventType, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(left.Source, right.Source, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(left.ProcessName, right.ProcessName, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(left.Path, right.Path, StringComparison.OrdinalIgnoreCase);
     }
 
 
@@ -3347,6 +3532,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     {
         html.AppendLine("<section id=\"timeline\" class=\"card\"><h2>Timeline</h2>");
         var events = report.Events
+            .Where(evt => !IsLowValueOperationalEvent(evt))
             .OrderBy(e => e.Timestamp)
             .Take(TimelineEventInlineLimit)
             .ToList();
@@ -3357,12 +3543,18 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             return;
         }
 
-        var hiddenEvents = Math.Max(0, report.Events.Count - events.Count);
+        var hiddenEvents = Math.Max(0, report.Events.Count(evt => !IsLowValueOperationalEvent(evt)) - events.Count);
+        var lifecycleEvents = report.Events.Count(IsLowValueOperationalEvent);
         var groups = BuildTimelineGroups(events);
         html.AppendLine("<div class=\"section-note\"><strong>Timeline grouping.</strong> Grouped by UTC minute with process/type summaries; large buckets show representative events first.</div>");
         if (hiddenEvents > 0)
         {
             html.AppendLine($"<div class=\"copy-hint\">Timeline is capped for readability; open Raw normalized events or report.json for complete evidence. {E(hiddenEvents.ToString())} additional timeline events are hidden.</div>");
+        }
+
+        if (lifecycleEvents > 0)
+        {
+            html.AppendLine($"<div class=\"copy-hint\">{E(lifecycleEvents.ToString(CultureInfo.InvariantCulture))} agent lifecycle row(s) are hidden from the timeline; the folded Raw normalized events section retains them for audit.</div>");
         }
 
         html.AppendLine("<div class=\"timeline-groups\">");
@@ -3991,9 +4183,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var orderedEvents = report.Events
             .OrderBy(e => e.Timestamp)
             .ToList();
-        var inlineEvents = orderedEvents
-            .Take(RawEventInlineLimit)
-            .ToList();
+        var inlineEvents = SelectRawInlineEvents(orderedEvents);
         var hiddenCount = Math.Max(0, orderedEvents.Count - inlineEvents.Count);
 
         html.AppendLine("<section id=\"events\" class=\"card\"><h2>Raw normalized events</h2>");
@@ -4003,7 +4193,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         Metric(html, "Inline pages", RawEventPageCount(inlineEvents.Count).ToString(), "risk-info");
         Metric(html, "Hidden raw events", hiddenCount.ToString(), hiddenCount > 0 ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"section-note\"><strong>Slim raw event sample.</strong> Raw events are collapsed by default. Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Raw evidence height limit: 58vh. Hidden raw events: {hiddenCount}. Inline raw pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row. Open report.json or raw source artifacts for complete evidence. Native details work without JavaScript and print labels call out folded evidence.</div>");
+        html.AppendLine($"<div class=\"section-note\"><strong>Slim raw event sample.</strong> Raw events are collapsed by default. Key process, guest import, artifact, and failure rows are promoted into the inline sample before lower-signal rows. Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Raw evidence height limit: 58vh. Hidden raw events: {hiddenCount}. Inline raw pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row. Open report.json or raw source artifacts for complete evidence. Native details work without JavaScript and print labels call out folded evidence.</div>");
         AppendRawEventReadingGuide(html, orderedEvents, inlineEvents.Count, hiddenCount);
         AppendRawEventSlimmingCards(html, orderedEvents, inlineEvents.Count, hiddenCount);
         AppendRawSourceHints(html, report, artifacts);
@@ -4248,6 +4438,46 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         return inlineEventCount == 0
             ? 0
             : (int)Math.Ceiling(inlineEventCount / (double)RawEventPageSize);
+    }
+
+    private static IReadOnlyList<SandboxEvent> SelectRawInlineEvents(IReadOnlyList<SandboxEvent> orderedEvents)
+    {
+        if (orderedEvents.Count <= RawEventInlineLimit)
+        {
+            return orderedEvents;
+        }
+
+        var promoted = orderedEvents
+            .Where(IsKeyOperationalEvent)
+            .Take(RawEventInlineLimit / 2)
+            .ToList();
+        var promotedKeys = promoted
+            .Select(EventIdentityKey)
+            .ToHashSet(StringComparer.Ordinal);
+        var filler = orderedEvents
+            .Where(evt => !promotedKeys.Contains(EventIdentityKey(evt)))
+            .Take(Math.Max(0, RawEventInlineLimit - promoted.Count));
+        return promoted
+            .Concat(filler)
+            .OrderBy(evt => evt.Timestamp)
+            .ToList();
+    }
+
+    private static string EventIdentityKey(SandboxEvent evt) =>
+        $"{evt.Timestamp.UtcTicks}\u001f{evt.EventType}\u001f{evt.Source}\u001f{evt.ProcessName}\u001f{evt.ProcessId}\u001f{evt.Path}\u001f{evt.CommandLine}";
+
+    private static bool IsKeyOperationalEvent(SandboxEvent evt)
+    {
+        return IsOperationalFailureEvent(evt) ||
+            evt.EventType.StartsWith("guest.events.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("artifact.", StringComparison.OrdinalIgnoreCase) ||
+            IsSampleBehaviorProcessEvent(evt) ||
+            IsSampleBehaviorFileEvent(evt) ||
+            IsSampleBehaviorNetworkEvent(evt) ||
+            IsSampleBehaviorRegistryEvent(evt) ||
+            IsSampleBehaviorStartupEvent(evt) ||
+            IsSampleBehaviorSecurityPrivilegeEvent(evt) ||
+            IsSampleBehaviorR0Event(evt);
     }
 
     private static int RawEventFoldedTechnicalFieldCount(SandboxEvent evt)
@@ -6980,7 +7210,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
     private static bool IsExcludedFromBehaviorStoryEvent(SandboxEvent evt)
     {
-        return IsBehaviorCountedFalseEvent(evt) ||
+        return IsLowValueOperationalEvent(evt) ||
+            IsBehaviorCountedFalseEvent(evt) ||
             IsNonBehaviorEvent(evt) ||
             IsNotSampleBehaviorMarkerEvent(evt) ||
             IsSampleBehaviorCandidateFalseEvent(evt) ||
@@ -6988,6 +7219,50 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             IsCollectorSelfNoiseEvent(evt) ||
             IsVirusTotalQuietStateEvent(evt) ||
             IsR0CollectionHealthEvent(evt);
+    }
+
+    private static bool IsAgentLifecycleEvent(SandboxEvent evt)
+    {
+        if (!evt.EventType.StartsWith("agent.", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return TextEqualsAny(
+            evt.EventType,
+            "agent.start",
+            "agent.stop",
+            "agent.ready",
+            "agent.exit",
+            "agent.heartbeat",
+            "agent.status");
+    }
+
+    private static bool IsLowValueOperationalEvent(SandboxEvent evt)
+    {
+        if (IsAgentLifecycleEvent(evt))
+        {
+            return true;
+        }
+
+        return TextEqualsAny(
+                evt.EventType,
+                "environment.snapshot",
+                "environment.detail",
+                "service.snapshot",
+                "scheduled_task.snapshot",
+                "startup_item.snapshot",
+                "registry.run.snapshot",
+                "dns.cache.snapshot",
+                "process.snapshot",
+                "process.observed",
+                "probe.summary",
+                "network.hosts.snapshot",
+                "network.proxy.snapshot",
+                "network.netstat.snapshot",
+                "network.tcp.listener.snapshot",
+                "network.udp.listener.snapshot") &&
+            !EventDataBoolTrue(evt, "behaviorCounted", "sampleBehaviorCandidate", "strongSampleCorrelation");
     }
 
     private static bool IsBehaviorCountedFalseEvent(SandboxEvent evt)
@@ -8107,6 +8382,19 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// </summary>
     private static string ArtifactHref(ArtifactDescriptor artifact)
     {
+        if (artifact.Metadata.TryGetValue("artifactExists", out var exists) &&
+            string.Equals(exists, "false", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(artifact.FullPath) &&
+            !File.Exists(artifact.FullPath) &&
+            (artifact.Kind is ArtifactKind.DriverEventsJsonLines or ArtifactKind.GuestEventsJson or ArtifactKind.ArtifactManifest))
+        {
+            return string.Empty;
+        }
+
         if (IsSafeReportRelativeHref(artifact.SafeLink))
         {
             return artifact.SafeLink;
@@ -8457,6 +8745,57 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Critical / high risk", "严重/高风险"),
         ("VT lookups", "VT 查询"),
         ("Risk summary", "风险摘要"),
+        ("Analyst focus", "分析重点"),
+        ("Start here", "从这里开始"),
+        ("Read the verdict and high-signal evidence first. Collection plumbing and lifecycle rows stay available in the detailed evidence sections.", "先阅读判定和高信号证据。采集流水线与生命周期行仍可在详细证据章节中查看。"),
+        ("Primary findings", "主要命中"),
+        ("Rules that contribute to the sample verdict.", "会影响样本判定的规则。"),
+        ("Sample behavior", "样本行为"),
+        ("Events eligible for the behavior story.", "进入行为叙事的事件。"),
+        ("Noise / diagnostics", "噪声 / 诊断"),
+        ("Operational rows retained as evidence but excluded from the verdict.", "保留为证据但不计入判定的运行行。"),
+        ("Failures", "失败"),
+        ("Open Failure reasons for the remediation hint.", "打开失败原因查看修复提示。"),
+        ("Lifecycle hidden", "已隐藏生命周期"),
+        ("agent.start/stop rows hidden from the main story; raw evidence remains below.", "agent.start/stop 行从主叙事隐藏；原始证据仍保留在下方。"),
+        ("Next review", "下一步检查"),
+        ("Review static analysis and collection health", "检查静态分析和采集健康状态"),
+        ("Open filtered event table", "打开筛选事件表"),
+        ("Open failure log", "打开失败日志"),
+        ("Copy analyst focus", "复制分析重点"),
+        ("Key event explorer", "关键事件筛选器"),
+        ("Review the signal first.", "先查看信号。"),
+        ("Search or filter by event type, source, stage, severity, and sample-behavior status. Agent lifecycle rows are omitted from this table; expand Raw normalized events for complete audit evidence.", "可按事件类型、来源、阶段、严重性和是否样本行为搜索或筛选。Agent 生命周期行不会出现在此表；展开原始规范化事件可查看完整审计证据。"),
+        ("Event type", "事件类型"),
+        ("Source", "来源"),
+        ("Stage", "阶段"),
+        ("Severity", "严重性"),
+        ("Sample behavior", "样本行为"),
+        ("Search", "搜索"),
+        ("All", "全部"),
+        ("Yes", "是"),
+        ("No", "否"),
+        ("Reset filters", "重置筛选"),
+        ("visible rows; ", "可见行；"),
+        (" report-only rows; ", " 报告专用行；"),
+        (" lifecycle rows folded in Raw normalized events.", " 生命周期行已折叠在原始规范化事件中。"),
+        (" matching rows; filters apply to the visible evidence table.", " 个匹配行；筛选器作用于可见证据表。"),
+        ("No user-facing events were retained for the event explorer.", "事件筛选器没有保留面向用户的事件。"),
+        ("Event type", "事件类型"),
+        ("Time", "时间"),
+        ("Evidence", "证据"),
+        ("Open evidence", "打开证据"),
+        ("execution", "执行"),
+        ("storage", "存储"),
+        ("persistence", "持久化"),
+        ("network", "网络"),
+        ("failure", "失败"),
+        ("collection", "采集"),
+        ("reputation", "信誉"),
+        ("static", "静态"),
+        ("other", "其他"),
+        ("Key process, guest import, artifact, and failure rows are promoted into the inline sample before lower-signal rows.", "关键进程、Guest 导入、证据文件和失败行会优先进入内联样本，低信号行随后展示。"),
+        (" agent lifecycle row(s) are hidden from the timeline; the folded Raw normalized events section retains them for audit.", " 个 Agent 生命周期行从时间线隐藏；折叠的原始规范化事件章节仍保留它们用于审计。"),
         ("Behavior detections", "行为命中"),
         ("Collection/self-noise policy", "采集/自噪声策略"),
         ("Collection/self-noise policy.", "采集/自噪声策略。"),
@@ -11297,6 +11636,48 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
       if (window.matchMedia('(max-width: 640px)').matches) { setSidebarExpanded(false); }
     });
   });
+
+  var explorer = document.querySelector('#event-explorer');
+  if (explorer) {
+    var explorerRows = Array.prototype.slice.call(explorer.querySelectorAll('[data-event-row]'));
+    var explorerSearch = explorer.querySelector('[data-event-search]');
+    var explorerStatus = explorer.querySelector('[data-event-count]');
+    var explorerFilters = {
+      type: explorer.querySelector('[data-event-type]'),
+      source: explorer.querySelector('[data-event-source]'),
+      stage: explorer.querySelector('[data-event-stage]'),
+      severity: explorer.querySelector('[data-event-severity]'),
+      sample: explorer.querySelector('[data-event-sample]')
+    };
+    function explorerValue(control) { return control ? (control.value || 'all').toLowerCase() : 'all'; }
+    function applyExplorerFilters() {
+      var query = explorerSearch ? (explorerSearch.value || '').toLowerCase().trim() : '';
+      var visible = 0;
+      explorerRows.forEach(function (row) {
+        var matches = (!query || (row.getAttribute('data-search') || '').toLowerCase().indexOf(query) >= 0) &&
+          (explorerValue(explorerFilters.type) === 'all' || explorerValue(explorerFilters.type) === (row.getAttribute('data-type') || '').toLowerCase()) &&
+          (explorerValue(explorerFilters.source) === 'all' || explorerValue(explorerFilters.source) === (row.getAttribute('data-source') || '').toLowerCase()) &&
+          (explorerValue(explorerFilters.stage) === 'all' || explorerValue(explorerFilters.stage) === (row.getAttribute('data-stage') || '').toLowerCase()) &&
+          (explorerValue(explorerFilters.severity) === 'all' || explorerValue(explorerFilters.severity) === (row.getAttribute('data-severity') || '').toLowerCase()) &&
+          (explorerValue(explorerFilters.sample) === 'all' || explorerValue(explorerFilters.sample) === (row.getAttribute('data-sample') || '').toLowerCase());
+        row.style.display = matches ? '' : 'none';
+        if (matches) { visible += 1; }
+      });
+      if (explorerStatus) { explorerStatus.textContent = visible + ' matching rows; filters apply to the visible evidence table.'; }
+    }
+    Object.keys(explorerFilters).forEach(function (key) {
+      if (explorerFilters[key]) { explorerFilters[key].addEventListener('change', applyExplorerFilters); }
+    });
+    if (explorerSearch) { explorerSearch.addEventListener('input', applyExplorerFilters); }
+    var explorerReset = explorer.querySelector('[data-event-reset]');
+    if (explorerReset) {
+      explorerReset.addEventListener('click', function () {
+        if (explorerSearch) { explorerSearch.value = ''; }
+        Object.keys(explorerFilters).forEach(function (key) { if (explorerFilters[key]) { explorerFilters[key].value = 'all'; } });
+        applyExplorerFilters();
+      });
+    }
+  }
 
   var observedSections = document.querySelectorAll('header#cover, main section[id]');
   if ('IntersectionObserver' in window) {
