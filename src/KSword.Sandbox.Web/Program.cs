@@ -106,7 +106,10 @@ app.MapGet("/api/setup/status", (SandboxConfig currentConfig, BackendProfileStor
         vmrunExists = File.Exists(currentConfig.VMware.VmrunPath),
         vmxExists = File.Exists(currentConfig.VMware.VmxPath)
     },
-    restartRequired = false
+    // The host binds its configuration once at startup. During first-run the
+    // profile is written beside the runtime root, so report the required
+    // restart instead of claiming that the current process has hot-reloaded.
+    restartRequired = firstRunNeedsSetup && File.Exists(profiles.ConfigPath)
 }));
 app.MapGet("/api/setup/profile", (SandboxConfig currentConfig, BackendProfileStore profiles) => Results.Ok(profiles.Read(currentConfig)));
 app.MapGet("/api/setup/guest-bootstrap", () =>
