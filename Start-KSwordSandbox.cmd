@@ -20,8 +20,12 @@ if not exist "%ROOT%run.ps1" (
     goto :finish
 )
 
-where powershell.exe >nul 2>&1
-if errorlevel 1 (
+set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+if not exist "%POWERSHELL_EXE%" (
+    set "POWERSHELL_EXE="
+    for /f "delims=" %%P in ('where powershell.exe 2^>nul') do if not defined POWERSHELL_EXE set "POWERSHELL_EXE=%%P"
+)
+if not defined POWERSHELL_EXE (
     set "EXIT_CODE=3"
     echo [KSwordSandbox] 错误：找不到 Windows PowerShell。/ Error: Windows PowerShell was not found.
     echo [KSwordSandbox] 请在 Windows 10 上启用 Windows PowerShell 5.1 后重试。/ Enable Windows PowerShell 5.1 on Windows 10 and retry.
@@ -29,7 +33,7 @@ if errorlevel 1 (
 )
 
 rem -ExecutionPolicy Bypass is scoped to this child process; the host policy is unchanged.
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%run.ps1" -Mode StartWebUI
+"%POWERSHELL_EXE%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%run.ps1" -Mode StartWebUI
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" (
     echo [KSwordSandbox] WebUI 启动失败（退出码 %EXIT_CODE%）。/ WebUI startup failed (exit code %EXIT_CODE%).
