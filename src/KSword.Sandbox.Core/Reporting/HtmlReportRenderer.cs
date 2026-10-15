@@ -1865,6 +1865,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var excluded = report.Events.Count(IsExcludedFromBehaviorStoryEvent);
         var examples = report.Events
             .Where(IsExcludedFromBehaviorStoryEvent)
+            .Where(evt => !IsLowValueOperationalEvent(evt))
             .Take(4)
             .Select(EventOneLine)
             .ToList();
@@ -1932,7 +1933,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 "sampleExamples:",
                 .. sampleEvents.Take(5).Select(EventOneLine),
                 "excludedExamples:",
-                .. excludedEvents.Take(5).Select(EventOneLine)
+                .. excludedEvents.Where(evt => !IsLowValueOperationalEvent(evt)).Take(5).Select(EventOneLine)
             ]);
 
         html.AppendLine("<h3>Behavior story routing</h3>");
