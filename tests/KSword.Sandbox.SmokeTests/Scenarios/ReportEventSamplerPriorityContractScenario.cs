@@ -233,6 +233,24 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
                 ["message"] = "The sample process could not be started."
             }
         });
+        events.Add(new SandboxEvent
+        {
+            EventType = "process.start",
+            Timestamp = timestamp.AddSeconds(5.3),
+            Source = "guest",
+            ProcessName = "notepad.exe",
+            Path = @"C:\KSwordSandbox\incoming\notepad.exe",
+            ProcessId = 4242
+        });
+        events.Add(new SandboxEvent
+        {
+            EventType = "process.exit",
+            Timestamp = timestamp.AddSeconds(5.4),
+            Source = "guest",
+            ProcessName = "notepad.exe",
+            Path = @"C:\KSwordSandbox\incoming\notepad.exe",
+            ProcessId = 4242
+        });
 
         var result = ReportEventSampler.SampleForReport(
             events,
@@ -315,6 +333,8 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
 
         var sampleStartFailure = RequireEvent(result.Events, "process.start_failed");
         RequireData(sampleStartFailure, "exceptionType", "System.IO.FileNotFoundException");
+        RequireEvent(result.Events, "process.start");
+        RequireEvent(result.Events, "process.exit");
         RequireData(guestImportEvent, "guestImportMarker", "true");
         RequireData(guestImportEvent, "terminalStatus", "Completed");
 

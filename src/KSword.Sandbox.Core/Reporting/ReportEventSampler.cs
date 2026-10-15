@@ -981,6 +981,14 @@ public static class ReportEventSampler
             return ReportSamplingBucket.FindingEvidence;
         }
 
+        // Keep the submitted sample's start/exit lifecycle visible even when
+        // the guest emits many process snapshots. These rows are the direct
+        // proof that the sample process was created and observed to exit.
+        if (IsSampleExecutionLifecycleEvent(evt))
+        {
+            return ReportSamplingBucket.GeneralBehaviorEvidence;
+        }
+
         if (string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "pcap.import.summary", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "network.import.summary", StringComparison.OrdinalIgnoreCase))
@@ -1050,6 +1058,18 @@ public static class ReportEventSampler
         return EventDataEqualsAny(evt, "sampleCorrelationStatus", "correlated", "confirmed", "probable", "candidate") ||
             EventDataBoolTrue(evt, "sampleBehaviorCandidate", "baselineSampleEvidence") ||
             (evt.Path?.Contains("\\incoming\\", StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static bool IsSampleExecutionLifecycleEvent(SandboxEvent evt)
+    {
+        var eventType = NormalizeEventType(evt.EventType);
+        if (eventType is not ("process.start" or "process.exit" or "process.timeout"))
+        {
+            return false;
+        }
+
+        return evt.Path?.Contains("\\incoming\\", StringComparison.OrdinalIgnoreCase) == true ||
+            EventDataBoolTrue(evt, "strongSampleCorrelation", "sampleBehaviorCandidate");
     }
 
     private static bool IsProbableSampleEvidenceEvent(SandboxEvent evt)
