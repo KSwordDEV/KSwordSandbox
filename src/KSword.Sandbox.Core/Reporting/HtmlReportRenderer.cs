@@ -132,8 +132,7 @@ public sealed class HtmlReportRenderer
         SandboxEvent Event,
         string Stage,
         string Severity,
-        bool SampleBehavior,
-        bool Noise);
+        bool SampleBehavior);
 
     private sealed record ArtifactEvidenceMatrixRow(
         string CollectionName,
@@ -649,8 +648,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 evt,
                 EventExplorerStage(evt),
                 EventExplorerSeverity(report, evt),
-                IsSampleBehaviorEvent(evt),
-                IsExcludedFromBehaviorStoryEvent(evt)))
+                IsSampleBehaviorEvent(evt)))
             .ToList();
         var hidden = Math.Max(0, report.Events.Count(evt => !IsLowValueOperationalEvent(evt)) - rows.Count);
         var lifecycle = report.Events.Count(IsLowValueOperationalEvent);
@@ -713,12 +711,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     {
         var eventType = evt.EventType ?? string.Empty;
         if (eventType.StartsWith("static.", StringComparison.OrdinalIgnoreCase)) return "static";
+        if (IsFailureEvent(evt)) return "failure";
+        if (IsCollectionHealthEvent(evt) || IsR0CollectionHealthEvent(evt)) return "collection";
         if (eventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase)) return "execution";
         if (IsFileEvent(evt)) return "storage";
         if (IsRegistryEvent(evt) || IsStartupEvent(evt)) return "persistence";
         if (IsNetworkEvent(evt)) return "network";
-        if (IsFailureEvent(evt)) return "failure";
-        if (IsCollectionHealthEvent(evt) || IsR0CollectionHealthEvent(evt)) return "collection";
         if (IsVirusTotalEvent(evt)) return "reputation";
         return "other";
     }
