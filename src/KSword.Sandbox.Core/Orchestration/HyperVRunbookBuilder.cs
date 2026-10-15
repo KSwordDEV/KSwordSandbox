@@ -1341,13 +1341,14 @@ public sealed class HyperVRunbookBuilder
             "$agentRuntimeConfig = Join-Path $payloadRoot 'agent\\KSword.Sandbox.Agent.runtimeconfig.json';",
             "$agentDeps = Join-Path $payloadRoot 'agent\\KSword.Sandbox.Agent.deps.json';",
             "foreach ($payloadFile in @($agentRuntimeConfig, $agentDeps)) { if (-not (Test-Path -LiteralPath $payloadFile -PathType Leaf)) { throw \"Required host guest payload file was not found: $payloadFile\" }; if ((Get-Item -LiteralPath $payloadFile).Length -le 0) { throw \"Required host guest payload file is empty: $payloadFile\" } }",
-            // Always refresh the complete self-contained Agent directory. Checking only
-            // the exe/runtimeconfig/deps files is insufficient: an older guest payload
-            // can pass that check while missing a framework assembly (for example
-            // System.Threading.ThreadPool.dll), which makes every Process.Start/helper
-            // call fail with a misleading FileNotFoundException. The payload is small
-            // enough that copying it once per run is preferable to running stale code.
-            $"Copy-Item -ToSession $session -Path $agentSource -Destination {Q(guestAgentDirectory)} -Recurse -Force; Write-Host 'Guest Agent payload refreshed through VMware Tools.';",
+            // Refresh the executable and the framework assemblies implicated in
+            // stale guest payload failures. Copying the entire self-contained
+            // runtime over WinRM is unreliable on this VM, while these files are
+            // enough to replace the agent code and the missing Thread/ThreadPool
+            // dependencies without a large remoting transfer.
+            "$agentRefreshNames = @('KSword.Sandbox.Agent.exe', 'KSword.Sandbox.Agent.dll', 'KSword.Sandbox.Abstractions.dll', 'System.Threading.Thread.dll', 'System.Threading.ThreadPool.dll');",
+            "$agentRefreshSource = @($agentRefreshNames | ForEach-Object { $candidate = Join-Path $payloadRoot ('agent\\' + $_); if (Test-Path -LiteralPath $candidate -PathType Leaf) { $candidate } }); if ($agentRefreshSource.Count -eq 0) { throw 'Guest Agent refresh files were not found in the host payload.' };",
+            $"Copy-Item -ToSession $session -Path $agentRefreshSource -Destination {Q(guestAgentDirectory)} -Force; Write-Host 'Guest Agent executable and framework payload refreshed.';",
             $"$runtimeConfigBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($agentRuntimeConfig)); Invoke-Command -Session $session -ScriptBlock {{ param($path, $content) [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($content)) }} -ArgumentList {Q(guestRuntimeConfigPath)}, $runtimeConfigBase64 -ErrorAction Stop;",
             $"$depsBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($agentDeps)); Invoke-Command -Session $session -ScriptBlock {{ param($path, $content) [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($content)) }} -ArgumentList {Q(guestDepsPath)}, $depsBase64 -ErrorAction Stop;",
             $"$expectedRuntimeLength = (Get-Item -LiteralPath $agentRuntimeConfig).Length; $guestRuntimeLength = 0; for ($copyAttempt = 0; $copyAttempt -lt 3; $copyAttempt++) {{ Start-Sleep -Milliseconds 500; $guestRuntimeLength = [int64](Invoke-Command -Session $session -ScriptBlock {{ (Get-Item -LiteralPath {Q(guestRuntimeConfigPath)}).Length }} -ErrorAction Stop); if ($guestRuntimeLength -eq $expectedRuntimeLength) {{ break }}; Invoke-Command -Session $session -ScriptBlock {{ param($path, $content) [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($content)) }} -ArgumentList {Q(guestRuntimeConfigPath)}, $runtimeConfigBase64 -ErrorAction Stop }}; if ($guestRuntimeLength -ne $expectedRuntimeLength) {{ throw \"Guest runtimeconfig copy length mismatch: expected $expectedRuntimeLength, got $guestRuntimeLength\" }};",
