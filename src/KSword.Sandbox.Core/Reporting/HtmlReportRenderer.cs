@@ -1403,7 +1403,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("</div>");
         if (dynamicEventCount == 0)
         {
-            Empty(html, "No guest/runtime events were collected. Zero counters mean dynamic telemetry was not collected or imported; this report is static-only and does not prove that the sample had no runtime behavior.");
+            Empty(html, "No attributable guest/runtime behavior events were retained in the bounded report. Raw guest telemetry and collection markers remain available in events.json; this does not prove that the sample had no runtime behavior.");
         }
 
         html.AppendLine("</section>");
@@ -8523,7 +8523,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("high-entropy-resource", "高熵资源"),
         ("Dynamic analysis", "动态分析"),
         ("No dynamic events were collected. Zero counters mean telemetry was not collected or imported for this section; they are not proof that the sample had no behavior.", "未采集到动态事件。本节的 0 计数表示遥测未采集或未导入，不代表样本没有行为。"),
-        ("No guest/runtime events were collected. Zero counters mean dynamic telemetry was not collected or imported; this report is static-only and does not prove that the sample had no runtime behavior.", "未采集到来宾/运行时事件。0 计数表示动态遥测未采集或未导入；本报告仅包含静态分析，不能证明样本没有运行时行为。"),
+        ("No attributable guest/runtime behavior events were retained in the bounded report. Raw guest telemetry and collection markers remain available in events.json; this does not prove that the sample had no runtime behavior.", "有界报告中没有保留可归因的来宾/运行时行为事件；原始来宾遥测和采集标记仍可在 events.json 中查看，这不能证明样本没有运行时行为。"),
         ("VirusTotal / reputation", "VirusTotal / 信誉"),
         ("Hash-only enrichment.", "仅哈希增强。"),
         ("VirusTotal (VT) results are optional reputation evidence and are separated from sandbox behavior. Missing keys, rate limits, or not-found responses are enrichment status, not malicious sample behavior.", "VirusTotal (VT) 结果是可选信誉证据，已与沙箱行为分离。缺少密钥、限速或未找到响应属于增强状态，不是恶意样本行为。"),
