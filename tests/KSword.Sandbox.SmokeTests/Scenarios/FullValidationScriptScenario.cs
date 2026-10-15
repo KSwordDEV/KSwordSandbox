@@ -50,7 +50,7 @@ internal sealed class FullValidationScriptScenario : ISmokeTestScenario
         RequireContains(script, "SkipNative", "Full validation should allow skipping native build when needed.");
         RequireContains(script, "StagedPolicyOnly", "Full validation should support staged-only policy checks.");
 
-        RequireContains(progress, "Overall v1 deliverable", "Progress doc should include overall progress.");
+        RequireContainsAny(progress, "Overall v1 deliverable", "总体 v1 交付链路", "Progress doc should include overall progress.");
         RequireContains(progress, "Remaining P0 gaps", "Progress doc should list remaining P0 gaps.");
         RequireContains(progress, "R0 Driver + R0Collector", "Progress doc should track R0 progress.");
         RequireContains(progress, "Hyper-V", "Progress doc should track Hyper-V progress.");
@@ -72,5 +72,18 @@ internal sealed class FullValidationScriptScenario : ISmokeTestScenario
     private static void RequireContains(string content, string expected, string message)
     {
         SmokeAssert.True(content.Contains(expected, StringComparison.Ordinal), message);
+    }
+
+    /// <summary>
+    /// Requires one of the bilingual progress labels. Inputs are content,
+    /// accepted English/Chinese fragments, and failure message; processing
+    /// checks ordinally; return value is none.
+    /// </summary>
+    private static void RequireContainsAny(string content, string expected, string alternate, string message)
+    {
+        SmokeAssert.True(
+            content.Contains(expected, StringComparison.Ordinal) ||
+            content.Contains(alternate, StringComparison.Ordinal),
+            message);
     }
 }

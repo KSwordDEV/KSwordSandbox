@@ -39,7 +39,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "AppendTimeline", "Report renderer should include a timeline section.");
         RequireContains(rendererSource, "BuildTimelineGroups", "Report renderer should group timeline events for stable visual scanning.");
         RequireContains(rendererSource, "timeline-group", "Report renderer should render grouped timeline buckets.");
-        RequireContains(rendererSource, "TimelineEventInlineLimit = 120", "Report renderer should cap timeline rendering separately from raw events.");
+        RequireContains(rendererSource, "TimelineEventInlineLimit = 60", "Report renderer should cap timeline rendering separately from raw events.");
         RequireContains(rendererSource, "EventFamilyLabel", "Report renderer should summarize timeline groups by event family.");
         RequireContains(rendererSource, "AppendProcessTree", "Report renderer should include a process tree.");
         RequireContains(rendererSource, "process-tree", "Report renderer should render a bounded stable process tree.");
@@ -102,7 +102,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "contextmenu", "Report renderer should support right-click copy.");
         RequireContains(rendererSource, "Copy event", "Report renderer should provide explicit copy buttons.");
         RequireContains(rendererSource, "Raw normalized events", "Report renderer should include raw event evidence.");
-        RequireContains(rendererSource, "RawEventInlineLimit = 75", "Report renderer should cap inline raw event rendering to a slim release-ready sample.");
+        RequireContains(rendererSource, "RawEventInlineLimit = 30", "Report renderer should cap inline raw event rendering to a slim release-ready sample.");
         RequireContains(rendererSource, "RawEventPageSize = 25", "Report renderer should page inline raw events into compact bounded chunks.");
         RequireContains(rendererSource, "AppendRawEventPages", "Report renderer should render native raw event pages.");
         RequireContains(rendererSource, "raw-events-shell", "Report renderer should collapse raw events with native HTML.");
@@ -209,7 +209,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "Registry behavior", "Report UX doc should list registry behavior.");
         RequireAnyContains(doc, ["Right-click", "right-click", "右键"], "Report UX doc should describe right-click copy.");
         RequireAnyContains(doc, ["raw events only", "只展示最终分类前的 raw events"], "Report UX doc should distinguish live raw events from final classification.");
-        RequireAnyContains(doc, ["first 75 raw events", "前 75 条 raw events", "前 75 行"], "Report UX doc should require a slim raw event inline limit.");
+        RequireAnyContains(doc, ["first 30 raw events", "前 30 条 raw events", "前 30 行"], "Report UX doc should require a slim raw event inline limit.");
         RequireAnyContains(doc, ["25-row native pages", "25 行一页的原生分页"], "Report UX doc should require compact bounded raw event pages.");
         RequireContains(doc, "folded technical field counts", "Report UX doc should require raw event fold-count labels.");
         RequireContains(doc, "Raw evidence height limit", "Report UX doc should require a raw evidence height limit.");
@@ -330,7 +330,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         var chineseHtml = renderer.RenderChinese(report, artifacts);
         var documents = renderer.RenderBilingualReports(report, artifacts);
         var totalRawEvents = report.Events.Count;
-        var hiddenRawEvents = Math.Max(0, totalRawEvents - 75);
+        var hiddenRawEvents = Math.Max(0, totalRawEvents - 30);
 
         RequireContains(defaultHtml, "<html lang=\"zh-CN\">", "Default rendered HTML should use the Simplified Chinese compatibility report.");
         RequireContains(defaultHtml, "href=\"report.zh.html\"", "Default rendered HTML should link to report.zh.html.");
@@ -366,10 +366,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "aria-controls=\"sidebar-navigation\"", "Rendered mobile toggle should target the navigation container.");
         RequireContains(englishHtml, "href=\"report.zh.html\"", "Rendered HTML should link to report.zh.html.");
         RequireContains(englishHtml, "href=\"report.en.html\"", "Rendered HTML should link to report.en.html.");
-        RequireContains(englishHtml, $"Show inline raw events (75/{totalRawEvents}; {hiddenRawEvents} hidden; 3 native pages)", "Rendered raw events should be collapsed and capped.");
+        RequireContains(englishHtml, $"Show inline raw events (30/{totalRawEvents}; {hiddenRawEvents} hidden; 2 native pages)", "Rendered raw events should be collapsed and capped.");
         RequireContains(englishHtml, "Inline pages", "Rendered raw event overview should show page counts.");
-        RequireContains(englishHtml, $"Raw event page 1/3: rows 1-25 of {totalRawEvents}", "Rendered raw event panel should show the first native page.");
-        RequireContains(englishHtml, $"Raw event page 3/3: rows 51-75 of {totalRawEvents}", "Rendered raw event panel should show the final inline page.");
+        RequireContains(englishHtml, $"Raw event page 1/2: rows 1-25 of {totalRawEvents}", "Rendered raw event panel should show the first native page.");
+        RequireContains(englishHtml, $"Raw event page 2/2: rows 26-30 of {totalRawEvents}", "Rendered raw event panel should show the final inline page.");
         RequireContains(englishHtml, "raw-event-page", "Rendered raw event panel should use bounded page containers.");
         RequireContains(englishHtml, "Raw event page index", "Rendered raw event overview should include a static page index.");
         RequireContains(englishHtml, "Index by event type", "Rendered raw event index should include event type grouping.");

@@ -137,7 +137,7 @@ progress-page 重新进入报告，避免自动打开失败时丢失上下文。
   （`打开 / Open`、`下载 / Download`）按钮。任意 host/guest 绝对文件系统路径只能作为可复制
   evidence text 展示，绝对路径不得用于 `href`。
 - Raw normalized events 章节默认保持轻量：渲染原生折叠 `<details>`，限制展开后 raw event
-  面板高度，并只内联前 75 条 raw events。展开后的内联行必须拆成 25 行一页的原生分页，
+  面板高度，并只内联前 30 条 raw events。展开后的内联行必须拆成 25 行一页的原生分页，
   让分析员打开小块证据而不是长表格。章节必须展示 total events、inline-rendered events、
   inline page count、hidden raw events、Raw evidence height limit（当前 `58vh`），以及明确的
   `report.json` 和 raw source artifact path hints 作为完整证据入口。Raw page summary 还应展示
@@ -220,7 +220,7 @@ progress-page 重新进入报告，避免自动打开失败时丢失上下文。
 - 点击 raw evidence 上的 `复制 / Copy` 按钮，复制完整 event block。
 - Raw event fields 应排序后渲染在扁平可折叠 evidence block 中；command/output/script fields
   保持在嵌套可复制 `<details>` 内，避免大型 driver payloads 淹没页面。
-- Raw normalized events 默认显示关闭的 summary，只内联前 75 行，并按 25 行一页的原生分页展示；
+- Raw normalized events 默认显示关闭的 summary，只内联前 30 行，并按 25 行一页的原生分页展示；
   页面必须明确告诉操作者隐藏了多少 events。
 - Raw section 应在已索引时指向 `report.json`、`events.json`、`driver-events.jsonl`
   和/或 artifact manifests，让操作者有 raw source artifact path hints，可以打开或复制完整原始来源，

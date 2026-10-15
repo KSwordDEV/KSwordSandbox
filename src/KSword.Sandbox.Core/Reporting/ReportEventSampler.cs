@@ -901,14 +901,6 @@ public static class ReportEventSampler
         }
 
         var diagnosticQuota = Math.Max(0, Math.Min(options.MaxDiagnosticEvents, options.MaxInlineEvents));
-        var diagnosticCount = inlineCandidates.Count(static candidate => candidate.Bucket == ReportSamplingBucket.Diagnostics);
-        if (inlineCandidates.Count <= options.MaxInlineEvents && diagnosticCount <= diagnosticQuota)
-        {
-            return new ReportSamplingSelection(
-                inlineCandidates.Select(static candidate => candidate.Event).ToList(),
-                excludedEventCount);
-        }
-
         var selectedIndexes = new HashSet<int>();
         var perType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
@@ -1025,6 +1017,14 @@ public static class ReportEventSampler
         if (IsSampleExecutionLifecycleEvent(evt))
         {
             return ReportSamplingBucket.GeneralBehaviorEvidence;
+        }
+
+        // Missing/failed artifact collection is a user-facing evidence gap.
+        // Keep the health row ahead of the diagnostic quota so an empty dump,
+        // screenshot, or PCAP lane is never silently mistaken for success.
+        if (IsArtifactCollectionFailureEvent(evt))
+        {
+            return ReportSamplingBucket.FindingEvidence;
         }
 
         if (string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase) ||
@@ -1209,6 +1209,16 @@ public static class ReportEventSampler
         }
 
         return IsReadinessOrStatusEvent(evt);
+    }
+
+    private static bool IsArtifactCollectionFailureEvent(SandboxEvent evt)
+    {
+        var eventType = NormalizeEventType(evt.EventType);
+        return (string.Equals(eventType, "collection.health", StringComparison.OrdinalIgnoreCase) ||
+                eventType.StartsWith("collection-health.", StringComparison.OrdinalIgnoreCase)) &&
+            (EventDataBoolTrue(evt, "artifactMissing", "captureFailed", "collectionFailed") ||
+             EventDataEqualsAny(evt, "healthStatus", "failed", "missing", "rejected") ||
+             EventDataEqualsAny(evt, "captureState", "failed", "missing", "rejected"));
     }
 
     private static bool IsReadinessOrStatusEvent(SandboxEvent evt)

@@ -24,6 +24,9 @@ internal sealed class R0ProcessRegistryImageContractScenario : ISmokeTestScenari
         var processHeader = ReadRepositoryText(
             context,
             "driver", "KSword.Sandbox.Driver", "src", "Producers", "Process", "ProcessMonitor.h");
+        var imageSource = ReadRepositoryText(
+            context,
+            "driver", "KSword.Sandbox.Driver", "src", "Producers", "Image", "ImageMonitor.c");
         var registrySource = ReadRepositoryText(
             context,
             "driver", "KSword.Sandbox.Driver", "src", "Producers", "Registry", "RegistryMonitor.c");
@@ -39,9 +42,9 @@ internal sealed class R0ProcessRegistryImageContractScenario : ISmokeTestScenari
         var producerDoc = ReadRepositoryText(context, "docs", "r0-process-registry-image.md");
 
         AssertProcessProducer(processSource, processHeader, abiHeader, collectorSource, producerDoc);
-        AssertImageProducer(processSource, abiHeader, collectorSource, producerDoc);
+        AssertImageProducer(imageSource, abiHeader, collectorSource, producerDoc);
         AssertRegistryProducer(registrySource, registryHeader, abiHeader, collectorSource, producerDoc);
-        AssertSafetyAndUnload(processSource, registrySource, producerDoc);
+        AssertSafetyAndUnload(processSource, imageSource, registrySource, producerDoc);
 
         return Task.FromResult(new SmokeTestResult
         {
@@ -88,19 +91,19 @@ internal sealed class R0ProcessRegistryImageContractScenario : ISmokeTestScenari
     /// source and docs; processing performs substring assertions; return value is none.
     /// </summary>
     private static void AssertImageProducer(
-        string processSource,
+        string imageSource,
         string abiHeader,
         string collectorSource,
         string producerDoc)
     {
-        RequireContains(processSource, "PsSetLoadImageNotifyRoutine", "Image producer should register image-load callbacks.");
-        RequireContains(processSource, "PsRemoveLoadImageNotifyRoutine", "Image producer should unregister image-load callbacks.");
-        RequireContains(processSource, "KswLoadImageNotify", "Image producer callback should be implemented.");
-        RequireContains(processSource, "KswSandboxEventTypeImage", "Image events should use the public image event type.");
-        RequireContains(processSource, "ImageBase", "Image payload should include base address.");
-        RequireContains(processSource, "ImageSize", "Image payload should include image size.");
-        RequireContains(processSource, "KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE", "Image payload should flag system-mode images.");
-        RequireContains(processSource, "KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT", "Image path presence should be flagged.");
+        RequireContains(imageSource, "PsSetLoadImageNotifyRoutine", "Image producer should register image-load callbacks.");
+        RequireContains(imageSource, "PsRemoveLoadImageNotifyRoutine", "Image producer should unregister image-load callbacks.");
+        RequireContains(imageSource, "KswLoadImageNotify", "Image producer callback should be implemented.");
+        RequireContains(imageSource, "KswSandboxEventTypeImage", "Image events should use the public image event type.");
+        RequireContains(imageSource, "ImageBase", "Image payload should include base address.");
+        RequireContains(imageSource, "ImageSize", "Image payload should include image size.");
+        RequireContains(imageSource, "KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE", "Image payload should flag system-mode images.");
+        RequireContains(imageSource, "KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT", "Image path presence should be flagged.");
         RequireContains(abiHeader, "KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD", "Public ABI should define the image payload.");
         RequireContains(collectorSource, "KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD", "Collector should parse image payloads.");
         RequireContains(producerDoc, "image.load", "Producer doc should name the image JSONL event.");
@@ -162,7 +165,11 @@ internal sealed class R0ProcessRegistryImageContractScenario : ISmokeTestScenari
     /// Checks IRQL/string safety and unload state. Inputs are producer source and
     /// docs; processing performs substring assertions; return value is none.
     /// </summary>
-    private static void AssertSafetyAndUnload(string processSource, string registrySource, string producerDoc)
+    private static void AssertSafetyAndUnload(
+        string processSource,
+        string imageSource,
+        string registrySource,
+        string producerDoc)
     {
         RequireContains(processSource, "KswPrepareProcessCallbackString", "Process producer should gate callback strings.");
         RequireContains(registrySource, "KswPrepareRegistryCallbackString", "Registry producer should gate callback strings.");
@@ -172,10 +179,12 @@ internal sealed class R0ProcessRegistryImageContractScenario : ISmokeTestScenari
         RequireContains(registrySource, "Source->MaximumLength", "Registry string copy should clamp to MaximumLength.");
         RequireContains(processSource, "KswCopyUnicodePrefix", "Process producer should use bounded UTF-16 copies.");
         RequireContains(registrySource, "KswCopyUnicodePrefix", "Registry producer should use bounded UTF-16 copies.");
-        RequireContains(processSource, "InterlockedExchange(&g_KswProcessMonitorActive, 0)", "Process teardown should disable emission first.");
-        RequireContains(registrySource, "InterlockedExchange(&g_KswRegistryMonitorActive, 0)", "Registry teardown should disable emission first.");
-        RequireContains(processSource, "InterlockedExchange(&g_KswImageCallbackRegistered, 0)", "Image teardown should clear registration state atomically.");
-        RequireContains(registrySource, "InterlockedExchange(&g_KswRegistryCallbackRegistered, 0)", "Registry teardown should clear registration state atomically.");
+        RequireContains(processSource, "g_KswProcessMonitorRuntime.Active", "Process teardown should disable emission first.");
+        RequireContains(registrySource, "g_KswRegistryMonitorRuntime.Active", "Registry teardown should disable emission first.");
+        RequireContains(imageSource, "InterlockedExchange(", "Image teardown should use an atomic registration-state update.");
+        RequireContains(imageSource, "&g_KswImageMonitorRuntime.CallbackRegistered", "Image teardown should clear registration state atomically.");
+        RequireContains(registrySource, "InterlockedExchange(", "Registry teardown should use an atomic registration-state update.");
+        RequireContains(registrySource, "g_KswRegistryMonitorRuntime.CallbackRegistered", "Registry teardown should clear registration state atomically.");
         RequireContains(producerDoc, "IRQL and string safety", "Producer doc should document string safety.");
         RequireContains(producerDoc, "Unload and failure behavior", "Producer doc should document unload behavior.");
     }

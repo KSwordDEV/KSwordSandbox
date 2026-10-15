@@ -199,10 +199,22 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
 
         RequireContains(contract, "Capability negotiation flow", "Core contract doc must describe negotiation flow.");
         RequireContains(contract, "Producer enable mask", "Core contract doc must describe producer enable mask.");
-        RequireContains(contract, "GET_HEALTH producer-mask snapshot", "Core contract doc must describe health producer-mask diagnostics.");
-        RequireContains(contract, "Queue and status counters", "Core contract doc must describe queue/status counters.");
+        RequireContainsAny(
+            contract,
+            "GET_HEALTH producer-mask snapshot",
+            "`GET_HEALTH` producer-mask snapshot",
+            "Core contract doc must describe health producer-mask diagnostics.");
+        RequireContainsAny(
+            contract,
+            "Queue and status counters",
+            "Queue 与 status counters",
+            "Core contract doc must describe queue/status counters.");
         RequireContains(contract, "Network WFP/ALE status diagnostics", "Core contract doc must describe network status diagnostics.");
-        RequireContains(contract, "Producer runtime state and payload versions", "Core contract doc must describe producer runtime state and payload versions.");
+        RequireContainsAny(
+            contract,
+            "Producer runtime state and payload versions",
+            "Producer runtime state 与 payload 版本",
+            "Core contract doc must describe producer runtime state and payload versions.");
         RequireContains(contract, "V1 typed payload checklist", "Core contract doc must include v1 typed payload checklist.");
         RequireContains(contract, "KSWORD_SANDBOX_NETWORK_EVENT_VERSION", "Core contract doc must name network payload version.");
         RequireContains(contract, "IOCTL error contract", "Core contract doc must describe IOCTL errors.");
@@ -241,5 +253,18 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
     private static void RequireContains(string content, string expected, string message)
     {
         SmokeAssert.True(content.Contains(expected, StringComparison.Ordinal), message);
+    }
+
+    /// <summary>
+    /// Requires one of the documented heading variants to be present. Inputs
+    /// are content, accepted fragments, and failure message; processing checks
+    /// each fragment ordinally; return value is none.
+    /// </summary>
+    private static void RequireContainsAny(string content, string expected, string alternate, string message)
+    {
+        SmokeAssert.True(
+            content.Contains(expected, StringComparison.Ordinal) ||
+            content.Contains(alternate, StringComparison.Ordinal),
+            message);
     }
 }

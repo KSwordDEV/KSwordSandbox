@@ -20,7 +20,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
 {
     private const string AbiVersion = "65536";
     private const string AbiVersionHex = "0x00010000";
-    private const string CurrentProducerMaskHex = "0x0000003F";
+    private const string CurrentProducerMaskHex = "0x0000007F";
+    private const string DefaultProducerMaskHex = "0x0000003F";
     private const int ExpectedEventRingCapacity = 1024;
     private const int ExpectedBackpressureQueueDepth = 768;
     private const int ExpectedStressDriverRows = 32;
@@ -523,7 +524,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["mockMode"] = "true",
                     ["syntheticMode"] = "true",
                     ["enableMaskSpecified"] = "true",
-                    ["enableMaskHex"] = CurrentProducerMaskHex,
+                    ["enableMaskHex"] = DefaultProducerMaskHex,
                     ["readEventsMaxEvents"] = "16",
                     ["maxReadBatches"] = "4",
                     ["StressJsonlExpectedDriverRows"] = ExpectedStressDriverRows.ToString(),
@@ -550,7 +551,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["abiVersionMinor"] = "0",
                     ["capabilityFlagsHex"] = "0x00000000000003FF",
                     ["supportedProducerMaskHex"] = CurrentProducerMaskHex,
-                    ["defaultProducerMaskHex"] = CurrentProducerMaskHex,
+                    ["defaultProducerMaskHex"] = DefaultProducerMaskHex,
                     ["eventSchemaName"] = "ksword.sandbox.r0.event",
                     ["eventSchemaVersion"] = AbiVersion,
                     ["eventSchemaVersionHex"] = AbiVersionHex,
@@ -568,7 +569,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 Data =
                 {
                     ["requestedEnableMaskHex"] = "0x0000001B",
-                    ["previousEnableMaskHex"] = CurrentProducerMaskHex,
+                    ["previousEnableMaskHex"] = DefaultProducerMaskHex,
                     ["effectiveEnableMaskHex"] = "0x0000001B",
                     ["supportedProducerMaskHex"] = CurrentProducerMaskHex,
                     ["requestedEnableMaskNames"] = "driver|process|file|registry",

@@ -259,7 +259,7 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
         RequireData(abiSelfCheck, "backpressureObserved", "false");
         RequireData(abiSelfCheck, "highWatermark", "0");
         RequireData(abiSelfCheck, "capabilityFlagsCurrentHex", "0x000000000007FFFF");
-        RequireData(abiSelfCheck, "producerMaskCurrentHex", "0x0000003F");
+        RequireData(abiSelfCheck, "producerMaskCurrentHex", "0x0000007F");
         RequireData(abiSelfCheck, "producerMaskDefaultHex", "0x0000003F");
         RequireData(abiSelfCheck, "abiGuardPassed", "true");
         RequireData(abiSelfCheck, "eventHeaderSize", "104");
@@ -351,7 +351,7 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "ABI self-check should document TLS service-hint mapping.");
         RequireContains(
             abiSelfCheck.Data["networkFlowKeyPolicy"],
-            "flowKeyVersion=1",
+            "flowKey uses protocol|sourceEndpoint|destinationEndpoint",
             "ABI self-check should document flow-key version semantics.");
         RequireContains(
             abiSelfCheck.Data["networkCorrelationPolicy"],

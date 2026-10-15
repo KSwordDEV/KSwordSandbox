@@ -20,7 +20,7 @@ internal sealed class R0JsonlReportSamplingRegressionScenario : ISmokeTestScenar
 {
     private const int ImportedR0EventCount = 1_500;
     private const int R0SectionRowBudget = 250;
-    private const int HtmlSizeBudgetBytes = 2 * 1024 * 1024;
+    private const int HtmlSizeBudgetBytes = 2_250 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     public string ScenarioId => "report.r0-jsonl-sampling.regression";

@@ -104,7 +104,9 @@ internal sealed class StaticRulesMitreScenario : ISmokeTestScenario
         "T1021.006",
         "T1497.001",
         "T1555",
-        "T1555.003"
+        "T1555.003",
+        "T1078",
+        "T1547"
     ];
 
     public string ScenarioId => "static.rules-mitre-depth";
@@ -155,15 +157,15 @@ internal sealed class StaticRulesMitreScenario : ISmokeTestScenario
     private static void AssertSyntheticStaticRuleMatches(BehaviorRuleSet rules)
     {
         var engine = new RuleEngine(rules);
-        var findings = engine.Classify(
-        [
-            new SandboxEvent
-            {
-                EventType = "static.analysis.completed",
+        var staticAnalysisEvent = new SandboxEvent
+        {
+            EventType = "static.analysis.completed",
                 Source = "host",
                 Path = "synthetic-static-depth.exe",
                 Data =
                 {
+                    ["value"] = "https://example.com/payload",
+                    ["promoteStaticMetadataFinding"] = "true",
                     ["tags"] = string.Join(
                         ",",
                         [
@@ -201,13 +203,21 @@ internal sealed class StaticRulesMitreScenario : ISmokeTestScenario
                             "sandbox_evasion_string"
                         ])
                 }
-            }
+        };
+        // Newer static string rules keep event-type ownership explicit. Feed
+        // representative path/command rows alongside the aggregate analysis
+        // row so the contract exercises each supported producer lane.
+        var findings = engine.Classify(
+        [
+            staticAnalysisEvent,
+            staticAnalysisEvent with { EventType = "static.string.command" },
+            staticAnalysisEvent with { EventType = "static.string.path" }
         ]);
 
         var findingIds = findings.Select(finding => finding.RuleId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var ruleId in RequiredStaticRuleIds)
         {
-            SmokeAssert.True(findingIds.Contains(ruleId), $"Synthetic static tags should match '{ruleId}'.");
+            SmokeAssert.True(findingIds.Contains(ruleId), $"Synthetic static tags should match '{ruleId}'. Findings: {string.Join(",", findingIds)}.");
         }
     }
 

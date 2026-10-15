@@ -245,6 +245,16 @@
       ]
     },
     {
+      "id": "T1078",
+      "name": "Valid Accounts",
+      "categories": [
+        "persistence",
+        "defense-evasion",
+        "privilege-escalation",
+        "initial-access"
+      ]
+    },
+    {
       "id": "T1071.001",
       "name": "Web Protocols",
       "categories": [
@@ -615,6 +625,14 @@
     {
       "id": "T1546.015",
       "name": "Component Object Model Hijacking",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1547",
+      "name": "Boot or Logon Autostart Execution",
       "categories": [
         "persistence",
         "privilege-escalation"

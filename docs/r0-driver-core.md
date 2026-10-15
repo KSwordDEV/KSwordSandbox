@@ -110,7 +110,7 @@ reserved and is not advertised by the current driver. Until a signed driver
 build advertises that bit with matching payloads, token privilege adjustment is
 an ETW/audit fallback lane in the collector contract.
 
-## Producer runtime state 与 payload 版本
+## Producer runtime state and payload versions / Producer runtime state 与 payload 版本
 
 Each v1 event producer owns an explicit runtime state structure in the driver
 source instead of scattering loose callback globals:
@@ -181,7 +181,7 @@ Each payload comment in `KSwordSandboxDriverIoctl.h` states that `Version` must
 match the corresponding `KSWORD_SANDBOX_*_EVENT_VERSION` constant and `Size`
 must match `sizeof(the payload structure)` for the fixed v1 layout.
 
-## `GET_HEALTH` producer-mask snapshot
+## GET_HEALTH producer-mask snapshot
 
 `IOCTL_KSWORD_SANDBOX_GET_HEALTH` remains the legacy fixed-size probe, but the
 ABI 1.0 reserved space now carries a compact producer health snapshot for
@@ -246,7 +246,7 @@ suppresses future enqueue attempts for that event type and increments
 `TotalEventsSuppressed`; it does not unregister kernel callbacks and does not
 remove events that were already queued.
 
-## Queue 与 status counters
+## Queue and status counters / Queue 与 status counters
 
 `IOCTL_KSWORD_SANDBOX_GET_STATUS` returns `KSWORD_SANDBOX_STATUS_REPLY` with:
 

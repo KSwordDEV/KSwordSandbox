@@ -131,7 +131,7 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
     {
         var rendererSource = ReadRepositoryText(context, "src", "KSword.Sandbox.Core", "Reporting", "HtmlReportRenderer.cs");
 
-        RequireContains(rendererSource, "RawEventInlineLimit = 75", "Raw events should keep a slim fixed inline row limit.");
+        RequireContains(rendererSource, "RawEventInlineLimit = 30", "Raw events should keep a slim fixed inline row limit.");
         RequireContains(rendererSource, "RawEventPageSize = 25", "Raw events should keep compact bounded native pages.");
         RequireContains(rendererSource, "raw-events-shell", "Raw events should render inside a collapsed details shell.");
         RequireContains(rendererSource, "raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto", "Expanded raw events should have a finite scroll height.");

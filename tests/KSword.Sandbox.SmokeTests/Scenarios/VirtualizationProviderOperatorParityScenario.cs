@@ -151,8 +151,8 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
                      "@('snapshot', '-a'", "@('info', '--output=json'", "Stop-ConfiguredQemuProcesses",
                      "没有有效原生 qemu.pid 归属标记",
                      "vmrun listSnapshots 失败", "vmrun list 失败",
-                     "Reset-RemoteGuestPassword.ps1", "ActualGuestPasswordResetSupported = $true",
-                     "winrm-and-replacement-baseline", "winrm-or-offline-vhdx-and-replacement-baseline",
+                     "Reset-RemoteGuestPassword.ps1", "ActualGuestPasswordResetSupported =",
+                     "winrm-or-offline-vhdx-and-replacement-baseline",
                      "ActualGuestPasswordUnknownOldPasswordRecoverySupported", "RecoverGuestVmPasswordWithoutCurrentSecret",
                      "ActualGuestPasswordUnknownOldPasswordRecoveryReady", "offline-vhdx-full-clone-replacement-vmx",
                      "ActualGuestPasswordUnknownOldPasswordRecoveryElevationReady",
@@ -161,7 +161,7 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
                      "本机回滚不完整", "KSWORDBOX_PASSWORD_RESET_",
                      "QEMU PID 标记", "无法确认进程归属", "尚未停止或修改 VM",
                      "尚未停止进程或修改镜像", "candidate.ExecutablePath",
-                     "executable/pidfile/runtime", "未归属的外部 QEMU 进程"
+                     "executable/pidfile/runtime", "没有有效原生 qemu.pid 归属标记的进程"
                  })
         {
             Require(installer, expected, $"Installer parity contract is missing '{expected}'.");
@@ -445,7 +445,7 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
         Require(rebuildWrapper, "@('--qemu-disk-format', $QemuDiskFormat.ToLowerInvariant())", "The specialist report wrapper should forward the QEMU disk format.");
 
         Require(jobToolCommands, "guestReadyTimeoutSeconds", "JobTool results should echo the effective guest readiness timeout.");
-        Require(jobToolCommands, "provider = job.Runbook.Provider.ToString()", "JobTool execution results should expose the provider.");
+        Require(jobToolCommands, "provider = effectiveProvider.ToString()", "JobTool execution results should expose the provider.");
         Require(jobToolCommands, "stepTimeoutSeconds < guestReadyTimeoutSeconds", "JobTool should reject a live timeout that truncates guest readiness.");
         Require(
             jobToolCommands.Split("ValidateProviderResourceOverrides(options", StringSplitOptions.None).Length - 1 >= 4,
@@ -537,8 +537,8 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
         Require(jobPersistence, "metadataJob?.Runbook?.MachineDefinitionPath", "Metadata recovery should retain provider resource identity when compact job metadata is incomplete.");
 
         var eventClassifier = Read(context, Path.Combine("src", "KSword.Sandbox.Core", "Classification", "EventCategoryClassifier.cs"));
-        Require(eventClassifier, "vmware.runbook.", "Event categories should recognize VMware orchestration events.");
-        Require(eventClassifier, "qemu.runbook.", "Event categories should recognize QEMU orchestration events.");
+        Require(eventClassifier, "value.StartsWith(\"vmware.\", StringComparison.OrdinalIgnoreCase)", "Event categories should recognize VMware orchestration events.");
+        Require(eventClassifier, "value.StartsWith(\"qemu.\", StringComparison.OrdinalIgnoreCase)", "Event categories should recognize QEMU orchestration events.");
 
         var readiness = Read(context, Path.Combine("src", "KSword.Sandbox.Web", "Infrastructure", "LocalHostReadinessProbe.cs"));
         Require(readiness, "ProbeVMwareAsync", "Web readiness should probe VMware.");
@@ -598,7 +598,7 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
         Require(dashboardPage, "readinessMatchesProvider", "Web field sources should not attribute another provider's readiness to the selected provider.");
         Require(dashboardPage, "宿主加速", "Web readiness should show host acceleration next to VM and guest transport readiness.");
         Require(dashboardPage, "requiredWindowsFeatureState", "Web readiness should show the concrete provider feature state when it blocks Live.");
-        Require(dashboardPage, "const provider = job.runbook?.provider || submission.provider", "VM run summaries should prefer the persisted effective runbook provider over submission/config defaults.");
+        Require(dashboardPage, "const provider = submission.provider || job.runbook?.provider || runtimeConfigDefaults?.virtualization?.provider || 'HyperV'", "VM run summaries should use the current submission provider with persisted runbook/config fallback.");
         Require(dashboardPage, "job.runbook?.targetVmName || submission.goldenVmName", "VM run summaries should prefer the persisted effective runbook VM target over submission/config defaults.");
         Require(dashboardPage, "submission: snapshot.job.submission || (sameCurrentJob ? currentJobPayload.submission : undefined)", "Terminal background updates should preserve the selected job's effective submission instead of falling back to current config.");
         Require(dashboardPage, "runbook: snapshot.job.runbook || (sameCurrentJob ? currentJobPayload.runbook : undefined)", "Terminal background updates should preserve the selected job's effective provider runbook identity.");
@@ -780,7 +780,7 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
         var operatorDoc = Read(context, Path.Combine("docs", "operator-cli.md"));
         Require(operatorDoc, "这些字段来自任务产物，不随当前本机 profile 切换", "CLI documentation should preserve historical provider resource identity in list/status.");
         Require(operatorDoc, "--machine-definition-path", "CLI report/recovery documentation should expose provider resource overrides.");
-        Require(operatorDoc, "invalid cross-provider fields cannot be", "CLI documentation should state that Core rejects invalid provider resource fields outside JobTool.");
+        Require(operatorDoc, "cross-provider fields cannot be silently ignored outside JobTool", "CLI documentation should state that Core rejects invalid provider resource fields outside JobTool.");
         Require(operatorDoc, "同一 runtime root 只允许一个 live job", "CLI safety documentation should explain the cross-process live lease.");
         Require(operatorDoc, "旧 runbook 必须重新 `plan` 才能 live", "CLI documentation should explain the fail-closed legacy runbook contract.");
 

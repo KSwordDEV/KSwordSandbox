@@ -94,7 +94,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
 ```
 
 `Prepare-GuestPayload.ps1`、`Prepare-HarmlessSample.ps1` 会生成 payload/sample/build 输出；这些都必须保持在
-`D:\Temp\KSwordSandbox` 等仓库外路径，不要提交。
+`D:\Temp\KSwordSandbox` 等仓库外路径，不要提交；generated harmless sample binaries stay out of git。
 
 ## 历史 go/no-go 快照
 

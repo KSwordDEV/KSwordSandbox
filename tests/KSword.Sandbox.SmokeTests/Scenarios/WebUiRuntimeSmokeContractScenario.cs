@@ -140,7 +140,7 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "not configured, not found, rate limits", "Live raw monitor page should explain quiet VirusTotal states in English.");
 
         RequireContains(settingsPage, "VirusTotal API Key", "Settings page should expose the VirusTotal API key form.");
-        RequireContains(settingsPage, "does not upload samples", "Settings page should clearly state that samples are not uploaded.");
+        RequireContains(settingsPage, "does not upload sample bytes", "Settings page should clearly state that sample bytes are not uploaded.");
         RequireContains(settingsPage, "不会产生噪音日志", "Settings page should state that missing VirusTotal keys do not create noisy logs.");
 
         RequireContains(doc, BaseUrlEnvironmentVariable, "WebUI framework doc should describe the runtime smoke base URL environment variable.");

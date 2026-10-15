@@ -5,7 +5,7 @@
 > `docs/webui-real-r0-e2e.md`，规则清单见 `docs/behavior-rule-matrix.md`，发布差距审计见
 > `docs/v1-release-gap-audit.md`。本文不声称本轮重新运行了 Hyper-V live、Notepad 5s 或真实样本测试。
 
-## 当前完成度估计（不含测试覆盖）
+## Overall v1 deliverable / 当前完成度估计（不含测试覆盖）
 
 这些百分比衡量“当前开源 MVP 可务实做到的范围”，不包含云端多租户、海量样本库、完整家族归因或默认真实 R0 驱动签名。
 本轮快照反映本地 v28 发布准备提交 `dd33924`（`Advance v28 telemetry and release hardening`）的源码能力：
@@ -21,6 +21,7 @@ Guest artifact event quality、R0 ABI/event quality、报告叙事、自噪声�
 - Guest Agent R3 采集：**93%**
 - R0Collector 用户态采集链：**91%**
 - R0 driver / kernel producer：**78%**
+- R0 Driver + R0Collector：**84%**
 - 静态分析与行为规则：**97%**
 - 网络 sidecar / PCAP 元数据：**91%**
 - Artifact import / host index / download：**95%**
@@ -32,6 +33,8 @@ Guest artifact event quality、R0 ABI/event quality、报告叙事、自噪声�
 ## 已具备的交付证据
 
 - WebUI/API 可以选择或上传 `.exe`，为 Hyper-V、VMware 或 QEMU 创建 job 后进入独立实时监控页（live monitor）；显式 live 才会操作所选 provider VM。
+- local WebUI/API pipeline smoke 已覆盖 health、扫描、dry-run、live-events、报告导入和中英文报告端点；本地 smoke 不启动真实 VM。
+- local WebUI/API pipeline smoke：health、文件扫描、dry-run job、live events、guest import 和中英文报告链路。
 - Live monitor 优先消费 `/api/jobs/{jobId}/progress/stream` 真实 runbook step SSE；SSE 不可用时回退 durable `runbook-progress.json` 和 `/runbook/progress` polling。
 - 主视图默认不展开 runbook command、stdout、stderr；需要深度排障时再打开 execution-flow 或复制 `runbook-execution.json`。
 - Web live artifact 面板展示 artifact index 总览、safe selector、download href、duplicate grouping 和 rejection diagnostics；下载解析必须命中 job artifact index。
@@ -74,7 +77,7 @@ git diff --check
 
 `scripts/Test-ReleaseReadiness.ps1` 生成的 `release-readiness.json`/`.md` 是非破坏性审阅物料；它不是 fresh live evidence，也不证明 runtime payload 完整交付。
 
-## 仍需发布经理确认的 P0/P1 差距
+## Remaining P0 gaps / 仍需发布经理确认的 P0/P1 差距
 
 P0 当前不是“必须先写代码”，而是候选提交发布前必须重新确认的门禁：
 

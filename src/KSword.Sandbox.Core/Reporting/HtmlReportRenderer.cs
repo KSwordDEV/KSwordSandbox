@@ -40,23 +40,23 @@ public sealed class HtmlReportRenderer
     private const int ArtifactPreviewCharacterLimit = 8_000;
     private const long ArtifactPreviewImageByteLimit = 2 * 1024 * 1024;
     private const int ProcessTreeDefaultOpenDepth = 1;
-    private const int TimelineEventInlineLimit = 120;
-    private const int TimelineGroupEventInlineLimit = 12;
-    private const int EventTableInlineLimit = 80;
+    private const int TimelineEventInlineLimit = 60;
+    private const int TimelineGroupEventInlineLimit = 10;
+    private const int EventTableInlineLimit = 40;
     private const int StaticStringInlineLimit = 200;
-    private const int RawEventInlineLimit = 75;
+    private const int RawEventInlineLimit = 30;
     private const int RawEventPageSize = 25;
     private const int RawEventIndexGroupInlineLimit = 16;
     private const int R0HealthEvidenceInlineLimit = 12;
     private const int R0SelfNoiseExampleLimit = 8;
-    private const int EventCompactFieldInlineLimit = 28;
-    private const int EventCompactFieldValueLimit = 220;
+    private const int EventCompactFieldInlineLimit = 20;
+    private const int EventCompactFieldValueLimit = 40;
     private const int FindingEvidenceDataPairLimit = 16;
     private const int FindingEvidenceValueLimit = 180;
     private const int RelationshipCardInlineLimit = 24;
     private const int RelationshipArtifactInlineLimit = 6;
     private const int EvidenceStoryInlineLimit = 12;
-    private const int EventExplorerInlineLimit = 120;
+    private const int EventExplorerInlineLimit = 40;
 
     private sealed record TimelineGroup(
         string Window,
@@ -1938,12 +1938,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var healthRows = report.Events.Count(IsCollectionHealthEvent);
         var vtQuiet = report.Events.Count(IsVirusTotalQuietStateEvent);
         var excluded = report.Events.Count(IsExcludedFromBehaviorStoryEvent);
-        var examples = report.Events
-            .Where(IsExcludedFromBehaviorStoryEvent)
-            .Where(evt => !IsLowValueOperationalEvent(evt))
-            .Take(4)
-            .Select(EventOneLine)
-            .ToList();
         var copy = string.Join(
             Environment.NewLine,
             [
@@ -1956,8 +1950,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 $"collectorSelfNoise={collectorSelfNoise}",
                 $"collectionHealthRows={healthRows}",
                 $"vtQuietRows={vtQuiet}",
-                "completeSource=Raw normalized events/report.json; pagination/folding unchanged",
-                .. examples
+                "completeSource=Raw normalized events/report.json; pagination/folding unchanged"
             ]);
 
         html.AppendLine($"<div class=\"compact-evidence-summary copyable\" data-copy=\"{A(copy)}\"><strong>Graph self-noise boundary / 图谱自噪声边界</strong><br>");
@@ -2006,9 +1999,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 "excludedReasonHits:",
                 .. reasonCounts.Select(reason => $"{reason.Label}={reason.Count}"),
                 "sampleExamples:",
-                .. sampleEvents.Take(5).Select(EventOneLine),
-                "excludedExamples:",
-                .. excludedEvents.Where(evt => !IsLowValueOperationalEvent(evt)).Take(5).Select(EventOneLine)
+                .. sampleEvents.Take(5).Select(EventOneLine)
             ]);
 
         html.AppendLine("<h3>Behavior story routing</h3>");
