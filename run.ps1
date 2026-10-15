@@ -839,27 +839,17 @@ function Get-WebUiLaunchTarget {
     $publishedExeExists = Test-Path -LiteralPath $publishedExe -PathType Leaf
     $publishedDllExists = Test-Path -LiteralPath $publishedDll -PathType Leaf
 
-    if ($projectExists) {
-        return [pscustomobject][ordered]@{
-            Kind = 'SourceProject'
-            Path = $projectPath
-            SourceProjectPath = $projectPath
-            SourceProjectExists = $true
-            PublishedWebRoot = $publishedRoot
-            PublishedExeExists = $publishedExeExists
-            PublishedDllExists = $publishedDllExists
-            RequiresDotNet = $true
-            SupportsNoBuild = $true
-            RecommendedAction = ''
-        }
-    }
-
+    # Prefer a published host whenever it is present. A source checkout may
+    # also contain app\host-web (for example after a local release build), and
+    # launching dotnet run in that case needlessly requires the SDK and can
+    # rebuild the application on every double-click. The portable package has
+    # no source project, while a developer checkout still falls back to it.
     if ($publishedExeExists) {
         return [pscustomobject][ordered]@{
             Kind = 'PublishedExe'
             Path = $publishedExe
             SourceProjectPath = $projectPath
-            SourceProjectExists = $false
+            SourceProjectExists = $projectExists
             PublishedWebRoot = $publishedRoot
             PublishedExeExists = $true
             PublishedDllExists = $publishedDllExists
@@ -874,13 +864,28 @@ function Get-WebUiLaunchTarget {
             Kind = 'PublishedDll'
             Path = $publishedDll
             SourceProjectPath = $projectPath
-            SourceProjectExists = $false
+            SourceProjectExists = $projectExists
             PublishedWebRoot = $publishedRoot
             PublishedExeExists = $false
             PublishedDllExists = $true
             RequiresDotNet = $true
             SupportsNoBuild = $false
             RecommendedAction = '下一步：如这是便携包，请确认 app\host-web 来自发布流水线；如这是源码仓库，请确认 src\KSword.Sandbox.Web 项目存在。'
+        }
+    }
+
+    if ($projectExists) {
+        return [pscustomobject][ordered]@{
+            Kind = 'SourceProject'
+            Path = $projectPath
+            SourceProjectPath = $projectPath
+            SourceProjectExists = $true
+            PublishedWebRoot = $publishedRoot
+            PublishedExeExists = $publishedExeExists
+            PublishedDllExists = $publishedDllExists
+            RequiresDotNet = $true
+            SupportsNoBuild = $true
+            RecommendedAction = ''
         }
     }
 
