@@ -11651,6 +11651,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     var explorerRows = Array.prototype.slice.call(explorer.querySelectorAll('[data-event-row]'));
     var explorerSearch = explorer.querySelector('[data-event-search]');
     var explorerStatus = explorer.querySelector('[data-event-count]');
+    var explorerChinese = document.documentElement.lang === 'zh-CN';
     var explorerFilters = {
       type: explorer.querySelector('[data-event-type]'),
       source: explorer.querySelector('[data-event-source]'),
@@ -11672,7 +11673,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         row.style.display = matches ? '' : 'none';
         if (matches) { visible += 1; }
       });
-      if (explorerStatus) { explorerStatus.textContent = visible + ' matching rows; filters apply to the visible evidence table.'; }
+      if (explorerStatus) {
+        explorerStatus.textContent = explorerChinese
+          ? visible + ' 个匹配行；筛选器作用于可见证据表。'
+          : visible + ' matching rows; filters apply to the visible evidence table.';
+      }
     }
     Object.keys(explorerFilters).forEach(function (key) {
       if (explorerFilters[key]) { explorerFilters[key].addEventListener('change', applyExplorerFilters); }
