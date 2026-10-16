@@ -38,6 +38,23 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
             });
         }
 
+        for (var index = 0; index < 80; index++)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = "process.snapshot",
+                Timestamp = timestamp.AddMilliseconds(400 + index),
+                Source = "guest",
+                ProcessName = "background.exe",
+                Data =
+                {
+                    ["baselineSnapshot"] = "true",
+                    ["behaviorCounted"] = "false",
+                    ["nonbehavior"] = "true"
+                }
+            });
+        }
+
         // Dynamic evidence must survive the report quota even when a process
         // burst or collector noise fills the ordinary inline budget.
         const int AttributedDynamicRows = 120;
@@ -60,6 +77,26 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
                 }
             });
         }
+
+        // Unknown/environment dynamic rows are evidence too. They must remain
+        // visible with their correlation boundary instead of disappearing into
+        // the small diagnostic quota.
+        events.Add(new SandboxEvent
+        {
+            EventType = "network.tcp",
+            Timestamp = timestamp.AddMilliseconds(2200 + AttributedDynamicRows),
+            Source = "guest",
+            ProcessId = 7777,
+            Data =
+            {
+                ["remote"] = "203.0.113.77:443",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["sampleCorrelation"] = "unknown",
+                ["sampleCorrelationStatus"] = "unknown",
+                ["sampleCorrelationReason"] = "network-row-has-no-sample-owner-pid-join"
+            }
+        });
 
         events.Add(new SandboxEvent
         {
@@ -464,8 +501,13 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireEvent(result.Events, "process.start");
         RequireEvent(result.Events, "process.exit");
         SmokeAssert.True(
-            result.Events.Count(evt => string.Equals(evt.EventType, "network.tcp", StringComparison.OrdinalIgnoreCase)) == AttributedDynamicRows,
+            result.Events.Count(evt => string.Equals(evt.EventType, "network.tcp", StringComparison.OrdinalIgnoreCase)) == AttributedDynamicRows + 1,
             "Every sample-attributed dynamic row must remain in report sampling even when it exceeds MaxInlineEvents.");
+        var unknownNetwork = result.Events.Single(evt =>
+            string.Equals(evt.EventType, "network.tcp", StringComparison.OrdinalIgnoreCase) &&
+            evt.Data.TryGetValue("sampleCorrelation", out var correlation) &&
+            string.Equals(correlation, "unknown", StringComparison.OrdinalIgnoreCase));
+        RequireData(unknownNetwork, "sampleCorrelationReason", "network-row-has-no-sample-owner-pid-join");
         RequireData(guestImportEvent, "guestImportMarker", "true");
         RequireData(guestImportEvent, "terminalStatus", "Completed");
 

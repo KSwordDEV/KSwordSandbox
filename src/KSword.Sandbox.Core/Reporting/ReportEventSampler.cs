@@ -1114,12 +1114,14 @@ public static class ReportEventSampler
             return ReportSamplingBucket.GeneralBehaviorEvidence;
         }
 
-        // Dynamic actions attributed to the submitted sample are evidence,
-        // even if a rule also references the same row. Route them through the
-        // complete dynamic-evidence bucket so process bursts cannot consume
-        // the global inline quota and hide file, registry, startup,
-        // scheduled-task, service, or network rows.
-        if (IsDynamicActionEvidenceEvent(evt) && IsSampleAttributedDynamicActionEvent(evt))
+        // Every normalized dynamic action is evidence, including rows that
+        // remain environment/unknown after correlation. Route all of them
+        // through the complete dynamic-evidence bucket so the report cannot
+        // lose TCP edges, rename/delete rows, registry writes, startup/task
+        // changes, or PowerShell children merely because attribution is weak.
+        // Correlation fields still decide whether a row contributes to a
+        // sample verdict; retention and attribution are separate concerns.
+        if (IsDynamicActionEvidenceEvent(evt))
         {
             return ReportSamplingBucket.DynamicActionEvidence;
         }
@@ -1171,6 +1173,13 @@ public static class ReportEventSampler
     private static bool IsDynamicActionEvidenceEvent(SandboxEvent evt)
     {
         var type = NormalizeEventType(evt.EventType);
+        if (type.Contains(".snapshot", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains(".observed", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains(".diff", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         return type.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
@@ -1178,14 +1187,6 @@ public static class ReportEventSampler
             type.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("service.", StringComparison.OrdinalIgnoreCase) &&
                 !type.Contains("snapshot", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsSampleAttributedDynamicActionEvent(SandboxEvent evt)
-    {
-        return EventDataBoolTrue(evt, "behaviorCounted", "sampleBehaviorCandidate", "strongSampleCorrelation") ||
-            EventDataEqualsAny(evt, "sampleCorrelation", "confirmed", "probable", "candidate") ||
-            EventDataEqualsAny(evt, "sampleCorrelationStatus", "correlated", "confirmed", "probable", "candidate") ||
-            EventDataEqualsAny(evt, "evidenceDisposition", "behavior-candidate", "sample-attributed");
     }
 
     private static bool IsStrongSampleBehaviorEvent(SandboxEvent evt)
