@@ -363,7 +363,7 @@ WebUI 下载 selector 有意保持冗余且相对：`relativePath`、`safeLink` 
 ## 可选抓包与外部导入 / Optional packet capture and external import
 
 `--packet-capture`、`--pcap` 和 `--network-capture` 是显式启用开关（opt-in switches）。它们在样本运行前启动 Windows `pktmon`，运行后停止，
-用 `pktmon etl2pcap` 转换 ETL trace，并在成功时写出 `packet-captures/*.pcapng`。Raw ETL diagnostics 保留在
+优先用 `pktmon etl2pcap` 转换 ETL trace；Windows 10 20H2 等旧版 guest 会回退到 `pktmon pcapng`，并在成功时写出 `packet-captures/*.pcapng`。Raw ETL diagnostics 保留在
 `packet-capture-diagnostics/` 下，不视为 packet-capture artifacts。
 
 抓包仍然 safe-by-default：除非出现上述 opt-in switch，否则不会启动 sniffer。`pktmon` 缺失、权限不足、系统已有 active capture

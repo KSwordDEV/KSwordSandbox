@@ -362,7 +362,8 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `sampleBehaviorCandidate=false`, and `zhMessage`/`zhHint` when available.
 - `packet_capture.skipped` and `packet_capture.failed` when packet capture was
   requested but Windows, rights, an existing capture session, `pktmon start`,
-  `pktmon stop`, or `pktmon etl2pcap` prevents usable output. These events are
+  `pktmon stop`, or both compatible ETL conversion spellings (`etl2pcap`, with
+  an older-guest fallback to `pcapng`) prevent usable output. These events are
   non-fatal and keep stdout/stderr suppressed while recording exit code,
   timeout, and reason fields.
 - `probe.timeout`, `probe.failed`, and `probe.canceled` for per-probe isolation.
@@ -534,7 +535,7 @@ host artifact index 将这些文件分类为 `memory-dump`，不新增共享 art
 
 `--packet-capture`（别名 `--pcap`、`--network-capture`）会围绕样本执行窗口启用一次
 best-effort Windows `pktmon` 抓包。probe 在 `BeforeStart` 阶段启动，在 `AfterRun` 停止，
-使用 `pktmon etl2pcap` 转换 ETL，并把 `packet-captures/*.pcapng` 写到 `--out`。
+优先使用 `pktmon etl2pcap` 转换 ETL，并把 `packet-captures/*.pcapng` 写到 `--out`；Windows 10 20H2 等旧版 guest 若返回未知命令，会有界回退到 `pktmon pcapng`。报告中的 `conversionCommand` 记录实际采用的命令，失败时仍保留 ETL 诊断文件。
 
 网络抓包有意默认关闭，因为它可能捕获 guest 内无关网络流量；不同镜像策略下也可能需要
 elevated guest 权限。缺少 `pktmon`、access denied、已有 active capture 冲突、stop 失败或
