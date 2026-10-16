@@ -3337,7 +3337,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
         var status = FirstEventDataValue(evt, "auditPolicyStatus", "captureState", "status", "reason");
         return TextEqualsAny(status ?? string.Empty, "partial", "targetPoliciesNotFullySuccessEnabled", "auditPolicyCoverageGap") ||
-            EventTextContainsAny(evt, "auditPolicyCoverageGap", "targetPoliciesNotFullySuccessEnabled");
+            EventTextContainsAny(evt, "auditPolicyCoverageGap", "targetPoliciesNotFullySuccessEnabled", "auditPolicyPartial") ||
+            EventDataBoolFalse(evt, "auditPolicyReady", "auditPolicyFullySuccessEnabled");
+    }
+
+    private static bool IsPacketCaptureFailureEvent(SandboxEvent evt)
+    {
+        return TextContainsAny(evt.EventType, "packet_capture.failed", "packet-capture.failed", "pcap.failed", "pktmon.failed") ||
+            EventTextContainsAny(evt, "pktmonStartFailed", "pktmonStopFailed", "pktmonConvertFailed");
     }
 
     private static void AppendHealthPill(StringBuilder html, string label, string state, string detail)
@@ -3820,7 +3827,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 ArtifactKind.PacketCapture,
                 artifacts,
                 report.Events,
-                evt => evt.EventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase) || evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase),
+                evt => evt.EventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase) ||
+                    evt.EventType.StartsWith("packet-capture.", StringComparison.OrdinalIgnoreCase) ||
+                    evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
+                    IsPacketCaptureFailureEvent(evt),
                 "Opt-in pktmon/PCAP artifacts and imported DNS/HTTP/TLS/flow rows.",
                 FindArtifactEvidenceMatrixRow(matrixRows, "packet-captures")),
             BuildArtifactCollectionStatusCard(
@@ -3925,7 +3935,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         if (artifacts.Any(artifact =>
                 string.Equals(artifact.CaptureState, "failed", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(MetadataValue(artifact.Metadata, "captureState"), "failed", StringComparison.OrdinalIgnoreCase)) ||
-            events.Any(evt => evt.EventType.Contains("failed", StringComparison.OrdinalIgnoreCase)))
+            events.Any(evt => evt.EventType.Contains("failed", StringComparison.OrdinalIgnoreCase) || IsPacketCaptureFailureEvent(evt)))
         {
             return artifacts.Count > 0 ? "partial" : "failed";
         }
@@ -7685,7 +7695,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         // It belongs in raw evidence unless the classifier explicitly marks
         // it confirmed or probable for the submitted sample.
         if (TextEqualsAny(evt.EventType, "process.new") &&
-            !HasConfirmedOrProbableSampleCorrelation(evt))
+            !HasProcessNewAttribution(evt))
         {
             return false;
         }
@@ -7760,6 +7770,35 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         return EventDataBoolTrue(evt, "strongSampleCorrelation", "strong_sample_correlation") ||
             TextEqualsAny(correlation ?? string.Empty, "confirmed", "probable") ||
             TextEqualsAny(status ?? string.Empty, "confirmed", "probable");
+    }
+
+    private static bool HasProcessNewAttribution(SandboxEvent evt)
+    {
+        if (HasConfirmedOrProbableSampleCorrelation(evt))
+        {
+            return true;
+        }
+
+        return EventDataBoolTrue(evt, "lineageIncludesRoot", "lineage_includes_root", "sampleRootLineage", "sample_root_lineage") &&
+            !HasExplicitWeakOrEnvironmentalCorrelation(evt);
+    }
+
+    private static bool HasExplicitWeakOrEnvironmentalCorrelation(SandboxEvent evt)
+    {
+        var correlation = FirstEventDataValue(evt, "sampleCorrelation", "sample_correlation");
+        if (TextEqualsAny(correlation ?? string.Empty, "environment", "unknown", "uncorrelated", "nonbehavior", "not-sample", "not_sample"))
+        {
+            return true;
+        }
+
+        var status = FirstEventDataValue(evt, "sampleCorrelationStatus", "sample_correlation_status");
+        if (TextEqualsAny(status ?? string.Empty, "environment", "unknown", "uncorrelated", "session-related", "session-only", "not-correlated", "not_correlated"))
+        {
+            return true;
+        }
+
+        var strength = FirstEventDataValue(evt, "sampleCorrelationStrength", "sample_correlation_strength");
+        return TextEqualsAny(strength ?? string.Empty, "none", "weak", "session-only", "unattributed");
     }
 
     private static bool IsSampleBehaviorSecurityPrivilegeEvent(SandboxEvent evt) =>
@@ -9102,7 +9141,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         // it cannot contribute to the primary behavior verdict.
         if (string.Equals(finding.RuleId, "process-new", StringComparison.OrdinalIgnoreCase) &&
             (finding.Evidence.Count == 0 ||
-             finding.Evidence.All(evt => !HasConfirmedOrProbableSampleCorrelation(evt))))
+             finding.Evidence.All(evt => !HasProcessNewAttribution(evt))))
         {
             return true;
         }

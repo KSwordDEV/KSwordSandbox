@@ -599,6 +599,17 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                     Timestamp = DateTimeOffset.UtcNow,
                     Source = "guest",
                     Data = { ["captureWasNotStarted"] = "true" }
+                },
+                new SandboxEvent
+                {
+                    EventType = "packet_capture.failed",
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Source = "guest",
+                    Data =
+                    {
+                        ["reason"] = "pktmonStartFailed",
+                        ["collectionName"] = "packet-captures"
+                    }
                 }
             ]
         };
@@ -622,6 +633,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(html, "coverage gap · captureWasNotStarted", "Report UX smoke should preserve ETW manifest captureWasNotStarted state.");
         RequireContains(html, "manifest enabled=True; status=failed", "Report UX smoke should show manifest enabled/status evidence.");
         RequireContains(html, "captureWasNotStarted=True", "Report UX smoke should show ETW captureWasNotStarted evidence.");
+        RequireContains(html, "Packet captures", "Report UX smoke should render packet capture collection status.");
+        RequireContains(html, "coverage gap · failed", "Report UX smoke should show packet capture failure as a coverage gap.");
+        RequireContains(html, "pktmonStartFailed", "Report UX smoke should preserve the pktmon start failure marker.");
     }
 
     /// <summary>
