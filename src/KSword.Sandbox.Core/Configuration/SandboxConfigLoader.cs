@@ -148,9 +148,15 @@ public static class SandboxConfigLoader
             GuestPayloadRoot = ExpandPath(config.Paths.GuestPayloadRoot, repositoryRoot)
         };
 
+        var configuredDriverPath = ExpandOptionalPath(config.Driver.HostDriverPath, repositoryRoot);
         var driver = config.Driver with
         {
-            HostDriverPath = ExpandOptionalPath(config.Driver.HostDriverPath, repositoryRoot)
+            // A development checkout often already contains the native
+            // driver output. Use it when no explicit path was configured so
+            // real-R0 planning can reach guest preflight without a manual
+            // path edit. If no build output exists, keep null and let the
+            // existing readiness check fail closed with its remediation.
+            HostDriverPath = configuredDriverPath ?? FindBuiltDriver(repositoryRoot)
         };
 
         var vmware = config.VMware with
@@ -224,6 +230,22 @@ public static class SandboxConfigLoader
     private static string? ExpandOptionalPath(string? path, string repositoryRoot)
     {
         return string.IsNullOrWhiteSpace(path) ? null : ExpandPath(path, repositoryRoot);
+    }
+
+    /// <summary>
+    /// Finds a driver produced by this checkout when no explicit host path was
+    /// configured. Release output wins over debug output; null means there is
+    /// no built driver to stage.
+    /// </summary>
+    private static string? FindBuiltDriver(string repositoryRoot)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(repositoryRoot, "driver", "KSword.Sandbox.Driver", "x64", "Release", "KSword.Sandbox.Driver.sys"),
+            Path.Combine(repositoryRoot, "driver", "KSword.Sandbox.Driver", "x64", "Debug", "KSword.Sandbox.Driver.sys")
+        };
+
+        return candidates.FirstOrDefault(File.Exists);
     }
 
     /// <summary>

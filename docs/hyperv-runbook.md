@@ -25,7 +25,9 @@ preflight 命令见 `docs/hyperv-readiness.md`；脚本化 PlanOnly / WhatIf / L
 12. 可选安装 driver service（`install-driver-service`），仅 real R0 且 `.sys` path 有效时生成。
 13. 通过 PowerShell Direct 异步启动 `KSword.Sandbox.Agent.exe`。
 14. driver collection 启用时传入 `--driver-events C:\KSwordSandbox\out\<job-id-n>\driver-events.jsonl`、
-    `--r0collector`、`--driver-device`；mock mode 会额外加入 `--r0-mock` / R0Collector `--mock`。
+    `--r0collector`、`--driver-device` 和 `--r0-enable-mask 0x3F`，确保稳定的
+    driver/process/image/file/registry/network producer 全部请求；draft handle-access 位不会被隐式打开。
+    mock mode 会额外加入 `--r0-mock` / R0Collector `--mock`。
 15. Guest Agent 运行期间周期性将 guest output 复制回 `D:\Temp\KSwordSandbox\jobs\<job-id-n>\guest`。
 16. 最终复制 guest JSON/JSONL output，并验证 `events.json`、`agent.pid`、`agent.exit` 到达 host。
 17. 停止 VM，并按配置再次还原 clean checkpoint。
@@ -110,17 +112,19 @@ Get-VMIntegrationService -VMName 'KSwordSandbox-Win10-Golden' |
 
 - `driver.enabled=true`
 - `driver.useMockCollector=false`
-- `driver.hostDriverPath` 指向存在的、已本地 test-signed 的 `.sys`
+- `driver.hostDriverPath` 指向存在的、已本地 test-signed 的 `.sys`；若留空，配置加载器会按
+  `driver/KSword.Sandbox.Driver/x64/Release/KSword.Sandbox.Driver.sys`、再按 Debug 顺序
+  自动探测当前仓库中已构建的驱动。
 
-如果 `driver.enabled=true` 且 `driver.useMockCollector=false`，但 `driver.hostDriverPath` 为空，runbook 无法把
-driver 复制进 guest，也不会生成 `install-driver-service`。后续 R0Collector 可能因打开
-`\\.\KSwordSandboxDriver` 失败而返回 `deviceUnavailable` / `win32Error=2`。
+如果配置路径为空且上述两个构建输出都不存在，runbook 仍会安全拒绝 staging，不会生成
+`install-driver-service`；后续 R0Collector 可能因打开 `\\.\KSwordSandboxDriver` 失败而返回
+`deviceUnavailable` / `win32Error=2`。
 
 生成的 runbook 会先发出非变更 `check-r0-driver-config` preflight；脚本 E2E plan 也会在任何
 VM mutation 前记录 `R0 driver host path configuration` 失败。修复方式：
 
 ```powershell
-# 真实 R0：记录仓库外 test-signed .sys。
+# 真实 R0：仓库已有构建输出时可省略；若使用仓库外 test-signed .sys，显式记录路径。
 .\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>
 
 # 只验证通路：改用 mock collector。

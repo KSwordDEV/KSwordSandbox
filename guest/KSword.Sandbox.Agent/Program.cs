@@ -492,6 +492,11 @@ internal static class AgentProgram
             startInfo.ArgumentList.Add(options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture));
             startInfo.ArgumentList.Add("--driver-event-sample-stride");
             startInfo.ArgumentList.Add(options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture));
+            if (options.R0CollectorEnableMask is uint enableMask)
+            {
+                startInfo.ArgumentList.Add("--enable-mask");
+                startInfo.ArgumentList.Add($"0x{enableMask:X8}");
+            }
             if (options.R0Mock)
             {
                 startInfo.ArgumentList.Add("--mock");
@@ -869,6 +874,7 @@ internal static class AgentProgram
                 ["r0MaxEventsPerRead"] = options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture),
                 ["r0MaxReadBatches"] = options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture),
                 ["r0DriverEventSampleStride"] = options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture),
+                ["r0EnableMask"] = options.R0CollectorEnableMask is uint enableMask ? $"0x{enableMask:X8}" : string.Empty,
                 ["r0BackpressureMitigation"] = "unlimited-read-batches-with-stride-sampling",
                 ["r0Mock"] = options.R0Mock.ToString(),
                 ["stdoutPath"] = standardOutputPath,
@@ -1321,6 +1327,12 @@ internal static class AgentProgram
             "--driver-event-sample-stride",
             options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture)
         };
+
+        if (options.R0CollectorEnableMask is uint enableMask)
+        {
+            arguments.Add("--enable-mask");
+            arguments.Add($"0x{enableMask:X8}");
+        }
 
         if (options.R0Mock)
         {
@@ -3451,6 +3463,13 @@ internal sealed record AgentOptions
 
     public int R0CollectorDriverEventSampleStride { get; init; } = AgentProgram.DefaultR0CollectorDriverEventSampleStride;
 
+    /// <summary>
+    /// Optional stable producer mask forwarded to R0Collector. The guest
+    /// agent keeps this separate from its own CLI so the value cannot be
+    /// silently ignored as an unknown collector switch.
+    /// </summary>
+    public uint? R0CollectorEnableMask { get; init; }
+
     public bool CaptureScreenshots { get; init; }
 
     public ScreenshotProbeOptions ScreenshotOptions { get; init; } = ScreenshotProbeOptions.Default;
@@ -3546,6 +3565,16 @@ internal sealed record AgentOptions
         var r0MaxEventsPerRead = ParseBoundedOption(values, 1, 1024, AgentProgram.DefaultR0CollectorMaxEventsPerRead, "r0-max-events", "r0-read-events-max-events", "driver-max-events");
         var r0MaxReadBatches = ParseBoundedOption(values, 0, 1_000_000, AgentProgram.DefaultR0CollectorMaxReadBatches, "r0-max-read-batches", "driver-max-read-batches");
         var r0DriverEventSampleStride = ParseBoundedOption(values, 1, 1_000_000, AgentProgram.DefaultR0CollectorDriverEventSampleStride, "r0-driver-event-sample-stride", "driver-event-sample-stride", "r0-event-sample-stride");
+        uint? r0EnableMask = null;
+        if (values.TryGetValue("r0-enable-mask", out var rawR0EnableMask) && !string.IsNullOrWhiteSpace(rawR0EnableMask))
+        {
+            if (!TryParseUnsignedMask(rawR0EnableMask, out var parsedR0EnableMask))
+            {
+                throw new ArgumentException("--r0-enable-mask must be a decimal or 0x-prefixed unsigned 32-bit mask. / --r0-enable-mask 必须是十进制或 0x 前缀的无符号 32 位掩码。", nameof(args));
+            }
+
+            r0EnableMask = parsedR0EnableMask;
+        }
         var screenshotOptions = ScreenshotProbeOptions.Parse(
             FirstValue(values, "screenshot-phases", "screenshot-stages", "screenshots-phases", "screenshots-stages"),
             FirstValue(values, "screenshot-count", "screenshots-count"));
@@ -3563,6 +3592,7 @@ internal sealed record AgentOptions
             R0CollectorMaxEventsPerRead = r0MaxEventsPerRead,
             R0CollectorMaxReadBatches = r0MaxReadBatches,
             R0CollectorDriverEventSampleStride = r0DriverEventSampleStride,
+            R0CollectorEnableMask = r0EnableMask,
             CaptureScreenshots = captureScreenshots,
             ScreenshotOptions = screenshotOptions,
             CollectDroppedFiles = flags.Contains("collect-dropped-files") || flags.Contains("dropped-files"),
@@ -3604,5 +3634,16 @@ internal sealed record AgentOptions
         }
 
         return Math.Clamp(parsed, minValue, maxValue);
+    }
+
+    private static bool TryParseUnsignedMask(string raw, out uint value)
+    {
+        var text = raw.Trim();
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            return uint.TryParse(text[2..], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out value);
+        }
+
+        return uint.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
     }
 }

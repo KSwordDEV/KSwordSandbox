@@ -390,6 +390,7 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         }
 
         VerifyAutomaticGuestRemotingMigration(context);
+        VerifyAutomaticDriverDiscovery(context);
 
         return Task.FromResult(new SmokeTestResult
         {
@@ -432,6 +433,27 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         SmokeAssert.True(!explicitHttp.VMware.GuestRemoting.SkipCertificateChecks, "Explicit VMwareTools HTTP should not imply certificate skipping.");
         SmokeAssert.True(!explicitHttp.Qemu.GuestRemoting.UseSsl, "An explicit QemuUserNat HTTP value should remain visible for readiness rejection.");
         SmokeAssert.True(!explicitHttp.Qemu.GuestRemoting.SkipCertificateChecks, "Explicit QemuUserNat HTTP should not imply certificate skipping.");
+    }
+
+    private static void VerifyAutomaticDriverDiscovery(SmokeTestContext context)
+    {
+        var repositoryRoot = Path.Combine(context.RuntimeRoot, "automatic-driver-discovery");
+        var driverPath = Path.Combine(
+            repositoryRoot,
+            "driver",
+            "KSword.Sandbox.Driver",
+            "x64",
+            "Release",
+            "KSword.Sandbox.Driver.sys");
+        Directory.CreateDirectory(Path.GetDirectoryName(driverPath)!);
+        File.WriteAllText(driverPath, "test driver placeholder");
+        var configPath = Path.Combine(repositoryRoot, "sandbox.json");
+        File.WriteAllText(configPath, "{}");
+
+        var config = SandboxConfigLoader.Load(configPath, repositoryRoot);
+        SmokeAssert.True(
+            string.Equals(config.Driver.HostDriverPath, driverPath, StringComparison.OrdinalIgnoreCase),
+            "Config loading should discover a built release driver when hostDriverPath is omitted.");
     }
 
     private static void RequireProviderResourceFailure(

@@ -24,6 +24,7 @@ Guest Agent 运行在 analysis VM 内，负责按限定时间启动样本、采�
 
 ```text
 [--r0collector <path>] [--driver-device <path>] [--r0-mock]
+[--r0-enable-mask <decimal-or-0x-mask>]
 [--r0-max-events <1-1024>] [--r0-max-read-batches <0-1000000>]
 [--r0-driver-event-sample-stride <1-1000000>]
 ```
@@ -33,6 +34,10 @@ Guest Agent 运行在 analysis VM 内，负责按限定时间启动样本、采�
 并统计被采样跳过的行，避免 Notepad 这类短运行也因全局 file/registry/image/handle
 噪声打满 ring；完整性请结合 `r0collector.driverStatus` 的 `lostCount`、`highWatermark`
 和 `producerDroppedMask` 判断。
+
+真实 R0 runbook 默认传入 `--r0-enable-mask 0x3F`，请求稳定的
+driver/process/image/file/registry/network producer；draft handle-access 位保持关闭，
+除非操作者显式改动 collector 参数。
 
 截图采集默认关闭，需要显式打开：
 
@@ -69,9 +74,12 @@ PCAPNG。缺少工具或权限不足会记录为非致命 `packet_capture.*` 事
 ```
 
 启用后，Agent 在 `before-start` 使用 `logman.exe` 创建 Windows 要求的
-`NT Kernel Logger` 系统会话（process/thread/image-load flags），在 `after-run` 停止会话并校验
-`etw-traces/*.etl`。`etw_live.captured` 只证明 ETL 原始证据已落盘，仍标记
-`semanticRowsAvailable=false`、`etlDecodeRequired=true`，不会把未解析 ETL 伪装成行为命中。
+`NT Kernel Logger` 系统会话（process/thread/image-load/file-io/registry flags），在 `after-run` 停止会话并校验
+`etw-traces/*.etl`。随后使用 Windows 自带的 `tracerpt.exe` 将 ETL 解码为
+`etw-traces/*.xml`，读取 `RenderingInfo`、进程/线程/镜像/文件/注册表字段并写入标准化行为行。
+`etw_live.captured` 会同时记录 `parsedEventCount`、`decodedArtifactRelativePath` 和解码状态；只有真实解析到事件行时才标记
+`semanticRowsAvailable=true`。tracerpt 不可用、失败或 XML 没有事件时会额外写出
+`etw_live.decode_failed`，原始 ETL 仍保留，不能把未解析 ETL 伪装成行为命中。
 缺少管理员权限、`logman.exe`、会话启动/停止失败或空 ETL 会写 `etw_live.failed`；默认关闭
 则写 `etw_live.disabled`，报告因此能区分“未启用”“启动失败”和“已捕获待解析”。
 
@@ -86,6 +94,9 @@ PCAPNG。缺少工具或权限不足会记录为非致命 `packet_capture.*` 事
   `--network-capture` 且转换成功时，由 Windows `pktmon` 生成的可选抓包。
 - `etw-traces/*.etl` - 显式传入 `--etw-live`、`--etw` 或 `--kernel-etw` 且
   `logman` 会话停止并通过完整性校验时保存的 Kernel ETW 原始追踪。
+- `etw-traces/*.xml` - 使用 Windows `tracerpt.exe` 从同一 ETL 真实解码的 XML；其
+  `RenderingInfo` 与 `EventData` 被转换为 `process.start/exit`、`thread.*`、`image.load`、
+  `file.etw.io`、`registry.etw` 和未分类 `etw.kernel.event` 行。
 - `artifacts/dropped-files/**` - 显式传入 `--collect-dropped-files` 或
   `--dropped-files` 时，样本工作目录下新增文件的可选副本。
 - `artifacts/manifest.json` - best-effort artifact manifest；即使敏感采集通道关闭，

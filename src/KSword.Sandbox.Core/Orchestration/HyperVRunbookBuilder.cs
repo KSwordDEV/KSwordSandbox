@@ -1679,7 +1679,12 @@ public sealed class HyperVRunbookBuilder
             "--r0collector",
             Q(config.Driver.R0CollectorPathInGuest),
             "--driver-device",
-            Q(config.Driver.DevicePath)
+            Q(config.Driver.DevicePath),
+            // Request every stable v1 producer (driver/process/image/file/
+            // registry/network). Draft handle-access bit 0x40 stays off and
+            // must remain an explicit future operator choice.
+            "--r0-enable-mask",
+            "0x3F"
         };
 
         if (config.Driver.UseMockCollector)
