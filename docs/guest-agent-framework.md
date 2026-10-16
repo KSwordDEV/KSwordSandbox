@@ -99,8 +99,8 @@ throwing for expected launch/exit failures.
   helpers, browser helper objects, KnownDLLs, and logon-script environment
   values.
 - `FileDiffProbe` compares file size and UTC last-write time below the sample
-  working directory and emits `file.created`, `file.modified`, and
-  `file.deleted` with relative-path metadata.
+  working directory and emits `file.created`, `file.modified`, `file.renamed`,
+  and `file.deleted` with relative-path metadata.
 - `TcpConnectionDiffProbe` compares `IPGlobalProperties.GetActiveTcpConnections`
   before and after execution. New connections keep the legacy `network.tcp`
   event type with `change=opened`; disappeared baseline connections emit

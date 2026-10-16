@@ -442,6 +442,16 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Environment("process-row-belongs-to-untainted-windows-service-host", "processName");
         }
 
+        // PsiXBot-style WMI CopyEx reinvocations can start after the submitted
+        // root exits and therefore lack a surviving parent-chain snapshot.
+        // Preserve this narrow, high-signal candidate instead of dropping it
+        // as ambient WmiPrvSE noise; it remains probable until ETW/R0 proves
+        // the caller and is never promoted solely by the path.
+        if (IsLikelyWmiSecondaryPayload(evt, data, context))
+        {
+            return CorrelationDisposition.Probable("post-exit-wmi-child-under-user-appdata-microsoft", "path/parentProcessName");
+        }
+
         var processFacts = TryGetEventProcessFacts(evt, data, context);
         if (processFacts is not null && IsKnownSystemProcess(processFacts))
         {
@@ -454,6 +464,30 @@ public static class SampleCorrelationClassifier
         }
 
         return CorrelationDisposition.Unchanged();
+    }
+
+    private static bool IsLikelyWmiSecondaryPayload(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context)
+    {
+        if (!TextEqualsAny(evt.EventType, "process.new", "process.snapshot", "process.observed"))
+        {
+            return false;
+        }
+
+        if (!TryGetRootProcessId(data, out var rootPid) || !context.SampleProcessIds.Contains(rootPid))
+        {
+            return false;
+        }
+
+        var path = FirstNonEmpty(evt.Path, Value(data, "processImagePath"), Value(data, "imagePath"));
+        var parentName = FirstNonEmpty(
+            Value(data, "parentProcessName"),
+            Value(data, "parentImageName"),
+            Value(data, "parentProcessPath"));
+        return ContainsAny(path, "\\AppData\\Local\\Microsoft\\", "%APPDATA%\\Local\\Microsoft\\") &&
+            ContainsAny(parentName, "WmiPrvSE", "WMIPrvSE");
     }
 
     private static SandboxEvent EnrichWithKnownProcess(

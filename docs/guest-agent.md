@@ -224,7 +224,7 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   interactive-session flag, time-zone metadata, temp/user profile paths, and
   selected environment-derived fields without dumping the full environment
   block.
-- `file.created`, `file.modified`, and `file.deleted` for files changed under
+- `file.created`, `file.modified`, `file.renamed`, and `file.deleted` for files changed under
   the sample working directory. File delta events include `root`,
   `relativePath`, `sizeBytes`/`lastWriteUtc`, and previous values for modified
   or deleted files when available.

@@ -32,7 +32,7 @@ public static class DefaultBehaviorTaxonomy
                 Title = "File creation or modification",
                 Category = "File system",
                 MitreTechniqueId = "T1105",
-                EventTypes = ["file.created", "file.modified"]
+                EventTypes = ["file.created", "file.modified", "file.renamed", "file.deleted"]
             },
             new BehaviorTaxonomyNode
             {

@@ -205,6 +205,7 @@ internal static class GuestArtifactEventQuality
         var eventType = evt.EventType ?? string.Empty;
         return (string.Equals(eventType, "file.created", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(eventType, "file.modified", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(eventType, "file.renamed", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(eventType, "file.deleted", StringComparison.OrdinalIgnoreCase)) &&
             (Value(evt.Data, "evidenceRole").StartsWith("dropped-file", StringComparison.OrdinalIgnoreCase) ||
              !string.IsNullOrWhiteSpace(Value(evt.Data, "droppedFileArtifactCopyPolicy")));

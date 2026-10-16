@@ -43,7 +43,9 @@
       "mitreTechniqueId": "T1059",
       "mitreTechniqueName": "Command and Scripting Interpreter",
       "eventTypes": [
-        "process.start"
+        "process.start",
+        "process.new",
+        "process.observed"
       ],
       "containsCommandLine": [
         "powershell",
@@ -1031,7 +1033,9 @@
       "mitreTechniqueId": "T1053.005",
       "mitreTechniqueName": "Scheduled Task",
       "eventTypes": [
-        "process.start"
+        "process.start",
+        "process.new",
+        "process.observed"
       ],
       "containsCommandLine": [
         "schtasks /create",
@@ -1131,7 +1135,9 @@
       "mitreTechniqueId": "T1059",
       "mitreTechniqueName": "Command and Scripting Interpreter",
       "eventTypes": [
-        "process.start"
+        "process.start",
+        "process.new",
+        "process.observed"
       ],
       "containsCommandLine": [
         ".ps1",
@@ -2853,7 +2859,9 @@
       "mitreTechniqueId": "T1543.003",
       "mitreTechniqueName": "Windows Service",
       "eventTypes": [
-        "process.start"
+        "process.start",
+        "process.new",
+        "process.observed"
       ],
       "containsCommandLine": [
         "sc create",
@@ -3456,7 +3464,9 @@
       "mitreTechniqueId": "T1059.001",
       "mitreTechniqueName": "PowerShell",
       "eventTypes": [
-        "process.start"
+        "process.start",
+        "process.new",
+        "process.observed"
       ],
       "containsCommandLine": [
         "-EncodedCommand",
@@ -3536,7 +3546,9 @@
       "mitreTechniqueId": "T1059.001",
       "mitreTechniqueName": "PowerShell",
       "eventTypes": [
-        "process.start"
+        "process.start",
+        "process.new",
+        "process.observed"
       ],
       "containsCommandLine": [
         "-ExecutionPolicy Bypass",
@@ -5722,7 +5734,9 @@
       "mitreTechniqueId": "T1562.001",
       "mitreTechniqueName": "Disable or Modify Tools",
       "eventTypes": [
-        "process.start"
+        "process.start",
+        "process.new",
+        "process.observed"
       ],
       "containsCommandLine": [
         "Set-MpPreference -DisableRealtimeMonitoring",
@@ -5870,7 +5884,9 @@
       "mitreTechniqueId": "T1070.001",
       "mitreTechniqueName": "Clear Windows Event Logs",
       "eventTypes": [
-        "process.start"
+        "process.start",
+        "process.new",
+        "process.observed"
       ],
       "containsCommandLine": [
         "wevtutil cl",
@@ -16178,7 +16194,9 @@
       "mitreTechniqueId": "T1202",
       "mitreTechniqueName": "Indirect Command Execution",
       "eventTypes": [
-        "process.start"
+        "process.start",
+        "process.new",
+        "process.observed"
       ],
       "allContainsCommandLine": [
         "forfiles",

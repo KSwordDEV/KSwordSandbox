@@ -8664,6 +8664,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
         if (HasSampleLifecycle(report) && !HasCompleteSampleBehavior(report))
         {
+            if (HasRuntimeCoverageGap(report))
+            {
+                return ("Execution complete / runtime evidence incomplete", "medium");
+            }
+
             return ("Observed execution / no behavior-rule hit", "info");
         }
 
@@ -8741,6 +8746,21 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             TextEqualsAny(evt.EventType, "process.start", "process.exit", "process.timeout") &&
             (evt.Path?.Contains("\\incoming\\", StringComparison.OrdinalIgnoreCase) == true ||
              EventDataBoolTrue(evt, "strongSampleCorrelation", "sampleBehaviorCandidate", "baselineSampleEvidence")));
+    }
+
+    private static bool HasRuntimeCoverageGap(AnalysisReport report)
+    {
+        return report.Events.Any(evt =>
+                EventDataBoolFalse(evt, "userInteractive", "interactiveDesktop", "etwLiveCaptureEnabled", "etwSessionStarted") ||
+                TextEqualsAny(evt.EventType,
+                    "packet_capture.disabled",
+                    "screenshot.disabled",
+                    "memory_dump.disabled",
+                    "dropped_file.disabled",
+                    "etw_live.disabled") ||
+                evt.EventType.Contains("capture_failed", StringComparison.OrdinalIgnoreCase) ||
+                evt.EventType.Contains("probe.timeout", StringComparison.OrdinalIgnoreCase)) ||
+            !report.Events.Any(evt => IsSampleBehaviorNetworkEvent(evt) || IsSampleBehaviorFileEvent(evt) || IsSampleBehaviorRegistryEvent(evt));
     }
 
     private static bool IsExecutionBoundaryEvent(SandboxEvent evt)
@@ -9505,6 +9525,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         (" generated at ", " 生成于 "),
         ("Analysis failed", "分析失败"),
         ("Execution blocked / runtime indeterminate", "执行被阻断/运行期不可判定"),
+        ("Execution complete / runtime evidence incomplete", "执行完成/运行期证据不完整"),
         ("Static analysis only", "仅静态分析"),
         ("No high-risk behavior", "未发现高风险行为"),
         ("Critical risk", "严重风险"),
@@ -9590,6 +9611,21 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Open filtered event table", "打开筛选事件表"),
         ("Open failure log", "打开失败日志"),
         ("No primary behavior rule matched; verify collection quality before concluding that the sample was quiet.", "未命中主要样本行为规则；请先核对采集质量，再判断样本是否没有继续活动。"),
+        ("No sample-attributed behavior was observed in the captured runtime events.", "捕获的运行时事件中未观察到归属于样本的行为。"),
+        ("No sample-attributed driver behavior was captured.", "未捕获归属于样本的驱动行为。"),
+        ("No sample-attributed evidence for this lane.", "此通道没有归属于样本的证据。"),
+        ("No events were collected for this section.", "本节未采集到事件。"),
+        ("Raw normalized events", "原始规范化事件"),
+        ("Raw event reading guide", "原始事件阅读指南"),
+        ("Raw event slimming story", "原始事件精简说明"),
+        ("Keep heavy fields folded", "保持大字段折叠"),
+        ("Raw event page", "原始事件页"),
+        ("Page evidence sample", "页面证据样本"),
+        ("R0 behavior", "R0 行为"),
+        ("Execution boundary", "执行边界"),
+        ("Failure reasons", "失败原因"),
+        ("Observed execution / no behavior-rule hit", "已观察执行/未命中行为规则"),
+        ("Evidence unavailable / runtime indeterminate", "运行证据不可用/运行期不可判定"),
         ("Copy analyst focus", "复制分析重点"),
         ("Key event explorer", "关键事件筛选器"),
         ("Review the signal first.", "先查看信号。"),

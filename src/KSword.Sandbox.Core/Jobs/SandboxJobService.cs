@@ -824,7 +824,7 @@ public sealed partial class SandboxJobService
             StaticAnalysis = staticAnalysis,
             Events = sampling.Events,
             Findings = findings,
-            Metrics = BuildMetrics(sampling.Events, findings, staticAnalysis, fullEvents.Count, sampling.OmittedEventCount)
+            Metrics = BuildMetrics(sampling.Events, findings, staticAnalysis, fullEvents.Count, sampling.OmittedEventCount, fullEvents)
         };
 
         var jsonPath = Path.Combine(jobRoot, "report.json");
@@ -1864,7 +1864,8 @@ public sealed partial class SandboxJobService
         List<BehaviorFinding> findings,
         StaticAnalysisResult staticAnalysis,
         int? rawEventCount = null,
-        int omittedReportEvents = 0)
+        int omittedReportEvents = 0,
+        IReadOnlyCollection<SandboxEvent>? rawEvents = null)
     {
         var totalEvents = rawEventCount ?? events.Count;
         var metrics = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
@@ -1880,7 +1881,7 @@ public sealed partial class SandboxJobService
             ["static.interestingStrings"] = staticAnalysis.InterestingStrings.Count
         };
 
-        AddDynamicCoverageMetrics(metrics, events, rawEventCount, omittedReportEvents);
+        AddDynamicCoverageMetrics(metrics, events, rawEvents ?? events, rawEventCount, omittedReportEvents);
 
         foreach (var group in findings.GroupBy(finding => finding.Severity))
         {
@@ -1893,14 +1894,20 @@ public sealed partial class SandboxJobService
     private static void AddDynamicCoverageMetrics(
         Dictionary<string, int> metrics,
         IReadOnlyCollection<SandboxEvent> reportEvents,
+        IReadOnlyCollection<SandboxEvent> rawEvents,
         int? rawEventCount,
         int omittedReportEvents)
     {
-        metrics["events.dynamicAction.report"] = reportEvents.Count(IsDynamicActionEvent);
+        var rawDynamicActionCount = rawEvents.Count(IsDynamicActionEvent);
+        var reportDynamicActionCount = reportEvents.Count(IsDynamicActionEvent);
+        metrics["events.dynamicAction.raw"] = rawDynamicActionCount;
+        metrics["events.dynamicAction.report"] = reportDynamicActionCount;
+        metrics["events.dynamicAction.omitted"] = Math.Max(0, rawDynamicActionCount - reportDynamicActionCount);
+        metrics["events.networkTcp.raw"] = rawEvents.Count(IsTcpEvent);
         metrics["events.networkTcp.report"] = reportEvents.Count(IsTcpEvent);
+        metrics["events.persistence.raw"] = rawEvents.Count(IsPersistenceEvent);
         metrics["events.persistence.report"] = reportEvents.Count(IsPersistenceEvent);
-        metrics["events.dynamicAction.omitted"] = Math.Max(0, omittedReportEvents);
-        metrics["events.dynamicAction.rawUnknown"] = reportEvents.Count(evt =>
+        metrics["events.dynamicAction.rawUnknown"] = rawEvents.Count(evt =>
             IsDynamicActionEvent(evt) && !EventDataTruthy(evt, "behaviorCounted", "sampleBehaviorCandidate", "strongSampleCorrelation"));
         if (rawEventCount.HasValue)
         {

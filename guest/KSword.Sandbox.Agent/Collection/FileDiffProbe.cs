@@ -8,7 +8,7 @@ namespace KSword.Sandbox.Agent.Collection;
 /// Captures and compares file state under the sample working directory.
 /// Inputs are BeforeStart and AfterRun probe phases; processing records file
 /// length and write-time metadata without administrator rights; CollectAsync
-/// returns file.created, file.modified, and file.deleted events.
+/// returns file.created, file.modified, file.renamed, and file.deleted events.
 /// </summary>
 internal sealed class FileDiffProbe : IGuestProbe
 {
@@ -615,6 +615,7 @@ internal sealed class FileDiffProbe : IGuestProbe
             "file.created" => "样本工作目录内检测到新建文件；可能是掉落文件候选。",
             "file.modified" => "样本工作目录内检测到文件被修改。",
             "file.deleted" => "样本工作目录内检测到文件被删除。",
+            "file.renamed" => "样本工作目录内检测到文件被重命名。",
             _ => "文件变更事件已记录。"
         };
     }
@@ -626,6 +627,7 @@ internal sealed class FileDiffProbe : IGuestProbe
             "file.created" => "若启用 dropped-file 复制，后续 artifact.dropped_file.* 事件会给出 artifactRelativePath、sizeBytes 和 sha256。",
             "file.modified" => "请结合 relativePath、sizeBytes、sha256/hashStatus 与 previous* 字段判断文件内容变化。",
             "file.deleted" => "删除事件没有可下载文件；如复制被跳过，请查看 artifact.dropped_file.skipped 的 reason/zhHint。",
+            "file.renamed" => "请结合 oldPath、previousPath、relativePath 判断重命名前后的文件关系。",
             _ => "请结合 relativePath、sizeBytes、sha256/hashStatus 和时间字段分析文件行为。"
         };
     }

@@ -789,13 +789,22 @@ internal static class PostProcessProgram
             ["networkEvents"] = rawEvents.Count(evt => evt.EventType.Contains("network", StringComparison.OrdinalIgnoreCase) || evt.EventType.Contains("tcp", StringComparison.OrdinalIgnoreCase)),
             ["staticTags"] = staticAnalysis?.Tags.Count ?? 0
         };
-        metrics["dynamicActionEvents"] = reportEvents.Count(IsDynamicActionEvent);
+        var rawDynamicActionCount = rawEvents.Count(IsDynamicActionEvent);
+        var reportDynamicActionCount = reportEvents.Count(IsDynamicActionEvent);
+        metrics["dynamicActionRawEvents"] = rawDynamicActionCount;
+        metrics["dynamicActionReportEvents"] = reportDynamicActionCount;
+        metrics["dynamicActionOmitted"] = Math.Max(0, rawDynamicActionCount - reportDynamicActionCount);
+        metrics["dynamicActionEvents"] = reportDynamicActionCount;
+        metrics["networkTcpRawEvents"] = rawEvents.Count(evt => evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase));
         metrics["networkTcpEvents"] = reportEvents.Count(evt => evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase));
+        metrics["persistenceRawEvents"] = rawEvents.Count(evt =>
+            evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase));
         metrics["persistenceEvents"] = reportEvents.Count(evt =>
             evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase));
-        metrics["dynamicActionOmitted"] = omittedReportEvents;
         return metrics;
     }
 

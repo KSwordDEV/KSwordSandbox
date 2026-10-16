@@ -310,7 +310,11 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 "process.snapshot",
                 process,
                 phase,
-                context.RootProcessId,
+                // Ambient visible processes are not sample descendants. Only
+                // attach root/role fields when the lineage builder linked the
+                // row (or the row is the root itself); otherwise preserve a
+                // neutral process-snapshot row for noise filtering.
+                metadata is null && process.ProcessId != context.RootProcessId ? null : context.RootProcessId,
                 metadata?.Depth,
                 metadata?.ChildCount,
                 metadata?.Lineage,
