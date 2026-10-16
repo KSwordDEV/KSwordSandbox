@@ -1498,7 +1498,7 @@ public static class ReportEventSampler
         {
             ["reason"] = "raw event volume exceeded report inline limit",
             ["zhMessage"] = "报告内联事件数量超过上限，已保留代表性事件并保留原始事件文件路径。",
-            ["zhHint"] = "该行是 Host 报告采样标记，behaviorCounted=false；report.json 只包含采样后的规范化视图；完整原始来源请查看 rawEventsPath/driverEventsPath 或已索引源文件。",
+            ["zhHint"] = "该行是 Host 报告采样标记，behaviorCounted=false；report.json 保留全部归属于样本的动态动作，普通静态/诊断行按配额采样；完整原始来源请查看 rawEventsPath/driverEventsPath 或已索引源文件。",
             ["behaviorCounted"] = "false",
             ["nonbehavior"] = "true",
             ["notSampleBehavior"] = "true",
@@ -1516,7 +1516,9 @@ public static class ReportEventSampler
             ["maxInlineEvents"] = options.MaxInlineEvents.ToString(),
             ["maxEventsPerType"] = options.MaxEventsPerType.ToString(),
             ["maxHighValueEventsPerType"] = options.MaxHighValueEventsPerType.ToString(),
-            ["maxDiagnosticEvents"] = options.MaxDiagnosticEvents.ToString()
+            ["maxDiagnosticEvents"] = options.MaxDiagnosticEvents.ToString(),
+            ["dynamicActionEventsAlwaysRetained"] = "true",
+            ["maxInlineEventsExcludesDynamicActions"] = "true"
         };
 
         var wmiFailures = orderedEvents

@@ -414,6 +414,8 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         var samplingMarker = RequireEvent(result.Events, "report.events.sampled");
         RequireData(samplingMarker, "wmiCaptureFailedCount", "2");
         RequireData(samplingMarker, "wmiCaptureFailedPhases", "before-start, after-run");
+        RequireData(samplingMarker, "dynamicActionEventsAlwaysRetained", "true");
+        RequireData(samplingMarker, "maxInlineEventsExcludesDynamicActions", "true");
 
         var artifactEvent = RequireEvent(result.Events, "artifact.host_imported");
         RequireData(artifactEvent, "downloadSelector", "artifacts/drop.bin");
