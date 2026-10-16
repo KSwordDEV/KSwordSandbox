@@ -87,6 +87,9 @@ PCAPNG。缺少工具或权限不足会记录为非致命 `packet_capture.*` 事
 - `artifacts/manifest.json` - best-effort artifact manifest；即使敏感采集通道关闭，
   也会作为安全证据索引写出。
 
+样本根进程提前退出时，Agent 不会把剩余分析窗口变成空等待；会继续按 250 ms
+轮询进程、文件和 TCP 边沿，以保留延迟子进程、WMI/计划任务交接和短连接证据。
+
 `artifacts/manifest.json` 使用 `KSword.Sandbox.Abstractions.Artifacts` 中的
 `ArtifactManifest`。每个 entry 记录 `kind:DroppedFile`、`name`、`relativePath`、
 `sizeBytes`、可选 `sha256`，以及 `origin=guest`、`evidenceRole=dropped-file`、
