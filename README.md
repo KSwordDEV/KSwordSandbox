@@ -280,7 +280,7 @@ Invoke-RestMethod `
   -Method Post `
   -Uri http://localhost:5000/api/jobs/plan `
   -ContentType 'application/json' `
-  -Body '{"samplePath":"D:\\Temp\\sample.exe","durationSeconds":120,"dryRun":true}'
+  -Body '{"samplePath":"D:\\Temp\\sample.exe","durationSeconds":30,"dryRun":true}'
 ```
 
 报告默认写到：

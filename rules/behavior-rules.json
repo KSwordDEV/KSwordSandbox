@@ -65,8 +65,8 @@
       "title": "New process observed after launch",
       "titleZh": "启动后观察到新进程",
       "severity": "low",
-      "summary": "The guest agent observed a non-baseline process after sample execution started. Sandbox plumbing helpers and normal interactive GUI root-process baselines are excluded so the finding stays focused on sample-visible process activity.",
-      "summaryZh": "来宾 Agent 在样本执行开始后观察到非基线进程。沙箱管道辅助进程以及普通交互式 GUI 根进程基线已排除，使命中聚焦于样本可见的进程活动。",
+      "summary": "The guest agent observed a sample-correlated non-baseline process after launch. Only confirmed or probable sample correlation can promote this generic finding; uncorrelated and environmental rows remain raw evidence.",
+      "summaryZh": "来宾 Agent 在启动后观察到与样本关联的非基线进程。只有确认或可能的样本关联才能升级此通用命中；未关联及环境行保留为原始证据。",
       "eventTypes": [
         "process.new"
       ],

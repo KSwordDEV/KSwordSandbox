@@ -65,7 +65,7 @@
     "powerShellRemotingSkipCertificateChecks": false
   },
   "analysis": {
-    "defaultDurationSeconds": 120,
+    "defaultDurationSeconds": 30,
     "maxDurationSeconds": 900,
     "guestReadyTimeoutSeconds": 180,
     "maxSampleBytes": 209715200

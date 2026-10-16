@@ -940,7 +940,7 @@ internal static class DashboardExperiencePage
 
             function clampDuration(value, maxDuration) {
               const max = normalizePositiveInt(maxDuration, 900);
-              const parsed = normalizePositiveInt(value, normalizePositiveInt(runtimeConfigDefaults?.analysis?.defaultDurationSeconds, 120));
+              const parsed = normalizePositiveInt(value, normalizePositiveInt(runtimeConfigDefaults?.analysis?.defaultDurationSeconds, 30));
               return Math.max(1, Math.min(max, parsed));
             }
 
@@ -964,7 +964,7 @@ internal static class DashboardExperiencePage
               }
 
               const max = normalizePositiveInt(input?.max || runtimeConfigDefaults?.analysis?.maxDurationSeconds, 900);
-              const fallback = normalizePositiveInt(runtimeConfigDefaults?.analysis?.defaultDurationSeconds || hidden?.value, 120);
+              const fallback = normalizePositiveInt(runtimeConfigDefaults?.analysis?.defaultDurationSeconds || hidden?.value, 30);
               const duration = clampDuration(input?.value || hidden?.value || fallback, max);
               if (input) {
                 input.value = String(duration);

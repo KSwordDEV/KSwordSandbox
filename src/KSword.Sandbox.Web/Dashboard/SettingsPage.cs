@@ -369,7 +369,7 @@ internal static class SettingsPage
             }
             function clampDuration(value, maxDuration){
               const max = normalizePositiveInt(maxDuration, 900);
-              const parsed = normalizePositiveInt(value, normalizePositiveInt(settingsConfigDefaults?.analysis?.defaultDurationSeconds, 120));
+              const parsed = normalizePositiveInt(value, normalizePositiveInt(settingsConfigDefaults?.analysis?.defaultDurationSeconds, 30));
               return Math.max(1, Math.min(max, parsed));
             }
             function getPresetDuration(){

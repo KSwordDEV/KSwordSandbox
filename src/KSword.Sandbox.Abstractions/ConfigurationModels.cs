@@ -226,7 +226,7 @@ public sealed record GuestConfig
 /// </summary>
 public sealed record AnalysisConfig
 {
-    public int DefaultDurationSeconds { get; init; } = 120;
+    public int DefaultDurationSeconds { get; init; } = 30;
 
     public int MaxDurationSeconds { get; init; } = 900;
 

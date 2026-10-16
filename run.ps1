@@ -41,7 +41,7 @@ param(
     [ValidateSet('', 'Notepad', 'Sample', 'HarmlessSample')]
     [string]$SamplePreset = '',
 
-    [int]$DurationSeconds = 120,
+    [int]$DurationSeconds = 30,
 
     [string]$Url = 'http://127.0.0.1:18080',
 

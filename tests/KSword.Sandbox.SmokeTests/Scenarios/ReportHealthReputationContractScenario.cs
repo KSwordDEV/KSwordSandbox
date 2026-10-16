@@ -299,7 +299,7 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
             Data =
             {
                 ["runtime"] = "CLR",
-                ["exitCode"] = "-532462766"
+                ["exitCode"] = "-2146232576"
             }
         };
         var blockedClrReport = baseline with
@@ -309,6 +309,10 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         };
         var blockedClrHtml = renderer.RenderEnglish(blockedClrReport);
         RequireContains(blockedClrHtml, "Execution blocked / runtime indeterminate", "A non-zero CLR early exit without behavior should make runtime coverage indeterminate.");
+        RequireContains(blockedClrHtml, "-2146232576", "Non-zero process exits must preserve the original numeric exit code.");
+        RequireContains(blockedClrHtml, "0x80131700", "CLR startup failures should expose a hexadecimal representation.");
+        RequireContains(blockedClrHtml, "CLR startup-stage failure", "Known CLR startup failures should expose their common semantic hint.");
+        RequireContains(blockedClrHtml, "Sample-attributed behavior is indeterminate", "Non-zero process exits must keep sample behavior indeterminate rather than implying maliciousness.");
         RequireNotContains(blockedClrHtml, "No high-risk behavior", "A non-zero CLR early exit must not render a reassuring no-risk verdict.");
 
         var completeBehavior = new SandboxEvent

@@ -565,7 +565,7 @@ internal static partial class ProgramMain
             var samplePath = ResolveSamplePath(options, locator.JobRoot);
             rebuildEventInput = ResolveEventInput(options, locator.JobRoot, locator.JobId, allowFailureSkeleton: true);
             var runbookExecutionPath = ResolveRunbookExecutionPath(options, locator.JobRoot);
-            var duration = ParseNonNegativeInt(GetOption(options, "duration", GetOption(options, "duration-seconds", "120")), "duration");
+            var duration = ParseNonNegativeInt(GetOption(options, "duration", GetOption(options, "duration-seconds", "30")), "duration");
             var provider = ResolvePersistedOrConfiguredProvider(options, serviceContext.Config, locator.JobRoot);
             ValidateProviderResourceOverrides(options, serviceContext.Config, provider);
             var vmName = ResolvePersistedOrConfiguredVmName(options, serviceContext.Config, locator.JobRoot, provider);
@@ -971,7 +971,7 @@ internal static partial class ProgramMain
         var samplePath = ResolveSamplePath(options, locator.JobRoot);
         var eventInput = ResolveEventInput(options, locator.JobRoot, locator.JobId, allowFailureSkeleton: true);
         var runbookExecutionPath = ResolveRunbookExecutionPath(options, locator.JobRoot);
-        var duration = ParseNonNegativeInt(GetOption(options, "duration", GetOption(options, "duration-seconds", "120")), "duration");
+        var duration = ParseNonNegativeInt(GetOption(options, "duration", GetOption(options, "duration-seconds", "30")), "duration");
         var displayName = GetOption(options, "display-name", Path.GetFileName(samplePath));
         var provider = ResolvePersistedOrConfiguredProvider(options, context.Config, locator.JobRoot);
         ValidateProviderResourceOverrides(options, context.Config, provider);

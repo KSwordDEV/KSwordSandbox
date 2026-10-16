@@ -11,7 +11,7 @@ internal sealed record GuestAgentParsedOptions
 
     public string OutputDirectory { get; init; } = string.Empty;
 
-    public int DurationSeconds { get; init; } = 120;
+    public int DurationSeconds { get; init; } = 30;
 
     public string? DriverEventsPath { get; init; }
 

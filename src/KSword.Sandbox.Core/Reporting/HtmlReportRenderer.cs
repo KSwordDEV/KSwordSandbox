@@ -3205,7 +3205,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var etwManifestGap = etwManifestRows
             .Select(collection =>
             {
-                var captureWasNotStarted = MetadataBoolTrue(collection.Metadata, "captureWasNotStarted", "etwCaptureWasNotStarted");
+                var captureWasNotStarted = MetadataBoolTrue(collection.Metadata, "captureWasNotStarted", "etwCaptureWasNotStarted") ||
+                    TextEqualsAny(MetadataValue(collection.Metadata, "reason", "lastReason", "lastDiagnosticReason") ?? string.Empty, "captureWasNotStarted");
                 var failed = TextEqualsAny(collection.Status, "failed", "partial", "missing", "enabled-empty", "not-created") ||
                     TextEqualsAny(MetadataValue(collection.Metadata, "captureState", "lastCaptureState") ?? string.Empty, "failed", "capture_failed");
                 var disabled = !collection.Enabled || TextEqualsAny(collection.Status, "disabled", "not-requested");
@@ -3221,7 +3222,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             etwEvents.Any(evt => EventDataBoolTrue(evt, "captureWasNotStarted", "etwCaptureWasNotStarted"));
         if (etwManifestGap is not null || etwEventGap)
         {
-            var state = etwManifestGap?.State ?? (etwEvents.Any(evt => TextContainsAny(evt.EventType, "etw_live.failed", "etw_live.capture_failed")) ? "failed" : "disabled");
+            var eventCaptureWasNotStarted = etwEvents.Any(evt => EventDataBoolTrue(evt, "captureWasNotStarted", "etwCaptureWasNotStarted") ||
+                TextEqualsAny(FirstEventDataValue(evt, "reason", "failureReason", "captureState") ?? string.Empty, "captureWasNotStarted"));
+            var state = etwManifestGap?.State ?? (eventCaptureWasNotStarted
+                ? "captureWasNotStarted"
+                : etwEvents.Any(evt => TextContainsAny(evt.EventType, "etw_live.failed", "etw_live.capture_failed")) ? "failed" : "disabled");
             var manifestDetail = etwManifestGap is null
                 ? "manifest=not-observed"
                 : $"manifest enabled={etwManifestGap.Collection.Enabled}; status={etwManifestGap.Collection.Status}; reason={etwManifestGap.Collection.Reason}; captureWasNotStarted={etwManifestGap.CaptureWasNotStarted}";

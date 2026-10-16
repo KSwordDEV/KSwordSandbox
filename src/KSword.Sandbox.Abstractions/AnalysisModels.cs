@@ -33,7 +33,7 @@ public sealed record SandboxSubmission
     /// only when <see cref="DurationUnlimited"/> is true and represents the
     /// Web/API "no runtime limit" intent.
     /// </summary>
-    public int DurationSeconds { get; init; } = 120;
+    public int DurationSeconds { get; init; } = 30;
 
     /// <summary>
     /// True when the operator explicitly requested no Web/API runtime cap for

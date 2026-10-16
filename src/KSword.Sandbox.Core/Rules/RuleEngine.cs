@@ -272,12 +272,56 @@ public sealed class RuleEngine
     /// </summary>
     private static bool IsEligibleForRule(BehaviorRule rule, SandboxEvent evt)
     {
+        // A raw process.new row is only useful to the generic process-new
+        // finding when sample correlation has explicitly promoted it. Live
+        // guest snapshots often contain unrelated Edge/Defender/VM tooling
+        // rows without correlation metadata; keep those rows as raw evidence
+        // instead of turning them into low-confidence behavior findings.
+        if (string.Equals(rule.Id, "process-new", StringComparison.OrdinalIgnoreCase) &&
+            !HasConfirmedOrProbableSampleCorrelation(evt))
+        {
+            return false;
+        }
+
         if (RuleIncludesNonBehaviorEvidence(rule))
         {
             return true;
         }
 
         return !IsNonBehaviorOrSelfNoiseEvent(evt);
+    }
+
+    /// <summary>
+    /// Determines whether an event carries an explicit confirmed or probable
+    /// sample-correlation disposition. Inputs are one normalized event;
+    /// processing checks the classifier's stable labels and strong marker,
+    /// and the method returns false for missing, unknown, or environmental
+    /// attribution so those rows remain raw evidence only.
+    /// </summary>
+    private static bool HasConfirmedOrProbableSampleCorrelation(SandboxEvent evt)
+    {
+        var correlation = TryGetRuleFieldValue(evt, "sampleCorrelation", out var directCorrelation)
+            ? directCorrelation
+            : TryGetRuleFieldValue(evt, "sample_correlation", out var aliasCorrelation)
+                ? aliasCorrelation
+                : string.Empty;
+        var status = TryGetRuleFieldValue(evt, "sampleCorrelationStatus", out var directStatus)
+            ? directStatus
+            : TryGetRuleFieldValue(evt, "sample_correlation_status", out var aliasStatus)
+                ? aliasStatus
+                : string.Empty;
+
+        // Treat an explicit environmental/unknown label as authoritative even
+        // when a stale strong marker was copied onto the same raw row.
+        if (TextEqualsAny(correlation, "environment", "unknown", "uncorrelated", "nonbehavior", "not-sample", "not_sample") ||
+            TextEqualsAny(status, "environment", "unknown", "uncorrelated", "session-related", "session-only", "not-correlated", "not_correlated"))
+        {
+            return false;
+        }
+
+        return EventDataBoolTrue(evt, "strongSampleCorrelation", "strong_sample_correlation") ||
+            TextEqualsAny(correlation, "confirmed", "probable") ||
+            TextEqualsAny(status, "confirmed", "probable");
     }
 
     /// <summary>
