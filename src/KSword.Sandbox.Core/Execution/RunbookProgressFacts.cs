@@ -468,7 +468,7 @@ internal static class RunbookProgressFacts
                 "enable-guest-service" or "start-temp-vm" or "start-golden" or "start-vm" or
                 "open-vm-desktop" or "wait-powershell-direct" or "wait-guest-remoting" => "vm-prepare",
             "stage-guest-payload" or "copy-sample" or "make-host-output" or "record-artifact-policy" or "prepare-guest-output" => "guest-prepare",
-            "install-driver-service" => "r0-driver",
+            "check-r0-driver-guest-readiness" or "install-driver-service" => "r0-driver",
             "run-agent" => "analysis",
             "sync-live-output" or "collect-output" => "collection",
             _ => stepId.Contains("driver", StringComparison.OrdinalIgnoreCase) ? "r0-driver" : "runbook"
@@ -480,7 +480,7 @@ internal static class RunbookProgressFacts
         return stepId switch
         {
             "check-hyperv" or "check-golden-vm" or "check-vmware" or "check-qemu" => "host-readiness",
-            "check-r0-driver-config" => "driver-readiness",
+            "check-r0-driver-config" or "check-r0-driver-guest-readiness" => "driver-readiness",
             "check-guest-credential" => "credential",
             "make-vm-root" or "make-diff-disk" or "make-overlay-disk" or "create-temp-vm" or
                 "stop-golden" or "stop-vm-before-restore" or "restore-golden" or "restore-vm-snapshot" or
@@ -509,6 +509,7 @@ internal static class RunbookProgressFacts
             "check-vmware" => "确认已使用 VMware Workstation Pro、vmType=ws，并且 vmrun 路径、VMX 路径和干净 snapshot 名称与本机配置一致。",
             "check-qemu" => "确认 qemu-system/qemu-img 路径、基础磁盘、磁盘格式和 internal snapshot/overlay 配置一致。",
             "check-r0-driver-config" => "确认 driver.hostDriverPath 指向已构建并测试签名的 .sys；如只验证流程，可启用 mock R0。",
+            "check-r0-driver-guest-readiness" => "确认来宾已暂存 .sys，Authenticode 签名可验证，并已重启进入 test-signing；该只读检查不会自动签名或修改 BCD。",
             "check-guest-credential" => "确认来宾密码环境变量在 Process/User/Machine 作用域可见，且用户名与 VM 内账号一致。",
             "stop-golden" or "stop-vm-before-restore" or "restore-golden" or "restore-vm-snapshot" or "start-temp-vm" or "start-golden" or "start-vm" => "检查当前 provider 管理工具、VM 状态、干净基线和本机路径是否可用；QEMU overlay 模式还应检查临时磁盘目录和启动参数。",
             "open-vm-desktop" => "确认 VMConnect/RDP、VMware GUI 或 QEMU display 能在当前交互用户会话中显示；无人值守才显式启用 headless/NoOpenVmConsole。",
