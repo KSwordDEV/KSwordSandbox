@@ -1417,14 +1417,17 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             var label = $"{FirstNonEmpty(rows[0].Subcategory, expectation.EnglishName)}={JoinDistinct(rows.Select(static row => FirstNonEmpty(row.InclusionSetting, "unknown")))}";
             observed.Add(label);
             coverage.Add($"{expectation.Guid}={settingState}|{expectation.SecurityEventIds}");
-            if (hasSuccess)
+            if (hasSuccess && !hasExplicitNonSuccess)
             {
                 enabled.Add($"{expectation.EnglishName} ({expectation.SecurityEventIds})");
             }
             else
             {
                 disabled.Add($"{expectation.EnglishName} ({expectation.SecurityEventIds})");
-                notes.Add($"{expectation.EnglishName}: {expectation.Rationale}");
+                var note = hasSuccess
+                    ? $"{expectation.EnglishName}: policy targets disagree; at least one row is not success-enabled. {expectation.Rationale}"
+                    : $"{expectation.EnglishName}: {expectation.Rationale}";
+                notes.Add(note);
             }
         }
 
