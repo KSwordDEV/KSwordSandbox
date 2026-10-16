@@ -1880,6 +1880,8 @@ public sealed partial class SandboxJobService
             ["static.interestingStrings"] = staticAnalysis.InterestingStrings.Count
         };
 
+        AddDynamicCoverageMetrics(metrics, events, rawEventCount, omittedReportEvents);
+
         foreach (var group in findings.GroupBy(finding => finding.Severity))
         {
             metrics[$"findings.{group.Key}"] = group.Count();
@@ -1887,4 +1889,41 @@ public sealed partial class SandboxJobService
 
         return metrics;
     }
+
+    private static void AddDynamicCoverageMetrics(
+        Dictionary<string, int> metrics,
+        IReadOnlyCollection<SandboxEvent> reportEvents,
+        int? rawEventCount,
+        int omittedReportEvents)
+    {
+        metrics["events.dynamicAction.report"] = reportEvents.Count(IsDynamicActionEvent);
+        metrics["events.networkTcp.report"] = reportEvents.Count(IsTcpEvent);
+        metrics["events.persistence.report"] = reportEvents.Count(IsPersistenceEvent);
+        metrics["events.dynamicAction.omitted"] = Math.Max(0, omittedReportEvents);
+        metrics["events.dynamicAction.rawUnknown"] = reportEvents.Count(evt =>
+            IsDynamicActionEvent(evt) && !EventDataTruthy(evt, "behaviorCounted", "sampleBehaviorCandidate", "strongSampleCorrelation"));
+        if (rawEventCount.HasValue)
+        {
+            metrics["events.rawProvided"] = rawEventCount.Value;
+        }
+    }
+
+    private static bool IsDynamicActionEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTcpEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPersistenceEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase);
+
+    private static bool EventDataTruthy(SandboxEvent evt, params string[] keys) =>
+        keys.Any(key => evt.Data.TryGetValue(key, out var value) &&
+            value is not null && (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1"));
 }

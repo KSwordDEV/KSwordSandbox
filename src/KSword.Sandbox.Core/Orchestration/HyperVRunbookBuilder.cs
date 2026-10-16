@@ -1523,11 +1523,10 @@ public sealed class HyperVRunbookBuilder
                 "$agentStablePath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.exe'; $runtimePath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.runtimeconfig.json'; $depsPath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.deps.json'; $agentStableTemp = \"$agentStablePath.refresh\"; $runtimeTemp = \"$runtimePath.refresh\"; $depsTemp = \"$depsPath.refresh\"; [IO.File]::WriteAllBytes($agentStableTemp, [Convert]::FromBase64String($agentExeBase64)); [IO.File]::WriteAllBytes($runtimeTemp, [Convert]::FromBase64String($runtimeConfigBase64)); [IO.File]::WriteAllBytes($depsTemp, [Convert]::FromBase64String($depsBase64)); Move-Item -LiteralPath $agentStableTemp -Destination $agentStablePath -Force; Move-Item -LiteralPath $runtimeTemp -Destination $runtimePath -Force; Move-Item -LiteralPath $depsTemp -Destination $depsPath -Force;",
                 "$stablePayloadChecks = 0; for ($payloadAttempt = 0; $payloadAttempt -lt 20 -and $stablePayloadChecks -lt 3; $payloadAttempt++) { Start-Sleep -Milliseconds 500; $agentBytes = [IO.File]::ReadAllBytes($agentStablePath); $runtimeBytes = [IO.File]::ReadAllBytes($runtimePath); $depsBytes = [IO.File]::ReadAllBytes($depsPath); if ($agentBytes.Length -gt 0 -and $runtimeBytes.Length -gt 0 -and $depsBytes.Length -gt 0 -and $runtimeBytes[0] -eq 0x7B -and $depsBytes[0] -eq 0x7B) { $stablePayloadChecks++; } else { $stablePayloadChecks = 0; [IO.File]::WriteAllBytes($agentStableTemp, [Convert]::FromBase64String($agentExeBase64)); [IO.File]::WriteAllBytes($runtimeTemp, [Convert]::FromBase64String($runtimeConfigBase64)); [IO.File]::WriteAllBytes($depsTemp, [Convert]::FromBase64String($depsBase64)); Move-Item -LiteralPath $agentStableTemp -Destination $agentStablePath -Force; Move-Item -LiteralPath $runtimeTemp -Destination $runtimePath -Force; Move-Item -LiteralPath $depsTemp -Destination $depsPath -Force; } }; if ($stablePayloadChecks -lt 3) { throw 'Guest Agent stable payload did not remain valid before launch.' };",
                 "$fallbackArgs = @('-NoLogo', '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand);",
-                // Keep the mock collector wrapper attached to this remoting step.
-                // A detached Start-Process can let the step finish before the
-                // Guest Agent has flushed events.json, leaving only agent.exit
-                // for the later collect-output step to copy.
-                "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $fallbackArgs -WorkingDirectory $workingDirectory -Wait -PassThru;",
+                // Launch detached and publish its PID immediately so live
+                // output sync overlaps the sample instead of starting after
+                // the Guest Agent has already exited.
+                "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $fallbackArgs -WorkingDirectory $workingDirectory -PassThru; $fallback.Id | Set-Content -LiteralPath $pidPath -Encoding ASCII;",
                 "$deadline = (Get-Date).AddSeconds(30);",
                 "do { Start-Sleep -Milliseconds 250 } while (-not (Test-Path -LiteralPath $pidPath -PathType Leaf) -and (Get-Date) -lt $deadline);",
                 "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw \"Guest Agent process did not create its pid marker: $pidPath\" };",
@@ -1562,11 +1561,9 @@ public sealed class HyperVRunbookBuilder
             "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue;",
             "Write-Warning 'Interactive desktop is unavailable; starting Guest Agent in the remoting session.';",
             "$fallbackArgs = @('-NoLogo', '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand);",
-            // Keep the fallback attached to this remoting step. A detached
-            // process can let collect-output run before events.json and the
-            // Agent logs have been flushed to the guest output directory.
-            "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $fallbackArgs -WorkingDirectory $workingDirectory -Wait -PassThru;",
-            "$fallback.Id | Set-Content -LiteralPath $pidPath -Encoding ASCII;",
+            // Publish the detached fallback PID before returning so live sync
+            // can observe events while the Guest Agent is still running.
+            "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $fallbackArgs -WorkingDirectory $workingDirectory -PassThru; $fallback.Id | Set-Content -LiteralPath $pidPath -Encoding ASCII;",
             "} ",
             $"}} -ArgumentList {Q(agentTaskName)}, {Q(config.Guest.UserName)}, {Q(guestRoot)}, {Q(agentPidPath)}, {Q(encodedCommand)} -ErrorAction Stop;",
             "}",

@@ -71,6 +71,7 @@ public static class ReportEventSampler
     {
         StrongSampleBehavior,
         FindingEvidence,
+        DynamicActionEvidence,
         ProbableSampleEvidence,
         GeneralBehaviorEvidence,
         Diagnostics,
@@ -83,6 +84,7 @@ public static class ReportEventSampler
     [
         ReportSamplingBucket.StrongSampleBehavior,
         ReportSamplingBucket.FindingEvidence,
+        ReportSamplingBucket.DynamicActionEvidence,
         ReportSamplingBucket.ProbableSampleEvidence,
         ReportSamplingBucket.GeneralBehaviorEvidence,
         ReportSamplingBucket.Diagnostics
@@ -1029,6 +1031,12 @@ public static class ReportEventSampler
             return ReportSamplingBucket.GeneralBehaviorEvidence;
         }
 
+        if (string.Equals(evt.EventType, "artifact.import_summary", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "artifact.import_rejected", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
         // Agent lifecycle is collection plumbing, not a sample event. Keep it
         // out of the inline report entirely; the original guest/driver files
         // remain the audit source for startup/stop timing.
@@ -1097,6 +1105,23 @@ public static class ReportEventSampler
             return ReportSamplingBucket.GeneralBehaviorEvidence;
         }
 
+        // Findings may deliberately reference nonbehavior/diagnostic rows
+        // (for example artifact manifest and collection-gap evidence). Resolve
+        // that explicit reference before the diagnostic gate so evidence cannot
+        // disappear behind the small diagnostics quota.
+        if (findingEvidenceKeys.Contains(BuildEventEvidenceKey(evt)))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
+        // Keep bounded, high-value runtime edges visible even when correlation
+        // is unknown. Visibility is not a behavior verdict: these rows retain
+        // behaviorCounted=false and remain clearly labelled as unattributed.
+        if (IsDynamicActionEvidenceEvent(evt))
+        {
+            return ReportSamplingBucket.DynamicActionEvidence;
+        }
+
         if (IsDiagnosticReportEvent(evt))
         {
             return ReportSamplingBucket.Diagnostics;
@@ -1105,11 +1130,6 @@ public static class ReportEventSampler
         if (IsStrongSampleBehaviorEvent(evt))
         {
             return ReportSamplingBucket.StrongSampleBehavior;
-        }
-
-        if (findingEvidenceKeys.Contains(BuildEventEvidenceKey(evt)))
-        {
-            return ReportSamplingBucket.FindingEvidence;
         }
 
         if (IsProbableSampleEvidenceEvent(evt))
@@ -1135,6 +1155,18 @@ public static class ReportEventSampler
         return IsHighValueReportEvent(evt)
             ? options.MaxHighValueEventsPerType
             : options.MaxEventsPerType;
+    }
+
+    private static bool IsDynamicActionEvidenceEvent(SandboxEvent evt)
+    {
+        var type = NormalizeEventType(evt.EventType);
+        return type.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("service.", StringComparison.OrdinalIgnoreCase) &&
+                !type.Contains("snapshot", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsStrongSampleBehaviorEvent(SandboxEvent evt)
@@ -1573,6 +1605,37 @@ public static class ReportEventSampler
 
     private static IEnumerable<string> BuildPriorityDataKeys(SandboxEvent evt)
     {
+        // Exit and launch diagnostics drive the runtime verdict. Keep the
+        // actual code/reason even when the event also carries verbose helper
+        // metadata; otherwise CLR/AV/timeout outcomes are silently erased.
+        if (TextEqualsAny(evt.EventType, "process.exit", "process.start_failed", "process.execution_failed", "process.wait_failed", "process.timeout"))
+        {
+            foreach (var key in new[]
+            {
+                "exitCode", "processExitCode", "code", "timedOut", "analysisFailure",
+                "failureReason", "reason", "exceptionType", "message", "stage",
+                "win32Error", "win32ErrorCode", "stderr", "stdout"
+            })
+            {
+                yield return key;
+            }
+        }
+
+        if (evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var key in new[]
+            {
+                "operation", "operationName", "operationType", "action", "keyPath", "registryPath",
+                "valueName", "value", "expandedValue", "previousValue", "taskName", "taskPath",
+                "taskToRun", "commandLine", "author", "status", "nextRunTime", "lastRunTime"
+            })
+            {
+                yield return key;
+            }
+        }
+
         if (evt.EventType.EndsWith(".runbook.executed", StringComparison.OrdinalIgnoreCase) &&
             TextEqualsAny(DataValue(evt.Data, "success"), "false", "0", "no", "failed"))
         {

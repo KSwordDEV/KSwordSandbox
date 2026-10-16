@@ -162,7 +162,7 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
     /// copies endpoint strings plus structured address/port fields; the method
     /// returns a SandboxEvent.
     /// </summary>
-    private static SandboxEvent CreateTcpEvent(
+    private SandboxEvent CreateTcpEvent(
         string eventType,
         string change,
         TcpConnectionSnapshot connection,
@@ -173,7 +173,13 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
                           string.Equals(row.Local, connection.Local, StringComparison.OrdinalIgnoreCase) &&
                           string.Equals(row.Remote, connection.Remote, StringComparison.OrdinalIgnoreCase))
             .Select(row => row.OwningProcessId)
-            .FirstOrDefault(pid => pid is not null);
+            .FirstOrDefault(pid => pid is > 0);
+        owningProcessId ??= baselineNetworkState.NetstatRows.Values
+            .Where(row => string.Equals(row.Protocol, "TCP", StringComparison.OrdinalIgnoreCase) &&
+                          string.Equals(row.Local, connection.Local, StringComparison.OrdinalIgnoreCase) &&
+                          string.Equals(row.Remote, connection.Remote, StringComparison.OrdinalIgnoreCase))
+            .Select(row => row.OwningProcessId)
+            .FirstOrDefault(pid => pid is > 0);
         var evt = new SandboxEvent
         {
             EventType = eventType,
@@ -188,7 +194,13 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
                 ["localAddress"] = connection.LocalEndPoint.Address.ToString(),
                 ["localPort"] = connection.LocalEndPoint.Port.ToString(CultureInfo.InvariantCulture),
                 ["remoteAddress"] = connection.RemoteEndPoint.Address.ToString(),
-                ["remotePort"] = connection.RemoteEndPoint.Port.ToString(CultureInfo.InvariantCulture)
+                ["remotePort"] = connection.RemoteEndPoint.Port.ToString(CultureInfo.InvariantCulture),
+                ["protocol"] = "TCP",
+                ["transportProtocol"] = "TCP",
+                ["localEndpoint"] = connection.Local,
+                ["remoteEndpoint"] = connection.Remote,
+                ["processIdSource"] = owningProcessId is > 0 ? "netstat-endpoint-join" : "unavailable",
+                ["processIdUnavailableReason"] = owningProcessId is > 0 ? string.Empty : "no-owner-row-for-endpoint"
             }
         };
 

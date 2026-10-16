@@ -159,7 +159,10 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                     "process.new",
                     process,
                     phase,
-                    context.RootProcessId,
+                    // A phase snapshot contains many ambient processes. Do
+                    // not stamp the sample root onto every row unless the
+                    // lineage builder actually linked that PID to the root.
+                    metadata is null ? null : context.RootProcessId,
                     depth: metadata?.Depth,
                     childCount: metadata?.ChildCount,
                     lineage: metadata?.Lineage,
@@ -3026,17 +3029,17 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
         }
 
         var headers = rows[0];
-        var taskNameIndex = FindHeader(headers, "TaskName", "Task Name");
+        var taskNameIndex = FindHeader(headers, "TaskName", "Task Name", "任务名称", "任务名");
         if (taskNameIndex < 0 && headers.Count > 1)
         {
             taskNameIndex = 1;
         }
 
-        var statusIndex = FindHeader(headers, "Status");
-        var taskToRunIndex = FindHeader(headers, "Task To Run");
-        var nextRunIndex = FindHeader(headers, "Next Run Time");
-        var lastRunIndex = FindHeader(headers, "Last Run Time");
-        var authorIndex = FindHeader(headers, "Author");
+        var statusIndex = FindHeader(headers, "Status", "状态");
+        var taskToRunIndex = FindHeader(headers, "Task To Run", "要运行的任务", "任务要运行的程序", "操作");
+        var nextRunIndex = FindHeader(headers, "Next Run Time", "下次运行时间");
+        var lastRunIndex = FindHeader(headers, "Last Run Time", "上次运行时间");
+        var authorIndex = FindHeader(headers, "Author", "作者");
 
         foreach (var row in rows.Skip(1))
         {
@@ -3540,7 +3543,8 @@ foreach ($row in Get-WmiRows '__FilterToConsumerBinding') {
     {
         for (var index = 0; index < headers.Count; index++)
         {
-            if (names.Any(name => string.Equals(headers[index].Trim(), name, StringComparison.OrdinalIgnoreCase)))
+            var header = headers[index].Trim().Trim('\uFEFF');
+            if (names.Any(name => string.Equals(header, name, StringComparison.OrdinalIgnoreCase)))
             {
                 return index;
             }

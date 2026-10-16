@@ -1382,11 +1382,26 @@ internal static class AgentProgram
             var delay = Task.Delay(remaining < pollInterval ? remaining : pollInterval);
             if (await Task.WhenAny(exitTask, delay).ConfigureAwait(false) == exitTask)
             {
+                // The process can create and close a file/socket immediately
+                // before exit. Take one final edge poll before the remaining
+                // analysis wait so the last observable state is not lost.
+                var exitEdgeEvents = await probeRunner.CollectAsync(
+                    ProbePhase.DuringRun,
+                    context,
+                    CancellationToken.None,
+                    includeHealthSummary: false).ConfigureAwait(false);
+                events.AddRange(exitEdgeEvents);
                 return true;
             }
 
             if (exitTask.IsCompleted)
             {
+                var exitEdgeEvents = await probeRunner.CollectAsync(
+                    ProbePhase.DuringRun,
+                    context,
+                    CancellationToken.None,
+                    includeHealthSummary: false).ConfigureAwait(false);
+                events.AddRange(exitEdgeEvents);
                 return true;
             }
 
@@ -1398,7 +1413,18 @@ internal static class AgentProgram
             events.AddRange(inFlightEvents);
         }
 
-        return exitTask.IsCompleted || process.HasExited;
+        if (exitTask.IsCompleted || process.HasExited)
+        {
+            var finalEdgeEvents = await probeRunner.CollectAsync(
+                ProbePhase.DuringRun,
+                context,
+                CancellationToken.None,
+                includeHealthSummary: false).ConfigureAwait(false);
+            events.AddRange(finalEdgeEvents);
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

@@ -8662,6 +8662,27 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             return ("Suspicious", "medium");
         }
 
+        if (HasSampleLifecycle(report) && !HasCompleteSampleBehavior(report))
+        {
+            return ("Observed execution / no behavior-rule hit", "info");
+        }
+
+        // A report containing only collection-health/VT/status rows is a
+        // valid quiet control-plane result. Preserve its neutral verdict;
+        // runtime-indeterminate is reserved for an actual sample run with no
+        // usable runtime evidence (or a completely empty completed report).
+        if (report.Events.Count > 0 &&
+            !report.Events.Any(IsDynamicEvidenceEvent) &&
+            !primaryFindings.Any())
+        {
+            return ("No high-risk behavior", "info");
+        }
+
+        if (!report.Events.Any(IsDynamicEvidenceEvent))
+        {
+            return ("Evidence unavailable / runtime indeterminate", "medium");
+        }
+
         return ("No high-risk behavior", "info");
     }
 
@@ -8712,6 +8733,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         return report.Events.Any(evt =>
             IsDynamicEvidenceEvent(evt) &&
             !IsExecutionBoundaryEvent(evt));
+    }
+
+    private static bool HasSampleLifecycle(AnalysisReport report)
+    {
+        return report.Events.Any(evt =>
+            TextEqualsAny(evt.EventType, "process.start", "process.exit", "process.timeout") &&
+            (evt.Path?.Contains("\\incoming\\", StringComparison.OrdinalIgnoreCase) == true ||
+             EventDataBoolTrue(evt, "strongSampleCorrelation", "sampleBehaviorCandidate", "baselineSampleEvidence")));
     }
 
     private static bool IsExecutionBoundaryEvent(SandboxEvent evt)
@@ -11910,8 +11939,16 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 AddPathDescriptor(descriptors, evt.Path, TryResolveReportRoot(report.JobId, evt.Path), ArtifactKind.PacketCapture, "packet-capture");
             }
 
+            // A file.* row is behavior evidence, not proof that a host-side
+            // artifact exists. Only materialize a download descriptor when
+            // the copy stage explicitly produced one or the local path is a
+            // real file; this prevents phantom dropped-file cards for every
+            // guest snapshot delta.
             if (evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) &&
-                !string.IsNullOrWhiteSpace(evt.Path))
+                !string.IsNullOrWhiteSpace(evt.Path) &&
+                (EventDataBoolTrue(evt, "artifactCopied", "artifactExists", "copied") ||
+                 !string.IsNullOrWhiteSpace(FirstEventDataValue(evt, "artifactRelativePath", "downloadSafeLink")) &&
+                 !string.Equals(FirstEventDataValue(evt, "artifactRelativePathStatus"), "not-created-by-file-diff", StringComparison.OrdinalIgnoreCase)))
             {
                 AddPathDescriptor(descriptors, evt.Path, TryResolveReportRoot(report.JobId, evt.Path), ArtifactKind.DroppedFile, "file-event-path");
             }

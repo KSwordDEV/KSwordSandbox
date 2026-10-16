@@ -1101,12 +1101,20 @@ public static class SampleCorrelationClassifier
 
     private static int? EventProcessId(SandboxEvent evt, IReadOnlyDictionary<string, string> data)
     {
-        return evt.ProcessId ??
+        return evt.ProcessId is > 0 ? evt.ProcessId :
             ParsePid(Value(data, "processId")) ??
+            ParsePid(Value(data, "pid")) ??
             ParsePid(Value(data, "driverProcessId")) ??
             ParsePid(Value(data, "owningProcessId")) ??
+            ParsePid(Value(data, "ownerPid")) ??
+            ParsePid(Value(data, "ownerProcessId")) ??
+            ParsePid(Value(data, "sourceProcessId")) ??
+            ParsePid(Value(data, "targetProcessId")) ??
+            ParsePid(Value(data, "eventHeaderPid")) ??
             ParsePid(Value(data, "serviceProcessId")) ??
-            ParsePid(Value(data, "actorProcessId"));
+            ParsePid(Value(data, "actorProcessId")) ??
+            ParsePid(Value(data, "parentPid")) ??
+            ParsePid(Value(data, "ppid"));
     }
 
     private static bool TryGetRootProcessId(IReadOnlyDictionary<string, string> data, out int rootPid)
@@ -1132,12 +1140,12 @@ public static class SampleCorrelationClassifier
         var text = value.Trim();
         if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
         {
-            return int.TryParse(text[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hex)
+            return int.TryParse(text[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hex) && hex > 0
                 ? hex
                 : null;
         }
 
-        return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+        return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed > 0
             ? parsed
             : null;
     }

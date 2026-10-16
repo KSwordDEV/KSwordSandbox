@@ -64,11 +64,11 @@ internal sealed class FileDiffProbe : IGuestProbe
 
             if (!baseline.TryGetValue(path, out var previous))
             {
-                events.Add(CreateFileEvent("file.created", context, path, snapshot, previous: null));
+                events.Add(CreateFileEvent("file.created", phase, context, path, snapshot, previous: null));
             }
             else if (previous != snapshot)
             {
-                events.Add(CreateFileEvent("file.modified", context, path, snapshot, previous));
+                events.Add(CreateFileEvent("file.modified", phase, context, path, snapshot, previous));
             }
         }
 
@@ -78,7 +78,7 @@ internal sealed class FileDiffProbe : IGuestProbe
 
             if (!current.ContainsKey(path))
             {
-                events.Add(CreateFileEvent("file.deleted", context, path, current: null, previous));
+                events.Add(CreateFileEvent("file.deleted", phase, context, path, current: null, previous));
             }
         }
 
@@ -109,11 +109,35 @@ internal sealed class FileDiffProbe : IGuestProbe
         }
         catch (IOException)
         {
-            return merged;
+            fixtureDirectories = Array.Empty<string>();
         }
         catch (UnauthorizedAccessException)
         {
-            return merged;
+            fixtureDirectories = Array.Empty<string>();
+        }
+
+        // The process-discovery and script fixtures write directly below TEMP
+        // rather than inside a fixture directory. Include only the sandbox
+        // namespace so a host temp directory cannot flood events.json.
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(tempRoot, "KSwordSandbox-*.txt", SearchOption.TopDirectoryOnly))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var info = new FileInfo(path);
+                    merged[path] = new FileStateSnapshot(info.Length, info.LastWriteTimeUtc);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
         }
 
         foreach (var directory in fixtureDirectories)
@@ -136,12 +160,22 @@ internal sealed class FileDiffProbe : IGuestProbe
     /// </summary>
     private static SandboxEvent CreateFileEvent(
         string eventType,
+        ProbePhase phase,
         GuestProbeContext context,
         string path,
         FileStateSnapshot? current,
         FileStateSnapshot? previous)
     {
-        var root = context.WorkingDirectory;
+        var root = path.StartsWith(context.WorkingDirectory, StringComparison.OrdinalIgnoreCase)
+            ? context.WorkingDirectory
+            : (Environment.GetEnvironmentVariable("TEMP") ?? context.WorkingDirectory);
+        var phaseLabel = phase switch
+        {
+            ProbePhase.DuringRun => "during-run",
+            ProbePhase.AfterRun => "after-run",
+            ProbePhase.AfterStart => "after-start",
+            _ => phase.ToString().ToLowerInvariant()
+        };
         var evt = new SandboxEvent
         {
             EventType = eventType,
@@ -151,9 +185,9 @@ internal sealed class FileDiffProbe : IGuestProbe
             ProcessId = context.RootProcessId,
             Data =
             {
-                ["phase"] = "after-run",
-                ["capturePhase"] = "after-run",
-                ["probePhase"] = "after-run",
+                ["phase"] = phaseLabel,
+                ["capturePhase"] = phaseLabel,
+                ["probePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "always-on-working-directory-file-diff",

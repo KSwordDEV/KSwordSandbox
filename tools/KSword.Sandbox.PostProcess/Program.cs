@@ -2,6 +2,7 @@ using System.Text.Json;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Core.Configuration;
 using KSword.Sandbox.Core.Correlation;
+using KSword.Sandbox.Core.Artifacts;
 using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Core.Samples;
@@ -85,16 +86,28 @@ internal static class PostProcessProgram
                 Metrics = BuildMetrics(allEvents, reportEvents, omittedReportEvents, findings, staticAnalysis)
             };
 
+            // Keep post-process regeneration on the same artifact-index path
+            // as the live job pipeline. Without this, re-rendering a report
+            // silently drops real screenshot/memory/PCAP/dropped-file links.
+            var artifactIndexBuilder = new HostArtifactIndexBuilder();
+            var artifactIndex = artifactIndexBuilder.Build(jobId, jobRoot, config.ArtifactCollection);
+            artifactIndexBuilder.WriteIndex(jobId, jobRoot, config.ArtifactCollection);
+
             var jsonReportPath = Path.Combine(jobRoot, "report.json");
             var htmlReportPath = Path.Combine(jobRoot, "report.html");
             var htmlZhReportPath = Path.Combine(jobRoot, "report.zh.html");
             var htmlEnReportPath = Path.Combine(jobRoot, "report.en.html");
             var renderer = new HtmlReportRenderer();
             File.WriteAllText(jsonReportPath, JsonSerializer.Serialize(report, JsonOptions));
-            File.WriteAllText(htmlReportPath, renderer.RenderChinese(report));
+            File.WriteAllText(htmlReportPath, renderer.RenderChinese(report, artifactIndex.Artifacts));
             foreach (var document in renderer.RenderBilingualReports(report))
             {
-                File.WriteAllText(Path.Combine(jobRoot, document.FileName), document.Html);
+                var html = document.FileName.EndsWith(".zh.html", StringComparison.OrdinalIgnoreCase)
+                    ? renderer.RenderChinese(report, artifactIndex.Artifacts)
+                    : document.FileName.EndsWith(".en.html", StringComparison.OrdinalIgnoreCase)
+                        ? renderer.RenderEnglish(report, artifactIndex.Artifacts)
+                        : document.Html;
+                File.WriteAllText(Path.Combine(jobRoot, document.FileName), html);
             }
 
             var resultPath = Path.Combine(jobRoot, "postprocess-result.json");
@@ -776,8 +789,22 @@ internal static class PostProcessProgram
             ["networkEvents"] = rawEvents.Count(evt => evt.EventType.Contains("network", StringComparison.OrdinalIgnoreCase) || evt.EventType.Contains("tcp", StringComparison.OrdinalIgnoreCase)),
             ["staticTags"] = staticAnalysis?.Tags.Count ?? 0
         };
+        metrics["dynamicActionEvents"] = reportEvents.Count(IsDynamicActionEvent);
+        metrics["networkTcpEvents"] = reportEvents.Count(evt => evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase));
+        metrics["persistenceEvents"] = reportEvents.Count(evt =>
+            evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase));
+        metrics["dynamicActionOmitted"] = omittedReportEvents;
         return metrics;
     }
+
+    private static bool IsDynamicActionEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase);
 
     private sealed class Options
     {
