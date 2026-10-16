@@ -64,8 +64,8 @@ PCAPNG。缺少工具或权限不足会记录为非致命 `packet_capture.*` 事
 [--etw-live | --etw | --kernel-etw]
 ```
 
-启用后，Agent 在 `before-start` 使用 `logman.exe` 创建 `Windows Kernel Trace`
-（process/thread/image-load flags）的实时会话，在 `after-run` 停止会话并校验
+启用后，Agent 在 `before-start` 使用 `logman.exe` 创建 Windows 要求的
+`NT Kernel Logger` 系统会话（process/thread/image-load flags），在 `after-run` 停止会话并校验
 `etw-traces/*.etl`。`etw_live.captured` 只证明 ETL 原始证据已落盘，仍标记
 `semanticRowsAvailable=false`、`etlDecodeRequired=true`，不会把未解析 ETL 伪装成行为命中。
 缺少管理员权限、`logman.exe`、会话启动/停止失败或空 ETL 会写 `etw_live.failed`；默认关闭
