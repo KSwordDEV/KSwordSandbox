@@ -125,7 +125,8 @@ internal sealed class GuestArtifactWriter
             outputDirectory,
             metadataByRelativePath: null,
             events: Array.Empty<SandboxEvent>(),
-            collectionOptions: new GuestArtifactCollectionOptions()).ManifestPath;
+            collectionOptions: new GuestArtifactCollectionOptions(),
+            jobId: null).ManifestPath;
     }
 
     /// <summary>
@@ -142,7 +143,8 @@ internal sealed class GuestArtifactWriter
             outputDirectory,
             metadataByRelativePath,
             events: Array.Empty<SandboxEvent>(),
-            collectionOptions: new GuestArtifactCollectionOptions());
+            collectionOptions: new GuestArtifactCollectionOptions(),
+            jobId: null);
     }
 
     /// <summary>
@@ -155,7 +157,8 @@ internal sealed class GuestArtifactWriter
         string outputDirectory,
         IReadOnlyDictionary<string, DroppedFileArtifactMetadata>? metadataByRelativePath,
         IReadOnlyList<SandboxEvent>? events,
-        GuestArtifactCollectionOptions? collectionOptions)
+        GuestArtifactCollectionOptions? collectionOptions,
+        Guid? jobId = null)
     {
         Directory.CreateDirectory(outputDirectory);
         var fullOutputDirectory = Path.GetFullPath(outputDirectory);
@@ -175,6 +178,7 @@ internal sealed class GuestArtifactWriter
             collectionOptions ?? new GuestArtifactCollectionOptions());
         var manifest = new ArtifactManifest
         {
+            JobId = jobId ?? Guid.Empty,
             RuntimeRoot = fullOutputDirectory,
             RootPath = artifactsRoot,
             ImportRoot = fullOutputDirectory,

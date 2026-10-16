@@ -7,8 +7,12 @@ Guest Agent 运行在 analysis VM 内，负责按限定时间启动样本、采�
 现有命令行契约保持不变：
 
 ```text
---sample <path> --out <directory> [--duration <seconds>] [--driver-events <path>]
+--sample <path> --out <directory> [--job-id <guid>] [--duration <seconds>] [--driver-events <path>]
 ```
+
+由宿主 runbook 启动时会传入 `--job-id`。Guest Agent 将该 GUID 写入
+`artifacts/manifest.json` 的 `jobId` 字段，使宿主在导入来宾证据时能够校验
+清单属于当前作业；直接手动启动时可以省略，清单会保留全零 GUID 以兼容旧调用。
 
 释放文件提取默认关闭，需要显式打开：
 

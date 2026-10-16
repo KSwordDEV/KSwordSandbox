@@ -51,7 +51,7 @@ public sealed class HyperVRunbookBuilder
                 throw new ArgumentOutOfRangeException(nameof(config), provider, "Unsupported virtualization provider.");
         }
 
-        AddGuestExecutionSteps(steps, config, provider, targetVmName, sample, guestSample, guestOut, hostOut);
+        AddGuestExecutionSteps(steps, config, provider, targetVmName, jobId, sample, guestSample, guestOut, hostOut);
         AddCleanupSteps(steps, config, provider, usesTemporaryVm, targetVmName, jobId);
 
         if (provider is not VirtualizationProvider.HyperV)
@@ -1082,6 +1082,7 @@ public sealed class HyperVRunbookBuilder
         SandboxConfig config,
         VirtualizationProvider provider,
         string targetVmName,
+        Guid jobId,
         SampleIdentity sample,
         string guestSample,
         string guestOut,
@@ -1104,7 +1105,7 @@ public sealed class HyperVRunbookBuilder
             steps.Add(Step("install-driver-service", "Install and start guest R0 driver service", BuildInstallDriverServiceCommand(config, provider, targetVmName)));
         }
 
-        steps.Add(Step("run-agent", "Start guest collector and sample on the interactive desktop", BuildStartGuestAgentCommand(config, provider, targetVmName, guestRoot, agentPath, guestSample, guestOut, driverEventsPath, agentPidPath, agentExitPath, agentTaskName)));
+        steps.Add(Step("run-agent", "Start guest collector and sample on the interactive desktop", BuildStartGuestAgentCommand(config, provider, targetVmName, jobId, guestRoot, agentPath, guestSample, guestOut, driverEventsPath, agentPidPath, agentExitPath, agentTaskName)));
         steps.Add(Step("sync-live-output", "Live-sync guest events while sample runs", BuildLiveOutputSyncCommand(config, provider, targetVmName, guestOut, hostOut, agentPidPath, agentExitPath, agentTaskName)));
         steps.Add(Step("collect-output", "Collect final guest JSON output", BuildCollectOutputCommand(config, provider, targetVmName, guestOut, hostOut)));
     }
@@ -1498,6 +1499,7 @@ public sealed class HyperVRunbookBuilder
         SandboxConfig config,
         VirtualizationProvider provider,
         string targetVmName,
+        Guid jobId,
         string guestRoot,
         string agentPath,
         string guestSample,
@@ -1507,7 +1509,7 @@ public sealed class HyperVRunbookBuilder
         string agentExitPath,
         string agentTaskName)
     {
-        var agentCommand = BuildGuestAgentInvocation(config, agentPath, guestSample, guestOut, driverEventsPath, agentExitPath, config.Driver.UseMockCollector);
+        var agentCommand = BuildGuestAgentInvocation(config, jobId, agentPath, guestSample, guestOut, driverEventsPath, agentExitPath, config.Driver.UseMockCollector);
         var interactiveCommand = $"$PID | Set-Content -LiteralPath {Q(agentPidPath)} -Encoding ASCII; {agentCommand}";
         var encodedCommand = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(interactiveCommand));
         if (config.Driver.UseMockCollector)
@@ -1585,7 +1587,7 @@ public sealed class HyperVRunbookBuilder
     /// formats the Guest Agent CLI and records its exit code; the method returns
     /// a command string passed to guest powershell.exe -Command.
     /// </summary>
-    private static string BuildGuestAgentInvocation(SandboxConfig config, string agentPath, string guestSample, string guestOut, string driverEventsPath, string agentExitPath, bool useStableRuntime = false)
+    private static string BuildGuestAgentInvocation(SandboxConfig config, Guid jobId, string agentPath, string guestSample, string guestOut, string driverEventsPath, string agentExitPath, bool useStableRuntime = false)
     {
         var arguments = new List<string>
         {
@@ -1593,6 +1595,8 @@ public sealed class HyperVRunbookBuilder
             Q(guestSample),
             "--out",
             Q(guestOut),
+            "--job-id",
+            Q(jobId.ToString("D")),
             "--duration",
             config.Analysis.DefaultDurationSeconds.ToString()
         };

@@ -2039,7 +2039,8 @@ internal static class AgentProgram
                     CaptureEtwLiveTrace = options.CaptureEtwLiveTrace,
                     DriverEventsRequested = !string.IsNullOrWhiteSpace(options.DriverEventsPath),
                     R0CollectorRequested = !string.IsNullOrWhiteSpace(options.R0CollectorPath) || options.R0Mock
-                });
+                },
+                options.JobId);
             var manifestRelativePath = NormalizeArtifactRelativePath(Path.GetRelativePath(options.OutputDirectory, manifestResult.ManifestPath));
             var manifestEvent = new SandboxEvent
             {
@@ -3426,6 +3427,14 @@ internal sealed record AgentOptions
 
     public required string OutputDirectory { get; init; }
 
+    /// <summary>
+    /// Host-assigned analysis job identity propagated into guest artifacts.
+    /// Inputs are the optional --job-id CLI value; processing preserves an
+    /// empty value for legacy direct invocations; the manifest writer records
+    /// the value so host import can verify evidence belongs to this job.
+    /// </summary>
+    public Guid JobId { get; init; }
+
     public int DurationSeconds { get; init; }
 
     public string? DriverEventsPath { get; init; }
@@ -3457,7 +3466,7 @@ internal sealed record AgentOptions
     /// <summary>
     /// Parses command-line switches for the guest agent.
     /// Inputs are string arguments, processing consumes --sample, --out,
-    /// --duration, --driver-events, optional R0Collector sidecar switches, and
+    /// --duration, --job-id, --driver-events, optional R0Collector sidecar switches, and
     /// boolean --r0-mock/--screenshot/--collect-dropped-files/--memory-dump,
     /// optional --screenshot-phases/--screenshot-count, plus opt-in
     /// --packet-capture/--pcap network capture and --etw-live kernel trace
@@ -3518,6 +3527,13 @@ internal sealed record AgentOptions
             ? Math.Clamp(parsedDuration, 1, 3600)
             : 30;
 
+        var jobId = Guid.Empty;
+        if (values.TryGetValue("job-id", out var rawJobId) && !string.IsNullOrWhiteSpace(rawJobId) &&
+            !Guid.TryParse(rawJobId, out jobId))
+        {
+            throw new ArgumentException("--job-id must be a valid GUID. / --job-id 必须是有效的 GUID。", nameof(args));
+        }
+
         values.TryGetValue("driver-events", out var driverEventsPath);
         values.TryGetValue("driver-device", out var driverDevicePath);
         values.TryGetValue("r0collector", out var r0CollectorPath);
@@ -3538,6 +3554,7 @@ internal sealed record AgentOptions
         {
             SamplePath = Path.GetFullPath(samplePath),
             OutputDirectory = Path.GetFullPath(outputDirectory),
+            JobId = jobId,
             DurationSeconds = duration,
             DriverEventsPath = string.IsNullOrWhiteSpace(driverEventsPath) ? null : Path.GetFullPath(driverEventsPath),
             R0CollectorPath = string.IsNullOrWhiteSpace(r0CollectorPath) ? null : Path.GetFullPath(r0CollectorPath),

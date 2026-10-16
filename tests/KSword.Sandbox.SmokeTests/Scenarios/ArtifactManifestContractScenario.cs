@@ -405,6 +405,8 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
     private static void AssertSourceContracts(SmokeTestContext context)
     {
         var guestWriter = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Output", "GuestArtifactWriter.cs");
+        var guestProgram = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Program.cs");
+        var runbookBuilder = ReadRepositoryText(context, "src", "KSword.Sandbox.Core", "Orchestration", "HyperVRunbookBuilder.cs");
         var guestDoc = ReadRepositoryText(context, "docs", "guest-agent.md");
         var reportDoc = ReadRepositoryText(context, "docs", "report-schema.md");
         var artifactDoc = ReadRepositoryText(context, "docs", "artifact-manifest.md");
@@ -426,7 +428,12 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(guestWriter.Contains("lastDiagnosticStage", StringComparison.Ordinal), "Guest writer should preserve collection diagnostic stages.");
         SmokeAssert.True(guestWriter.Contains("lastProcessId", StringComparison.Ordinal), "Guest writer should preserve artifact collection process identity.");
         SmokeAssert.True(guestWriter.Contains("CountProbeFailureEvents", StringComparison.Ordinal), "Guest writer should count probe failures in collection status.");
+        SmokeAssert.True(guestWriter.Contains("JobId = jobId ?? Guid.Empty", StringComparison.Ordinal), "Guest artifact manifests should persist the host-assigned job ID.");
+        SmokeAssert.True(guestProgram.Contains("--job-id", StringComparison.Ordinal), "Guest Agent should parse the host-assigned --job-id argument.");
+        SmokeAssert.True(guestProgram.Contains("options.JobId", StringComparison.Ordinal), "Guest Agent should pass the parsed job ID to artifact manifest writing.");
+        SmokeAssert.True(runbookBuilder.Contains("\"--job-id\"", StringComparison.Ordinal), "The VM runbook should forward the analysis job ID to Guest Agent.");
         SmokeAssert.True(guestDoc.Contains("artifacts/manifest.json", StringComparison.Ordinal), "Guest-agent doc should describe artifacts/manifest.json.");
+        SmokeAssert.True(guestDoc.Contains("--job-id", StringComparison.Ordinal), "Guest-agent doc should describe the job ID argument.");
         SmokeAssert.True(reportDoc.Contains("ArtifactManifest", StringComparison.Ordinal), "Report schema doc should describe ArtifactManifest.");
         SmokeAssert.True(reportDoc.Contains("DroppedFile", StringComparison.Ordinal), "Report schema doc should describe dropped-file artifact entries.");
         SmokeAssert.True(reportDoc.Contains("PacketCapture", StringComparison.Ordinal), "Report schema doc should describe packet-capture artifact entries.");
