@@ -1293,6 +1293,8 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var renderer = new HtmlReportRenderer();
         var html = renderer.RenderEnglish(report, index.Artifacts);
         AssertReportHtmlContainsArtifactLinks(html, jobId);
+        SmokeAssert.True(html.Contains("Artifact manifest job-id mismatch", StringComparison.Ordinal), "A guest artifact manifest with an all-zero top-level jobId should be surfaced as an explicit integrity mismatch.");
+        SmokeAssert.True(html.Contains("Original manifest evidence is preserved and was not rewritten", StringComparison.Ordinal), "Manifest job-id mismatch messaging must preserve the original evidence without implying a repair.");
         var zhHtml = renderer.RenderChinese(report, index.Artifacts);
         SmokeAssert.True(zhHtml.Contains("证据文件链接", StringComparison.Ordinal), "Chinese HTML report should include localized artifact links section.");
 
