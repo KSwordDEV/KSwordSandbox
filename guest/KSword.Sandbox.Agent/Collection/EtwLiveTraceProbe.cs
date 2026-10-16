@@ -85,11 +85,10 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
 
         if (!result.Succeeded)
         {
-            // logman can leave a persistent trace definition behind even when
-            // `-ets` fails to start it (for example Access Denied).  Best
-            // effort cleanup prevents the next analysis from inheriting a
-            // stale session while retaining this failed evidence row.
-            await CleanupTraceDefinitionAsync(session, cancellationToken).ConfigureAwait(false);
+            // `start ... -ets` does not persist a data-collector definition.
+            // Do not issue a best-effort stop here: if the query above was
+            // denied or raced another controller, stopping could terminate a
+            // trace session that this job did not own.
             return [CreateFailureEvent(
                 result.TimedOut ? "logmanStartTimedOut" : "logmanStartFailed",
                 "before-start",
@@ -324,24 +323,6 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
 
     private static string FormatCommand(string fileName, IEnumerable<string> args) =>
         fileName + " " + string.Join(" ", args.Select(static arg => arg.Any(char.IsWhiteSpace) ? $"\"{arg}\"" : arg));
-
-    private static async Task CleanupTraceDefinitionAsync(
-        EtwTraceSession session,
-        CancellationToken cancellationToken)
-    {
-        // Both operations are deliberately best effort.  Their failures are
-        // represented by the original start failure; cleanup must not hide it.
-        _ = await BoundedProcessRunner.RunAsync(
-            LogmanExecutable,
-            ["stop", session.SessionName, "-ets"],
-            TimeSpan.FromSeconds(5),
-            CancellationToken.None).ConfigureAwait(false);
-        _ = await BoundedProcessRunner.RunAsync(
-            LogmanExecutable,
-            ["delete", session.SessionName],
-            TimeSpan.FromSeconds(5),
-            CancellationToken.None).ConfigureAwait(false);
-    }
 
     private sealed record EtwTraceSession(string SessionName, string EtlPath, DateTimeOffset StartedAtUtc);
 }
