@@ -595,8 +595,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         QuickLink(html, "files", "File system activity", report.Events.Count(IsSampleBehaviorFileEvent).ToString());
         QuickLink(html, "startup", "Startup diff", report.Events.Count(IsSampleBehaviorStartupEvent).ToString());
         QuickLink(html, "network", "Network behavior", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString());
-        QuickLink(html, "r0", "R0 sample/health", report.Events.Count(IsR0Event).ToString());
-        QuickLink(html, "vt", "VT lookups", report.Events.Count(IsVirusTotalEvent).ToString());
+        QuickLink(html, "r0", "R0 behavior", report.Events.Count(IsSampleBehaviorR0Event).ToString());
         QuickLink(html, "artifacts", "Artifact links", artifacts.Count.ToString());
         QuickLink(html, "events", "Raw normalized events", report.Events.Count.ToString());
         html.AppendLine("</div>");
@@ -676,7 +675,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             ]);
 
         html.AppendLine("<section id=\"focus\" class=\"card focus-panel\">");
-        html.AppendLine("<div class=\"focus-heading\"><div><p class=\"eyebrow\">Start here</p><h2>Analyst focus</h2><p class=\"section-lead\">Read the verdict and high-signal evidence first. Collection plumbing and lifecycle rows stay available in the detailed evidence sections.</p></div>");
+        html.AppendLine("<div class=\"focus-heading\"><div><p class=\"eyebrow\">Start here</p><h2>Analyst focus</h2><p class=\"section-lead\">Read the verdict and high-signal evidence first.</p></div>");
         html.AppendLine($"<div class=\"focus-verdict badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</div></div>");
         html.AppendLine("<div class=\"focus-grid\">");
         FocusMetric(html, "Primary findings", primaryFindings.Count.ToString(CultureInfo.InvariantCulture), primaryFindings.Count > 0 ? "risk-medium" : "risk-low", "Rules that contribute to the sample verdict.");
@@ -729,7 +728,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var severities = rows.Select(row => row.Severity).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(SeverityRank).ToList();
 
         html.AppendLine("<section id=\"event-explorer\" class=\"card\"><h2>Key event explorer</h2>");
-        html.AppendLine("<div class=\"section-note\"><strong>Review the signal first.</strong> Search or filter by event type, source, stage, severity, and sample-behavior status. Agent lifecycle rows are omitted from this table; expand Raw normalized events for complete audit evidence.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Review the signal first.</strong> Search or filter by event type, source, stage, severity, and sample-behavior status.</div>");
         html.AppendLine("<div class=\"event-explorer-toolbar\">");
         html.AppendLine("<label>Search <input type=\"search\" data-event-search placeholder=\"type, path, process, target\"></label>");
         AppendEventExplorerSelect(html, "Event type", "data-event-type", types);
