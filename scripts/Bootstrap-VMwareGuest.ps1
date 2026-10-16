@@ -90,9 +90,28 @@ function Get-UsableWinRmCertificate {
     $computerName = [Environment]::MachineName
     $ekuServerAuth = '1.3.6.1.5.5.7.3.1'
     $certificates = @(Get-ChildItem -Path 'Cert:\LocalMachine\My' -ErrorAction Stop | Where-Object {
+        $ekuValues = foreach ($eku in @($_.EnhancedKeyUsageList)) {
+            # Windows PowerShell and newer certificate providers expose EKU
+            # entries with different shapes: some are Oid objects with Value,
+            # others wrap the Oid in ObjectId. Read both without assuming one
+            # provider-specific shape.
+            $valueProperty = $eku.PSObject.Properties['Value']
+            if ($null -ne $valueProperty) {
+                [string]$valueProperty.Value
+                continue
+            }
+
+            $objectIdProperty = $eku.PSObject.Properties['ObjectId']
+            if ($null -ne $objectIdProperty -and $null -ne $eku.ObjectId) {
+                $nestedValue = $eku.ObjectId.PSObject.Properties['Value']
+                if ($null -ne $nestedValue) {
+                    [string]$nestedValue.Value
+                }
+            }
+        }
         $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(30) -and
         $_.Subject -eq "CN=$computerName" -and
-        (@($_.EnhancedKeyUsageList | ForEach-Object { $_.ObjectId.Value }) -contains $ekuServerAuth)
+        (@($ekuValues) -contains $ekuServerAuth)
     } | Sort-Object NotAfter -Descending)
     if ($certificates.Count -gt 0) { return $certificates[0] }
 
