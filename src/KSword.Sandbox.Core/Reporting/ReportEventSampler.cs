@@ -1114,10 +1114,10 @@ public static class ReportEventSampler
             return ReportSamplingBucket.FindingEvidence;
         }
 
-        // Keep bounded, high-value runtime edges visible even when correlation
-        // is unknown. Visibility is not a behavior verdict: these rows retain
-        // behaviorCounted=false and remain clearly labelled as unattributed.
-        if (IsDynamicActionEvidenceEvent(evt))
+        // Keep bounded, high-value runtime edges visible only when the
+        // correlation layer has attributed them to the sample. Unknown edges
+        // remain in raw events/coverage metrics and stay out of the main UI.
+        if (IsDynamicActionEvidenceEvent(evt) && IsSampleAttributedDynamicActionEvent(evt))
         {
             return ReportSamplingBucket.DynamicActionEvidence;
         }
@@ -1167,6 +1167,14 @@ public static class ReportEventSampler
             type.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("service.", StringComparison.OrdinalIgnoreCase) &&
                 !type.Contains("snapshot", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSampleAttributedDynamicActionEvent(SandboxEvent evt)
+    {
+        return EventDataBoolTrue(evt, "behaviorCounted", "sampleBehaviorCandidate", "strongSampleCorrelation") ||
+            EventDataEqualsAny(evt, "sampleCorrelation", "confirmed", "probable", "candidate") ||
+            EventDataEqualsAny(evt, "sampleCorrelationStatus", "correlated", "confirmed", "probable", "candidate") ||
+            EventDataEqualsAny(evt, "evidenceDisposition", "behavior-candidate", "sample-attributed");
     }
 
     private static bool IsStrongSampleBehaviorEvent(SandboxEvent evt)
