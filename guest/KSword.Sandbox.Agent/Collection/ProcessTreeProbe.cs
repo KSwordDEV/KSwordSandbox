@@ -95,7 +95,14 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         cancellationToken.ThrowIfCancellationRequested();
 
         var capturedAtUtc = DateTimeOffset.UtcNow;
-        var current = snapshotProvider.Capture(cancellationToken);
+        // DuringRun is deliberately a Toolhelp-only edge sweep. The normal
+        // snapshot enriches every process through a bounded CIM query, which
+        // can take several seconds and misses short-lived children. Fast
+        // snapshots trade optional path/command-line fields for process
+        // creation visibility; AfterStart/AfterRun retain the rich sweep.
+        var current = phase == ProbePhase.DuringRun
+            ? snapshotProvider.CaptureFast(cancellationToken)
+            : snapshotProvider.Capture(cancellationToken);
         var events = new List<SandboxEvent>();
         if (phase == ProbePhase.BeforeStart)
         {
@@ -2434,6 +2441,14 @@ internal sealed class ProcessTreeProbe : IGuestProbe
 internal interface IProcessSnapshotProvider
 {
     Dictionary<int, ProcessTreeSnapshot> Capture(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Captures a low-latency process edge snapshot. Implementations may omit
+    /// expensive optional metadata; the default keeps injected test providers
+    /// source-compatible by using the normal capture path.
+    /// </summary>
+    Dictionary<int, ProcessTreeSnapshot> CaptureFast(CancellationToken cancellationToken = default)
+        => Capture(cancellationToken);
 }
 
 /// <summary>
@@ -2462,6 +2477,44 @@ internal sealed class ProcessSnapshotProvider : IProcessSnapshotProvider
             : new Dictionary<int, ProcessCommandLineInfo>();
 
         return CaptureWithProcessApi(toolhelpByPid, commandLineMetadataByPid, cancellationToken);
+    }
+
+    /// <summary>
+    /// Captures a low-latency process snapshot for in-flight edge polling.
+    /// Inputs are a cancellation token; processing reads one Toolhelp process
+    /// snapshot without CIM or per-process handles; the method returns the
+    /// visible PID/parent/name rows keyed by PID. Rich metadata is recovered
+    /// on the next AfterStart/AfterRun sweep when the process survives.
+    /// </summary>
+    public Dictionary<int, ProcessTreeSnapshot> CaptureFast(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!OperatingSystem.IsWindows())
+        {
+            return Capture(cancellationToken);
+        }
+
+        var toolhelpByPid = CaptureToolhelpProcessInfo();
+        var snapshot = new Dictionary<int, ProcessTreeSnapshot>();
+        foreach (var pair in toolhelpByPid)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var info = pair.Value;
+            var name = string.IsNullOrWhiteSpace(info.ImageName) ? "unknown" : info.ImageName;
+            snapshot[pair.Key] = new ProcessTreeSnapshot(
+                ProcessId: pair.Key,
+                ParentProcessId: info.ParentProcessId > 0 ? info.ParentProcessId : null,
+                ProcessName: name,
+                Path: null,
+                StartTimeUtc: null,
+                SessionId: null,
+                ThreadCount: info.ThreadCount,
+                BasePriority: info.BasePriority,
+                ToolhelpImageName: info.ImageName,
+                CommandLine: null);
+        }
+
+        return snapshot;
     }
 
     /// <summary>

@@ -33,4 +33,11 @@ internal sealed record GuestProbeContext
     public bool CaptureMemoryDump { get; init; }
 
     public bool CapturePacketCapture { get; init; }
+
+    /// <summary>
+    /// Enables the explicit opt-in Windows logman kernel ETW trace.  The
+    /// resulting ETL is raw evidence and must be decoded before behavior
+    /// counting; false means the probe emits an explicit disabled row.
+    /// </summary>
+    public bool CaptureEtwLiveTrace { get; init; }
 }

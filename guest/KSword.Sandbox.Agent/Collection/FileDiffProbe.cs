@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using KSword.Sandbox.Abstractions;
 
@@ -11,8 +12,15 @@ namespace KSword.Sandbox.Agent.Collection;
 /// </summary>
 internal sealed class FileDiffProbe : IGuestProbe
 {
+    private const int MaxQueuedWatcherEvents = 2048;
     private readonly IFileSnapshotProvider snapshotProvider;
     private Dictionary<string, FileStateSnapshot> baseline = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentQueue<FileSystemChange> watcherChanges = new();
+    private readonly List<FileSystemWatcher> watchers = [];
+    private readonly HashSet<string> watchedRoots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, FileStateSnapshot> lastKnownFileState = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object watcherGate = new();
+    private string? tempRoot;
 
     public FileDiffProbe()
         : this(new FileSnapshotProvider())
@@ -46,7 +54,15 @@ internal sealed class FileDiffProbe : IGuestProbe
 
         if (phase == ProbePhase.BeforeStart)
         {
+            DisposeWatchers();
             baseline = CaptureWatchedFiles(context, cancellationToken);
+            lastKnownFileState.Clear();
+            foreach (var pair in baseline)
+            {
+                lastKnownFileState[pair.Key] = pair.Value;
+            }
+
+            StartWatchers(context);
             return Task.FromResult<IReadOnlyList<SandboxEvent>>([]);
         }
 
@@ -57,6 +73,69 @@ internal sealed class FileDiffProbe : IGuestProbe
 
         var current = CaptureWatchedFiles(context, cancellationToken);
         var events = new List<SandboxEvent>();
+        var emittedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // FileSystemWatcher is the primary edge source during the run. A
+        // snapshot still runs as a reconciliation pass, but watcher rows are
+        // emitted first so create -> rename -> delete sequences survive even
+        // when no file exists by the next snapshot.
+        foreach (var change in DrainWatcherChanges())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var eventType = change.Kind switch
+            {
+                WatcherChangeKind.Created => "file.created",
+                WatcherChangeKind.Changed => "file.modified",
+                WatcherChangeKind.Deleted => "file.deleted",
+                WatcherChangeKind.Renamed => "file.renamed",
+                _ => string.Empty
+            };
+            if (string.IsNullOrWhiteSpace(eventType) || !IsWatchedPath(change.Path))
+            {
+                continue;
+            }
+
+            // A Changed notification often follows Created. The create row
+            // already carries the current hash/size, so suppress this one
+            // duplicate while preserving later modifications.
+            var key = $"{eventType}|{change.Path}|{change.OldPath}";
+            if (!emittedKeys.Add(key))
+            {
+                continue;
+            }
+
+            var currentState = TryReadState(change.Path);
+            var previousStatePath = change.Kind == WatcherChangeKind.Renamed && !string.IsNullOrWhiteSpace(change.OldPath)
+                ? change.OldPath
+                : change.Path;
+            lastKnownFileState.TryGetValue(previousStatePath, out var previousState);
+            if (currentState is not null)
+            {
+                lastKnownFileState[change.Path] = currentState;
+            }
+            if (change.Kind == WatcherChangeKind.Deleted || change.Kind == WatcherChangeKind.Renamed)
+            {
+                lastKnownFileState.TryRemove(previousStatePath, out _);
+            }
+
+            var evt = CreateFileEvent(
+                eventType,
+                phase,
+                context,
+                change.Path,
+                currentState,
+                previousState);
+            evt.Data["captureSource"] = "filesystem-watcher";
+            evt.Data["watcherChangeKind"] = change.Kind.ToString().ToLowerInvariant();
+            evt.Data["edgeCaptured"] = "true";
+            evt.Data["transientState"] = currentState is null ? "not-present-at-drain" : "present-at-drain";
+            if (!string.IsNullOrWhiteSpace(change.OldPath))
+            {
+                evt.Data["oldPath"] = change.OldPath;
+                evt.Data["previousPath"] = change.OldPath;
+            }
+            events.Add(evt);
+        }
 
         foreach (var (path, snapshot) in current.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
         {
@@ -64,12 +143,22 @@ internal sealed class FileDiffProbe : IGuestProbe
 
             if (!baseline.TryGetValue(path, out var previous))
             {
-                events.Add(CreateFileEvent("file.created", phase, context, path, snapshot, previous: null));
+                var key = $"file.created|{path}|";
+                if (emittedKeys.Add(key))
+                {
+                    events.Add(CreateFileEvent("file.created", phase, context, path, snapshot, previous: null));
+                }
             }
             else if (previous != snapshot)
             {
-                events.Add(CreateFileEvent("file.modified", phase, context, path, snapshot, previous));
+                var key = $"file.modified|{path}|";
+                if (emittedKeys.Add(key))
+                {
+                    events.Add(CreateFileEvent("file.modified", phase, context, path, snapshot, previous));
+                }
             }
+
+            lastKnownFileState[path] = snapshot;
         }
 
         foreach (var (path, previous) in baseline.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
@@ -78,7 +167,12 @@ internal sealed class FileDiffProbe : IGuestProbe
 
             if (!current.ContainsKey(path))
             {
-                events.Add(CreateFileEvent("file.deleted", phase, context, path, current: null, previous));
+                var key = $"file.deleted|{path}|";
+                if (emittedKeys.Add(key))
+                {
+                    events.Add(CreateFileEvent("file.deleted", phase, context, path, current: null, previous));
+                }
+                lastKnownFileState.TryRemove(path, out _);
             }
         }
 
@@ -88,7 +182,206 @@ internal sealed class FileDiffProbe : IGuestProbe
         // the final AfterRun sweep.
         baseline = current;
 
+        if (phase == ProbePhase.AfterRun)
+        {
+            DisposeWatchers();
+        }
+
         return Task.FromResult<IReadOnlyList<SandboxEvent>>(events);
+    }
+
+    private void StartWatchers(GuestProbeContext context)
+    {
+        tempRoot = Environment.GetEnvironmentVariable("TEMP");
+        TryAddWatcher(context.WorkingDirectory, includeSubdirectories: true);
+        if (!string.IsNullOrWhiteSpace(tempRoot))
+        {
+            // One watcher on TEMP covers both direct KSwordSandbox-*.txt
+            // files and fixture directories created after BeforeStart.
+            TryAddWatcher(tempRoot, includeSubdirectories: true);
+        }
+    }
+
+    private void TryAddWatcher(string root, bool includeSubdirectories)
+    {
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            return;
+        }
+
+        lock (watcherGate)
+        {
+            if (!watchedRoots.Add(root))
+            {
+                return;
+            }
+
+            try
+            {
+                var watcher = new FileSystemWatcher(root)
+                {
+                    IncludeSubdirectories = includeSubdirectories,
+                    NotifyFilter = NotifyFilters.FileName |
+                                   NotifyFilters.DirectoryName |
+                                   NotifyFilters.LastWrite |
+                                   NotifyFilters.Size,
+                    Filter = "*",
+                    InternalBufferSize = 64 * 1024,
+                    EnableRaisingEvents = true
+                };
+                watcher.Created += (_, args) => EnqueueWatcherChange(WatcherChangeKind.Created, args.FullPath, null);
+                watcher.Changed += (_, args) => EnqueueWatcherChange(WatcherChangeKind.Changed, args.FullPath, null);
+                watcher.Deleted += (_, args) => EnqueueWatcherChange(WatcherChangeKind.Deleted, args.FullPath, null);
+                watcher.Renamed += (_, args) => EnqueueWatcherChange(WatcherChangeKind.Renamed, args.FullPath, args.OldFullPath);
+                watcher.Error += (_, _) => { /* snapshot reconciliation remains authoritative */ };
+                watchers.Add(watcher);
+            }
+            catch (ArgumentException)
+            {
+                watchedRoots.Remove(root);
+            }
+            catch (IOException)
+            {
+                watchedRoots.Remove(root);
+            }
+            catch (InvalidOperationException)
+            {
+                watchedRoots.Remove(root);
+            }
+        }
+    }
+
+    private void EnqueueWatcherChange(WatcherChangeKind kind, string? path, string? oldPath)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !IsWatchedPath(path))
+        {
+            return;
+        }
+
+        // FileSystemWatcher also reports directory notifications. The probe
+        // is a file evidence lane; ignore directory creation/rename and only
+        // accept a delete when that path was previously known as a file.
+        if (kind is WatcherChangeKind.Created or WatcherChangeKind.Changed or WatcherChangeKind.Renamed)
+        {
+            if (Directory.Exists(path))
+            {
+                return;
+            }
+        }
+        else if (kind == WatcherChangeKind.Deleted &&
+                 !lastKnownFileState.ContainsKey(path) &&
+                 !File.Exists(path))
+        {
+            return;
+        }
+
+        while (watcherChanges.Count >= MaxQueuedWatcherEvents && watcherChanges.TryDequeue(out _))
+        {
+        }
+
+        watcherChanges.Enqueue(new FileSystemChange(kind, path, oldPath));
+    }
+
+    private List<FileSystemChange> DrainWatcherChanges()
+    {
+        var changes = new List<FileSystemChange>();
+        while (watcherChanges.TryDequeue(out var change))
+        {
+            changes.Add(change);
+        }
+
+        return changes;
+    }
+
+    private bool IsWatchedPath(string path)
+    {
+        bool underWorkingRoot;
+        bool tempRootWatched;
+        lock (watcherGate)
+        {
+            underWorkingRoot = watchedRoots.Any(root =>
+                !string.Equals(root, tempRoot, StringComparison.OrdinalIgnoreCase) && IsPathUnderRoot(root, path));
+            tempRootWatched = !string.IsNullOrWhiteSpace(tempRoot) && watchedRoots.Contains(tempRoot);
+        }
+        if (underWorkingRoot)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(tempRoot) || !tempRootWatched || !IsPathUnderRoot(tempRoot, path))
+        {
+            return false;
+        }
+
+        var relative = SafeRelativePath(tempRoot, path);
+        return relative.StartsWith("KSwordSandbox-", StringComparison.OrdinalIgnoreCase) ||
+               relative.Contains("KSwordSandboxFixture-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPathUnderRoot(string root, string path)
+    {
+        try
+        {
+            var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var fullPath = Path.GetFullPath(path);
+            return string.Equals(fullRoot, fullPath, StringComparison.OrdinalIgnoreCase) ||
+                   fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                   fullPath.StartsWith(fullRoot + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private FileStateSnapshot? TryReadState(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            var info = new FileInfo(path);
+            return new FileStateSnapshot(info.Length, info.LastWriteTimeUtc);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private void DisposeWatchers()
+    {
+        lock (watcherGate)
+        {
+            foreach (var watcher in watchers)
+            {
+                try
+                {
+                    watcher.EnableRaisingEvents = false;
+                    watcher.Dispose();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            }
+
+            watchers.Clear();
+            watchedRoots.Clear();
+        }
+        while (watcherChanges.TryDequeue(out _))
+        {
+        }
     }
 
     private Dictionary<string, FileStateSnapshot> CaptureWatchedFiles(
@@ -464,3 +757,18 @@ internal sealed class FileSnapshotProvider : IFileSnapshotProvider
 /// are returned from file snapshot providers and compared by value.
 /// </summary>
 internal sealed record FileStateSnapshot(long SizeBytes, DateTime LastWriteUtc);
+
+/// <summary>
+/// Represents one edge notification from a FileSystemWatcher.
+/// Inputs are change kind, full path, and optional old path; processing keeps
+/// transient create/rename/delete evidence until the next probe drain.
+/// </summary>
+internal sealed record FileSystemChange(WatcherChangeKind Kind, string Path, string? OldPath);
+
+internal enum WatcherChangeKind
+{
+    Created,
+    Changed,
+    Deleted,
+    Renamed
+}

@@ -25,6 +25,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         var programText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Program.cs");
         var phaseText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Collection", "ProbePhase.cs");
         var guestWriterText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Output", "GuestArtifactWriter.cs");
+        var probeRunnerText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Collection", "GuestProbeRunner.cs");
 
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "process.tree", "Process tree probe must emit process.tree.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "CreateToolhelp32Snapshot", "Process tree probe must use low-privilege Toolhelp snapshots.");
@@ -49,6 +50,12 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.created", "File diff probe must emit file.created.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.modified", "File diff probe must emit file.modified.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.deleted", "File diff probe must emit file.deleted.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "FileSystemWatcher", "File diff probe must capture short-lived file edges with an event-driven watcher.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.renamed", "File diff probe must preserve rename edges even when the destination is gone before a snapshot.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "captureSource", "File diff events must identify event-driven versus snapshot capture.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "KSwordSandbox-*.txt", "File diff probe must include the sandbox TEMP root fixture files.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "CaptureFast", "Process tree probe must use a low-latency edge capture during the run.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Toolhelp-only edge sweep", "Fast process capture must avoid the slow CIM path during in-flight polling.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.tcp.closed", "TCP diff probe must emit closed connection deltas.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "dns.cache.added", "Network probe must emit DNS cache deltas.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.hosts.snapshot", "Network probe must emit hosts file snapshots.");
@@ -56,6 +63,12 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.proxy.snapshot", "Network probe must emit proxy snapshots.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.proxy.modified", "Network probe must emit proxy setting modifications.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.netstat", "Network probe must emit netstat evidence.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "etw_live.started", "ETW live probe must emit an explicit started row.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "etw_live.captured", "ETW live probe must emit a captured row only after ETL validation.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "etw_live.failed", "ETW live probe must close startup/stop failures explicitly.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "semanticRowsAvailable", "ETW live probe must distinguish raw ETL from parsed behavior rows.");
+        SmokeAssert.True(programText.Contains("etw-live", StringComparison.Ordinal), "Guest Agent CLI must expose explicit --etw-live opt-in.");
+        SmokeAssert.True(guestAgentDoc.Contains("etw_live.captured", StringComparison.Ordinal), "Guest Agent documentation must explain ETW live capture and failure states.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "ipconfig.exe", "DNS cache collection must use a bounded ipconfig helper.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "netsh.exe", "WinHTTP proxy collection must use a bounded netsh helper.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "netstat.exe", "Netstat collection must use a bounded netstat helper.");
@@ -251,6 +264,8 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("new MemoryDumpProbe()", StringComparison.Ordinal), "Agent pipeline must include MemoryDumpProbe.");
         SmokeAssert.True(programText.Contains("WaitForExitWithPeriodicProbesAsync", StringComparison.Ordinal), "Agent must poll in-flight probes while the sample is running.");
         SmokeAssert.True(programText.Contains("ProbePhase.DuringRun", StringComparison.Ordinal), "Agent must expose an in-flight probe phase for short-lived behavior.");
+        SmokeAssert.True(probeRunnerText.Contains("CollectDuringRunParallelAsync", StringComparison.Ordinal), "DuringRun probes must run in parallel to preserve short-lived edges.");
+        SmokeAssert.True(probeRunnerText.Contains("Task.WhenAll", StringComparison.Ordinal), "DuringRun probe collection must use concurrent execution.");
         SmokeAssert.True(phaseText.Contains("DuringRun", StringComparison.Ordinal), "ProbePhase must define DuringRun.");
         SmokeAssert.True(programText.Contains("CaptureScreenshots", StringComparison.Ordinal), "Agent options must carry screenshot enablement.");
         SmokeAssert.True(programText.Contains("ScreenshotProbeOptions.Parse", StringComparison.Ordinal), "Agent options must parse configurable screenshot phases and count.");

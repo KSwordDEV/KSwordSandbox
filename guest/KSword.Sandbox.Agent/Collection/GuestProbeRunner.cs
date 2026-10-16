@@ -41,6 +41,16 @@ internal sealed class GuestProbeRunner
         CancellationToken cancellationToken = default,
         bool includeHealthSummary = true)
     {
+        // DuringRun is the only latency-sensitive phase. Running independent
+        // read-only probes concurrently prevents a slow CIM/EventLog query
+        // from turning the nominal 750 ms edge poll into a multi-second gap.
+        // Before/After phases remain ordered because they establish/consume
+        // probe baselines and system snapshots.
+        if (phase == ProbePhase.DuringRun)
+        {
+            return await CollectDuringRunParallelAsync(context, cancellationToken, includeHealthSummary).ConfigureAwait(false);
+        }
+
         var events = new List<SandboxEvent>();
         var completedCount = 0;
         var failedCount = 0;
@@ -145,6 +155,122 @@ internal sealed class GuestProbeRunner
                 events.Count));
         }
         return events;
+    }
+
+    private async Task<IReadOnlyList<SandboxEvent>> CollectDuringRunParallelAsync(
+        GuestProbeContext context,
+        CancellationToken cancellationToken,
+        bool includeHealthSummary)
+    {
+        var results = await Task.WhenAll(probes.Select(probe => ExecuteProbeAsync(probe, ProbePhase.DuringRun, context, cancellationToken)))
+            .ConfigureAwait(false);
+        var events = new List<SandboxEvent>();
+        var completedCount = 0;
+        var failedCount = 0;
+        var timedOutCount = 0;
+
+        foreach (var result in results.OrderBy(result => result.Ordinal))
+        {
+            events.AddRange(result.Events);
+            if (includeHealthSummary)
+            {
+                events.Add(CreateProbeSummaryEvent(
+                    result.Probe,
+                    ProbePhase.DuringRun,
+                    context,
+                    result.Status,
+                    result.Reason,
+                    result.Elapsed,
+                    result.Events.Count,
+                    probeTimeout,
+                    result.Exception));
+            }
+
+            if (result.Status == "completed") completedCount++;
+            else if (result.Status == "timeout") timedOutCount++;
+            else failedCount++;
+        }
+
+        if (includeHealthSummary)
+        {
+            events.Add(CreateProbePhaseSummaryEvent(
+                ProbePhase.DuringRun,
+                context,
+                completedCount,
+                failedCount,
+                timedOutCount,
+                events.Count));
+        }
+
+        return events;
+    }
+
+    private async Task<ProbeExecutionResult> ExecuteProbeAsync(
+        IGuestProbe probe,
+        ProbePhase phase,
+        GuestProbeContext context,
+        CancellationToken cancellationToken)
+    {
+        var elapsed = Stopwatch.StartNew();
+        try
+        {
+            var probeEvents = await CollectProbeWithTimeoutAsync(probe, phase, context, cancellationToken).ConfigureAwait(false);
+            elapsed.Stop();
+            return new ProbeExecutionResult(probe, ProbeOrdinal(probe), "completed", "probeCompleted", elapsed.Elapsed, probeEvents, null);
+        }
+        catch (ProbeTimeoutException)
+        {
+            elapsed.Stop();
+            return new ProbeExecutionResult(
+                probe,
+                ProbeOrdinal(probe),
+                "timeout",
+                "probeTimeout",
+                elapsed.Elapsed,
+                [CreateProbeTimeoutEvent(probe, phase, context, elapsed.Elapsed)],
+                null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            elapsed.Stop();
+            return new ProbeExecutionResult(
+                probe,
+                ProbeOrdinal(probe),
+                "canceled",
+                "probeCanceled",
+                elapsed.Elapsed,
+                [CreateProbeFailureEvent("probe.canceled", probe, phase, context, elapsed.Elapsed, ex)],
+                ex);
+        }
+        catch (Exception ex)
+        {
+            elapsed.Stop();
+            return new ProbeExecutionResult(
+                probe,
+                ProbeOrdinal(probe),
+                "failed",
+                "probeFailed",
+                elapsed.Elapsed,
+                [CreateProbeFailureEvent("probe.failed", probe, phase, context, elapsed.Elapsed, ex)],
+                ex);
+        }
+    }
+
+    private int ProbeOrdinal(IGuestProbe probe)
+    {
+        for (var index = 0; index < probes.Count; index++)
+        {
+            if (ReferenceEquals(probes[index], probe))
+            {
+                return index;
+            }
+        }
+
+        return int.MaxValue;
     }
 
     /// <summary>
@@ -530,6 +656,15 @@ internal sealed class GuestProbeRunner
     }
 
     private readonly record struct ProbeCollection(string CollectionName, string EvidenceRole, string ExpectedRelativePath);
+
+    private sealed record ProbeExecutionResult(
+        IGuestProbe Probe,
+        int Ordinal,
+        string Status,
+        string Reason,
+        TimeSpan Elapsed,
+        IReadOnlyList<SandboxEvent> Events,
+        Exception? Exception);
 
     /// <summary>
     /// Marks an internal probe timeout without depending on localized exception

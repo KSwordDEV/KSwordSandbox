@@ -58,6 +58,20 @@ Guest Agent 运行在 analysis VM 内，负责按限定时间启动样本、采�
 在 Windows 中启用后，Agent 会在样本执行前后使用 `pktmon`，并把 trace 转为
 PCAPNG。缺少工具或权限不足会记录为非致命 `packet_capture.*` 事件，不会让整次分析失败。
 
+短命进程、线程和镜像边沿可通过以下开关启用真实 Kernel ETW 原始追踪：
+
+```text
+[--etw-live | --etw | --kernel-etw]
+```
+
+启用后，Agent 在 `before-start` 使用 `logman.exe` 创建包含
+`Microsoft-Windows-Kernel-Process`、`Microsoft-Windows-Kernel-Thread` 和
+`Microsoft-Windows-Kernel-Image` 的实时会话，在 `after-run` 停止会话并校验
+`etw-traces/*.etl`。`etw_live.captured` 只证明 ETL 原始证据已落盘，仍标记
+`semanticRowsAvailable=false`、`etlDecodeRequired=true`，不会把未解析 ETL 伪装成行为命中。
+缺少管理员权限、`logman.exe`、会话启动/停止失败或空 ETL 会写 `etw_live.failed`；默认关闭
+则写 `etw_live.disabled`，报告因此能区分“未启用”“启动失败”和“已捕获待解析”。
+
 主要 JSON 和证据输出写到 `--out` 下：
 
 - `events.json` - guest 内采集到的有序 `SandboxEvent` 事件。

@@ -98,7 +98,8 @@ internal static class AgentProgram
                     ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
                     ["captureScreenshots"] = options.CaptureScreenshots.ToString(),
                     ["screenshotPhases"] = options.ScreenshotOptions.FormatStages(),
-                    ["screenshotCount"] = options.ScreenshotOptions.CaptureCount.ToString(CultureInfo.InvariantCulture)
+                    ["screenshotCount"] = options.ScreenshotOptions.CaptureCount.ToString(CultureInfo.InvariantCulture),
+                    ["captureEtwLiveTrace"] = options.CaptureEtwLiveTrace.ToString()
                 }
             }
         };
@@ -338,6 +339,7 @@ internal static class AgentProgram
                 new ProcessTreeProbe(),
                 new SecurityEventLogProbe(),
                 new WindowsBehaviorEventLogProbe(),
+                new EtwLiveTraceProbe(),
                 new EtwSecurityReadinessProbe(),
                 new FileDiffProbe(),
                 new TcpConnectionDiffProbe(),
@@ -378,7 +380,8 @@ internal static class AgentProgram
             CaptureScreenshots = options.CaptureScreenshots,
             CollectDroppedFiles = options.CollectDroppedFiles,
             CaptureMemoryDump = options.CaptureMemoryDump,
-            CapturePacketCapture = options.CapturePacketCapture
+            CapturePacketCapture = options.CapturePacketCapture,
+            CaptureEtwLiveTrace = options.CaptureEtwLiveTrace
         };
     }
 
@@ -3395,13 +3398,16 @@ internal sealed record AgentOptions
 
     public bool CapturePacketCapture { get; init; }
 
+    public bool CaptureEtwLiveTrace { get; init; }
+
     /// <summary>
     /// Parses command-line switches for the guest agent.
     /// Inputs are string arguments, processing consumes --sample, --out,
     /// --duration, --driver-events, optional R0Collector sidecar switches, and
     /// boolean --r0-mock/--screenshot/--collect-dropped-files/--memory-dump,
     /// optional --screenshot-phases/--screenshot-count, plus opt-in
-    /// --packet-capture/--pcap network capture flags without breaking existing
+    /// --packet-capture/--pcap network capture and --etw-live kernel trace
+    /// flags without breaking existing
     /// value switches; the method returns
     /// validated and normalized options.
     /// </summary>
@@ -3426,7 +3432,11 @@ internal sealed record AgentOptions
                 string.Equals(optionName, "memory-dumps", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(optionName, "packet-capture", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(optionName, "pcap", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(optionName, "network-capture", StringComparison.OrdinalIgnoreCase))
+                string.Equals(optionName, "network-capture", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "etw-live", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "etw", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "kernel-etw", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "capture-etw", StringComparison.OrdinalIgnoreCase))
             {
                 flags.Add(optionName);
                 continue;
@@ -3486,7 +3496,8 @@ internal sealed record AgentOptions
             ScreenshotOptions = screenshotOptions,
             CollectDroppedFiles = flags.Contains("collect-dropped-files") || flags.Contains("dropped-files"),
             CaptureMemoryDump = flags.Contains("memory-dump") || flags.Contains("memory-dumps"),
-            CapturePacketCapture = flags.Contains("packet-capture") || flags.Contains("pcap") || flags.Contains("network-capture")
+            CapturePacketCapture = flags.Contains("packet-capture") || flags.Contains("pcap") || flags.Contains("network-capture"),
+            CaptureEtwLiveTrace = flags.Contains("etw-live") || flags.Contains("etw") || flags.Contains("kernel-etw") || flags.Contains("capture-etw")
         };
     }
 
