@@ -339,10 +339,8 @@ public sealed class HyperVRunbookBuilder
         {
             $"$driverPath = {Q(config.Driver.HostDriverPath)};",
             "if (-not (Test-Path -LiteralPath $driverPath -PathType Leaf)) { throw \"R0 driver host path was not found: $driverPath\" };",
-            "$signature = Get-AuthenticodeSignature -FilePath $driverPath;",
             "Write-Host \"R0 driver host path: $driverPath\";",
-            "Write-Host \"R0 driver Authenticode status: $($signature.Status)\";",
-            "if ($signature.Status -eq 'NotSigned') { Write-Warning 'R0 driver file is not signed. Windows x64 guests normally require a trusted/test-signed kernel driver; sc.exe start may fail with 577/1275 until the guest is in test-signing mode and the driver is test-signed.' }"
+            "if ($null -ne (Get-Command Get-AuthenticodeSignature -ErrorAction SilentlyContinue)) { try { $signature = Get-AuthenticodeSignature -FilePath $driverPath; Write-Host \"R0 driver Authenticode status: $($signature.Status)\"; if ($signature.Status -eq 'NotSigned') { Write-Warning 'R0 driver file is not signed. Windows x64 guests normally require a trusted/test-signed kernel driver; sc.exe start may fail with 577/1275 until the guest is in test-signing mode and the driver is test-signed.' } } catch { Write-Warning \"R0 driver signature check unavailable: $($_.Exception.Message)\" } } else { Write-Warning 'R0 driver signature check unavailable in this PowerShell host; continuing to VM/guest driver readiness.' }"
         });
     }
 

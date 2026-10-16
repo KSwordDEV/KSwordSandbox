@@ -7850,6 +7850,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             IsRegistryEvent(evt) ||
             IsStartupEvent(evt) ||
             IsNetworkEvent(evt) ||
+            EventDataEqualsAny(evt, "captureSource", "etw-live-tracerpt") ||
             IsSecurityPrivilegeEvent(evt) ||
             IsR0Event(evt) ||
             IsDynamicProcessActionEvent(evt) ||

@@ -2006,6 +2006,11 @@ public sealed partial class SandboxJobService
             return false;
         }
 
+        if (EventDataEqualsAny(evt, "captureSource", "etw-live-tracerpt"))
+        {
+            return true;
+        }
+
         return type.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
