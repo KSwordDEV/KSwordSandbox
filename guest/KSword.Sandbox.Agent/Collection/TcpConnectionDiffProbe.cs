@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security;
 using System.Security.Cryptography;
@@ -168,7 +170,14 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
         TcpConnectionSnapshot connection,
         NetworkStateSnapshot? networkState = null)
     {
-        var owningProcessId = networkState?.NetstatRows.Values
+        // The extended TCP table is captured by TcpConnectionSnapshotProvider
+        // on Windows and is authoritative for the edge that was observed. For
+        // a closed edge, keeping that PID on the snapshot is essential: a
+        // later netstat call cannot recover a socket which has already gone.
+        // Never infer an owner from a service name or from PID 0.
+        var owningProcessId = connection.OwningProcessId is > 0
+            ? connection.OwningProcessId
+            : networkState?.NetstatRows.Values
             .Where(row => string.Equals(row.Protocol, "TCP", StringComparison.OrdinalIgnoreCase) &&
                           string.Equals(row.Local, connection.Local, StringComparison.OrdinalIgnoreCase) &&
                           string.Equals(row.Remote, connection.Remote, StringComparison.OrdinalIgnoreCase))
@@ -199,7 +208,9 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
                 ["transportProtocol"] = "TCP",
                 ["localEndpoint"] = connection.Local,
                 ["remoteEndpoint"] = connection.Remote,
-                ["processIdSource"] = owningProcessId is > 0 ? "netstat-endpoint-join" : "unavailable",
+                ["processIdSource"] = connection.OwningProcessId is > 0
+                    ? connection.ProcessIdSource
+                    : owningProcessId is > 0 ? "netstat-endpoint-join" : "unavailable",
                 ["processIdUnavailableReason"] = owningProcessId is > 0 ? string.Empty : "no-owner-row-for-endpoint"
             }
         };
@@ -990,17 +1001,304 @@ internal sealed class TcpConnectionSnapshotProvider : ITcpConnectionSnapshotProv
     /// </summary>
     public Dictionary<string, TcpConnectionSnapshot> Capture()
     {
+        // GetActiveTcpConnections is a convenient managed fallback, but it
+        // has no owning PID and can miss short-lived rows. Windows exposes the
+        // same table with owner PIDs through GetExtendedTcpTable; reading that
+        // table is one fast syscall and also gives us a real owner for a
+        // closed edge. If the API is unavailable or denied, fall back to the
+        // managed table and leave ownership unknown instead of guessing.
+        if (OperatingSystem.IsWindows() && TryCaptureWindowsOwnerTable(out var ownerRows))
+        {
+            return ownerRows;
+        }
+
         try
         {
             return IPGlobalProperties.GetIPGlobalProperties()
                 .GetActiveTcpConnections()
-                .Select(connection => new TcpConnectionSnapshot(connection.LocalEndPoint, connection.RemoteEndPoint, connection.State.ToString()))
+                .Select(connection => new TcpConnectionSnapshot(
+                    connection.LocalEndPoint,
+                    connection.RemoteEndPoint,
+                    connection.State.ToString(),
+                    OwningProcessId: null,
+                    ProcessIdSource: "unavailable-managed-api"))
                 .ToDictionary(connection => connection.Key, StringComparer.OrdinalIgnoreCase);
         }
         catch (NetworkInformationException)
         {
             return new Dictionary<string, TcpConnectionSnapshot>(StringComparer.OrdinalIgnoreCase);
         }
+    }
+
+    private static bool TryCaptureWindowsOwnerTable(out Dictionary<string, TcpConnectionSnapshot> snapshots)
+    {
+        snapshots = new Dictionary<string, TcpConnectionSnapshot>(StringComparer.OrdinalIgnoreCase);
+        IntPtr buffer = IntPtr.Zero;
+        try
+        {
+            uint bufferSize = 0;
+            var status = GetExtendedTcpTable(
+                IntPtr.Zero,
+                ref bufferSize,
+                sort: true,
+                addressFamily: AddressFamily.InterNetwork,
+                tableClass: TcpTableOwnerPidAll,
+                reserved: 0);
+            if (status != ErrorInsufficientBuffer || bufferSize == 0)
+            {
+                return false;
+            }
+
+            buffer = Marshal.AllocHGlobal(checked((int)bufferSize));
+            status = GetExtendedTcpTable(
+                buffer,
+                ref bufferSize,
+                sort: true,
+                addressFamily: AddressFamily.InterNetwork,
+                tableClass: TcpTableOwnerPidAll,
+                reserved: 0);
+            if (status != ErrorSuccess)
+            {
+                return false;
+            }
+
+            var rowCount = Marshal.ReadInt32(buffer);
+            var rowSize = Marshal.SizeOf<MibTcpRowOwnerPid>();
+            var rowPointer = IntPtr.Add(buffer, sizeof(uint));
+            for (var index = 0; index < rowCount; index++)
+            {
+                var row = Marshal.PtrToStructure<MibTcpRowOwnerPid>(rowPointer);
+                rowPointer = IntPtr.Add(rowPointer, rowSize);
+                if (row.LocalPort is null || row.RemotePort is null)
+                {
+                    continue;
+                }
+
+                // The managed fallback used by this probe reports active
+                // connections, not listening sockets. Listener deltas have a
+                // separate network.tcp.listener event path, so keep the owner
+                // table semantically equivalent and avoid duplicate rows.
+                if (row.State == 2)
+                {
+                    continue;
+                }
+
+                var local = new IPEndPoint(
+                    new IPAddress(row.LocalAddress),
+                    DecodeNetworkPort(row.LocalPort));
+                var remote = new IPEndPoint(
+                    new IPAddress(row.RemoteAddress),
+                    DecodeNetworkPort(row.RemotePort));
+                var owner = row.OwningProcessId > 0 && row.OwningProcessId <= int.MaxValue
+                    ? (int?)row.OwningProcessId
+                    : null;
+                var snapshot = new TcpConnectionSnapshot(
+                    local,
+                    remote,
+                    TcpStateName(row.State),
+                    owner,
+                    owner is > 0 ? "getextendedtcptable-owner-pid" : "unavailable-pid-zero");
+                snapshots[snapshot.Key] = snapshot;
+            }
+
+            // IPv6 has a different row layout but uses the same owner table
+            // API. Keep it in the same dictionary so endpoint matching and
+            // closed-edge PID retention work for both address families.
+            TryCaptureWindowsOwnerTableV6(snapshots);
+            return true;
+        }
+        catch (DllNotFoundException)
+        {
+            snapshots.Clear();
+            return false;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            snapshots.Clear();
+            return false;
+        }
+        catch (ExternalException)
+        {
+            snapshots.Clear();
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            snapshots.Clear();
+            return false;
+        }
+        finally
+        {
+            if (buffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+    }
+
+    private static int DecodeNetworkPort(byte[] bytes)
+    {
+        if (bytes.Length < 2)
+        {
+            return 0;
+        }
+
+        return (bytes[0] << 8) | bytes[1];
+    }
+
+    private static int DecodeNetworkPort(uint value)
+    {
+        var low = (int)(value & 0xFF);
+        var high = (int)((value >> 8) & 0xFF);
+        return (low << 8) | high;
+    }
+
+    private static void TryCaptureWindowsOwnerTableV6(Dictionary<string, TcpConnectionSnapshot> snapshots)
+    {
+        IntPtr buffer = IntPtr.Zero;
+        try
+        {
+            uint bufferSize = 0;
+            var status = GetExtendedTcpTable(
+                IntPtr.Zero,
+                ref bufferSize,
+                sort: true,
+                addressFamily: AddressFamily.InterNetworkV6,
+                tableClass: TcpTableOwnerPidAll,
+                reserved: 0);
+            if (status != ErrorInsufficientBuffer || bufferSize == 0)
+            {
+                return;
+            }
+
+            buffer = Marshal.AllocHGlobal(checked((int)bufferSize));
+            status = GetExtendedTcpTable(
+                buffer,
+                ref bufferSize,
+                sort: true,
+                addressFamily: AddressFamily.InterNetworkV6,
+                tableClass: TcpTableOwnerPidAll,
+                reserved: 0);
+            if (status != ErrorSuccess)
+            {
+                return;
+            }
+
+            var rowCount = Marshal.ReadInt32(buffer);
+            var rowSize = Marshal.SizeOf<MibTcp6RowOwnerPid>();
+            var rowPointer = IntPtr.Add(buffer, sizeof(uint));
+            for (var index = 0; index < rowCount; index++)
+            {
+                var row = Marshal.PtrToStructure<MibTcp6RowOwnerPid>(rowPointer);
+                rowPointer = IntPtr.Add(rowPointer, rowSize);
+                if (row.LocalAddress is null || row.RemoteAddress is null || row.State == 2)
+                {
+                    continue;
+                }
+
+                var localAddress = new IPAddress(row.LocalAddress, row.LocalScopeId);
+                var remoteAddress = new IPAddress(row.RemoteAddress, row.RemoteScopeId);
+                var local = new IPEndPoint(localAddress, DecodeNetworkPort(row.LocalPort));
+                var remote = new IPEndPoint(remoteAddress, DecodeNetworkPort(row.RemotePort));
+                var owner = row.OwningProcessId > 0 && row.OwningProcessId <= int.MaxValue
+                    ? (int?)row.OwningProcessId
+                    : null;
+                var snapshot = new TcpConnectionSnapshot(
+                    local,
+                    remote,
+                    TcpStateName(row.State),
+                    owner,
+                    owner is > 0 ? "getextendedtcptable-owner-pid" : "unavailable-pid-zero");
+                snapshots[snapshot.Key] = snapshot;
+            }
+        }
+        catch (DllNotFoundException)
+        {
+        }
+        catch (EntryPointNotFoundException)
+        {
+        }
+        catch (ExternalException)
+        {
+        }
+        catch (ArgumentException)
+        {
+        }
+        finally
+        {
+            if (buffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+    }
+
+    private static string TcpStateName(uint state)
+    {
+        return state switch
+        {
+            1 => "Closed",
+            2 => "Listen",
+            3 => "SynSent",
+            4 => "SynReceived",
+            5 => "Established",
+            6 => "FinWait1",
+            7 => "FinWait2",
+            8 => "CloseWait",
+            9 => "Closing",
+            10 => "LastAck",
+            11 => "TimeWait",
+            12 => "DeleteTcb",
+            _ => $"Unknown({state.ToString(CultureInfo.InvariantCulture)})"
+        };
+    }
+
+    private const uint ErrorSuccess = 0;
+    private const uint ErrorInsufficientBuffer = 122;
+    private const int TcpTableOwnerPidAll = 5;
+
+    [DllImport("iphlpapi.dll", SetLastError = true)]
+    private static extern uint GetExtendedTcpTable(
+        IntPtr tcpTable,
+        ref uint sizePointer,
+        [MarshalAs(UnmanagedType.Bool)] bool sort,
+        AddressFamily addressFamily,
+        int tableClass,
+        uint reserved);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MibTcpRowOwnerPid
+    {
+        public uint State;
+        public uint LocalAddress;
+
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)]
+        public byte[]? LocalPort;
+
+        public uint RemoteAddress;
+
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)]
+        public byte[]? RemotePort;
+
+        public uint OwningProcessId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MibTcp6RowOwnerPid
+    {
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+        public byte[]? LocalAddress;
+
+        public uint LocalScopeId;
+        public uint LocalPort;
+
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+        public byte[]? RemoteAddress;
+
+        public uint RemoteScopeId;
+        public uint RemotePort;
+        public uint State;
+        public uint OwningProcessId;
     }
 }
 
@@ -1764,7 +2062,12 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
 /// Inputs are local/remote endpoints and TCP state; processing exposes stable
 /// string forms for event Data; records are returned by TCP snapshot providers.
 /// </summary>
-internal sealed record TcpConnectionSnapshot(IPEndPoint LocalEndPoint, IPEndPoint RemoteEndPoint, string State)
+internal sealed record TcpConnectionSnapshot(
+    IPEndPoint LocalEndPoint,
+    IPEndPoint RemoteEndPoint,
+    string State,
+    int? OwningProcessId = null,
+    string ProcessIdSource = "unavailable")
 {
     public string Local => FormatEndPoint(LocalEndPoint);
 
