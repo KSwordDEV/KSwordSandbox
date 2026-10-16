@@ -88,13 +88,19 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
             return baselineEvents;
         }
 
-        if (phase != ProbePhase.AfterRun)
+        if (phase is not (ProbePhase.DuringRun or ProbePhase.AfterRun))
         {
             return [];
         }
 
         var current = snapshotProvider.Capture();
-        var currentNetworkState = await networkStateSnapshotProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
+        // In-flight polls only need the cheap TCP table. The broader DNS,
+        // hosts, proxy, netstat and listener inventories remain on the final
+        // sweep so a long-running sample does not flood events.json with
+        // repeated environment snapshots.
+        var currentNetworkState = phase == ProbePhase.AfterRun
+            ? await networkStateSnapshotProvider.CaptureAsync(cancellationToken).ConfigureAwait(false)
+            : NetworkStateSnapshot.Empty;
         var events = new List<SandboxEvent>();
 
         foreach (var (key, connection) in current.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
@@ -102,7 +108,7 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
             cancellationToken.ThrowIfCancellationRequested();
             if (!baseline.ContainsKey(key))
             {
-                events.Add(CreateTcpEvent("network.tcp", "opened", connection));
+                events.Add(CreateTcpEvent("network.tcp", "opened", connection, phase == ProbePhase.AfterRun ? currentNetworkState : null));
             }
         }
 
@@ -111,8 +117,17 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
             cancellationToken.ThrowIfCancellationRequested();
             if (!current.ContainsKey(key))
             {
-                events.Add(CreateTcpEvent("network.tcp.closed", "closed", connection));
+                events.Add(CreateTcpEvent("network.tcp.closed", "closed", connection, phase == ProbePhase.AfterRun ? currentNetworkState : null));
             }
+        }
+
+        // A connection can be opened and closed while the sample is alive.
+        // Advance the TCP baseline on each poll so both edges are retained.
+        baseline = current;
+
+        if (phase == ProbePhase.DuringRun)
+        {
+            return events;
         }
 
         events.Add(CreateDnsSnapshotEvent(phase, currentNetworkState.DnsCacheEntries));
@@ -147,9 +162,19 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
     /// copies endpoint strings plus structured address/port fields; the method
     /// returns a SandboxEvent.
     /// </summary>
-    private static SandboxEvent CreateTcpEvent(string eventType, string change, TcpConnectionSnapshot connection)
+    private static SandboxEvent CreateTcpEvent(
+        string eventType,
+        string change,
+        TcpConnectionSnapshot connection,
+        NetworkStateSnapshot? networkState = null)
     {
-        return new SandboxEvent
+        var owningProcessId = networkState?.NetstatRows.Values
+            .Where(row => string.Equals(row.Protocol, "TCP", StringComparison.OrdinalIgnoreCase) &&
+                          string.Equals(row.Local, connection.Local, StringComparison.OrdinalIgnoreCase) &&
+                          string.Equals(row.Remote, connection.Remote, StringComparison.OrdinalIgnoreCase))
+            .Select(row => row.OwningProcessId)
+            .FirstOrDefault(pid => pid is not null);
+        var evt = new SandboxEvent
         {
             EventType = eventType,
             Source = "guest",
@@ -166,6 +191,14 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
                 ["remotePort"] = connection.RemoteEndPoint.Port.ToString(CultureInfo.InvariantCulture)
             }
         };
+
+        if (owningProcessId is not null)
+        {
+            evt.Data["owningProcessId"] = owningProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["processId"] = owningProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return evt;
     }
 
     /// <summary>

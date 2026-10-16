@@ -25,7 +25,11 @@ through explicit probe boundaries:
    screenshot, and optional pktmon packet-capture start.
 2. `AfterStart` - process deltas, process tree, optional during-stage
    screenshot, and opt-in memory dump.
-3. `AfterRun` - final process deltas, file diffs, TCP/DNS/netstat/listener
+3. `DuringRun` - bounded 750 ms in-flight process/file/TCP polls while the
+   sample is alive. These polls retain short-lived children, writes, and
+   connections; frequent probe health summaries are suppressed to keep raw
+   evidence usable.
+4. `AfterRun` - final process deltas, file diffs, TCP/DNS/netstat/listener
    diffs, service/task/startup/Run-key diffs, optional after-stage screenshot,
    and optional pktmon stop/PCAPNG conversion.
 

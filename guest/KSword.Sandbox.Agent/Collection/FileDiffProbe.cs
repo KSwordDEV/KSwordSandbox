@@ -50,7 +50,7 @@ internal sealed class FileDiffProbe : IGuestProbe
             return Task.FromResult<IReadOnlyList<SandboxEvent>>([]);
         }
 
-        if (phase != ProbePhase.AfterRun)
+        if (phase is not (ProbePhase.DuringRun or ProbePhase.AfterRun))
         {
             return Task.FromResult<IReadOnlyList<SandboxEvent>>([]);
         }
@@ -81,6 +81,12 @@ internal sealed class FileDiffProbe : IGuestProbe
                 events.Add(CreateFileEvent("file.deleted", context, path, current: null, previous));
             }
         }
+
+        // Advance the comparison point after every in-flight poll. This keeps
+        // short-lived create/modify/delete activity visible in the event
+        // stream while preventing the same delta from being emitted again by
+        // the final AfterRun sweep.
+        baseline = current;
 
         return Task.FromResult<IReadOnlyList<SandboxEvent>>(events);
     }

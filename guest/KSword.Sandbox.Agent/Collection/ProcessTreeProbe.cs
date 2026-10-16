@@ -125,7 +125,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                     capturedAtUtc: capturedAtUtc));
             }
         }
-        else if (phase is ProbePhase.AfterStart or ProbePhase.AfterRun)
+        else if (phase is ProbePhase.AfterStart or ProbePhase.DuringRun or ProbePhase.AfterRun)
         {
             TrackRootProcess(context, current, phase, capturedAtUtc);
             RememberVisibleProcesses(current, phase, capturedAtUtc);

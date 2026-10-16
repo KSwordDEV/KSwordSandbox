@@ -171,7 +171,12 @@ internal static class AgentProgram
             events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterStart, runningProbeContext));
 
             executionStage = "wait";
-            var exited = await WaitForExitAsync(process, TimeSpan.FromSeconds(options.DurationSeconds));
+            var exited = await WaitForExitWithPeriodicProbesAsync(
+                process,
+                TimeSpan.FromSeconds(options.DurationSeconds),
+                probeRunner,
+                runningProbeContext,
+                events);
             if (!exited)
             {
                 events.Add(new SandboxEvent
@@ -1341,6 +1346,50 @@ internal static class AgentProgram
         var exitTask = process.WaitForExitAsync();
         var delayTask = Task.Delay(timeout);
         return await Task.WhenAny(exitTask, delayTask) == exitTask;
+    }
+
+    /// <summary>
+    /// Waits for the sample while taking bounded in-flight snapshots. Inputs
+    /// are the sample process, analysis window, probe runner, root context,
+    /// and event sink; processing polls every 750 ms and records process/file/
+    /// TCP deltas before they disappear, then returns whether the process exited
+    /// before the deadline. Health summaries are suppressed for these frequent
+    /// polls; probe failures remain explicit diagnostic events.
+    /// </summary>
+    private static async Task<bool> WaitForExitWithPeriodicProbesAsync(
+        Process process,
+        TimeSpan timeout,
+        GuestProbeRunner probeRunner,
+        GuestProbeContext context,
+        List<SandboxEvent> events)
+    {
+        var exitTask = process.WaitForExitAsync();
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        var pollInterval = TimeSpan.FromMilliseconds(750);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            var delay = Task.Delay(remaining < pollInterval ? remaining : pollInterval);
+            if (await Task.WhenAny(exitTask, delay).ConfigureAwait(false) == exitTask)
+            {
+                return true;
+            }
+
+            if (exitTask.IsCompleted)
+            {
+                return true;
+            }
+
+            var inFlightEvents = await probeRunner.CollectAsync(
+                ProbePhase.DuringRun,
+                context,
+                CancellationToken.None,
+                includeHealthSummary: false).ConfigureAwait(false);
+            events.AddRange(inFlightEvents);
+        }
+
+        return exitTask.IsCompleted || process.HasExited;
     }
 
     /// <summary>

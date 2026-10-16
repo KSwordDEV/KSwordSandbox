@@ -9,6 +9,12 @@ internal enum ProbePhase
 {
     BeforeStart = 0,
     AfterStart,
+    /// <summary>
+    /// A bounded in-flight sample poll. Dynamic probes use this phase to
+    /// retain short-lived process, file, and TCP deltas that can disappear
+    /// before the final AfterRun sweep.
+    /// </summary>
+    DuringRun,
     AfterRun,
     Cleanup
 }

@@ -38,7 +38,8 @@ internal sealed class GuestProbeRunner
     public async Task<IReadOnlyList<SandboxEvent>> CollectAsync(
         ProbePhase phase,
         GuestProbeContext context,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool includeHealthSummary = true)
     {
         var events = new List<SandboxEvent>();
         var completedCount = 0;
@@ -52,16 +53,19 @@ internal sealed class GuestProbeRunner
                 var probeEvents = await CollectProbeWithTimeoutAsync(probe, phase, context, cancellationToken).ConfigureAwait(false);
                 elapsed.Stop();
                 events.AddRange(probeEvents);
-                events.Add(CreateProbeSummaryEvent(
-                    probe,
-                    phase,
-                    context,
-                    status: "completed",
-                    reason: "probeCompleted",
-                    elapsed.Elapsed,
-                    emittedEventCount: probeEvents.Count,
-                    probeTimeout,
-                    exception: null));
+                if (includeHealthSummary)
+                {
+                    events.Add(CreateProbeSummaryEvent(
+                        probe,
+                        phase,
+                        context,
+                        status: "completed",
+                        reason: "probeCompleted",
+                        elapsed.Elapsed,
+                        emittedEventCount: probeEvents.Count,
+                        probeTimeout,
+                        exception: null));
+                }
                 completedCount++;
             }
             catch (ProbeTimeoutException)
@@ -69,16 +73,19 @@ internal sealed class GuestProbeRunner
                 elapsed.Stop();
                 var timeoutEvent = CreateProbeTimeoutEvent(probe, phase, context, elapsed.Elapsed);
                 events.Add(timeoutEvent);
-                events.Add(CreateProbeSummaryEvent(
-                    probe,
-                    phase,
-                    context,
-                    status: "timeout",
-                    reason: "probeTimeout",
-                    elapsed.Elapsed,
-                    emittedEventCount: 1,
-                    probeTimeout,
-                    exception: null));
+                if (includeHealthSummary)
+                {
+                    events.Add(CreateProbeSummaryEvent(
+                        probe,
+                        phase,
+                        context,
+                        status: "timeout",
+                        reason: "probeTimeout",
+                        elapsed.Elapsed,
+                        emittedEventCount: 1,
+                        probeTimeout,
+                        exception: null));
+                }
                 timedOutCount++;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -90,16 +97,19 @@ internal sealed class GuestProbeRunner
                 elapsed.Stop();
                 var failureEvent = CreateProbeFailureEvent("probe.canceled", probe, phase, context, elapsed.Elapsed, ex);
                 events.Add(failureEvent);
-                events.Add(CreateProbeSummaryEvent(
-                    probe,
-                    phase,
-                    context,
-                    status: "canceled",
-                    reason: "probeCanceled",
-                    elapsed.Elapsed,
-                    emittedEventCount: 1,
-                    probeTimeout,
-                    exception: ex));
+                if (includeHealthSummary)
+                {
+                    events.Add(CreateProbeSummaryEvent(
+                        probe,
+                        phase,
+                        context,
+                        status: "canceled",
+                        reason: "probeCanceled",
+                        elapsed.Elapsed,
+                        emittedEventCount: 1,
+                        probeTimeout,
+                        exception: ex));
+                }
                 failedCount++;
             }
             catch (Exception ex)
@@ -107,27 +117,33 @@ internal sealed class GuestProbeRunner
                 elapsed.Stop();
                 var failureEvent = CreateProbeFailureEvent("probe.failed", probe, phase, context, elapsed.Elapsed, ex);
                 events.Add(failureEvent);
-                events.Add(CreateProbeSummaryEvent(
-                    probe,
-                    phase,
-                    context,
-                    status: "failed",
-                    reason: "probeFailed",
-                    elapsed.Elapsed,
-                    emittedEventCount: 1,
-                    probeTimeout,
-                    exception: ex));
+                if (includeHealthSummary)
+                {
+                    events.Add(CreateProbeSummaryEvent(
+                        probe,
+                        phase,
+                        context,
+                        status: "failed",
+                        reason: "probeFailed",
+                        elapsed.Elapsed,
+                        emittedEventCount: 1,
+                        probeTimeout,
+                        exception: ex));
+                }
                 failedCount++;
             }
         }
 
-        events.Add(CreateProbePhaseSummaryEvent(
-            phase,
-            context,
-            completedCount,
-            failedCount,
-            timedOutCount,
-            events.Count));
+        if (includeHealthSummary)
+        {
+            events.Add(CreateProbePhaseSummaryEvent(
+                phase,
+                context,
+                completedCount,
+                failedCount,
+                timedOutCount,
+                events.Count));
+        }
         return events;
     }
 

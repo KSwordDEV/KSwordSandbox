@@ -23,6 +23,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         var frameworkDoc = ReadRepositoryText(context, "docs", "guest-agent-framework.md");
         var artifactsDoc = ReadRepositoryText(context, "docs", "artifacts.md");
         var programText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Program.cs");
+        var phaseText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Collection", "ProbePhase.cs");
         var guestWriterText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Output", "GuestArtifactWriter.cs");
 
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "process.tree", "Process tree probe must emit process.tree.");
@@ -248,6 +249,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("new PacketCaptureProbe()", StringComparison.Ordinal), "Agent pipeline must include PacketCaptureProbe.");
         SmokeAssert.True(programText.Contains("new ScreenshotProbe(options.ScreenshotOptions)", StringComparison.Ordinal), "Agent pipeline must include configured ScreenshotProbe.");
         SmokeAssert.True(programText.Contains("new MemoryDumpProbe()", StringComparison.Ordinal), "Agent pipeline must include MemoryDumpProbe.");
+        SmokeAssert.True(programText.Contains("WaitForExitWithPeriodicProbesAsync", StringComparison.Ordinal), "Agent must poll in-flight probes while the sample is running.");
+        SmokeAssert.True(programText.Contains("ProbePhase.DuringRun", StringComparison.Ordinal), "Agent must expose an in-flight probe phase for short-lived behavior.");
+        SmokeAssert.True(phaseText.Contains("DuringRun", StringComparison.Ordinal), "ProbePhase must define DuringRun.");
         SmokeAssert.True(programText.Contains("CaptureScreenshots", StringComparison.Ordinal), "Agent options must carry screenshot enablement.");
         SmokeAssert.True(programText.Contains("ScreenshotProbeOptions.Parse", StringComparison.Ordinal), "Agent options must parse configurable screenshot phases and count.");
         SmokeAssert.True(programText.Contains("screenshot-phases", StringComparison.Ordinal), "Agent CLI must accept configurable screenshot phases.");
