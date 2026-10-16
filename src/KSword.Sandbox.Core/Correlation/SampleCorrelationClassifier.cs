@@ -434,8 +434,32 @@ public static class SampleCorrelationClassifier
             return true;
         }
 
+        // A DNS query that occurs during the sample's own lifecycle is useful
+        // evidence even when the sample's static strings do not contain the
+        // domain and no socket owner PID survived the capture.  Dropping this
+        // row into the environment bucket hides short-lived C2 lookups (for
+        // example a downloader resolving its gate before it opens a socket).
+        // Keep the disposition conservative: probable/uncertain DNS only;
+        // generic flows still require an owner PID or IOC corroboration.
+        if (IsPcapDnsEvidence(evt, data))
+        {
+            data["pcapCorrelationUncertainty"] = "owner-pid-unavailable; lifecycle-overlap; unattributed-dns-query";
+            data["pcapCorrelationDnsLifecycleMatched"] = "true";
+            disposition = CorrelationDisposition.Probable(
+                "pcap-lifecycle-overlap-unattributed-dns",
+                "timestamp+dnsLifecycle",
+                "probable-pcap-dns-boundary",
+                true);
+            return true;
+        }
+
         data["pcapCorrelationUncertainty"] = "owner-pid-unavailable; lifecycle-overlap; no-static-ioc-corroboration";
         return false;
+    }
+
+    private static bool IsPcapDnsEvidence(SandboxEvent evt, IReadOnlyDictionary<string, string> data)
+    {
+        return evt.EventType.Equals("dns.query", StringComparison.OrdinalIgnoreCase) && !IsRawPcapCompatibilityRow(data);
     }
 
     private static bool IsPcapProtocolEvidence(SandboxEvent evt, IReadOnlyDictionary<string, string> data)
@@ -653,6 +677,11 @@ public static class SampleCorrelationClassifier
         if (targetMatchesSample)
         {
             return CorrelationDisposition.Confirmed("file-target-points-to-submitted-sample", "path");
+        }
+
+        if (IsUnattributedFileWatcherEvent(evt, data) && IsKnownCollectorFilesystemNoise(target))
+        {
+            return CorrelationDisposition.Environment("filesystem-watcher-row-matches-powerShell-or-windows-collection-noise", "path");
         }
 
         if (LooksUserWritableOrPersistenceTarget(target, context) && IsHighSignalMutation(evt, data))
@@ -1393,6 +1422,25 @@ public static class SampleCorrelationClassifier
     {
         return IsFileEvidence(evt) &&
             string.Equals(Value(data, "actorPidStatus"), "unavailable-filesystem-watcher", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsKnownCollectorFilesystemNoise(string? target)
+    {
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return false;
+        }
+
+        var normalized = NormalizeSlashes(target);
+        return normalized.Contains("__PSScriptPolicyTest_", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("\\DeviceMetadataCache\\", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("\\Diagnosis\\", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("EventStore.db-wal", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("\\PowerShell\\StartupProfileData", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("\\EdgeUpdate\\", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("\\AppRepository\\", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("RPTA", StringComparison.OrdinalIgnoreCase) &&
+            normalized.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool ExactSamplePathMatches(string? value, CorrelationContext context)

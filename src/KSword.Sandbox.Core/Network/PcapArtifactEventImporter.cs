@@ -486,13 +486,15 @@ public sealed class PcapArtifactEventImporter
             if (dns is not null)
             {
                 var dnsData = DnsData(dns);
+                var compatibilityData = packet.BaseData(PcapProtocolData(dnsData, packet, "dns.query", "pcap.dns", compatibilityRow: true), "dns", source);
+                NetworkTelemetrySchema.AddArtifactData(compatibilityData, source);
                 yield return new SandboxEvent
                 {
                     EventType = "pcap.dns",
                     Timestamp = packet.Timestamp,
                     Source = "host",
                     Path = path,
-                    Data = packet.BaseData(PcapProtocolData(dnsData, packet, "dns.query", "pcap.dns", compatibilityRow: true), "dns", source)
+                    Data = compatibilityData
                 };
                 yield return NetworkTelemetrySchema.CreateNetworkEvent(
                     "dns.query",
@@ -516,13 +518,15 @@ public sealed class PcapArtifactEventImporter
             if (http is not null)
             {
                 var httpData = HttpData(http);
+                var compatibilityData = packet.BaseData(PcapProtocolData(httpData, packet, "http.request", "pcap.http", compatibilityRow: true), "http", source);
+                NetworkTelemetrySchema.AddArtifactData(compatibilityData, source);
                 yield return new SandboxEvent
                 {
                     EventType = "pcap.http",
                     Timestamp = packet.Timestamp,
                     Source = "host",
                     Path = path,
-                    Data = packet.BaseData(PcapProtocolData(httpData, packet, "http.request", "pcap.http", compatibilityRow: true), "http", source)
+                    Data = compatibilityData
                 };
                 yield return NetworkTelemetrySchema.CreateNetworkEvent(
                     "http.request",
@@ -543,13 +547,15 @@ public sealed class PcapArtifactEventImporter
             if (tls is not null)
             {
                 var tlsData = TlsData(tls);
+                var compatibilityData = packet.BaseData(PcapProtocolData(tlsData, packet, "tls.connection", "pcap.tls", compatibilityRow: true), "tls", source);
+                NetworkTelemetrySchema.AddArtifactData(compatibilityData, source);
                 yield return new SandboxEvent
                 {
                     EventType = "pcap.tls",
                     Timestamp = packet.Timestamp,
                     Source = "host",
                     Path = path,
-                    Data = packet.BaseData(PcapProtocolData(tlsData, packet, "tls.connection", "pcap.tls", compatibilityRow: true), "tls", source)
+                    Data = compatibilityData
                 };
                 yield return NetworkTelemetrySchema.CreateNetworkEvent(
                     "tls.connection",

@@ -330,7 +330,29 @@ internal static class AgentProgram
             await StopR0CollectorAsync(r0Collector, events);
         }
 
-        events.AddRange(ReadDriverEvents(options.DriverEventsPath));
+        var driverEvents = ReadDriverEvents(options.DriverEventsPath, executionProcessId);
+        events.AddRange(driverEvents);
+        if (!string.IsNullOrWhiteSpace(options.DriverEventsPath) && driverEvents.Count > 0)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = "driver.events.filtered",
+                Source = "guest",
+                Path = options.DriverEventsPath,
+                Data =
+                {
+                    ["rootProcessId"] = executionProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    ["retainedEventCount"] = driverEvents.Count.ToString(CultureInfo.InvariantCulture),
+                    ["rawJsonlRetainedOnDisk"] = "true",
+                    ["filterPolicy"] = "sample-process-tree-plus-collector-lifecycle",
+                    ["behaviorCounted"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["collectionNoise"] = "true",
+                    ["zhMessage"] = "R0 原始 JSONL 已保留；报告事件只内联样本进程树和采集器生命周期行。",
+                    ["zhHint"] = "未归属于样本进程树的系统 R0 行仍可从 driver-events.jsonl 下载复核。"
+                }
+            });
+        }
         events.Add(new SandboxEvent { EventType = "agent.stop", Source = "guest", Path = options.OutputDirectory });
         return events;
     }
@@ -1815,10 +1837,10 @@ internal static class AgentProgram
     /// as guest evidence, and the method returns normalized events for
     /// inclusion in events.json.
     /// </summary>
-    private static IReadOnlyList<SandboxEvent> ReadDriverEvents(string? path)
+    private static IReadOnlyList<SandboxEvent> ReadDriverEvents(string? path, int? rootProcessId)
     {
         var driverJsonLinesReader = new DriverJsonLinesReader();
-        return driverJsonLinesReader.Read(path);
+        return driverJsonLinesReader.ReadForSampleTree(path, rootProcessId);
     }
 
     /// <summary>

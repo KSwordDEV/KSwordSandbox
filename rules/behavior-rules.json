@@ -5748,6 +5748,12 @@
         "Remove-MpPreference",
         "sc stop WinDefend",
         "sc.exe stop WinDefend",
+        "sc delete WinDefend",
+        "sc.exe delete WinDefend",
+        "sc delete WdNisSvc",
+        "sc.exe delete WdNisSvc",
+        "sc delete Sense",
+        "sc.exe delete Sense",
         "Stop-Service WinDefend",
         "Set-Service WinDefend -StartupType Disabled",
         "MpCmdRun.exe -RemoveDefinitions"

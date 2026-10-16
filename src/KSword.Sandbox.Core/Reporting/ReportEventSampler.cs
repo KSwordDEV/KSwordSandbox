@@ -140,6 +140,13 @@ public static class ReportEventSampler
     [
         "collectionName",
         "importMode",
+        // Artifact selectors/hashes keep the evidence row downloadable and
+        // verifiable even when the bounded payload is full of endpoint data.
+        "sourceArtifactRelativePath",
+        "sourceArtifactSha256",
+        "sourceArtifactSizeBytes",
+        "pcapSourceArtifactRelativePath",
+        "pcapDownloadSelector",
         "behaviorCounted",
         "nonbehavior",
         "notSampleBehavior",
@@ -147,6 +154,28 @@ public static class ReportEventSampler
         "sampleCorrelation",
         "sampleCorrelationStatus",
         "sampleCorrelationReason",
+        // Endpoint identity is the primary user-facing value for PCAP rows.
+        // Keep it before correlation/diagnostic metadata so the bounded data
+        // payload cannot hide the remote IP/port behind policy fields.
+        "sourceIp",
+        "sourcePort",
+        "sourceAddress",
+        "sourceEndpoint",
+        "localAddress",
+        "localPort",
+        "destinationIp",
+        "destinationPort",
+        "destinationAddress",
+        "destinationEndpoint",
+        "remoteAddress",
+        "remotePort",
+        "remoteEndpoint",
+        "serverIp",
+        "serverPort",
+        "flowKey",
+        "endpointPair",
+        "owningProcessId",
+        "processId",
         "pcapCorrelationAttempted",
         "pcapCorrelationOwnerPidAvailable",
         "pcapCorrelationWindowMatched",
@@ -155,18 +184,14 @@ public static class ReportEventSampler
         "pcapCorrelationStaticIocMatched",
         "pcapCorrelationStaticIoc",
         "pcapCorrelationDnsCorroborated",
+        "pcapCorrelationDnsLifecycleMatched",
         "pcapCorrelationUncertainty",
         "protocolSummaryAvailable",
         "protocolSummaryState",
         "protocolSummaryStatus",
         "protocolSummaryReason",
         "protocolSummaryParser",
-        "sourceArtifactRelativePath",
-        "sourceArtifactSha256",
-        "sourceArtifactSizeBytes",
         "sourcePcapArtifactSha256",
-        "pcapSourceArtifactRelativePath",
-        "pcapDownloadSelector",
         "eventFamily",
         "eventKind",
         "protocol",
@@ -184,9 +209,7 @@ public static class ReportEventSampler
         "serverName",
         "tls.sni",
         "tls.server_name",
-        "networkTarget",
-        "destinationIp",
-        "destinationPort"
+        "networkTarget"
     ];
 
     // Synthetic R0 rows are plumbing evidence used to verify JSONL import and

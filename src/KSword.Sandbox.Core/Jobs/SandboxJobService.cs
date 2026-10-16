@@ -1155,13 +1155,45 @@ public sealed partial class SandboxJobService
         foreach (var networkEvent in new NetworkArtifactEventImporter().ImportGuestArtifacts(searchRoot, includeCanonicalDriverJsonl: false))
         {
             var normalized = NormalizeEvent(networkEvent);
-            if (eventKeys.Add(EventKey(normalized)))
+            var key = EventKey(normalized);
+            if (eventKeys.Add(key))
             {
                 events.Add(normalized);
+            }
+            else
+            {
+                // Guest events may already contain a compatibility PCAP row
+                // with the same identity but without host artifact metadata.
+                // Merge the host parser's source/selector/hash fields into
+                // that retained row instead of silently discarding them as a
+                // duplicate.
+                var existingIndex = events.FindIndex(evt => string.Equals(EventKey(evt), key, StringComparison.Ordinal));
+                if (existingIndex >= 0)
+                {
+                    events[existingIndex] = MergeMissingEventData(events[existingIndex], normalized);
+                }
             }
         }
 
         return NormalizeHostParsedProtocolSummary(events.Select(NormalizeEvent).ToList());
+    }
+
+    private static SandboxEvent MergeMissingEventData(SandboxEvent existing, SandboxEvent imported)
+    {
+        var data = new Dictionary<string, string>(existing.Data, StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in imported.Data)
+        {
+            if (!data.TryGetValue(pair.Key, out var value) || string.IsNullOrWhiteSpace(value))
+            {
+                data[pair.Key] = pair.Value;
+            }
+        }
+
+        return existing with
+        {
+            Path = string.IsNullOrWhiteSpace(existing.Path) ? imported.Path : existing.Path,
+            Data = data
+        };
     }
 
     private static List<SandboxEvent> NormalizeHostParsedProtocolSummary(List<SandboxEvent> events)

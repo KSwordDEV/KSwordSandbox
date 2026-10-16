@@ -112,6 +112,121 @@ internal sealed class DriverJsonLinesReader
     }
 
     /// <summary>
+    /// Reads only driver rows that belong to the submitted process tree. The
+    /// input is a raw JSONL path and root PID; processing makes one lightweight
+    /// relationship pass followed by a bounded parse pass, preserving all raw
+    /// lines on disk while keeping full-machine R0 noise out of events.json.
+    /// </summary>
+    public IReadOnlyList<SandboxEvent> ReadForSampleTree(string? path, int? rootProcessId)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path) || rootProcessId is not int root || root <= 0)
+        {
+            return Read(path);
+        }
+
+        var relationships = new List<(int? ProcessId, int? ParentProcessId, string EventType, string Source)>();
+        foreach (var line in ReadSharedLines(path))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                var evt = ParseSandboxEvent(document.RootElement);
+                relationships.Add((evt.ProcessId, ResolveDataPid(evt.Data, "parentProcessId", "parentPid", "parentId", "rootProcessId"), evt.EventType, evt.Source));
+            }
+            catch (JsonException)
+            {
+                // The raw JSONL remains the authoritative malformed-row
+                // evidence; a parse error cannot be assigned to a PID tree.
+            }
+        }
+
+        var processIds = new HashSet<int> { root };
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var relation in relationships)
+            {
+                if (relation.ProcessId is int pid && pid > 0 &&
+                    relation.ParentProcessId is int parent && processIds.Contains(parent) &&
+                    processIds.Add(pid))
+                {
+                    changed = true;
+                }
+            }
+        }
+
+        var events = new List<SandboxEvent>();
+        var lineNumber = 0;
+        foreach (var line in ReadSharedLines(path))
+        {
+            lineNumber++;
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                var hasSource = document.RootElement.ValueKind == JsonValueKind.Object &&
+                    document.RootElement.EnumerateObject().Any(property => string.Equals(property.Name, "source", StringComparison.OrdinalIgnoreCase));
+                var evt = ParseSandboxEvent(document.RootElement);
+                var parent = ResolveDataPid(evt.Data, "parentProcessId", "parentPid", "parentId", "rootProcessId");
+                var isCollector = evt.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(evt.Source, "r0collector", StringComparison.OrdinalIgnoreCase);
+                var belongsToTree = isCollector ||
+                    (evt.ProcessId is int pid && processIds.Contains(pid)) ||
+                    (parent is int parentPid && processIds.Contains(parentPid));
+                if (belongsToTree)
+                {
+                    events.Add(NormalizeParsedEvent(evt, hasSource, lineNumber, path));
+                }
+            }
+            catch (JsonException ex)
+            {
+                events.Add(new SandboxEvent
+                {
+                    EventType = "driver.parse_error",
+                    Source = "guest",
+                    Path = path,
+                    Data = new(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["lineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["jsonlPath"] = path,
+                        ["jsonlImportStatus"] = "parse-error-preserved",
+                        ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                        ["message"] = ex.Message,
+                        ["behaviorCounted"] = "false",
+                        ["nonbehavior"] = "true",
+                        ["collectionNoise"] = "true"
+                    }
+                });
+            }
+        }
+
+        return events;
+    }
+
+    private static int? ResolveDataPid(IReadOnlyDictionary<string, string> data, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (data.TryGetValue(name, out var value) && int.TryParse(value, out var pid))
+            {
+                return pid;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Parses one JSON object into SandboxEvent while coercing Data values to
     /// strings. Inputs are a JSON element from one JSONL row; processing accepts
     /// camelCase/PascalCase fields and scalar/non-scalar Data values; the
