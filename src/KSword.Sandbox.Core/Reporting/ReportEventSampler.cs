@@ -1125,6 +1125,7 @@ public static class ReportEventSampler
         SandboxEvent evt,
         IReadOnlySet<string> findingEvidenceKeys)
     {
+        var eventType = NormalizeEventType(evt.EventType);
         if (IsReportSamplingMarkerEvent(evt))
         {
             return ReportSamplingBucket.Excluded;
@@ -1173,14 +1174,6 @@ public static class ReportEventSampler
             return ReportSamplingBucket.FindingEvidence;
         }
 
-        // Keep the submitted sample's start/exit lifecycle visible even when
-        // the guest emits many process snapshots. These rows are the direct
-        // proof that the sample process was created and observed to exit.
-        if (IsSampleExecutionLifecycleEvent(evt))
-        {
-            return ReportSamplingBucket.GeneralBehaviorEvidence;
-        }
-
         // Missing/failed artifact collection is a user-facing evidence gap.
         // Keep the health row ahead of the diagnostic quota so an empty dump,
         // screenshot, or PCAP lane is never silently mistaken for success.
@@ -1193,6 +1186,14 @@ public static class ReportEventSampler
         // Keep both before-start and after-run class/query failures visible so
         // a single sampled row cannot make the probe look healthy.
         if (IsWmiCaptureFailureEvent(evt))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
+        // The submitted process lifecycle is the minimum proof of what ran.
+        // Keep start/exit rows ahead of bounded diagnostic and dynamic quotas
+        // so a zero or nonzero exit code can never disappear from report.json.
+        if (IsSampleExecutionLifecycleEvent(evt))
         {
             return ReportSamplingBucket.FindingEvidence;
         }
@@ -1211,6 +1212,14 @@ public static class ReportEventSampler
             string.Equals(evt.EventType, "network.import.summary", StringComparison.OrdinalIgnoreCase))
         {
             return ReportSamplingBucket.GeneralBehaviorEvidence;
+        }
+
+        if (eventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase) &&
+            (eventType.Contains("summary", StringComparison.OrdinalIgnoreCase) ||
+             eventType.EndsWith(".captured", StringComparison.OrdinalIgnoreCase) ||
+             eventType.EndsWith(".failed", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ReportSamplingBucket.FindingEvidence;
         }
 
         // Environment network snapshots are still important coverage proof;
@@ -1292,6 +1301,24 @@ public static class ReportEventSampler
             return true;
         }
 
+        // R0 rows are already filtered to the submitted process tree by the
+        // Guest Agent. Keep typed process/file/registry/network activity in
+        // the dynamic evidence lane, while dropping explicit collector or
+        // synthetic stress noise so the report remains bounded and useful.
+        if (IsDriverSampleActivityEvent(evt))
+        {
+            return true;
+        }
+
+        if (type.StartsWith("process.", StringComparison.OrdinalIgnoreCase))
+        {
+            return type.Equals("process.start", StringComparison.OrdinalIgnoreCase) ||
+                type.Equals("process.exit", StringComparison.OrdinalIgnoreCase) ||
+                type.Equals("process.new", StringComparison.OrdinalIgnoreCase) ||
+                type.Equals("process.tree", StringComparison.OrdinalIgnoreCase) ||
+                type.Equals("process.tree_unavailable", StringComparison.OrdinalIgnoreCase);
+        }
+
         return type.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
@@ -1309,6 +1336,30 @@ public static class ReportEventSampler
             type.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
             (type.StartsWith("service.", StringComparison.OrdinalIgnoreCase) &&
                 !type.Contains("snapshot", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsDriverSampleActivityEvent(SandboxEvent evt)
+    {
+        var type = NormalizeEventType(evt.EventType);
+        if (EventDataBoolTrue(evt, "stress") ||
+            !(type.StartsWith("driver.process", StringComparison.OrdinalIgnoreCase) ||
+              type.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase) ||
+              type.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase) ||
+              type.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return !EventDataBoolTrue(
+            evt,
+            "noise",
+            "nonbehavior",
+            "collectionNoise",
+            "collectorNoise",
+            "collectorSelfNoise",
+            "selfNoise",
+            "metadataOnly",
+            "collectionDiagnostic");
     }
 
     private static bool IsStrongSampleBehaviorEvent(SandboxEvent evt)

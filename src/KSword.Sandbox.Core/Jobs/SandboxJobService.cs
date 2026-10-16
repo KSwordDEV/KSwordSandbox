@@ -2152,6 +2152,24 @@ public sealed partial class SandboxJobService
             return true;
         }
 
+        // The Guest Agent keeps R0 rows that belong to the submitted process
+        // tree. Count typed driver activity alongside user-mode normalized
+        // rows, but exclude explicit collector/synthetic noise from coverage
+        // metrics and report omission accounting.
+        if (IsDriverSampleActivityEvent(evt))
+        {
+            return true;
+        }
+
+        if (type.StartsWith("process.", StringComparison.OrdinalIgnoreCase))
+        {
+            return type.Equals("process.start", StringComparison.OrdinalIgnoreCase) ||
+                type.Equals("process.exit", StringComparison.OrdinalIgnoreCase) ||
+                type.Equals("process.new", StringComparison.OrdinalIgnoreCase) ||
+                type.Equals("process.tree", StringComparison.OrdinalIgnoreCase) ||
+                type.Equals("process.tree_unavailable", StringComparison.OrdinalIgnoreCase);
+        }
+
         return type.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
@@ -2171,17 +2189,44 @@ public sealed partial class SandboxJobService
     }
 
     private static bool IsTcpEvent(SandboxEvent evt) =>
-        evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase);
+        evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsPersistenceEvent(SandboxEvent evt) =>
         IsDynamicActionEvent(evt) &&
         (evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase) ||
          evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
          evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
          evt.EventType.StartsWith("service.", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsFileEvent(SandboxEvent evt) =>
-        evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase);
+        evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsDriverSampleActivityEvent(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        if (EventDataTruthy(evt, "stress") ||
+            !(type.StartsWith("driver.process", StringComparison.OrdinalIgnoreCase) ||
+              type.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase) ||
+              type.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase) ||
+              type.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return !EventDataTruthy(
+            evt,
+            "noise",
+            "nonbehavior",
+            "collectionNoise",
+            "collectorNoise",
+            "collectorSelfNoise",
+            "selfNoise",
+            "metadataOnly",
+            "collectionDiagnostic");
+    }
 
     private static bool IsSampleAttributedDynamicActionEvent(SandboxEvent evt)
     {

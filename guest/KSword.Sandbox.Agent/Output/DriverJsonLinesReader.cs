@@ -136,7 +136,7 @@ internal sealed class DriverJsonLinesReader
             {
                 using var document = JsonDocument.Parse(line);
                 var evt = ParseSandboxEvent(document.RootElement);
-                relationships.Add((evt.ProcessId, ResolveDataPid(evt.Data, "parentProcessId", "parentPid", "parentId", "rootProcessId"), evt.EventType, evt.Source));
+                relationships.Add((evt.ProcessId, ResolveDataPid(evt.Data, "parentProcessId", "parentPid", "parentId", "rootProcessId") ?? evt.ParentProcessId, evt.EventType, evt.Source));
             }
             catch (JsonException)
             {
@@ -177,7 +177,7 @@ internal sealed class DriverJsonLinesReader
                 var hasSource = document.RootElement.ValueKind == JsonValueKind.Object &&
                     document.RootElement.EnumerateObject().Any(property => string.Equals(property.Name, "source", StringComparison.OrdinalIgnoreCase));
                 var evt = ParseSandboxEvent(document.RootElement);
-                var parent = ResolveDataPid(evt.Data, "parentProcessId", "parentPid", "parentId", "rootProcessId");
+                var parent = ResolveDataPid(evt.Data, "parentProcessId", "parentPid", "parentId", "rootProcessId") ?? evt.ParentProcessId;
                 var isCollector = evt.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(evt.Source, "r0collector", StringComparison.OrdinalIgnoreCase);
                 var belongsToTree = isCollector ||

@@ -476,12 +476,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .event-explorer-table tbody tr[data-severity="low"] td{background:#effbf4}
 .modern-sandbox-report .event-explorer-table tbody tr td:first-child{border-radius:0}
 .modern-sandbox-report .event-explorer-table tbody tr td:last-child{border-radius:0}
-.modern-sandbox-report .event-explorer-details{display:block;min-width:420px}
+.modern-sandbox-report .event-explorer-details{display:block;min-width:420px;width:100%}
 .modern-sandbox-report .event-explorer-details summary{background:#eaf5fb;border:0;border-radius:0;color:#1f5e7b;min-height:42px;padding:10px 12px}
-.modern-sandbox-report .event-explorer-detail{background:#f7fbfe;border:0;border-radius:0;margin-top:8px;max-height:52vh;min-height:180px;overflow:auto;padding:16px}
+.modern-sandbox-report .event-explorer-detail{background:#f7fbfe;border:0;border-radius:0;margin-top:8px;max-height:60vh;min-height:220px;min-width:0;overflow:auto;padding:16px 18px;width:100%}
 .modern-sandbox-report .event-explorer-detail pre,.modern-sandbox-report .event-explorer-detail code{font-size:13px;line-height:1.6}
 .modern-sandbox-report .ui-field-label{font-weight:800;color:#24516b}
-.modern-sandbox-report .event-explorer-detail .event-evidence-fields{max-height:none}
+.modern-sandbox-report .event-explorer-detail .event-evidence-fields{max-height:44vh;overflow:auto}
+.modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:420px;width:42%}
 .modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:460px;width:42%}
 .modern-sandbox-report .copy-hint,.modern-sandbox-report #event-explorer>.section-note{display:none}
 .modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn{background:#e6f4fb;border:0;border-radius:0;color:#1e6385;padding:7px 11px}
@@ -9753,6 +9754,15 @@ html[lang="en"] .localized-evidence-field{display:none}
             normalized.Contains("normalbehaviorboundary", StringComparison.Ordinal) ||
             normalized.Contains("collectorselfnoise", StringComparison.Ordinal) ||
             normalized.Contains("collectornoise", StringComparison.Ordinal) ||
+            normalized.Contains("sourceartifact", StringComparison.Ordinal) ||
+            normalized.Contains("pcapsourceartifact", StringComparison.Ordinal) ||
+            normalized.Contains("downloadselector", StringComparison.Ordinal) ||
+            normalized.Contains("safelink", StringComparison.Ordinal) ||
+            normalized.Contains("artifactrelativepath", StringComparison.Ordinal) ||
+            normalized.Contains("traceevidence", StringComparison.Ordinal) ||
+            normalized.Contains("selectorpolicy", StringComparison.Ordinal) ||
+            normalized.Contains("importmode", StringComparison.Ordinal) ||
+            normalized is "sha256" or "sizebytes" or "bytes" or "relativepath" ||
             normalized is "staticonly" or "staticevidenceboundary" or "runtimecorrelationrequired")
         {
             return true;
@@ -9960,6 +9970,8 @@ html[lang="en"] .localized-evidence-field{display:none}
             ("Families kept out of sample behavior:", "未纳入样本行为的事件族："),
             ("No explicit nonbehavior/self-noise 行 were observed.", "未观察到明确的非行为/自噪声行。"),
             ("No matching evidence 行. Clear a filter or open 原始事件.", "没有匹配的证据行。请清除筛选条件或打开原始事件。"),
+            ("No matching evidence rows. Clear a filter or open Raw normalized events.", "没有匹配的证据行。请清除筛选条件或打开原始规范化事件。"),
+            ("No matching evidence rows. Clear a filter or open 原始事件.", "没有匹配的证据行。请清除筛选条件或打开原始事件。"),
             ("行为事实 before raw events.", "原始事件之前的行为事实。"),
             ("This section groups normalized events into reviewer-facing facts. It does not remove evidence: raw normalized events, source JSON/JSONL, and artifact links remain 可用 later in the report.", "本节将规范化事件汇总为面向复核的事实，不会删除证据；原始规范化事件、来源 JSON/JSONL 和证据文件链接仍可在报告后部查看。"),
             ("Startup 持久化 before/after diff", "启动项持久化前后差异"),
