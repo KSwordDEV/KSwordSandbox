@@ -10849,7 +10849,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         (">static-analysis<", ">静态分析<"),
         (">screenshot<", ">截图<"),
         ("memory-dump", "内存转储"),
-        ("packet-capture", "网络抓包"),
+        (">packet-capture<", ">网络抓包<"),
         (">telemetry<", ">遥测<"),
         (">runbook<", ">运行手册<"),
         (">log<", ">日志<"),
