@@ -254,8 +254,9 @@ public sealed record ArtifactCollectionConfig
     public bool CapturePacketCapture { get; init; }
 
     /// <summary>
-    /// Explicit opt-in for a Windows kernel ETW process/thread/image trace.
-    /// The trace is raw ETL evidence and remains disabled by default.
+    /// Explicit opt-in for a Windows kernel ETW process/thread/image/file/
+    /// registry trace. The guest retains the raw ETL and attempts a bounded
+    /// tracerpt XML decode; the lane remains disabled by default.
     /// </summary>
     public bool CaptureEtwLiveTrace { get; init; }
 }
