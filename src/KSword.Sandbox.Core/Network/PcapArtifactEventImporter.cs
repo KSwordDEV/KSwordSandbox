@@ -82,6 +82,12 @@ public sealed class PcapArtifactEventImporter
                         ["parserMaxProtocolEvents"] = MaxProtocolEvents.ToString(CultureInfo.InvariantCulture),
                         ["parserMaxFlowEvents"] = MaxFlowEvents.ToString(CultureInfo.InvariantCulture),
                         ["parserPacketLimitHit"] = (packets.Count >= MaxPackets).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                         ["protocolSummaryAvailable"] = "true",
+                         ["protocolSummaryState"] = allImportedEvents.Any(evt => IsBehaviorCounted(evt) && IsPcapProtocolEvent(evt)) ? "parsed" : "parsed-empty",
+                         ["protocolSummaryStatus"] = "ok",
+                         ["protocolSummaryReason"] = "nativePcapParser",
+                         ["protocolSummaryFormat"] = "normalized-events",
+                         ["protocolSummaryParser"] = "native-pcap",
                         ["duplicatePolicy"] = "normalized-events-canonical; raw-pcap-rows-compatibility-nonbehavior",
                         ["protocolHealthSummaryScope"] = "behavior-counted-canonical-events",
                         ["pcapSourceDiagnostic"] = "native parser used; tshark not required",
@@ -120,6 +126,12 @@ public sealed class PcapArtifactEventImporter
                         ["parserMaxPayloadBytes"] = MaxPayloadBytes.ToString(CultureInfo.InvariantCulture),
                         ["parserMaxProtocolEvents"] = MaxProtocolEvents.ToString(CultureInfo.InvariantCulture),
                         ["parserMaxFlowEvents"] = MaxFlowEvents.ToString(CultureInfo.InvariantCulture),
+                         ["protocolSummaryAvailable"] = "false",
+                         ["protocolSummaryState"] = "parse-error",
+                         ["protocolSummaryStatus"] = "error",
+                         ["protocolSummaryReason"] = "nativePcapParserFailure",
+                         ["protocolSummaryFormat"] = "normalized-events",
+                         ["protocolSummaryParser"] = "native-pcap",
                         ["duplicatePolicy"] = "normalized-events-canonical; raw-pcap-rows-compatibility-nonbehavior",
                         ["pcapSourceDiagnostic"] = "pcap parse_error emitted with boundary diagnostics",
                         ["tsharkRequired"] = "false",
@@ -430,6 +442,12 @@ public sealed class PcapArtifactEventImporter
             ["rawPcapCompatibilityProtocolFamilyCounterScope"] = "raw-pcap-compatibility-nonbehavior-rows",
             ["rawPcapCompatibilityProtocolFamilyCounters"] = ProtocolFamilyCounters(rawCompatibilityEvents),
             ["protocolHealthSummaryScope"] = "behavior-counted-canonical-protocol-events",
+            ["protocolSummaryAvailable"] = "true",
+            ["protocolSummaryState"] = canonicalBehaviorEvents.Count > 0 ? "parsed" : "parsed-empty",
+            ["protocolSummaryStatus"] = "ok",
+            ["protocolSummaryReason"] = "nativePcapParser",
+            ["protocolSummaryFormat"] = "normalized-events",
+            ["protocolSummaryParser"] = "native-pcap",
             ["byteCount"] = bytes.ToString(CultureInfo.InvariantCulture),
             ["tcpPacketCount"] = CountOrZero(transportProtocolCounts, "tcp").ToString(CultureInfo.InvariantCulture),
             ["udpPacketCount"] = CountOrZero(transportProtocolCounts, "udp").ToString(CultureInfo.InvariantCulture),
@@ -570,7 +588,13 @@ public sealed class PcapArtifactEventImporter
             ["pcapCompatibilityEventType"] = compatibilityEventType,
             ["rawPcapCompatibilityRow"] = compatibilityRow.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["duplicateRole"] = compatibilityRow ? "raw-pcap-compatibility" : "normalized-canonical",
-            ["parserMetadataValueMaxLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(CultureInfo.InvariantCulture)
+            ["parserMetadataValueMaxLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(CultureInfo.InvariantCulture),
+            ["protocolSummaryAvailable"] = "true",
+            ["protocolSummaryState"] = "parsed",
+            ["protocolSummaryStatus"] = "ok",
+            ["protocolSummaryReason"] = "nativePcapParser",
+            ["protocolSummaryFormat"] = "normalized-events",
+            ["protocolSummaryParser"] = "native-pcap"
         };
 
         if (compatibilityRow)
@@ -2019,6 +2043,13 @@ public sealed class PcapArtifactEventImporter
                 !string.Equals(nonbehavior, "true", StringComparison.OrdinalIgnoreCase));
     }
 
+    private static bool IsPcapProtocolEvent(SandboxEvent evt)
+    {
+        return evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Equals("network.flow", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType is "dns.query" or "http.request" or "tls.connection";
+    }
+
     private static bool IsRawPcapCompatibility(SandboxEvent evt)
     {
         return evt.Data.TryGetValue("rawPcapCompatibilityRow", out var value) &&
@@ -2552,7 +2583,13 @@ public sealed class PcapArtifactEventImporter
                     ["behaviorLane"] = isCompatibilityRow ? "raw-pcap-compatibility" : "sample-network-behavior",
                     ["behaviorScope"] = isCompatibilityRow ? "raw-pcap-compatibility" : "network-behavior",
                     ["sampleBehaviorBoundary"] = isCompatibilityRow ? "nonbehavior-separated" : "sample-countable",
-                    ["collectorNoiseScope"] = isCompatibilityRow ? "nonbehavior-evidence-quality" : "sample-or-external-network"
+                    ["collectorNoiseScope"] = isCompatibilityRow ? "nonbehavior-evidence-quality" : "sample-or-external-network",
+                    ["protocolSummaryAvailable"] = "true",
+                    ["protocolSummaryState"] = "parsed",
+                    ["protocolSummaryStatus"] = "ok",
+                    ["protocolSummaryReason"] = "nativePcapParser",
+                    ["protocolSummaryFormat"] = "normalized-events",
+                    ["protocolSummaryParser"] = "native-pcap"
                 });
             if (isCompatibilityRow)
             {

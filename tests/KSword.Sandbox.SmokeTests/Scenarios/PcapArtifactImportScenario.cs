@@ -88,6 +88,10 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(summary, "pcapParser", "native-pcap");
         RequireData(summary, "pcapParserMode", "bounded-native");
         RequireData(summary, "protocolHealth", "ok");
+        RequireData(summary, "protocolSummaryAvailable", "true");
+        RequireData(summary, "protocolSummaryState", "parsed");
+        RequireData(summary, "protocolSummaryStatus", "ok");
+        RequireData(summary, "protocolSummaryReason", "nativePcapParser");
         RequireNonEmpty(summary, "pcapSourceDiagnostic");
         RequireData(summary, "parentArtifactRelativePath", "sample.pcap");
         RequireData(summary, "parentArtifactKind", "PacketCapture");
@@ -95,6 +99,9 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireNonEmpty(summary, "parentArtifactSha256");
         RequireData(dns, "schema", "network.telemetry.v1");
         RequireData(dns, "eventKind", "dns");
+        RequireData(dns, "protocolSummaryAvailable", "true");
+        RequireData(dns, "protocolSummaryState", "parsed");
+        RequireData(dns, "protocolSummaryStatus", "ok");
         RequireData(dns, "transportProtocol", "udp");
         RequireData(dns, "flowKey", "udp|10.0.0.4:53000|8.8.8.8:53");
         RequireData(dns, "queryName", "beacon.example.test");

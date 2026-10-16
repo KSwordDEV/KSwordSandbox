@@ -12,6 +12,8 @@ namespace KSword.Sandbox.Core.Correlation;
 /// </summary>
 public static class SampleCorrelationClassifier
 {
+    private static readonly TimeSpan PcapAttributionGrace = TimeSpan.FromSeconds(2);
+
     private static readonly string[] CollectionEventTypePrefixes =
     [
         "agent.",
@@ -189,6 +191,16 @@ public static class SampleCorrelationClassifier
                 true);
         }
 
+        // A PCAP packet has no owning PID.  Keep the ownerless row useful when
+        // the capture timestamp overlaps the submitted sample lifecycle and
+        // the decoded DNS/HTTP/TLS/flow target corroborates a static IOC.  This
+        // runs before stale nonbehavior flags so imported rows are not silently
+        // discarded, while raw compatibility/collector/WinRM rows remain out.
+        if (IsNetworkEvidence(evt) && TryClassifyPcapCorrelation(evt, data, context, out var pcapDisposition))
+        {
+            return pcapDisposition;
+        }
+
         if (IsExplicitNonBehaviorOrCollectionNoise(evt, data))
         {
             return CorrelationDisposition.Environment("explicit-nonbehavior-or-collection-noise", "behaviorCounted/nonbehavior");
@@ -355,6 +367,205 @@ public static class SampleCorrelationClassifier
         }
 
         return CorrelationDisposition.Unknown("network-row-has-no-sample-owner-pid-join", "owningProcessId");
+    }
+
+    private static bool TryClassifyPcapCorrelation(
+        SandboxEvent evt,
+        Dictionary<string, string> data,
+        CorrelationContext context,
+        out CorrelationDisposition disposition)
+    {
+        disposition = CorrelationDisposition.Unchanged();
+        if (!IsPcapProtocolEvidence(evt, data) || IsRawPcapCompatibilityRow(data) ||
+            IsPcapSummaryOrCollectionRow(evt, data) || IsCollectionNetworkEvidence(evt, data))
+        {
+            return false;
+        }
+
+        // A real owner PID or an already strong disposition is more precise
+        // than timestamp/IOC corroboration. Let the normal network classifier
+        // keep confirmed owner attribution instead of downgrading it.
+        if (HasExistingStrongCorrelation(data) ||
+            (EventProcessId(evt, data) is int ownerPid && context.SampleProcessIds.Contains(ownerPid)) ||
+            (ParsePid(Value(data, "owningProcessId")) is int owningPid && context.SampleProcessIds.Contains(owningPid)))
+        {
+            return false;
+        }
+
+        data["pcapCorrelationAttempted"] = "true";
+        data["pcapCorrelationOwnerPidAvailable"] = EventProcessId(evt, data) is not null ? "true" : "false";
+        var lifecycle = context.SampleLifecycles.FirstOrDefault(window =>
+            evt.Timestamp >= window.StartUtc && evt.Timestamp <= window.EndUtc);
+        data["pcapCorrelationWindowMatched"] = (lifecycle is not null).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        if (lifecycle is null)
+        {
+            data["pcapCorrelationUncertainty"] = "capture-timestamp-outside-sample-lifecycle";
+            return false;
+        }
+
+        data["pcapCorrelationWindowStartUtc"] = lifecycle.StartUtc.ToString("O", CultureInfo.InvariantCulture);
+        data["pcapCorrelationWindowEndUtc"] = lifecycle.EndUtc.ToString("O", CultureInfo.InvariantCulture);
+
+        var targets = NetworkTargets(data).ToList();
+        var staticMatch = targets
+            .Select(target => (Target: target, Match: FindStaticIocMatch(target, context.StaticNetworkIndicators)))
+            .FirstOrDefault(pair => !string.IsNullOrWhiteSpace(pair.Match));
+        var matchedIoc = staticMatch.Match;
+        data["pcapCorrelationStaticIocMatched"] = (!string.IsNullOrWhiteSpace(matchedIoc)).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(matchedIoc))
+        {
+            data["pcapCorrelationStaticIoc"] = matchedIoc;
+            data["pcapCorrelationUncertainty"] = "owner-pid-unavailable; lifecycle-overlap; static-ioc-corroboration";
+            disposition = CorrelationDisposition.Probable(
+                "pcap-lifecycle-overlap-static-ioc-corroboration",
+                "timestamp+staticIoc",
+                "probable-pcap-static-ioc-boundary",
+                true);
+            return true;
+        }
+
+        data["pcapCorrelationUncertainty"] = "owner-pid-unavailable; lifecycle-overlap; no-static-ioc-corroboration";
+        return false;
+    }
+
+    private static bool IsPcapProtocolEvidence(SandboxEvent evt, IReadOnlyDictionary<string, string> data)
+    {
+        return evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Value(data, "importSource"), "pcap-native", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Value(data, "sourceArtifactKind"), "PacketCapture", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Value(data, "importArtifactKind"), "PacketCapture", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRawPcapCompatibilityRow(IReadOnlyDictionary<string, string> data)
+    {
+        return IsTruthy(Value(data, "rawPcapCompatibilityRow")) ||
+            string.Equals(Value(data, "duplicateRole"), "raw-pcap-compatibility", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPcapSummaryOrCollectionRow(SandboxEvent evt, IReadOnlyDictionary<string, string> data)
+    {
+        return evt.EventType.EndsWith(".summary", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Contains(".parse_error", StringComparison.OrdinalIgnoreCase) ||
+            TextEqualsAny(Value(data, "eventKind"), "summary", "health", "parse_error");
+    }
+
+    private static bool IsCollectionNetworkEvidence(SandboxEvent evt, IReadOnlyDictionary<string, string> data)
+    {
+        if (IsTruthy(Value(data, "collectorSelfNoise")) || IsTruthy(Value(data, "collectionHealth")) ||
+            ContainsAny(Value(data, "sourceComponent"), "collector", "winrm", "ksword.sandbox.agent"))
+        {
+            return true;
+        }
+
+        var destinationPort = ParsePort(FirstNonEmpty(
+            Value(data, "destinationPort"),
+            Value(data, "destPort"),
+            Value(data, "serverPort"),
+            Value(data, "remotePort")));
+        if (destinationPort is 5985 or 5986)
+        {
+            return true;
+        }
+
+        var endpoint = FirstNonEmpty(
+            Value(data, "destinationEndpoint"),
+            Value(data, "remoteEndpoint"),
+            Value(data, "destinationIp"),
+            Value(data, "remoteAddress"));
+        return IsLoopbackAddress(endpoint) &&
+            (destinationPort is 5985 or 5986 || ContainsAny(Value(data, "serviceHint"), "winrm", "wsman"));
+    }
+
+    private static IEnumerable<string> NetworkTargets(IReadOnlyDictionary<string, string> data)
+    {
+        var values = new[]
+        {
+            Value(data, "queryName"), Value(data, "qname"), Value(data, "domain"), Value(data, "dnsQueryName"),
+            Value(data, "sni"), Value(data, "serverName"), Value(data, "tlsSni"), Value(data, "tls.server_name"),
+            Value(data, "host"), Value(data, "hostname"), Value(data, "httpHost"), Value(data, "authority"),
+            Value(data, "url"), Value(data, "requestUrl"), Value(data, "httpUrl"),
+            Value(data, "destinationIp"), Value(data, "destIp"), Value(data, "dstIp"), Value(data, "serverIp"), Value(data, "remoteAddress"),
+            Value(data, "answerAddress"), Value(data, "dnsAnswerIps"), Value(data, "answersNormalized"), Value(data, "networkTarget")
+        };
+
+        foreach (var value in values.Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            foreach (var candidate in value!.Split(new[] { ',', ';', '|', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var normalized = NormalizeNetworkTarget(candidate);
+                if (!string.IsNullOrWhiteSpace(normalized) && !IsLoopbackAddress(normalized))
+                {
+                    yield return normalized;
+                }
+            }
+        }
+    }
+
+    private static string FindStaticIocMatch(string target, IReadOnlySet<string> indicators)
+    {
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return string.Empty;
+        }
+
+        foreach (var indicator in indicators)
+        {
+            if (string.Equals(target, indicator, StringComparison.OrdinalIgnoreCase) ||
+                (!IsIpLiteral(target) && target.EndsWith("." + indicator, StringComparison.OrdinalIgnoreCase)))
+            {
+                return indicator;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string NormalizeNetworkTarget(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var candidate = value.Trim().Trim('"', '\'', '[', ']', '(', ')', ',', ';');
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Host))
+        {
+            candidate = uri.Host;
+        }
+        else if (candidate.Contains('/', StringComparison.Ordinal) && Uri.TryCreate("http://" + candidate, UriKind.Absolute, out var authority))
+        {
+            candidate = authority.Host;
+        }
+
+        return candidate.TrimEnd('.').ToLowerInvariant();
+    }
+
+    private static bool IsIpLiteral(string value) => System.Net.IPAddress.TryParse(value.Trim('[', ']'), out _);
+
+    private static bool IsLoopbackAddress(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var candidate = NormalizeNetworkTarget(value);
+        return candidate is "localhost" or "127.0.0.1" or "::1";
+    }
+
+    private static bool IsCollectionNetworkTarget(string value)
+    {
+        return IsLoopbackAddress(value) || value is "0.0.0.0" or "::";
+    }
+
+    private static bool IsKnownCollectionNetworkTarget(string value)
+    {
+        var normalized = value.TrimEnd('.').ToLowerInvariant();
+        return normalized is "wpad" or "wpad.localdomain" ||
+            normalized.EndsWith(".microsoft.com", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith(".windowsupdate.com", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith(".msftncsi.com", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith(".microsoftonline.com", StringComparison.OrdinalIgnoreCase);
     }
 
     private static CorrelationDisposition ClassifyServiceOrScheduledTaskEvidence(
@@ -545,7 +756,99 @@ public static class SampleCorrelationClassifier
         var rootPids = ResolveRootProcessIds(events, sampleFullPath, sampleFileName);
         var samplePids = ExpandSampleProcessTree(rootPids, processes);
         var networkOwners = BuildNetworkEndpointOwnerMap(events);
-        return new CorrelationContext(sampleFullPath, sampleFileName, sampleDirectory, processes, samplePids, networkOwners);
+        var lifecycles = BuildSampleLifecycles(events, rootPids, samplePids);
+        var staticIocs = BuildStaticNetworkIndicators(events);
+        return new CorrelationContext(sampleFullPath, sampleFileName, sampleDirectory, processes, samplePids, networkOwners, lifecycles, staticIocs);
+    }
+
+    private static IReadOnlyList<SampleLifecycleWindow> BuildSampleLifecycles(
+        IEnumerable<SandboxEvent> events,
+        IReadOnlySet<int> rootPids,
+        IReadOnlySet<int> samplePids)
+    {
+        var eventList = events.ToList();
+        var windows = new List<SampleLifecycleWindow>();
+        foreach (var rootPid in rootPids)
+        {
+            var related = eventList
+                .Where(evt => EventProcessId(evt, evt.Data) == rootPid ||
+                    TryGetRootProcessId(evt.Data, out var eventRootPid) && eventRootPid == rootPid)
+                .OrderBy(evt => evt.Timestamp)
+                .ToList();
+            if (related.Count == 0)
+            {
+                continue;
+            }
+
+            var start = related
+                .Where(evt => evt.EventType.Equals("process.start", StringComparison.OrdinalIgnoreCase) ||
+                    evt.EventType.Equals("process.tree.summary", StringComparison.OrdinalIgnoreCase) ||
+                    evt.EventType.Equals("process.snapshot", StringComparison.OrdinalIgnoreCase))
+                .Select(evt => evt.Timestamp)
+                .DefaultIfEmpty(related[0].Timestamp)
+                .Min();
+            var end = related.Max(evt => evt.Timestamp);
+            // A root exit event is authoritative, but process-tree summaries
+            // can continue while the 30-second guest collection window drains.
+            // Keep that observed tail so packets from a short-lived child are
+            // still within the same sample execution window.
+            var exit = eventList
+                .Where(evt => EventProcessId(evt, evt.Data) is int pid && samplePids.Contains(pid) &&
+                    evt.EventType.Equals("process.exit", StringComparison.OrdinalIgnoreCase))
+                .Select(evt => evt.Timestamp)
+                .Where(timestamp => timestamp >= start)
+                .DefaultIfEmpty(end)
+                .Max();
+            end = end > exit ? end : exit;
+            if (end >= start)
+            {
+                windows.Add(new SampleLifecycleWindow(start - PcapAttributionGrace, end + PcapAttributionGrace));
+            }
+        }
+
+        return windows;
+    }
+
+    private static HashSet<string> BuildStaticNetworkIndicators(IEnumerable<SandboxEvent> events)
+    {
+        var indicators = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var evt in events)
+        {
+            if (!evt.EventType.StartsWith("static.string.indicator", StringComparison.OrdinalIgnoreCase) ||
+                IsTruthy(Value(evt.Data, "isReference")) ||
+                string.Equals(Value(evt.Data, "classification"), "reference", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            AddStaticNetworkIndicator(indicators, Value(evt.Data, "value"));
+        }
+
+        return indicators;
+    }
+
+    private static void AddStaticNetworkIndicator(ISet<string> indicators, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var normalized = NormalizeNetworkTarget(value);
+        if (!string.IsNullOrWhiteSpace(normalized) && !IsCollectionNetworkTarget(normalized) && !IsKnownCollectionNetworkTarget(normalized))
+        {
+            indicators.Add(normalized);
+        }
+
+        if (Uri.TryCreate(value.Trim().Trim('"', '\''), UriKind.Absolute, out var uri) &&
+            !string.IsNullOrWhiteSpace(uri.Host))
+        {
+            var host = NormalizeNetworkTarget(uri.Host);
+            if (!string.IsNullOrWhiteSpace(host) && !IsCollectionNetworkTarget(host) && !IsKnownCollectionNetworkTarget(host))
+            {
+                indicators.Add(host);
+            }
+        }
     }
 
     private static Dictionary<int, ProcessFacts> BuildProcessFacts(IEnumerable<SandboxEvent> events)
@@ -794,8 +1097,20 @@ public static class SampleCorrelationClassifier
             }
             else
             {
-                AddIfMissing(data, "sampleBehaviorCandidate", "true");
-                AddIfMissing(data, "behaviorCounted", "true");
+                if (disposition.OverrideExistingNonBehavior)
+                {
+                    data["sampleBehaviorCandidate"] = "true";
+                    data["behaviorCounted"] = "true";
+                    data["nonbehavior"] = "false";
+                    data["notSampleBehavior"] = "false";
+                    data.Remove("nonbehaviorReason");
+                    data["behaviorCountingPolicy"] = "probable-pcap-correlation-is-counted-as-sample-candidate";
+                }
+                else
+                {
+                    AddIfMissing(data, "sampleBehaviorCandidate", "true");
+                    AddIfMissing(data, "behaviorCounted", "true");
+                }
             }
             AddIfMissing(data, "sampleBehaviorCandidateReason", disposition.Reason);
             AddIfMissing(data, "normalBehaviorBoundary", disposition.Boundary);
@@ -1271,6 +1586,25 @@ public static class SampleCorrelationClassifier
             : null;
     }
 
+    private static int? ParsePort(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var text = value.Trim();
+        var separator = text.LastIndexOf(':');
+        if (separator >= 0 && separator + 1 < text.Length)
+        {
+            text = text[(separator + 1)..];
+        }
+
+        return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) && port is > 0 and <= 65535
+            ? port
+            : null;
+    }
+
     private static bool LineageContainsPid(string? lineage, int pid)
     {
         if (string.IsNullOrWhiteSpace(lineage))
@@ -1410,7 +1744,11 @@ public static class SampleCorrelationClassifier
         string SampleDirectory,
         IReadOnlyDictionary<int, ProcessFacts> Processes,
         HashSet<int> SampleProcessIds,
-        IReadOnlyDictionary<string, int> NetworkEndpointOwners);
+        IReadOnlyDictionary<string, int> NetworkEndpointOwners,
+        IReadOnlyList<SampleLifecycleWindow> SampleLifecycles,
+        IReadOnlySet<string> StaticNetworkIndicators);
+
+    private sealed record SampleLifecycleWindow(DateTimeOffset StartUtc, DateTimeOffset EndUtc);
 
     private sealed record ProcessFacts(
         int ProcessId,
@@ -1445,7 +1783,7 @@ public static class SampleCorrelationClassifier
 
         public static CorrelationDisposition Confirmed(string reason, string field, string boundary = "sample-attribution-boundary", bool overrideExistingNonBehavior = false) => new(CorrelationKind.Confirmed, "confirmed", "correlated", reason, field, "strong", true, boundary, overrideExistingNonBehavior);
 
-        public static CorrelationDisposition Probable(string reason, string field, string boundary = "probable-behavior-boundary") => new(CorrelationKind.Probable, "probable", "probable", reason, field, "medium", false, boundary);
+        public static CorrelationDisposition Probable(string reason, string field, string boundary = "probable-behavior-boundary", bool overrideExistingNonBehavior = false) => new(CorrelationKind.Probable, "probable", "probable", reason, field, "medium", false, boundary, overrideExistingNonBehavior);
 
         public static CorrelationDisposition Environment(string reason, string field) => new(CorrelationKind.Environment, "environment", "environment", reason, field, "none", false, "environment-system-collector-boundary");
 
