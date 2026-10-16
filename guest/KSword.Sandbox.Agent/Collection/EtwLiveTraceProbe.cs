@@ -269,7 +269,11 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
                 providerElement?.Attribute("name")?.Value,
                 ChildValue(renderingInfo, "Provider"));
             var eventId = ChildValue(system, "EventID", "EventId", "Id");
-            var opcode = FirstNonEmpty(ChildValue(system, "Opcode", "Operation"), ChildValue(renderingInfo, "Opcode", "Operation"));
+            // Kernel ETL stores a numeric System/Opcode while tracerpt adds
+            // the semantic name (Start/Stop/DCStart) under RenderingInfo.
+            // Prefer the latter so Process/Thread/Image rows normalize into
+            // canonical lifecycle event types.
+            var opcode = FirstNonEmpty(ChildValue(renderingInfo, "Opcode", "Operation"), ChildValue(system, "Opcode", "Operation"));
             var task = ChildValue(system, "Task");
             var timestampElement = system.Elements().FirstOrDefault(static element => element.Name.LocalName.Equals("TimeCreated", StringComparison.OrdinalIgnoreCase));
             var timestampText = FirstNonEmpty(timestampElement?.Attribute("SystemTime")?.Value, timestampElement?.Attribute("systemTime")?.Value);
