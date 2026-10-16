@@ -53,6 +53,8 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "FileSystemWatcher", "File diff probe must capture short-lived file edges with an event-driven watcher.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.renamed", "File diff probe must preserve rename edges even when the destination is gone before a snapshot.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "captureSource", "File diff events must identify event-driven versus snapshot capture.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.watcher.failed", "File watcher failures must remain explicit collection-health evidence.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "watcherBufferOverflow", "File watcher buffer overflow must not be presented as complete capture.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "KSwordSandbox-*.txt", "File diff probe must include the sandbox TEMP root fixture files.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "CaptureFast", "Process tree probe must use a low-latency edge capture during the run.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Toolhelp-only edge sweep", "Fast process capture must avoid the slow CIM path during in-flight polling.");

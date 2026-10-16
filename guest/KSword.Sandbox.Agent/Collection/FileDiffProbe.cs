@@ -16,6 +16,7 @@ internal sealed class FileDiffProbe : IGuestProbe
     private readonly IFileSnapshotProvider snapshotProvider;
     private Dictionary<string, FileStateSnapshot> baseline = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<FileSystemChange> watcherChanges = new();
+    private readonly ConcurrentQueue<WatcherError> watcherErrors = new();
     private readonly ConcurrentDictionary<string, byte> watcherKnownPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<FileSystemWatcher> watchers = [];
     private readonly HashSet<string> watchedRoots = new(StringComparer.OrdinalIgnoreCase);
@@ -77,6 +78,16 @@ internal sealed class FileDiffProbe : IGuestProbe
         var current = CaptureWatchedFiles(context, cancellationToken);
         var events = new List<SandboxEvent>();
         var emittedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // FileSystemWatcher can report an internal buffer overflow when a
+        // process creates/removes many files quickly.  Snapshot reconciliation
+        // cannot recover the missing edge history, so retain an explicit
+        // collection-health event instead of silently presenting a partial
+        // file stream as complete.
+        foreach (var watcherError in DrainWatcherErrors())
+        {
+            events.Add(CreateWatcherFailureEvent(phase, context, watcherError));
+        }
 
         // FileSystemWatcher is the primary edge source during the run. A
         // snapshot still runs as a reconciliation pass, but watcher rows are
@@ -253,7 +264,7 @@ internal sealed class FileDiffProbe : IGuestProbe
                 watcher.Changed += (_, args) => EnqueueWatcherChange(WatcherChangeKind.Changed, args.FullPath, null);
                 watcher.Deleted += (_, args) => EnqueueWatcherChange(WatcherChangeKind.Deleted, args.FullPath, null);
                 watcher.Renamed += (_, args) => EnqueueWatcherChange(WatcherChangeKind.Renamed, args.FullPath, args.OldFullPath);
-                watcher.Error += (_, _) => { /* snapshot reconciliation remains authoritative */ };
+                watcher.Error += (_, args) => EnqueueWatcherError(args.GetException());
                 watchers.Add(watcher);
             }
             catch (ArgumentException)
@@ -321,6 +332,17 @@ internal sealed class FileDiffProbe : IGuestProbe
         }
 
         return changes;
+    }
+
+    private List<WatcherError> DrainWatcherErrors()
+    {
+        var errors = new List<WatcherError>();
+        while (watcherErrors.TryDequeue(out var error))
+        {
+            errors.Add(error);
+        }
+
+        return errors;
     }
 
     private bool IsWatchedPath(string path)
@@ -412,7 +434,76 @@ internal sealed class FileDiffProbe : IGuestProbe
         while (watcherChanges.TryDequeue(out _))
         {
         }
+        while (watcherErrors.TryDequeue(out _))
+        {
+        }
         watcherKnownPaths.Clear();
+    }
+
+    private void EnqueueWatcherError(Exception? exception)
+    {
+        // Keep diagnostics bounded if a broken watcher repeatedly signals the
+        // same condition; the first rows retain the exception detail needed to
+        // diagnose the loss without allowing the queue to become another loss
+        // source.
+        while (watcherErrors.Count >= 32 && watcherErrors.TryDequeue(out _))
+        {
+        }
+
+        watcherErrors.Enqueue(new WatcherError(exception));
+    }
+
+    private static SandboxEvent CreateWatcherFailureEvent(
+        ProbePhase phase,
+        GuestProbeContext context,
+        WatcherError watcherError)
+    {
+        var exception = watcherError.Exception;
+        var overflow = exception is InternalBufferOverflowException;
+        var evt = new SandboxEvent
+        {
+            EventType = "file.watcher.failed",
+            Source = "guest",
+            ProcessName = SampleProcessName(context.SamplePath),
+            ProcessId = context.RootProcessId,
+            Path = context.WorkingDirectory,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["capturePhase"] = ToPhaseLabel(phase),
+                ["captureSource"] = "filesystem-watcher",
+                ["captureState"] = "failed",
+                ["status"] = "failed",
+                ["collectionHealth"] = "true",
+                ["nonfatal"] = "true",
+                ["nonbehavior"] = "true",
+                ["behaviorCounted"] = "false",
+                ["reason"] = overflow ? "watcherBufferOverflow" : "watcherError",
+                ["reasonCode"] = overflow ? "watcherBufferOverflow" : "watcherError",
+                ["reasonCategory"] = "file-capture",
+                ["capturePolicy"] = "always-on-working-directory-file-diff",
+                ["samplePath"] = context.SamplePath,
+                ["workingDirectory"] = context.WorkingDirectory,
+                ["zhMessage"] = overflow
+                    ? "文件实时监视器缓冲区溢出；部分瞬时文件边沿可能无法恢复。"
+                    : "文件实时监视器发生错误；部分瞬时文件边沿可能无法恢复。",
+                ["zhHint"] = "请结合快照中的 file.* 行和该采集健康事件判断文件证据是否完整。"
+            }
+        };
+
+        if (exception is not null)
+        {
+            evt.Data["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name;
+            evt.Data["exceptionMessage"] = exception.Message;
+        }
+
+        if (context.RootProcessId is not null)
+        {
+            evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["treeLineage"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return evt;
     }
 
     private Dictionary<string, FileStateSnapshot> CaptureWatchedFiles(
@@ -675,6 +766,19 @@ internal sealed class FileDiffProbe : IGuestProbe
             return path;
         }
     }
+
+    private static string ToPhaseLabel(ProbePhase phase)
+    {
+        return phase switch
+        {
+            ProbePhase.BeforeStart => "before-start",
+            ProbePhase.AfterStart => "after-start",
+            ProbePhase.DuringRun => "during-run",
+            ProbePhase.AfterRun => "after-run",
+            ProbePhase.Cleanup => "cleanup",
+            _ => phase.ToString().ToLowerInvariant()
+        };
+    }
 }
 
 /// <summary>
@@ -797,6 +901,12 @@ internal sealed record FileStateSnapshot(long SizeBytes, DateTime LastWriteUtc);
 /// transient create/rename/delete evidence until the next probe drain.
 /// </summary>
 internal sealed record FileSystemChange(WatcherChangeKind Kind, string Path, string? OldPath);
+
+/// <summary>
+/// Stores one FileSystemWatcher error until the next probe drain so capture
+/// loss is represented as collection-health evidence rather than discarded.
+/// </summary>
+internal sealed record WatcherError(Exception? Exception);
 
 internal enum WatcherChangeKind
 {
