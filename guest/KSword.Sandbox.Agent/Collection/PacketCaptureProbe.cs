@@ -17,6 +17,11 @@ internal sealed class PacketCaptureProbe : IGuestProbe
 {
     private const string CollectionName = "packet-captures";
     private const string PktmonExecutable = "pktmon.exe";
+    // Windows 10 20H2 builds differ in their handling of a zero packet size;
+    // 128 bytes is the documented/default capture size and is sufficient for
+    // Ethernet/IP/TCP/UDP/DNS endpoint attribution without an invalid-parameter
+    // start failure.
+    private const string PacketSizeBytes = "128";
     private const string ArtifactSelectorVersion = "artifact-selectors-v1";
     private const string ReasonTaxonomy = "guest-artifact.packet-capture.reason.v1";
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
@@ -89,7 +94,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 "start",
                 "--capture",
                 "--pkt-size",
-                "0",
+                PacketSizeBytes,
                 "--file-name",
                 session.EtlPath,
                 "--file-size",
@@ -136,7 +141,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["pcapngRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["diagnosticRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
                 ["captureStartedUtc"] = session.StartedAtUtc.ToString("O", CultureInfo.InvariantCulture),
-                ["captureToolCommand"] = "pktmon start --capture --pkt-size 0 --file-name <etl> --file-size 128",
+                ["captureToolCommand"] = "pktmon start --capture --pkt-size 128 --file-name <etl> --file-size 128",
                 ["conversionTool"] = PktmonExecutable,
                 ["conversionCommand"] = "pktmon etl2pcap <etl> --out <pcapng>",
                 ["conversionStatus"] = "pending",
