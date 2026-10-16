@@ -42,9 +42,9 @@ public sealed class HtmlReportRenderer
     private const int ProcessTreeDefaultOpenDepth = 1;
     private const int TimelineEventInlineLimit = 60;
     private const int TimelineGroupEventInlineLimit = 10;
-    private const int EventTableInlineLimit = 40;
+    private const int EventTableInlineLimit = 28;
     private const int StaticStringInlineLimit = 200;
-    private const int RawEventInlineLimit = 20;
+    private const int RawEventInlineLimit = 30;
     private const int RawEventPageSize = 25;
     private const int RawEventIndexGroupInlineLimit = 16;
     private const int R0HealthEvidenceInlineLimit = 12;
@@ -56,7 +56,7 @@ public sealed class HtmlReportRenderer
     private const int RelationshipCardInlineLimit = 24;
     private const int RelationshipArtifactInlineLimit = 6;
     private const int EvidenceStoryInlineLimit = 12;
-    private const int EventExplorerInlineLimit = 40;
+    private const int EventExplorerInlineLimit = 30;
 
     private sealed record TimelineGroup(
         string Window,
@@ -4226,7 +4226,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var collectionDiagnostics = report.Events
             .Where(evt => IsCollectionHealthAlertEvent(evt) && !failures.Contains(evt))
             .ToList();
-        html.AppendLine("<section id=\"failure\" class=\"card\"><h2>Execution and collection diagnostics</h2>");
+        html.AppendLine("<section id=\"failure\" class=\"card\"><h2>Failure reasons</h2>");
         if (report.Status != AnalysisStatus.Failed && failures.Count == 0 && sampleExitOutcomes.Count == 0 && collectionDiagnostics.Count == 0)
         {
             Empty(html, "No operational failure markers were collected for this job.");
