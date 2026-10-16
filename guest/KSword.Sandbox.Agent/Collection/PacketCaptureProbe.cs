@@ -1097,7 +1097,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         }
 
         data["conversionOutputSummaryAvailable"] = "true";
-        var convertedPackets = FindFirstNumberAfterLabel(output, "packet");
+        var convertedPackets = FindPktmonPacketCount(output);
         if (convertedPackets is not null)
         {
             data["pktmonReportedPacketCount"] = convertedPackets.Value.ToString(CultureInfo.InvariantCulture);
@@ -1119,16 +1119,30 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         AddIfNotEmpty(data, "protocolSummaryReason", data.TryGetValue("protocolSummaryReason", out var reason) ? reason : "protocolParserNotImplemented");
     }
 
-    private static long? FindFirstNumberAfterLabel(string text, string label)
+    private static long? FindPktmonPacketCount(string text)
     {
-        var labelIndex = text.IndexOf(label, StringComparison.OrdinalIgnoreCase);
-        if (labelIndex < 0)
+        foreach (var label in new[] { "packets total", "packets formatted" })
         {
-            return null;
+            var labelIndex = text.IndexOf(label, StringComparison.OrdinalIgnoreCase);
+            if (labelIndex < 0)
+            {
+                continue;
+            }
+
+            var digits = new string(text[(labelIndex + label.Length)..]
+                .SkipWhile(ch => !char.IsDigit(ch))
+                .TakeWhile(char.IsDigit)
+                .ToArray());
+            if (long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var value))
+            {
+                return value;
+            }
         }
 
-        var digits = new string(text[(labelIndex + label.Length)..].SkipWhile(ch => !char.IsDigit(ch)).TakeWhile(char.IsDigit).ToArray());
-        return long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : null;
+        // A localized or truncated conversion output has no trustworthy
+        // packet counter. Do not scrape digits from an ETL/PCAP path, which
+        // commonly contains the capture date (for example 20261016).
+        return null;
     }
 
     /// <summary>
