@@ -286,11 +286,24 @@ public sealed partial class SandboxJobService
             ? result.Success ? AnalysisStatus.Running : AnalysisStatus.Failed
             : job.Status;
         var existingGuestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
+        var submission = job.Submission with
+        {
+            DryRun = result.Mode != SandboxRunbookExecutionMode.Live
+        };
+        var messages = result.Mode == SandboxRunbookExecutionMode.Live
+            ? job.Messages
+                .Where(message =>
+                    !message.StartsWith("Dry-run planning completed.", StringComparison.OrdinalIgnoreCase) &&
+                    !message.StartsWith("Review the runbook before enabling live", StringComparison.OrdinalIgnoreCase))
+                .Append($"Live runbook execution result persisted to {resultPath}.")
+                .ToList()
+            : AppendMessage(job.Messages, $"Runbook execution result persisted to {resultPath}.");
         var updated = RegenerateReport(job with
         {
             Status = status,
             RunbookExecutionResultPath = resultPath,
-            Messages = AppendMessage(job.Messages, $"Runbook execution result persisted to {resultPath}.")
+            Submission = submission,
+            Messages = messages
         }, status, existingGuestEvents, job.GuestEventsPath);
 
         PersistRunbookProgress(updated, result);
