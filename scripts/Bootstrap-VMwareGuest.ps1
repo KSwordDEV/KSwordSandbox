@@ -126,12 +126,42 @@ function Get-HttpsListeners {
     })
 }
 
+function Get-WsManListenerProperty {
+    param(
+        [Parameter(Mandatory)]$Listener,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $directProperty = $Listener.PSObject.Properties[$Name]
+    if ($null -ne $directProperty) {
+        return [string]$directProperty.Value
+    }
+
+    try {
+        $propertyItem = Get-Item -LiteralPath (Join-Path $Listener.PSPath $Name) -ErrorAction Stop
+        $valueProperty = $propertyItem.PSObject.Properties['Value']
+        if ($null -ne $valueProperty) {
+            return [string]$valueProperty.Value
+        }
+    }
+    catch {
+        return $null
+    }
+
+    return $null
+}
+
 function Ensure-WinRmHttpsListener {
     param([Parameter(Mandatory)]$Certificate)
     $listeners = @(Get-HttpsListeners)
     $matching = @($listeners | Where-Object {
         $item = Get-Item -LiteralPath $_.PSPath -ErrorAction SilentlyContinue
-        $item.CertificateThumbprint -eq $Certificate.Thumbprint -and ([int]$item.Port -eq $Port)
+        if ($null -eq $item) { return $false }
+        $thumbprint = Get-WsManListenerProperty -Listener $item -Name 'CertificateThumbprint'
+        $listenerPort = Get-WsManListenerProperty -Listener $item -Name 'Port'
+        $thumbprint -eq $Certificate.Thumbprint -and
+        (-not [string]::IsNullOrWhiteSpace($listenerPort)) -and
+        ([int]$listenerPort -eq $Port)
     })
     if ($matching.Count -eq 0) {
         foreach ($listener in $listeners) {
