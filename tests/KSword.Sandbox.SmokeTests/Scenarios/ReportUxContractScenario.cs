@@ -361,12 +361,16 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseVisibleText, "可按事件类型、来源、阶段、严重性和样本行为状态搜索或筛选。", "Chinese event explorer note should be fully localized.");
         RequireContains(chineseVisibleText, "命令/stdout/stderr/PowerShell 字段默认隐藏", "Chinese technical-field fold summary should be localized.");
         RequireContains(chineseVisibleText, "此通道没有归属于样本的证据。", "Chinese story-lane empty state should be localized.");
+        RequireContains(chineseHtml, "class=\"chip chip-high\">高</span>", "Chinese report should localize high-severity UI badges.");
+        RequireContains(chineseHtml, "class=\"chip chip-medium\">中</span>", "Chinese report should localize medium-severity UI badges.");
         RequireNotContains(chineseHtml, "additional behavior rows in report.json", "Chinese report must not leak the event explorer report-only-row phrase.");
         RequireNotContains(chineseVisibleText, "sample-attributed:", "Chinese report must not leak the English sample-attributed counter label.");
         RequireNotContains(chineseVisibleText, "Read the verdict and high-signal evidence first.", "Chinese report must not leak the analyst-focus English lead.");
         RequireNotContains(chineseVisibleText, "Search or filter by event type", "Chinese report must not leak the event explorer English note.");
         RequireNotContains(chineseVisibleText, "command/stdout/stderr/PowerShell fields hidden by default", "Chinese report must not leak the technical-field English note.");
         RequireNotContains(chineseVisibleText, "No supporting sample-behavior evidence rows were collected for this lane.", "Chinese report must not leak the story-lane English empty state.");
+        RequireNotContains(chineseHtml, "class=\"chip chip-high\">high</span>", "Chinese report must not leak the English high-severity UI badge.");
+        RequireNotContains(chineseHtml, "class=\"chip chip-medium\">medium</span>", "Chinese report must not leak the English medium-severity UI badge.");
         var coverageGapChinese = renderer.RenderChinese(
             report with
             {

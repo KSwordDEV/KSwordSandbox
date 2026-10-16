@@ -9390,6 +9390,26 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         // The cover status value is wrapped explicitly so this replacement
         // localizes the UI label without touching same-named evidence values.
         html = html.Replace("ui-status-value\">Failed", "ui-status-value\">失败", StringComparison.Ordinal);
+        // Severity values are renderer-owned chrome.  They appear inside
+        // styled badges/cells whose tags are protected during the first pass,
+        // so localize only the exact UI wrappers and leave raw evidence values
+        // untouched.
+        foreach (var (english, chinese) in new (string English, string Chinese)[]
+        {
+            ("class=\"chip chip-critical\">critical</span>", "class=\"chip chip-critical\">严重</span>"),
+            ("class=\"chip chip-high\">high</span>", "class=\"chip chip-high\">高</span>"),
+            ("class=\"chip chip-medium\">medium</span>", "class=\"chip chip-medium\">中</span>"),
+            ("class=\"chip chip-low\">low</span>", "class=\"chip chip-low\">低</span>"),
+            ("class=\"chip chip-info\">info</span>", "class=\"chip chip-info\">信息</span>"),
+            ("class=\"risk-critical\">critical</td>", "class=\"risk-critical\">严重</td>"),
+            ("class=\"risk-high\">high</td>", "class=\"risk-high\">高</td>"),
+            ("class=\"risk-medium\">medium</td>", "class=\"risk-medium\">中</td>"),
+            ("class=\"risk-low\">low</td>", "class=\"risk-low\">低</td>"),
+            ("class=\"risk-info\">info</td>", "class=\"risk-info\">信息</td>")
+        })
+        {
+            html = html.Replace(english, chinese, StringComparison.Ordinal);
+        }
         var replacements = new (string English, string Chinese)[]
         {
             (">1 indexed<", ">1 已索引<"),
