@@ -738,7 +738,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("<div class=\"focus-grid\">");
         FocusMetric(html, "Primary findings", primaryFindings.Count.ToString(CultureInfo.InvariantCulture), primaryFindings.Count > 0 ? "risk-medium" : "risk-low", "Rules that contribute to the sample verdict.");
         FocusMetric(html, "Sample behavior", sampleEvents.ToString(CultureInfo.InvariantCulture), sampleEvents > 0 ? "risk-medium" : "risk-info", "Events eligible for the behavior story.");
-        FocusMetric(html, "Operational failures", failures.ToString(CultureInfo.InvariantCulture), failures > 0 || report.Status == AnalysisStatus.Failed ? "risk-high" : "risk-low", "Environment and evidence failures.");
+        var runtimeFailureCount = failures + sampleExitOutcomes;
+        FocusMetric(html, "Runtime / collection failures", runtimeFailureCount.ToString(CultureInfo.InvariantCulture), runtimeFailureCount > 0 || report.Status == AnalysisStatus.Failed ? "risk-high" : "risk-low", "Sample execution, environment, and evidence failures.");
         FocusMetric(html, "Sample exit outcomes", sampleExitOutcomes.ToString(CultureInfo.InvariantCulture), sampleExitOutcomes > 0 ? "risk-info" : "risk-low", "Non-zero sample exits are execution outcomes, not maliciousness verdicts.");
         FocusMetric(html, "Artifacts", artifactCount.ToString(CultureInfo.InvariantCulture), artifactCount > 0 ? "risk-low" : "risk-info", "Indexed files, screenshots, dumps, and packet captures.");
         html.AppendLine("</div>");
@@ -10168,6 +10169,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Page evidence sample", "页面证据样本"),
         ("R0 behavior", "R0 行为"),
         ("Execution boundary", "执行边界"),
+        ("sample execution was blocked or ended before complete runtime behavior, so the runtime verdict is indeterminate.", "样本执行被阻断或在产生完整运行期行为前结束，因此运行期不可判定。"),
+        ("Static findings remain static-only evidence and do not establish execution.", "静态命中仍是未验证证据，不能证明样本实际执行。"),
         ("Failure reasons", "失败原因"),
         ("Observed execution / no behavior-rule hit", "已观察执行/未命中行为规则"),
         ("Evidence unavailable / runtime indeterminate", "运行证据不可用/运行期不可判定"),
@@ -10239,6 +10242,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("<strong>Execution boundary:</strong> sample execution was blocked or ended before complete runtime behavior, so the runtime verdict is indeterminate. Static findings remain static-only evidence and do not establish execution.", "<strong>执行边界：</strong>样本执行被阻断或在产生完整运行期行为前结束，因此运行期不可判定。静态命中仍保留为 static-only 证据，不能证明样本实际执行。"),
         ("Environment and evidence failures; sample exit outcomes are shown separately.", "环境与证据失败；样本退出结果单独显示。"),
         ("Operational failures", "运行失败"),
+        ("Runtime / collection failures", "运行期/采集失败"),
+        ("Sample execution, environment, and evidence failures.", "样本执行、环境和证据失败。"),
         ("Environment and evidence failures.", "环境与证据失败。"),
         ("Sample exit outcomes", "样本退出结果"),
         ("Non-zero sample exits are execution outcomes, not maliciousness verdicts.", "样本非零退出属于执行结果，不是恶意性结论。"),

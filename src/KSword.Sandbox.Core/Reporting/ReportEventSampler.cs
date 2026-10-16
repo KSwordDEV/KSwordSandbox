@@ -1226,12 +1226,15 @@ public static class ReportEventSampler
             type.StartsWith("pcap.http", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("pcap.tls", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("pcap.flow", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("eventlog.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("security.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("etw.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("service.", StringComparison.OrdinalIgnoreCase) &&
-                !type.Contains("snapshot", StringComparison.OrdinalIgnoreCase);
+            (type.StartsWith("service.", StringComparison.OrdinalIgnoreCase) &&
+                !type.Contains("snapshot", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsStrongSampleBehaviorEvent(SandboxEvent evt)

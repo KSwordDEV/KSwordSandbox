@@ -2014,6 +2014,9 @@ public sealed partial class SandboxJobService
             type.StartsWith("pcap.http", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("pcap.tls", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("pcap.flow", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("eventlog.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("security.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("etw.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
@@ -2025,9 +2028,11 @@ public sealed partial class SandboxJobService
         evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsPersistenceEvent(SandboxEvent evt) =>
-        evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase);
+        IsDynamicActionEvent(evt) &&
+        (evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("service.", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsFileEvent(SandboxEvent evt) =>
         evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase);
