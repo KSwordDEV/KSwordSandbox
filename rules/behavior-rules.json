@@ -6530,8 +6530,8 @@
       "title": "Process tree execution from user-writable path",
       "titleZh": "进程树中从用户可写路径执行",
       "severity": "medium",
-      "summary": "A process-tree or process observation referenced execution from Temp, AppData, Downloads, ProgramData, or Public staging paths.",
-      "summaryZh": "进程树遥测显示可执行或脚本从用户可写路径启动；请结合父子进程、命令行、下载/暂存路径和样本上下文复核。",
+      "summary": "A sample-correlated process-tree or process observation referenced execution from Temp, AppData, Downloads, ProgramData, or Public staging paths. A process.new row also requires sample-root lineage; uncorrelated and environmental rows remain raw evidence.",
+      "summaryZh": "与样本关联的进程树或进程遥测显示可执行文件或脚本从 Temp、AppData、Downloads、ProgramData 或 Public 等可写暂存路径启动。process.new 行还必须具备样本根血缘；未关联及环境行保留为原始证据。",
       "mitreTechniqueId": "T1204.002",
       "mitreTechniqueName": "Malicious File",
       "eventTypes": [

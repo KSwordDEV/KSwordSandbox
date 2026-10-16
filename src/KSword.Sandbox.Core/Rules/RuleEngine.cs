@@ -283,6 +283,13 @@ public sealed class RuleEngine
             return false;
         }
 
+        if (string.Equals(rule.Id, "execution-from-user-writable-tree-path", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(evt.EventType, "process.new", StringComparison.OrdinalIgnoreCase) &&
+            !HasProcessNewAttribution(evt))
+        {
+            return false;
+        }
+
         if (RuleIncludesNonBehaviorEvidence(rule))
         {
             return true;
@@ -322,6 +329,46 @@ public sealed class RuleEngine
         return EventDataBoolTrue(evt, "strongSampleCorrelation", "strong_sample_correlation") ||
             TextEqualsAny(correlation, "confirmed", "probable") ||
             TextEqualsAny(status, "confirmed", "probable");
+    }
+
+    private static bool HasProcessNewAttribution(SandboxEvent evt)
+    {
+        if (HasConfirmedOrProbableSampleCorrelation(evt))
+        {
+            return true;
+        }
+
+        return HasSampleRootLineage(evt) && !HasExplicitWeakOrEnvironmentalCorrelation(evt);
+    }
+
+    private static bool HasSampleRootLineage(SandboxEvent evt)
+    {
+        return EventDataBoolTrue(evt, "lineageIncludesRoot", "lineage_includes_root", "sampleRootLineage", "sample_root_lineage");
+    }
+
+    private static bool HasExplicitWeakOrEnvironmentalCorrelation(SandboxEvent evt)
+    {
+        if (TryGetRuleFieldValue(evt, "sampleCorrelation", out var correlation) ||
+            TryGetRuleFieldValue(evt, "sample_correlation", out correlation))
+        {
+            if (TextEqualsAny(correlation, "environment", "unknown", "uncorrelated", "nonbehavior", "not-sample", "not_sample"))
+            {
+                return true;
+            }
+        }
+
+        if (TryGetRuleFieldValue(evt, "sampleCorrelationStatus", out var status) ||
+            TryGetRuleFieldValue(evt, "sample_correlation_status", out status))
+        {
+            if (TextEqualsAny(status, "environment", "unknown", "uncorrelated", "session-related", "session-only", "not-correlated", "not_correlated"))
+            {
+                return true;
+            }
+        }
+
+        return (TryGetRuleFieldValue(evt, "sampleCorrelationStrength", out var strength) ||
+                TryGetRuleFieldValue(evt, "sample_correlation_strength", out strength)) &&
+            TextEqualsAny(strength, "none", "weak", "session-only", "unattributed");
     }
 
     /// <summary>

@@ -36,6 +36,19 @@ internal sealed class ProcessNewCorrelationContractScenario : ISmokeTestScenario
             HasProcessNewFinding(engine.Classify([BuildEvent(("sampleCorrelation", "probable"), ("sampleCorrelationStatus", "probable"))])),
             "A probable process.new row should still produce process-new.");
 
+        SmokeAssert.True(
+            !HasWritableTreeFinding(engine.Classify([BuildWritableEvent()])),
+            "An uncorrelated user-writable process.new row must not produce execution-from-user-writable-tree-path.");
+        SmokeAssert.True(
+            !HasWritableTreeFinding(engine.Classify([BuildWritableEvent(("sampleCorrelation", "environment"), ("sampleCorrelationStatus", "environment"))])),
+            "An environmental user-writable process.new row must not produce execution-from-user-writable-tree-path.");
+        SmokeAssert.True(
+            HasWritableTreeFinding(engine.Classify([BuildWritableEvent(("lineageIncludesRoot", "true"))])),
+            "A process.new row with sample-root lineage should produce execution-from-user-writable-tree-path.");
+        SmokeAssert.True(
+            HasWritableTreeFinding(engine.Classify([BuildWritableEvent(("sampleCorrelationStatus", "confirmed"))])),
+            "A confirmed user-writable process.new row should produce execution-from-user-writable-tree-path.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
@@ -47,6 +60,19 @@ internal sealed class ProcessNewCorrelationContractScenario : ISmokeTestScenario
     private static bool HasProcessNewFinding(IReadOnlyCollection<BehaviorFinding> findings)
     {
         return findings.Any(finding => string.Equals(finding.RuleId, "process-new", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasWritableTreeFinding(IReadOnlyCollection<BehaviorFinding> findings)
+    {
+        return findings.Any(finding => string.Equals(finding.RuleId, "execution-from-user-writable-tree-path", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static SandboxEvent BuildWritableEvent(params (string Key, string Value)[] metadata)
+    {
+        return BuildEvent(metadata) with
+        {
+            Path = @"C:\Users\Public\payload.exe"
+        };
     }
 
     private static SandboxEvent BuildEvent(params (string Key, string Value)[] metadata)
