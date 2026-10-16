@@ -145,6 +145,11 @@ public sealed class HtmlReportRenderer
         string Source,
         string Selectors);
 
+    private sealed record ArtifactManifestJobIdMismatch(
+        ArtifactDescriptor Artifact,
+        Guid ExpectedJobId,
+        string Detail);
+
     private sealed record ProcessRelationshipCard(
         string Label,
         string RiskCss,
@@ -234,8 +239,20 @@ public sealed class HtmlReportRenderer
     /// localizes the report shell; the method returns a complete HTML document.
     /// </summary>
     public string Render(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts, HtmlReportLanguage language)
+        => Render(report, artifacts, collections: null, language);
+
+    /// <summary>
+    /// Converts one report plus indexed artifact collections to localized HTML.
+    /// Collection descriptors preserve manifest-only lanes (including ETW when
+    /// no ETL file was materialized) so coverage gaps match the manifest.
+    /// </summary>
+    public string Render(
+        AnalysisReport report,
+        IEnumerable<ArtifactDescriptor>? artifacts,
+        IEnumerable<ArtifactCollectionDescriptor>? collections,
+        HtmlReportLanguage language)
     {
-        var html = RenderEnglishCore(report, artifacts);
+        var html = RenderEnglishCore(report, artifacts, collections);
         return language == HtmlReportLanguage.ChineseSimplified
             ? LocalizeChineseHtml(html, report)
             : html;
@@ -255,6 +272,12 @@ public sealed class HtmlReportRenderer
     public string RenderEnglish(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts) =>
         Render(report, artifacts, HtmlReportLanguage.English);
 
+    public string RenderEnglish(
+        AnalysisReport report,
+        IEnumerable<ArtifactDescriptor>? artifacts,
+        IEnumerable<ArtifactCollectionDescriptor>? collections) =>
+        Render(report, artifacts, collections, HtmlReportLanguage.English);
+
     /// <summary>
     /// Converts one AnalysisReport to the Simplified Chinese HTML variant.
     /// Inputs are a completed or planned report; processing delegates to the
@@ -268,6 +291,12 @@ public sealed class HtmlReportRenderer
     /// </summary>
     public string RenderChinese(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts) =>
         Render(report, artifacts, HtmlReportLanguage.ChineseSimplified);
+
+    public string RenderChinese(
+        AnalysisReport report,
+        IEnumerable<ArtifactDescriptor>? artifacts,
+        IEnumerable<ArtifactCollectionDescriptor>? collections) =>
+        Render(report, artifacts, collections, HtmlReportLanguage.ChineseSimplified);
 
     /// <summary>
     /// Renders the pair of localized report documents expected by operators.
@@ -283,18 +312,29 @@ public sealed class HtmlReportRenderer
     /// artifact descriptors.
     /// </summary>
     public IReadOnlyList<HtmlReportDocument> RenderBilingualReports(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts)
+        => RenderBilingualReports(report, artifacts, collections: null);
+
+    public IReadOnlyList<HtmlReportDocument> RenderBilingualReports(
+        AnalysisReport report,
+        IEnumerable<ArtifactDescriptor>? artifacts,
+        IEnumerable<ArtifactCollectionDescriptor>? collections)
     {
         var artifactList = artifacts?.ToList();
+        var collectionList = collections?.ToList();
         return
         [
-            new HtmlReportDocument("report.en.html", HtmlReportLanguage.English, "en-US", RenderEnglish(report, artifactList)),
-            new HtmlReportDocument("report.zh.html", HtmlReportLanguage.ChineseSimplified, "zh-CN", RenderChinese(report, artifactList))
+            new HtmlReportDocument("report.en.html", HtmlReportLanguage.English, "en-US", RenderEnglish(report, artifactList, collectionList)),
+            new HtmlReportDocument("report.zh.html", HtmlReportLanguage.ChineseSimplified, "zh-CN", RenderChinese(report, artifactList, collectionList))
         ];
     }
 
-    private static string RenderEnglishCore(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts)
+    private static string RenderEnglishCore(
+        AnalysisReport report,
+        IEnumerable<ArtifactDescriptor>? artifacts,
+        IEnumerable<ArtifactCollectionDescriptor>? collections)
     {
         var artifactLinks = BuildReportArtifactList(report, artifacts);
+        var collectionList = collections?.ToList() ?? [];
         var artifactLookup = BuildArtifactLookup(artifactLinks);
         var html = new StringBuilder();
         html.AppendLine("<!doctype html>");
@@ -322,7 +362,7 @@ public sealed class HtmlReportRenderer
         AppendStaticAnalysis(html, report);
         AppendDynamicAnalysis(html, report);
         AppendVirusTotalSummary(html, report, artifactLookup, artifactLinks);
-        AppendBehaviorGraph(html, report, artifactLookup, artifactLinks);
+        AppendBehaviorGraph(html, report, artifactLookup, artifactLinks, collectionList);
         AppendArtifactLinks(html, report, artifactLinks);
         AppendTimeline(html, report, artifactLookup, artifactLinks);
         AppendProcessDetails(html, report, artifactLookup, artifactLinks);
@@ -1875,7 +1915,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         StringBuilder html,
         AnalysisReport report,
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
-        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+        IReadOnlyCollection<ArtifactDescriptor> artifacts,
+        IReadOnlyCollection<ArtifactCollectionDescriptor> collections)
     {
         var processNodes = BuildProcessGraphNodes(report).Take(16).ToList();
         var edges = BuildBehaviorGraphEdges(report, artifactLookup, artifacts).Take(96).ToList();
@@ -1910,7 +1951,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         AppendEvidenceNarrativeSpine(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts);
         AppendEvidenceSummaryCards(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
         AppendEvidenceStoryBoard(html, report, artifacts);
-        AppendCollectionCoverageGaps(html, report, artifacts);
+        AppendCollectionCoverageGaps(html, report, artifacts, collections);
         AppendStableRelationshipLanes(html, edges);
         AppendTopBehaviorChain(html, edges);
 
@@ -3065,7 +3106,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         AnalysisReport report,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        AppendCollectionCoverageGaps(html, report, artifacts);
+        AppendCollectionCoverageGaps(html, report, artifacts, []);
         var r0HealthEvents = report.Events.Where(IsR0HealthRowEvent).ToList();
         var vtEvents = report.Events.Where(IsVirusTotalEvent).ToList();
         var downloadable = artifacts.Count(artifact => !string.IsNullOrWhiteSpace(ArtifactHref(artifact)));
@@ -3118,7 +3159,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     private static void AppendCollectionCoverageGaps(
         StringBuilder html,
         AnalysisReport report,
-        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+        IReadOnlyCollection<ArtifactDescriptor> artifacts,
+        IReadOnlyCollection<ArtifactCollectionDescriptor> collections)
     {
         var gaps = new List<(string Name, string State, string Detail, string Evidence)>();
         var wmiFailures = report.Events
@@ -3150,16 +3192,44 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 string.Join("; ", wmiFailures.Take(8).Select(EventOneLine))));
         }
 
-        var etwDisabled = report.Events
-            .Where(evt => IsEtwLiveCaptureDisabledEvent(evt))
+        // The artifact manifest is authoritative for collection lanes. Keep
+        // ETW event diagnostics as supporting evidence, but merge them with
+        // the manifest row so one ETW gap has the same cardinality as the
+        // manifest even when no ETL descriptor was materialized.
+        var etwEvents = report.Events
+            .Where(evt => TextContainsAny(evt.EventType, "etw_live", "etw_security"))
             .ToList();
-        if (etwDisabled.Count > 0)
+        var etwManifestRows = collections
+            .Where(collection => string.Equals(collection.Name, "etw-traces", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var etwManifestGap = etwManifestRows
+            .Select(collection =>
+            {
+                var captureWasNotStarted = MetadataBoolTrue(collection.Metadata, "captureWasNotStarted", "etwCaptureWasNotStarted");
+                var failed = TextEqualsAny(collection.Status, "failed", "partial", "missing", "enabled-empty", "not-created") ||
+                    TextEqualsAny(MetadataValue(collection.Metadata, "captureState", "lastCaptureState") ?? string.Empty, "failed", "capture_failed");
+                var disabled = !collection.Enabled || TextEqualsAny(collection.Status, "disabled", "not-requested");
+                var gap = captureWasNotStarted || failed || disabled;
+                var state = captureWasNotStarted ? "captureWasNotStarted" : failed ? "failed" : "disabled";
+                return new { Collection = collection, Gap = gap, State = state, CaptureWasNotStarted = captureWasNotStarted };
+            })
+            .Where(item => item.Gap)
+            .OrderBy(item => item.State, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        var etwEventGap = etwEvents.Any(IsEtwLiveCaptureDisabledEvent) ||
+            etwEvents.Any(evt => TextContainsAny(evt.EventType, "etw_live.failed", "etw_live.capture_failed")) ||
+            etwEvents.Any(evt => EventDataBoolTrue(evt, "captureWasNotStarted", "etwCaptureWasNotStarted"));
+        if (etwManifestGap is not null || etwEventGap)
         {
+            var state = etwManifestGap?.State ?? (etwEvents.Any(evt => TextContainsAny(evt.EventType, "etw_live.failed", "etw_live.capture_failed")) ? "failed" : "disabled");
+            var manifestDetail = etwManifestGap is null
+                ? "manifest=not-observed"
+                : $"manifest enabled={etwManifestGap.Collection.Enabled}; status={etwManifestGap.Collection.Status}; reason={etwManifestGap.Collection.Reason}; captureWasNotStarted={etwManifestGap.CaptureWasNotStarted}";
             gaps.Add((
                 "ETW live capture",
-                "disabled",
-                "Live ETW capture is disabled; provider/readiness metadata does not represent a live trace.",
-                string.Join("; ", etwDisabled.Take(4).Select(EventOneLine))));
+                state,
+                $"ETW live collection gap: {manifestDetail}. Provider/readiness metadata does not represent a complete live trace.",
+                string.Join("; ", etwEvents.Take(4).Select(EventOneLine))));
         }
 
         var auditPartial = report.Events
@@ -3200,6 +3270,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 card.CopyText));
         }
 
+        foreach (var mismatch in FindArtifactManifestJobIdMismatches(artifacts, report.JobId))
+        {
+            gaps.Add((
+                "Artifact manifest job-id integrity",
+                "job-id mismatch",
+                mismatch.Detail + " Original manifest evidence is preserved and was not rewritten.",
+                ArtifactManifestJobIdMismatchEvidenceLine(mismatch)));
+        }
+
         var copy = string.Join(
             Environment.NewLine,
             [
@@ -3218,7 +3297,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("<div class=\"evidence-summary-grid collection-coverage-gap-grid copyable\" data-copy=\"" + A(copy) + "\">");
         foreach (var gap in gaps)
         {
-            var css = TextEqualsAny(gap.State, "partial", "capture_failed", "failed", "disabled", "disabled/missing", "missing") ? "medium" : "info";
+            var css = TextEqualsAny(gap.State, "partial", "capture_failed", "failed", "disabled", "disabled/missing", "missing", "job-id mismatch") ? "medium" : "info";
             var evidence = string.IsNullOrWhiteSpace(gap.Evidence) ? "-" : gap.Evidence;
             html.AppendLine("<article class=\"evidence-summary-card\">");
             html.AppendLine("<div class=\"relationship-title\">");
@@ -3393,7 +3472,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("<div class=\"section-note\"><strong>Artifact evidence cards.</strong> Collection status, safe download selectors, duplicate grouping, and rejection diagnostics are summarized before the dense artifact table. Safe report-relative links can open or download; absolute host/guest paths remain copy-only evidence.</div>");
         AppendArtifactCollectionStatusCards(html, report, artifacts);
         AppendArtifactEvidenceMatrixNarrative(html, report, artifacts);
-        AppendArtifactIndexStory(html, artifacts);
+        AppendArtifactIndexStory(html, report, artifacts);
         if (artifacts.Count == 0)
         {
             Empty(html, "No events.json, driver-events.jsonl, screenshot, or dropped-file artifacts were indexed.");
@@ -3501,8 +3580,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// processing summarizes safe download selectors, duplicate groups, and
     /// manifest rejection diagnostics in copyable square cards.
     /// </summary>
-    private static void AppendArtifactIndexStory(StringBuilder html, IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    private static void AppendArtifactIndexStory(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
+        var manifestMismatches = FindArtifactManifestJobIdMismatches(artifacts, report.JobId);
         var downloadable = artifacts.Count(artifact => !string.IsNullOrWhiteSpace(ArtifactHref(artifact)));
         var selectorCount = artifacts.Count(HasDownloadSelectorEvidence);
         var duplicateMembers = artifacts.Count(IsDuplicateArtifactDescriptor);
@@ -3527,11 +3610,17 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 $"duplicateGroups={duplicateGroups}",
                 $"duplicateMembers={duplicateMembers}",
                 $"rejectedArtifactReferences={rejectedCount}",
+                $"manifestJobIdMismatches={manifestMismatches.Count}",
+                .. manifestMismatches.Select(ArtifactManifestJobIdMismatchEvidenceLine),
                 .. artifacts.Take(12).Select(ArtifactIndexEvidenceLine)
             ]);
 
         html.AppendLine("<h3>Artifact index evidence</h3>");
         html.AppendLine("<div class=\"section-note\"><strong>Host artifact index.</strong> Download buttons use safe report-relative selectors only; duplicate grouping and rejection diagnostics explain why guest manifest references were accepted, deduplicated, or rejected.</div>");
+        foreach (var mismatch in manifestMismatches)
+        {
+            html.AppendLine($"<div class=\"section-note failure-note artifact-manifest-integrity\"><strong>Artifact manifest job-id mismatch:</strong> {E(mismatch.Detail)} Original manifest evidence is preserved and was not rewritten.</div>");
+        }
         html.AppendLine("<div class=\"overview-strip artifact-index-overview\">");
         AppendOverviewItem(
             html,
@@ -3551,8 +3640,103 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             rejectedCount.ToString(CultureInfo.InvariantCulture),
             rejectionArtifacts.Count == 0 ? "No host-side manifest rejection diagnostics are attached to indexed artifacts." : $"Collections with rejection diagnostics: {rejectionArtifacts.Count}.",
             rejectedCount > 0 ? "risk-medium" : "risk-low");
+        AppendOverviewItem(
+            html,
+            "Manifest JobId integrity",
+            manifestMismatches.Count == 0 ? "matched / not observed" : "job-id mismatch",
+            manifestMismatches.Count == 0
+                ? "Top-level guest artifact manifest JobId matches the report JobId when a manifest was readable."
+                : $"Top-level guest artifact manifest jobId is all-zero while report/runbook JobId is {report.JobId:D}; original evidence is preserved.",
+            manifestMismatches.Count == 0 ? "risk-low" : "risk-medium");
         html.AppendLine("</div>");
         html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Artifact index selector/duplicate/rejection evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+    }
+
+    private static IReadOnlyList<ArtifactManifestJobIdMismatch> FindArtifactManifestJobIdMismatches(
+        IEnumerable<ArtifactDescriptor> artifacts,
+        Guid expectedJobId)
+    {
+        if (expectedJobId == Guid.Empty)
+        {
+            return [];
+        }
+
+        var mismatches = new List<ArtifactManifestJobIdMismatch>();
+        foreach (var artifact in artifacts.Where(artifact => artifact.Kind == ArtifactKind.ArtifactManifest))
+        {
+            if (!TryReadArtifactManifestJobId(artifact, out var manifestJobId) || manifestJobId != Guid.Empty)
+            {
+                continue;
+            }
+
+            mismatches.Add(new ArtifactManifestJobIdMismatch(
+                artifact,
+                expectedJobId,
+                $"Guest artifact manifest top-level jobId is all-zero while report/runbook JobId is {expectedJobId:D} ({ArtifactDisplayName(artifact)})."));
+        }
+
+        return mismatches;
+    }
+
+    private static bool TryReadArtifactManifestJobId(ArtifactDescriptor artifact, out Guid jobId)
+    {
+        jobId = Guid.Empty;
+        if (string.IsNullOrWhiteSpace(artifact.FullPath) || !File.Exists(artifact.FullPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(artifact.FullPath);
+            using var document = JsonDocument.Parse(stream);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (!string.Equals(property.Name, "jobId", StringComparison.OrdinalIgnoreCase) ||
+                    property.Value.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                return Guid.TryParse(property.Value.GetString(), out jobId);
+            }
+        }
+        catch (IOException)
+        {
+            // An unreadable manifest remains an evidence-quality issue, but it
+            // is not a provable job-id mismatch.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Keep report rendering best-effort when local artifact access is
+            // restricted by the host filesystem.
+        }
+        catch (JsonException)
+        {
+            // Preserve malformed source evidence without rewriting or failing
+            // the report renderer.
+        }
+
+        return false;
+    }
+
+    private static string ArtifactManifestJobIdMismatchEvidenceLine(ArtifactManifestJobIdMismatch mismatch)
+    {
+        return string.Join(
+            "; ",
+            [
+                "artifactManifestJobIdMismatch=true",
+                $"artifact={ArtifactDisplayName(mismatch.Artifact)}",
+                "observedTopLevelJobId=00000000-0000-0000-0000-000000000000",
+                $"reportRunbookJobId={mismatch.ExpectedJobId:D}",
+                "originalManifestPreserved=true",
+                "originalManifestRewritten=false"
+            ]);
     }
 
     /// <summary>
@@ -7492,6 +7676,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// </summary>
     private static bool IsSampleBehaviorEvent(SandboxEvent evt)
     {
+        // Generic process.new telemetry is common ambient Windows/VM noise.
+        // It belongs in raw evidence unless the classifier explicitly marks
+        // it confirmed or probable for the submitted sample.
+        if (TextEqualsAny(evt.EventType, "process.new") &&
+            !HasConfirmedOrProbableSampleCorrelation(evt))
+        {
+            return false;
+        }
+
         return !IsExcludedFromBehaviorStoryEvent(evt) &&
             !IsStaticOnlyEvidenceEvent(evt) &&
             !IsCollectionHealthEvent(evt) &&
@@ -7542,6 +7735,27 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
     private static bool IsSampleBehaviorProcessEvent(SandboxEvent evt) =>
         IsSampleBehaviorEvent(evt) && evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Determines whether one event has an explicit confirmed or probable
+    /// sample-correlation disposition. Inputs are normalized event metadata;
+    /// processing accepts the classifier's strong marker and stable labels,
+    /// and the method returns false for missing or environmental attribution.
+    /// </summary>
+    private static bool HasConfirmedOrProbableSampleCorrelation(SandboxEvent evt)
+    {
+        var correlation = FirstEventDataValue(evt, "sampleCorrelation", "sample_correlation");
+        var status = FirstEventDataValue(evt, "sampleCorrelationStatus", "sample_correlation_status");
+        if (TextEqualsAny(correlation ?? string.Empty, "environment", "unknown", "uncorrelated", "nonbehavior", "not-sample", "not_sample") ||
+            TextEqualsAny(status ?? string.Empty, "environment", "unknown", "uncorrelated", "session-related", "session-only", "not-correlated", "not_correlated"))
+        {
+            return false;
+        }
+
+        return EventDataBoolTrue(evt, "strongSampleCorrelation", "strong_sample_correlation") ||
+            TextEqualsAny(correlation ?? string.Empty, "confirmed", "probable") ||
+            TextEqualsAny(status ?? string.Empty, "confirmed", "probable");
+    }
 
     private static bool IsSampleBehaviorSecurityPrivilegeEvent(SandboxEvent evt) =>
         IsSampleBehaviorEvent(evt) && IsSecurityPrivilegeFallbackEvent(evt);
@@ -8367,6 +8581,56 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         return long.TryParse(exitCode, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed != 0;
     }
 
+    private static string? BuildProcessExitCodeContext(SandboxEvent evt)
+    {
+        if (!string.Equals(evt.EventType, "process.exit", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var rawExitCode = FirstEventDataValue(evt, "exitCode", "processExitCode", "code");
+        if (!TryParseExitCode(rawExitCode, out var exitCode) || exitCode == 0)
+        {
+            return null;
+        }
+
+        var hex = exitCode >= int.MinValue && exitCode <= uint.MaxValue
+            ? $"0x{unchecked((uint)exitCode):X8}"
+            : $"0x{unchecked((ulong)exitCode):X}";
+        var meaning = exitCode switch
+        {
+            -2146232576L => "CLR startup-stage failure",
+            -532462766L => "CLR unhandled managed exception",
+            -1073741510L => "process terminated by Ctrl+C or console close",
+            -1073741819L => "Windows access violation",
+            _ => "no standard semantic mapping"
+        };
+
+        return $"Exit code {rawExitCode} ({hex}): {meaning}. Sample-attributed behavior is indeterminate; this execution outcome is not treated as malicious sample behavior.";
+    }
+
+    private static bool TryParseExitCode(string? value, out long exitCode)
+    {
+        exitCode = 0;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out exitCode))
+        {
+            return true;
+        }
+
+        var trimmed = value.Trim();
+        if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            return long.TryParse(trimmed[2..], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out exitCode);
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Determines whether an R0 event is collection health rather than sample
     /// telemetry. Inputs are R0/driver rows; processing recognizes IOCTL health
@@ -8569,6 +8833,20 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         {
             if (evt.Data.TryGetValue(key, out var value) &&
                 TextEqualsAny(value, "false", "0", "no", "n"))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool MetadataBoolTrue(IReadOnlyDictionary<string, string> metadata, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (metadata.TryGetValue(key, out var value) &&
+                TextEqualsAny(value, "true", "1", "yes", "y"))
             {
                 return true;
             }
@@ -8813,6 +9091,17 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
     private static bool IsDiagnosticFinding(BehaviorFinding finding)
     {
+        // Reports loaded from older or externally-produced JSON may still
+        // carry the historical generic process-new finding. Demote it when
+        // every evidence row lacks confirmed/probable sample correlation so
+        // it cannot contribute to the primary behavior verdict.
+        if (string.Equals(finding.RuleId, "process-new", StringComparison.OrdinalIgnoreCase) &&
+            (finding.Evidence.Count == 0 ||
+             finding.Evidence.All(evt => !HasConfirmedOrProbableSampleCorrelation(evt))))
+        {
+            return true;
+        }
+
         if (finding.Evidence.Count > 0 &&
             finding.Evidence.All(evt =>
                 IsCollectionHealthEvent(evt) ||
@@ -9153,6 +9442,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
         var html = new StringBuilder();
         html.Append($"<details class=\"event-evidence-fields\" data-copy=\"{A(EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300))}\"><summary>Evidence fields ({compactFields.Count} compact / {technicalFields.Count} folded technical)</summary>");
+        var processExitContext = BuildProcessExitCodeContext(evt);
+        if (!string.IsNullOrWhiteSpace(processExitContext))
+        {
+            html.Append($"<div class=\"section-note failure-note process-exit-context\"><strong>Exit code context:</strong> {E(processExitContext)}</div>");
+        }
         if (compactFields.Count == 0 && technicalFields.Count == 0)
         {
             html.Append("<pre>-</pre>");
@@ -9562,6 +9856,23 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Analysis failed", "分析失败"),
         ("Execution blocked / runtime indeterminate", "执行被阻断/运行期不可判定"),
         ("Execution complete / runtime evidence incomplete", "执行完成/运行期证据不完整"),
+        ("Exit code context:", "退出码上下文："),
+        ("Exit code ", "退出码 "),
+        ("CLR startup-stage failure", "CLR 启动阶段失败"),
+        ("CLR unhandled managed exception", "CLR 未处理托管异常"),
+        ("process terminated by Ctrl+C or console close", "进程因 Ctrl+C 或关闭控制台而终止"),
+        ("Windows access violation", "Windows 访问冲突"),
+        ("no standard semantic mapping", "无常见语义映射"),
+        ("Sample-attributed behavior is indeterminate; this execution outcome is not treated as malicious sample behavior.", "主体行为不可判定；该执行结果不作为样本恶意行为。"),
+        ("Artifact manifest job-id mismatch:", "证据清单 job-id 不一致："),
+        ("Artifact manifest integrity:", "证据清单完整性："),
+        ("Guest artifact manifest top-level jobId is all-zero while report/runbook JobId is", "Guest artifact manifest 顶层 jobId 为全零，而报告/运行手册 JobId 为"),
+        ("Original manifest evidence is preserved and was not rewritten.", "原始清单证据已保留，未被重写。"),
+        ("Manifest JobId integrity", "Manifest JobId 完整性"),
+        ("matched / not observed", "匹配 / 未观察"),
+        ("job-id mismatch", "job-id 不一致"),
+        ("Top-level guest artifact manifest JobId matches the report JobId when a manifest was readable.", "可读取清单时，Guest artifact manifest 顶层 JobId 与报告 JobId 匹配。"),
+        ("Top-level guest artifact manifest jobId is all-zero while report/runbook JobId is", "Guest artifact manifest 顶层 jobId 为全零，而报告/运行手册 JobId 为"),
         ("Static analysis only", "仅静态分析"),
         ("No high-risk behavior", "未发现高风险行为"),
         ("Critical risk", "严重风险"),

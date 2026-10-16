@@ -71,6 +71,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Network and PCAP evidence", "Report renderer should keep PCAP/network story evidence visible.");
         RequireContains(rendererSource, "R0 health/noise boundary", "Report renderer should keep R0 health/noise context visible.");
         RequireContains(rendererSource, "AppendArtifactCollectionStatusCards", "Report renderer should expose artifact collection status cards.");
+        RequireContains(rendererSource, "captureWasNotStarted", "Report renderer should surface ETW manifest captureWasNotStarted diagnostics.");
+        RequireContains(rendererSource, "manifest enabled=", "Report renderer should include ETW manifest enabled/status evidence in coverage gaps.");
         RequireContains(rendererSource, "Artifact collection status", "Report renderer should expose artifact collection status title.");
         RequireContains(rendererSource, "Dropped files", "Report renderer should summarize dropped-file collection status.");
         RequireContains(rendererSource, "Screenshots", "Report renderer should summarize screenshot collection status.");
@@ -251,6 +253,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireAnyContains(doc, ["Raw normalized events / 原始事件", "原始标准化事件 / Raw normalized events"], "Report UX doc should list raw events.");
 
         RequireRenderedReportContract();
+        RequireEtwManifestCoverageContract();
 
         return Task.FromResult(new SmokeTestResult
         {
@@ -566,6 +569,59 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                 document.Language == HtmlReportLanguage.ChineseSimplified &&
                 string.Equals(document.CultureName, "zh-CN", StringComparison.Ordinal)),
             "Bilingual render output should include report.zh.html with zh-CN metadata.");
+    }
+
+    private static void RequireEtwManifestCoverageContract()
+    {
+        var report = new AnalysisReport
+        {
+            JobId = Guid.Parse("11111111-2222-3333-4444-555555555555"),
+            Sample = new SampleIdentity
+            {
+                FileName = "etw-contract.exe",
+                FullPath = @"C:\Samples\etw-contract.exe",
+                Sha256 = new string('a', 64),
+                Sha1 = new string('b', 40),
+                Md5 = new string('c', 32),
+                Crc32 = "1234abcd"
+            },
+            Events =
+            [
+                new SandboxEvent
+                {
+                    EventType = "r0collector.started",
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Source = "r0collector"
+                },
+                new SandboxEvent
+                {
+                    EventType = "etw_live.failed",
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Source = "guest",
+                    Data = { ["captureWasNotStarted"] = "true" }
+                }
+            ]
+        };
+        var collections = new[]
+        {
+            new ArtifactCollectionDescriptor
+            {
+                Name = "etw-traces",
+                Enabled = true,
+                Status = "failed",
+                Reason = "captureWasNotStarted",
+                Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["captureWasNotStarted"] = "true",
+                    ["captureState"] = "failed"
+                }
+            }
+        };
+        var html = new HtmlReportRenderer().RenderEnglish(report, [], collections);
+        RequireContains(html, "ETW live capture", "Report UX smoke should render ETW manifest lanes in coverage gaps.");
+        RequireContains(html, "coverage gap · captureWasNotStarted", "Report UX smoke should preserve ETW manifest captureWasNotStarted state.");
+        RequireContains(html, "manifest enabled=True; status=failed", "Report UX smoke should show manifest enabled/status evidence.");
+        RequireContains(html, "captureWasNotStarted=True", "Report UX smoke should show ETW captureWasNotStarted evidence.");
     }
 
     /// <summary>

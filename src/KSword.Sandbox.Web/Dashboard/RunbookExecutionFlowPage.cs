@@ -182,6 +182,16 @@ internal static class RunbookExecutionFlowPage
                     ? "已取消 / canceled"
                     : "失败 / failed";
         var samplePath = job.Sample?.FullPath ?? job.Submission.SamplePath;
+        var executionMode = execution is null
+            ? "未执行 / not executed"
+            : execution.Mode == SandboxRunbookExecutionMode.Live
+                ? "实时 / Live"
+                : "演练 / DryRun";
+        var modePrecedenceHint = execution is null
+            ? string.Empty
+            : execution.Mode == SandboxRunbookExecutionMode.Live
+                ? "本次执行以 runbook execution Mode=Live 且 Success 为准；Submission.DryRun 只是建单默认值，不代表本次执行是 dry-run。 / This run is live according to the persisted runbook execution Mode=Live and Success; Submission.DryRun is only the submission default."
+                : "本次执行以 runbook execution Mode=DryRun 且 Success 为准；未启动实时 VM 步骤。 / This run is dry-run according to the persisted runbook execution Mode=DryRun and Success; no live VM steps were started.";
 
         return $$"""
           <div class="grid">
@@ -194,11 +204,13 @@ internal static class RunbookExecutionFlowPage
             <div class="metric"><strong data-zh="样本" data-en="Sample">样本</strong><code data-copy="{{Attr(samplePath)}}">{{Html(samplePath)}}</code></div>
             <div class="metric"><strong data-zh="任务状态" data-en="Job status">任务状态</strong><span class="pill" data-copy="{{Attr(jobStatus)}}">{{Html(jobStatus)}}</span></div>
             <div class="metric"><strong data-zh="执行状态" data-en="Execution status">执行状态</strong><span class="pill {{StatusClass(execution)}}">{{Html(executionState)}}</span></div>
+            <div class="metric"><strong data-zh="执行模式（以 runbook 为准）" data-en="Execution mode (runbook authority)">执行模式（以 runbook 为准）</strong><span class="pill" data-copy="{{Attr(executionMode)}}">{{Html(executionMode)}}</span></div>
             <div class="metric"><strong data-zh="计划步骤" data-en="Planned steps">计划步骤</strong><span>{{runbookSteps}}</span></div>
             <div class="metric"><strong data-zh="已执行" data-en="Executed">已执行</strong><span>{{(execution?.ExecutedSteps.ToString() ?? "-")}}</span></div>
             <div class="metric"><strong data-zh="耗时" data-en="Duration">耗时</strong><span>{{Html(FormatDuration(execution?.Duration))}}</span></div>
             <div class="metric"><strong>runbook-execution.json</strong>{{(string.IsNullOrWhiteSpace(executionPath) ? "<span class=\"muted\">-</span>" : $"<code data-copy=\"{Attr(executionPath)}\">{Html(executionPath)}</code>")}}</div>
           </div>
+          {{(string.IsNullOrWhiteSpace(modePrecedenceHint) ? string.Empty : $"<p class=\"section-note\" data-copy=\"{Attr(modePrecedenceHint)}\"><strong data-zh=\"模式判定\" data-en=\"Mode authority\">模式判定</strong> {Html(modePrecedenceHint)}</p>")}}
           {{(string.IsNullOrWhiteSpace(execution?.Message) ? string.Empty : $"<p class=\"muted\" data-copy=\"{Attr(execution.Message)}\">{Html(execution.Message)}</p>")}}
         """;
     }

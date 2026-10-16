@@ -855,8 +855,8 @@ public sealed partial class SandboxJobService
     private void WriteHtmlReports(string jobRoot, AnalysisReport report, ArtifactCollectionConfig artifactCollection)
     {
         var artifactIndex = artifactIndexBuilder.Build(report.JobId, jobRoot, artifactCollection);
-        File.WriteAllText(Path.Combine(jobRoot, "report.html"), reportRenderer.RenderChinese(report, artifactIndex.Artifacts));
-        foreach (var document in reportRenderer.RenderBilingualReports(report, artifactIndex.Artifacts))
+        File.WriteAllText(Path.Combine(jobRoot, "report.html"), reportRenderer.RenderChinese(report, artifactIndex.Artifacts, artifactIndex.Collections));
+        foreach (var document in reportRenderer.RenderBilingualReports(report, artifactIndex.Artifacts, artifactIndex.Collections))
         {
             File.WriteAllText(Path.Combine(jobRoot, document.FileName), document.Html);
         }

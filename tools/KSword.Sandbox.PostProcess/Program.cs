@@ -99,13 +99,13 @@ internal static class PostProcessProgram
             var htmlEnReportPath = Path.Combine(jobRoot, "report.en.html");
             var renderer = new HtmlReportRenderer();
             File.WriteAllText(jsonReportPath, JsonSerializer.Serialize(report, JsonOptions));
-            File.WriteAllText(htmlReportPath, renderer.RenderChinese(report, artifactIndex.Artifacts));
-            foreach (var document in renderer.RenderBilingualReports(report))
+            File.WriteAllText(htmlReportPath, renderer.RenderChinese(report, artifactIndex.Artifacts, artifactIndex.Collections));
+            foreach (var document in renderer.RenderBilingualReports(report, artifactIndex.Artifacts, artifactIndex.Collections))
             {
                 var html = document.FileName.EndsWith(".zh.html", StringComparison.OrdinalIgnoreCase)
-                    ? renderer.RenderChinese(report, artifactIndex.Artifacts)
+                        ? renderer.RenderChinese(report, artifactIndex.Artifacts, artifactIndex.Collections)
                     : document.FileName.EndsWith(".en.html", StringComparison.OrdinalIgnoreCase)
-                        ? renderer.RenderEnglish(report, artifactIndex.Artifacts)
+                        ? renderer.RenderEnglish(report, artifactIndex.Artifacts, artifactIndex.Collections)
                         : document.Html;
                 File.WriteAllText(Path.Combine(jobRoot, document.FileName), html);
             }
