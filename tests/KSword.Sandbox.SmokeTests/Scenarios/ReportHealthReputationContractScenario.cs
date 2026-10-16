@@ -180,6 +180,8 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         var englishHtml = renderer.RenderEnglish(report);
         var chineseHtml = renderer.RenderChinese(report);
 
+        AssertExecutionBoundaryVerdictContracts(renderer, report, events);
+
         RequireMetric(englishHtml, "High risk", "0", "risk-high");
         RequireMetric(englishHtml, "Suspicious", "0", "risk-medium");
         RequireMetric(englishHtml, "General / info", "0", "risk-info");
@@ -223,6 +225,123 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         RequireContains(chineseHtml, "R0 / 驱动事件", "Chinese report should include the localized R0 section.");
         RequireContains(chineseHtml, "R0 可用性", "Chinese report should localize R0 availability.");
         RequireContains(chineseHtml, "原始事件", "Chinese report should include the localized raw-event section.");
+    }
+
+    /// <summary>
+    /// Verifies that launch blocks and CLR early exits do not render a
+    /// reassuring no-risk verdict without complete runtime behavior, while a
+    /// report with substantive dynamic evidence keeps the normal verdict path.
+    /// </summary>
+    private static void AssertExecutionBoundaryVerdictContracts(
+        HtmlReportRenderer renderer,
+        AnalysisReport baseline,
+        IReadOnlyCollection<SandboxEvent> baselineEvents)
+    {
+        var staticEvent = new SandboxEvent
+        {
+            EventType = "static.pe.import.module",
+            Timestamp = baseline.GeneratedAt,
+            Source = "static",
+            Path = baseline.Sample.FullPath,
+            Data =
+            {
+                ["staticOnly"] = "true",
+                ["moduleName"] = "wininet.dll"
+            }
+        };
+        var blockedStart = new SandboxEvent
+        {
+            EventType = "process.start_failed",
+            Timestamp = baseline.GeneratedAt.AddSeconds(1),
+            Source = "guest",
+            ProcessName = baseline.Sample.FileName,
+            Path = baseline.Sample.FullPath,
+            Data =
+            {
+                ["exceptionType"] = "System.ComponentModel.Win32Exception",
+                ["nativeErrorCode"] = "225",
+                ["message"] = "Windows Defender blocked this file (WinError 225)."
+            }
+        };
+        var staticFinding = new BehaviorFinding
+        {
+            RuleId = "static-import-anti-analysis-api",
+            Title = "Anti-analysis API imports or strings",
+            TitleZh = "反分析 API 导入或字符串",
+            Severity = "low",
+            Confidence = "low",
+            Summary = "Static analysis found debugger or timing API imports/strings commonly used in sandbox or debugger checks.",
+            SummaryZh = "静态分析发现调试器或计时 API 导入/字符串，常用于沙箱或调试器检查。",
+            Tags = ["static", "imports", "anti-analysis", "triage"],
+            Evidence = [staticEvent]
+        };
+        var staticOnlyReport = baseline with
+        {
+            Events = [staticEvent],
+            Findings = [staticFinding]
+        };
+        var staticOnlyHtml = renderer.RenderEnglish(staticOnlyReport);
+        RequireContains(staticOnlyHtml, "Static capability clue (unverified): Anti-analysis API imports or strings", "Static findings must be labelled as unverified capability clues.");
+        RequireContains(staticOnlyHtml, "Static evidence only: imports, API-like strings, URLs, YARA matches, entropy, and PE metadata do not prove execution", "Static findings must carry an explicit runtime boundary.");
+        RequireContains(staticOnlyHtml, "Static-only / unverified", "Static findings must expose an evidence class instead of a risk-only severity label.");
+        RequireNotContains(staticOnlyHtml, "<td class=\"risk-medium\">", "Static-only triage must not render as a medium-risk metric cell.");
+        var staticOnlyChineseHtml = renderer.RenderChinese(staticOnlyReport);
+        RequireContains(staticOnlyChineseHtml, "静态能力线索（未验证）：反分析 API 导入或字符串", "Chinese static findings must keep the unverified capability label.");
+        RequireContains(staticOnlyChineseHtml, "静态证据边界", "Chinese static analysis must expose the runtime evidence boundary.");
+        var blockedStartReport = baseline with
+        {
+            Events = baselineEvents.Concat([staticEvent, blockedStart]).ToList(),
+            Findings = [staticFinding]
+        };
+        var blockedStartHtml = renderer.RenderEnglish(blockedStartReport);
+        RequireContains(blockedStartHtml, "Execution blocked / runtime indeterminate", "WinError 225 launch block should make runtime coverage indeterminate.");
+        RequireNotContains(blockedStartHtml, "No high-risk behavior", "A WinError 225 launch block must not render a reassuring no-risk verdict.");
+        RequireContains(blockedStartHtml, "static-only evidence", "Static evidence should remain explicitly static-only after a launch block.");
+        RequireContains(renderer.RenderChinese(blockedStartReport), "执行被阻断/运行期不可判定", "Chinese reports should localize the indeterminate runtime verdict.");
+
+        var blockedClrExit = new SandboxEvent
+        {
+            EventType = "process.exit",
+            Timestamp = baseline.GeneratedAt.AddSeconds(2),
+            Source = "guest",
+            ProcessName = baseline.Sample.FileName,
+            Path = baseline.Sample.FullPath,
+            Data =
+            {
+                ["runtime"] = "CLR",
+                ["exitCode"] = "-532462766"
+            }
+        };
+        var blockedClrReport = baseline with
+        {
+            Events = [staticEvent, blockedClrExit],
+            Findings = [staticFinding]
+        };
+        var blockedClrHtml = renderer.RenderEnglish(blockedClrReport);
+        RequireContains(blockedClrHtml, "Execution blocked / runtime indeterminate", "A non-zero CLR early exit without behavior should make runtime coverage indeterminate.");
+        RequireNotContains(blockedClrHtml, "No high-risk behavior", "A non-zero CLR early exit must not render a reassuring no-risk verdict.");
+
+        var completeBehavior = new SandboxEvent
+        {
+            EventType = "network.http",
+            Timestamp = baseline.GeneratedAt.AddSeconds(3),
+            Source = "guest",
+            ProcessName = baseline.Sample.FileName,
+            Path = baseline.Sample.FullPath,
+            Data =
+            {
+                ["host"] = "example.test",
+                ["method"] = "GET"
+            }
+        };
+        var completedBehaviorReport = baseline with
+        {
+            Events = [staticEvent, blockedClrExit, completeBehavior],
+            Findings = [staticFinding]
+        };
+        var completedBehaviorHtml = renderer.RenderEnglish(completedBehaviorReport);
+        RequireContains(completedBehaviorHtml, "No high-risk behavior", "A non-zero exit with substantive runtime behavior should use the normal verdict path.");
+        RequireNotContains(completedBehaviorHtml, "Execution blocked / runtime indeterminate", "Complete runtime behavior should clear the indeterminate execution verdict.");
     }
 
     /// <summary>

@@ -54,6 +54,15 @@ public sealed class HostArtifactIndexBuilder
                     continue;
                 }
 
+                // A zero-byte driver-events.jsonl is an output placeholder, not
+                // captured telemetry. Keep it out of the host index so it cannot
+                // become a captured artifact or a downloadable selector.
+                if (classification.Kind == ArtifactKind.DriverEventsJsonLines &&
+                    new FileInfo(path).Length == 0)
+                {
+                    continue;
+                }
+
                 var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["origin"] = "host",
@@ -124,6 +133,11 @@ public sealed class HostArtifactIndexBuilder
                 ? Classify(fullPath, fullJobRoot).Kind
                 : guestArtifact.Kind;
             if (kind == ArtifactKind.Unknown)
+            {
+                continue;
+            }
+
+            if (kind == ArtifactKind.DriverEventsJsonLines && new FileInfo(fullPath).Length == 0)
             {
                 continue;
             }
@@ -1745,6 +1759,8 @@ public sealed class HostArtifactIndexBuilder
             "disabled" => "未启用",
             "rejected" => "已拒绝",
             "missing" => "缺失",
+            "not-created" => "未创建",
+            "not created" => "未创建",
             "summary" => "摘要",
             _ => "未知状态"
         };

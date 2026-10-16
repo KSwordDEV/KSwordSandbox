@@ -115,6 +115,13 @@ public sealed record VMwareConfig
 
     public bool Headless { get; init; }
 
+    /// <summary>
+    /// Disables Windows Defender blocking inside this disposable lab guest
+    /// before a sample is staged. This is intentionally provider-specific and
+    /// opt-in so normal VM runs keep the guest security policy unchanged.
+    /// </summary>
+    public bool DisableDefenderForLab { get; init; }
+
     public GuestRemotingConfig GuestRemoting { get; init; } = new()
     {
         AddressMode = GuestRemotingAddressMode.VMwareTools,

@@ -41,6 +41,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         await AssertHostArtifactImportReportEventsAsync(context, cancellationToken);
         await AssertArtifactDownloadSelectorsAsync(context, cancellationToken);
         await AssertReportArtifactLinksAsync(context, cancellationToken);
+        AssertDriverArtifactTruth(context);
 
         return new SmokeTestResult
         {
@@ -48,6 +49,52 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
             Passed = true,
             Message = "Artifact manifest schema, host index, guest reader, and report artifact links are present."
         };
+    }
+
+    /// <summary>
+    /// Verifies that a missing or empty driver JSONL never becomes captured
+    /// evidence or a safe report download link.
+    /// </summary>
+    private static void AssertDriverArtifactTruth(SmokeTestContext context)
+    {
+        var jobId = Guid.NewGuid();
+        var jobRoot = Path.Combine(context.RuntimeRoot, "driver-artifact-truth", jobId.ToString("N"));
+        Directory.CreateDirectory(jobRoot);
+        var driverPath = Path.Combine(jobRoot, "driver-events.jsonl");
+        File.WriteAllText(driverPath, string.Empty);
+
+        var index = new HostArtifactIndexBuilder().Build(jobId, jobRoot);
+        SmokeAssert.True(
+            index.Artifacts.All(artifact => artifact.Kind != ArtifactKind.DriverEventsJsonLines),
+            "Zero-byte driver-events.jsonl must not be indexed as captured evidence.");
+
+        var missingPath = Path.Combine(jobRoot, "missing-driver-events.jsonl");
+        var report = new AnalysisReport
+        {
+            JobId = jobId,
+            Sample = new SampleIdentity
+            {
+                FileName = "sample.exe",
+                FullPath = Path.Combine(jobRoot, "sample.exe"),
+                Sha256 = new string('0', 64),
+                Sha1 = new string('1', 40),
+                Md5 = new string('2', 32),
+                Crc32 = "00000000",
+                SizeBytes = 1
+            },
+            Events =
+            [
+                new SandboxEvent
+                {
+                    EventType = "r0collector.exited",
+                    Source = "guest",
+                    Data = { ["driverEventsPath"] = missingPath }
+                }
+            ]
+        };
+        var html = new HtmlReportRenderer().RenderEnglish(report, []);
+        SmokeAssert.True(html.Contains("status=missing", StringComparison.Ordinal), "Missing driver JSONL should render an explicit missing collection status.");
+        SmokeAssert.True(!html.Contains("href=\"driver-artifact-truth/", StringComparison.OrdinalIgnoreCase), "Missing driver JSONL must not render a safe download href.");
     }
 
     /// <summary>

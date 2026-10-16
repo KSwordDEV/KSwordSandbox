@@ -209,6 +209,16 @@ internal sealed class GuestArtifactWriter
                 continue;
             }
 
+            // An empty driver JSONL is only a pre-created output placeholder.
+            // Do not publish it as durable driver evidence: an empty file has
+            // no telemetry to download or preview and must remain a missing /
+            // not-created lane in the manifest.
+            if (classification.Kind == ArtifactKind.DriverEventsJsonLines &&
+                new FileInfo(path).Length == 0)
+            {
+                continue;
+            }
+
             eventMetadataByRelativePath.TryGetValue(relativePath, out var eventMetadata);
             DroppedFileArtifactMetadata? droppedFileMetadata = null;
             droppedFileMetadataByRelativePath?.TryGetValue(relativePath, out droppedFileMetadata);
@@ -418,7 +428,7 @@ internal sealed class GuestArtifactWriter
             CreateCollection(descriptors, events, "driver-events", ArtifactKind.DriverEventsJsonLines, "telemetry", "driver-events",
                 FirstRelativePath(descriptors, "driver-events") ?? "driver-events.jsonl",
                 options.DriverEventsRequested || descriptors.Any(artifact => string.Equals(artifact.CollectionName, "driver-events", StringComparison.OrdinalIgnoreCase)),
-                implemented: true, capturedEventPrefixes: ["driver.load", "driver.process", "driver.file", "driver.registry", "driver.network", "driver.event", "driver.parse_error", "image.load", "r0collector.driver", "r0collector.exited"],
+                implemented: true, capturedEventPrefixes: [],
                 skippedEventPrefixes: ["driver.events.missing", "r0collector.failed"], disabledEventPrefixes: [], reasonWhenDisabled: "driverEventsNotRequested",
                 failedEventPrefixes: ["driver.read_error"]),
             CreateCollection(descriptors, events, "r0-logs", ArtifactKind.Log, "log", "diagnostic-log",
@@ -455,6 +465,11 @@ internal sealed class GuestArtifactWriter
         var disabledEventCount = CountEvents(events, disabledEventPrefixes);
         var failedEventCount = (failedEventPrefixes is null ? 0 : CountEvents(events, failedEventPrefixes)) + CountProbeFailureEvents(events, name);
         var status = DetermineCollectionStatus(enabled, implemented, artifactCount, capturedEventCount, skippedEventCount, disabledEventCount, failedEventCount);
+        if (string.Equals(name, "driver-events", StringComparison.OrdinalIgnoreCase) &&
+            enabled && artifactCount == 0 && capturedEventCount == 0 && failedEventCount == 0 && skippedEventCount == 0)
+        {
+            status = "missing";
+        }
         var normalizedRelativePath = NormalizeRelativePath(relativePath);
         var disabledCount = enabled ? disabledEventCount : Math.Max(1, disabledEventCount);
         var capturedCount = Math.Max(artifactCount, capturedEventCount);
@@ -555,6 +570,7 @@ internal sealed class GuestArtifactWriter
             "not-implemented" => "collectorNotImplemented",
             "skipped" => concreteStatusReason ?? "collectorSkippedOrUnavailable",
             "failed" => concreteStatusReason ?? "collectorFailed",
+            "missing" => "noArtifactsProduced",
             "enabled-empty" => "noArtifactsProduced",
             _ => string.Empty
         };
@@ -1482,6 +1498,7 @@ internal sealed class GuestArtifactWriter
             "failed" => "该证据通道执行失败。",
             "skipped" => "该证据通道被跳过或不可用。",
             "enabled-empty" => "该证据通道已启用，但未产出文件。",
+            "missing" => "该证据通道已请求，但没有创建 JSONL 文件。",
             "not-implemented" => "该证据通道尚未实现。",
             _ => string.Empty
         };

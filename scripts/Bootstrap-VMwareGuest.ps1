@@ -17,6 +17,7 @@ param(
     [string]$WorkingDirectory = 'C:\KSwordSandbox',
     [ValidateRange(1, 65535)]
     [int]$Port = 5986,
+    [switch]$DisableDefenderForLab,
     [switch]$SkipPasswordSet
 )
 
@@ -200,6 +201,33 @@ function Ensure-WorkingDirectory {
     Write-Bilingual -Chinese "工作目录已就绪：$WorkingDirectory" -English "Working directory is ready: $WorkingDirectory"
 }
 
+function Ensure-LabDefenderPolicy {
+    if (-not $DisableDefenderForLab) {
+        return
+    }
+
+    $setMpPreference = Get-Command Set-MpPreference -ErrorAction SilentlyContinue
+    $addMpPreference = Get-Command Add-MpPreference -ErrorAction SilentlyContinue
+    if ($null -eq $setMpPreference -or $null -eq $addMpPreference) {
+        throw '未找到 Defender PowerShell cmdlet，无法为实验 VM 关闭阻断。 / Defender PowerShell cmdlets were not found; cannot disable blocking for this lab VM.'
+    }
+
+    $preference = @{
+        DisableRealtimeMonitoring = $true
+        DisableBehaviorMonitoring = $true
+        DisableIOAVProtection = $true
+        DisableScriptScanning = $true
+        DisableArchiveScanning = $true
+        PUAProtection = 'Disabled'
+    }
+    Set-MpPreference @preference
+    foreach ($path in @($WorkingDirectory, (Join-Path $WorkingDirectory 'incoming'), (Join-Path $WorkingDirectory 'out'))) {
+        Add-MpPreference -ExclusionPath $path
+    }
+
+    Write-Bilingual -Chinese '已为此一次性实验 VM 关闭 Defender 实时阻断，并排除 KSwordSandbox 工作目录' -English 'Disabled Defender real-time blocking and excluded the KSwordSandbox working tree for this disposable lab VM'
+}
+
 function Ensure-LocalWinRmAccessPolicy {
     $policyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
     New-Item -Path $policyPath -Force | Out-Null
@@ -218,6 +246,7 @@ $certificate = Get-UsableWinRmCertificate
 Ensure-WinRmHttpsListener -Certificate $certificate
 Ensure-FirewallRule
 Ensure-WorkingDirectory
+Ensure-LabDefenderPolicy
 
 $addresses = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {
     $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*'

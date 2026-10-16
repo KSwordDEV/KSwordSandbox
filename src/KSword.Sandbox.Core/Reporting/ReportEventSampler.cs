@@ -692,6 +692,53 @@ public static class ReportEventSampler
         "flowKey"
     ];
 
+    // Import summaries are the only network evidence left in many reports
+    // when raw netstat/sidecar rows are omitted by the inline quota. Preserve
+    // their counters so the report can say "environment network observed; no
+    // sample attribution" instead of incorrectly presenting the lane as
+    // uncollected.
+    private static readonly string[] NetworkImportSummaryPriorityDataKeys =
+    [
+        "status",
+        "eventCount",
+        "connectionEventCount",
+        "dnsEventCount",
+        "httpEventCount",
+        "tlsEventCount",
+        "flowEventCount",
+        "parseErrorCount",
+        "nonbehaviorEventCount",
+        "behaviorCountedEventCount",
+        "canonicalBehaviorEventCount",
+        "canonicalDnsEventCount",
+        "canonicalHttpEventCount",
+        "canonicalTlsEventCount",
+        "canonicalFlowEventCount",
+        "compatibilityEventCount",
+        "rawPcapCompatibilityEventCount",
+        "artifactCount",
+        "pcapArtifactCount",
+        "sidecarArtifactCount",
+        "manifestPresent",
+        "collectionHealthSummary",
+        "protocols",
+        "protocolHealthSummary"
+    ];
+
+    private static readonly string[] NetworkSnapshotPriorityDataKeys =
+    [
+        "phase",
+        "rowCount",
+        "emittedRows",
+        "entryCount",
+        "listenerCount",
+        "settingCount",
+        "addedCount",
+        "removedCount",
+        "sourceTool",
+        "change"
+    ];
+
     private static readonly string[] ArtifactImportPriorityDataKeys =
     [
         "collectionName",
@@ -839,7 +886,7 @@ public static class ReportEventSampler
 
         if (result.WasSampled)
         {
-            result.Events.Insert(0, BuildSamplingMarker(result, resolvedOptions, jobRoot, eventsPath, driverEventsPath));
+            result.Events.Insert(0, BuildSamplingMarker(result, resolvedOptions, jobRoot, eventsPath, driverEventsPath, orderedEvents));
         }
 
         return result;
@@ -1027,9 +1074,25 @@ public static class ReportEventSampler
             return ReportSamplingBucket.FindingEvidence;
         }
 
+        // WMI startup inventory failures explain a persistence-coverage gap.
+        // Keep both before-start and after-run class/query failures visible so
+        // a single sampled row cannot make the probe look healthy.
+        if (IsWmiCaptureFailureEvent(evt))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
         if (string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "pcap.import.summary", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "network.import.summary", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReportSamplingBucket.GeneralBehaviorEvidence;
+        }
+
+        // Environment network snapshots are still important coverage proof;
+        // keep representative rows out of the small diagnostics quota so the
+        // report can distinguish observed environment traffic from no capture.
+        if (IsNetworkSnapshotOrDiffEvent(evt))
         {
             return ReportSamplingBucket.GeneralBehaviorEvidence;
         }
@@ -1221,6 +1284,14 @@ public static class ReportEventSampler
              EventDataEqualsAny(evt, "captureState", "failed", "missing", "rejected"));
     }
 
+    private static bool IsWmiCaptureFailureEvent(SandboxEvent evt)
+    {
+        var eventType = NormalizeEventType(evt.EventType);
+        return eventType.Contains("wmi.capture_failed", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("wmi.capture-failed", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("wmi.query_failed", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsReadinessOrStatusEvent(SandboxEvent evt)
     {
         return EventDataEqualsAny(
@@ -1369,7 +1440,8 @@ public static class ReportEventSampler
         ReportEventSamplingOptions options,
         string? jobRoot,
         string? eventsPath,
-        string? driverEventsPath)
+        string? driverEventsPath,
+        IReadOnlyList<SandboxEvent> orderedEvents)
     {
         var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -1395,6 +1467,17 @@ public static class ReportEventSampler
             ["maxHighValueEventsPerType"] = options.MaxHighValueEventsPerType.ToString(),
             ["maxDiagnosticEvents"] = options.MaxDiagnosticEvents.ToString()
         };
+
+        var wmiFailures = orderedEvents
+            .Where(evt => TextContainsAny(evt.EventType, "wmi.capture_failed", "wmi.capture-failed"))
+            .ToList();
+        if (wmiFailures.Count > 0)
+        {
+            data["wmiCaptureFailedCount"] = wmiFailures.Count.ToString();
+            data["wmiCaptureFailedPhases"] = string.Join(", ", wmiFailures
+                .Select(evt => FirstDataValue(evt, "phase", "capturePhase", "diagnosticStage") ?? "unknown")
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+        }
 
         if (!string.IsNullOrWhiteSpace(eventsPath))
         {
@@ -1587,9 +1670,27 @@ public static class ReportEventSampler
 
         if (IsNetworkReportDataEvent(evt))
         {
+            if (IsNetworkSnapshotOrDiffEvent(evt))
+            {
+                foreach (var key in NetworkSnapshotPriorityDataKeys)
+                {
+                    yield return key;
+                }
+            }
+
             foreach (var key in NetworkCommonPriorityDataKeys)
             {
                 yield return key;
+            }
+
+            if (string.Equals(evt.EventType, "network.import.summary", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(evt.EventType, "pcap.import.summary", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var key in NetworkImportSummaryPriorityDataKeys)
+                {
+                    yield return key;
+                }
             }
 
             var eventKind = DataValue(evt.Data, "eventKind");
@@ -1640,6 +1741,14 @@ public static class ReportEventSampler
             IsNetworkKind(eventType, DataValue(evt.Data, "eventKind"), DataValue(evt.Data, "serviceHint"), "http") ||
             IsNetworkKind(eventType, DataValue(evt.Data, "eventKind"), DataValue(evt.Data, "serviceHint"), "tls") ||
             IsNetworkKind(eventType, DataValue(evt.Data, "eventKind"), DataValue(evt.Data, "serviceHint"), "connection");
+    }
+
+    private static bool IsNetworkSnapshotOrDiffEvent(SandboxEvent evt)
+    {
+        var eventType = evt.EventType ?? string.Empty;
+        return IsNetworkReportDataEvent(evt) &&
+            (eventType.Contains(".snapshot", StringComparison.OrdinalIgnoreCase) ||
+             eventType.Contains(".diff", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsNetworkKind(string eventType, string eventKind, string serviceHint, string expected)

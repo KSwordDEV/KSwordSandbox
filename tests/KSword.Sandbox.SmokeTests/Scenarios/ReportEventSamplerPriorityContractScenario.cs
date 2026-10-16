@@ -99,6 +99,67 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         });
         events.Add(new SandboxEvent
         {
+            EventType = "network.import.summary",
+            Timestamp = timestamp.AddSeconds(1.6),
+            Source = "host",
+            Data =
+            {
+                ["eventKind"] = "summary",
+                ["behaviorScope"] = "network-import-summary",
+                ["eventCount"] = "64",
+                ["canonicalBehaviorEventCount"] = "0",
+                ["behaviorCountedEventCount"] = "0",
+                ["connectionEventCount"] = "64",
+                ["nonbehaviorEventCount"] = "64",
+                ["protocols"] = "TCP",
+                ["sampleCorrelation"] = "environment",
+                ["sampleCorrelationStatus"] = "environment",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true"
+            }
+        });
+        events.Add(new SandboxEvent
+        {
+            EventType = "network.netstat.snapshot",
+            Timestamp = timestamp.AddSeconds(1.65),
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = "after-run",
+                ["rowCount"] = "58",
+                ["emittedRows"] = "58",
+                ["sourceTool"] = "netstat -ano",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true"
+            }
+        });
+        events.Add(new SandboxEvent
+        {
+            EventType = "startup_item.wmi.capture_failed",
+            Timestamp = timestamp.AddSeconds(1.7),
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = "before-start",
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true"
+            }
+        });
+        events.Add(new SandboxEvent
+        {
+            EventType = "startup_item.wmi.capture_failed",
+            Timestamp = timestamp.AddSeconds(1.8),
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = "after-run",
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true"
+            }
+        });
+        events.Add(new SandboxEvent
+        {
             EventType = "artifact.host_imported",
             Timestamp = timestamp.AddSeconds(1.7),
             Source = "host",
@@ -319,6 +380,17 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(networkEvent, "method", "POST");
         RequireData(networkEvent, "host", "api.example.test");
         RequireData(networkEvent, "uri", "/checkin");
+
+        var networkSummary = RequireEvent(result.Events, "network.import.summary");
+        RequireData(networkSummary, "eventCount", "64");
+        RequireData(networkSummary, "canonicalBehaviorEventCount", "0");
+        RequireData(networkSummary, "connectionEventCount", "64");
+        var networkSnapshot = RequireEvent(result.Events, "network.netstat.snapshot");
+        RequireData(networkSnapshot, "rowCount", "58");
+        RequireData(networkSnapshot, "phase", "after-run");
+        var samplingMarker = RequireEvent(result.Events, "report.events.sampled");
+        RequireData(samplingMarker, "wmiCaptureFailedCount", "2");
+        RequireData(samplingMarker, "wmiCaptureFailedPhases", "before-start, after-run");
 
         var artifactEvent = RequireEvent(result.Events, "artifact.host_imported");
         RequireData(artifactEvent, "downloadSelector", "artifacts/drop.bin");

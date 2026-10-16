@@ -41,6 +41,72 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(html, "Evidence health narrative", "Report should narrate evidence health before dense evidence.");
         RequireContains(html, "R0 / VT / Artifact health narrative", "Report should separate evidence health from sample behavior.");
         RequireContains(html, "Copy health narrative", "Evidence health narrative should be explicitly copyable.");
+        RequireContains(html, "Collection coverage gaps", "Report should list disabled, missing, and partial collection channels as explicit coverage gaps.");
+        RequireContains(html, "WMI startup inventory", "Collection coverage should show WMI capture_failed counts and phases.");
+        RequireContains(html, "capture_failed count=2", "WMI coverage should preserve before/after failure count.");
+        RequireContains(html, "before-start, after-run", "WMI coverage should preserve capture phases.");
+        RequireContains(html, "ETW live capture", "Collection coverage should show that live ETW is disabled.");
+        RequireContains(html, "Security audit policy", "Collection coverage should show partial audit policy readiness.");
+        RequireContains(html, "disabled/missing", "Collection coverage should show disabled R0/artifact lanes explicitly.");
+        RequireContains(html, "environment network observed; no sample attribution", "Network coverage should distinguish environment network from missing collection.");
+        RequireContains(html, "Network collection coverage", "Network coverage status should be rendered before endpoint cards.");
+
+        // VMware reports commonly inline only network.import.summary while raw
+        // netstat/sidecar rows remain in events.json. Summary counters must
+        // keep the network lane honest about observed environment traffic.
+        var summaryOnlyReport = BuildReport() with
+        {
+            Events =
+            [
+                new SandboxEvent
+                {
+                    EventType = "network.import.summary",
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Source = "host",
+                    Data =
+                    {
+                        ["eventKind"] = "summary",
+                        ["behaviorScope"] = "network-import-summary",
+                        ["eventCount"] = "64",
+                        ["canonicalBehaviorEventCount"] = "0",
+                        ["behaviorCountedEventCount"] = "0",
+                        ["sampleCorrelation"] = "environment",
+                        ["sampleCorrelationStatus"] = "environment",
+                        ["behaviorCounted"] = "false",
+                        ["nonbehavior"] = "true"
+                    }
+                }
+            ]
+        };
+        var summaryOnlyHtml = renderer.RenderEnglish(summaryOnlyReport, []);
+        RequireContains(summaryOnlyHtml, "environment network observed; no sample attribution", "Network import summary counters should expose environment network without sample attribution.");
+        RequireContains(summaryOnlyHtml, "Observed rows: 64", "Network import summary eventCount should survive report coverage rendering.");
+
+        var snapshotOnlyReport = BuildReport() with
+        {
+            Events =
+            [
+                new SandboxEvent
+                {
+                    EventType = "network.netstat.snapshot",
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Source = "guest",
+                    Data =
+                    {
+                        ["phase"] = "after-run",
+                        ["rowCount"] = "58",
+                        ["emittedRows"] = "58",
+                        ["behaviorCounted"] = "false",
+                        ["nonbehavior"] = "true",
+                        ["collectionHealth"] = "true"
+                    }
+                }
+            ]
+        };
+        var snapshotOnlyHtml = renderer.RenderEnglish(snapshotOnlyReport, []);
+        RequireContains(snapshotOnlyHtml, "environment network observed; no sample attribution", "Netstat snapshot rows should count as observed environment network.");
+        RequireContains(snapshotOnlyHtml, "Observed rows: 58", "Netstat snapshot rowCount should survive report coverage rendering.");
+
         RequireContains(html, "Stable relationship lanes", "Behavior graph should expose stable relationship lanes before dense edges.");
         RequireContains(html, "Process relation path", "Process cards should expose visible relationship paths.");
         RequireContains(html, "Artifact lane health", "Artifact status cards should expose lane health summaries.");
@@ -226,7 +292,84 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
             }
         };
 
-        var events = new List<SandboxEvent> { processStart, r0NetworkStatus, staticResource, vt, networkFlow, artifactImportSummary, screenshot, memoryDump, packetCapture };
+        var wmiBefore = new SandboxEvent
+        {
+            EventType = "startup_item.wmi.capture_failed",
+            Timestamp = timestamp.AddMilliseconds(50),
+            Source = "guest",
+            Data =
+            {
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true",
+                ["phase"] = "before-start",
+                ["exitCode"] = "1"
+            }
+        };
+        var wmiAfter = new SandboxEvent
+        {
+            EventType = "startup_item.wmi.capture_failed",
+            Timestamp = timestamp.AddSeconds(9),
+            Source = "guest",
+            Data =
+            {
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true",
+                ["phase"] = "after-run",
+                ["exitCode"] = "1"
+            }
+        };
+        var etwReadiness = new SandboxEvent
+        {
+            EventType = "etw_security.readiness.summary",
+            Timestamp = timestamp.AddSeconds(9),
+            Source = "guest",
+            Data =
+            {
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true",
+                ["etwLiveCaptureEnabled"] = "false"
+            }
+        };
+        var auditPartial = new SandboxEvent
+        {
+            EventType = "security_eventlog.audit_policy.summary",
+            Timestamp = timestamp.AddSeconds(9),
+            Source = "guest",
+            Data =
+            {
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true",
+                ["captureState"] = "partial",
+                ["auditPolicyStatus"] = "targetPoliciesNotFullySuccessEnabled"
+            }
+        };
+        var r0Disabled = new SandboxEvent
+        {
+            EventType = "r0collector.disabled",
+            Timestamp = timestamp.AddSeconds(9),
+            Source = "r0collector",
+            Data =
+            {
+                ["collectionHealth"] = "true",
+                ["r0Enabled"] = "false"
+            }
+        };
+        var environmentNetwork = new SandboxEvent
+        {
+            EventType = "network.tcp.closed",
+            Timestamp = timestamp.AddSeconds(9),
+            Source = "guest",
+            Data =
+            {
+                ["sampleCorrelation"] = "environment",
+                ["sampleCorrelationStatus"] = "environment",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["remoteAddress"] = "198.51.100.40",
+                ["remotePort"] = "443"
+            }
+        };
+        var events = new List<SandboxEvent> { processStart, r0NetworkStatus, staticResource, vt, networkFlow, artifactImportSummary, screenshot, memoryDump, packetCapture, wmiBefore, wmiAfter, etwReadiness, auditPartial, r0Disabled, environmentNetwork };
         for (var index = 0; index < 30; index++)
         {
             events.Add(new SandboxEvent

@@ -1797,6 +1797,7 @@ internal static class LiveEventsPage
               const jsonReportArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'report.json') || fileNameEquals(artifact.name || artifact.Name, 'report.json'));
               const eventsArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'events.json') || fileNameEquals(artifact.name || artifact.Name, 'events.json'));
               const driverArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'driver-events.jsonl') || fileNameEquals(artifact.name || artifact.Name, 'driver-events.jsonl'));
+              const driverArtifactReady = isUsableDriverArtifact(driverArtifact);
               const runbookArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'runbook-execution.json') || fileNameEquals(artifact.name || artifact.Name, 'runbook-execution.json'));
               const droppedArtifact = findArtifact(artifacts, artifact => artifactMatches(artifact, 'dropped-file', 'dropped-files'));
               const screenshotArtifact = findArtifact(artifacts, artifact => artifactMatches(artifact, 'screenshot', 'screenshots'));
@@ -1811,7 +1812,7 @@ internal static class LiveEventsPage
               pushArtifactCard(rows, seen, t('英文报告', 'English report'), 'report.en.html', artifactPath(enReportArtifact) || paths.enReportPath, htmlReportReady ? reportHtmlHrefForLanguage(reportReadiness, 'en') : '', htmlReportReady, enReportArtifact ? artifactDetail(enReportArtifact, htmlReportDetail) : htmlReportDetail, enReportArtifact);
               pushArtifactCard(rows, seen, t('JSON 报告', 'JSON report'), 'report.json', artifactPath(jsonReportArtifact) || paths.reportJsonPath, artifactDownloadHref(jsonReportArtifact), reportReadiness.hasJsonReport, jsonReportArtifact ? artifactDetail(jsonReportArtifact, t('已索引，可下载；JSON 只作为 HTML 就绪提示，不显示 HTML 打开按钮', 'indexed and downloadable; JSON is only an HTML-readiness hint and does not show HTML open buttons')) : t('JSON 路径已记录；等待 artifact index 下载链接', 'JSON path is recorded; waiting for artifact-index download link'), jsonReportArtifact);
               pushArtifactCard(rows, seen, 'events.json', 'events.json', artifactPath(eventsArtifact) || paths.eventsJsonPath, artifactDownloadHref(eventsArtifact), Boolean(eventsArtifact || paths.eventsCollected), eventsArtifact ? artifactDetail(eventsArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.eventsCollected ? t('已记录事件来源', 'event source recorded') : t('等待回收', 'waiting for collection')), eventsArtifact);
-              pushArtifactCard(rows, seen, 'driver-events.jsonl', 'driver-events.jsonl', artifactPath(driverArtifact) || paths.driverEventsJsonlPath, artifactDownloadHref(driverArtifact), Boolean(driverArtifact || paths.driverCollected), driverArtifact ? artifactDetail(driverArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.driverCollected ? t('已发现驱动遥测', 'driver telemetry found') : t('等待回收', 'waiting for collection')), driverArtifact);
+              pushArtifactCard(rows, seen, 'driver-events.jsonl', 'driver-events.jsonl', artifactPath(driverArtifact) || paths.driverEventsJsonlPath, driverArtifactReady ? artifactDownloadHref(driverArtifact) : '', driverArtifactReady, driverArtifactReady ? artifactDetail(driverArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.driverCollected ? t('驱动 JSONL 缺失或为空；未创建可下载证据', 'driver JSONL is missing or empty; no downloadable evidence was created') : t('等待回收', 'waiting for collection')), driverArtifact);
               pushArtifactCard(rows, seen, t('执行记录', 'Runbook execution'), 'runbook-execution.json', artifactPath(runbookArtifact) || paths.runbookExecutionPath, '', Boolean(runbookArtifact || paths.runbookExecutionPath), runbookArtifact ? artifactDetail(runbookArtifact, t('已索引，仅限宿主机本地检查；Web 下载已禁用', 'indexed for host-local inspection only; Web download is disabled')) : t('执行后仅在宿主机本地生成', 'generated host-locally after execution'), runbookArtifact);
               pushArtifactCard(rows, seen, t('落地文件', 'Dropped files'), 'artifacts/dropped-files', artifactPath(droppedArtifact) || paths.droppedFilesPath, artifactDownloadHref(droppedArtifact), Boolean(droppedArtifact || latestArtifactSignals.droppedFiles), droppedArtifact ? artifactDetail(droppedArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.droppedFiles ? t('事件中已出现落地文件证据', 'dropped-file evidence observed in events') : t('等待回收', 'waiting for collection')), droppedArtifact);
               pushArtifactCard(rows, seen, t('截图', 'Screenshots'), 'screenshots', artifactPath(screenshotArtifact) || paths.screenshotsPath, artifactDownloadHref(screenshotArtifact), Boolean(screenshotArtifact || latestArtifactSignals.screenshots), screenshotArtifact ? artifactDetail(screenshotArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.screenshots ? t('事件中已出现截图证据', 'screenshot evidence observed in events') : t('等待回收', 'waiting for collection')), screenshotArtifact);
@@ -1927,6 +1928,16 @@ internal static class LiveEventsPage
             function artifactDownloadHref(artifact) {
               const download = artifactDownloadInfo(artifact);
               return download.href || firstArtifactText(artifactField(artifact, 'downloadHref', 'DownloadHref'));
+            }
+
+            function isUsableDriverArtifact(artifact) {
+              if (!artifact) { return false; }
+              const metadata = artifactMetadata(artifact);
+              const exists = artifactField(metadata, 'artifactExists', 'ArtifactExists');
+              if (artifactString(exists) && !artifactBool(exists)) { return false; }
+              const download = artifactDownloadInfo(artifact);
+              const sizeBytes = Number(download.sizeBytes || artifactField(artifact, 'sizeBytes', 'SizeBytes') || 0);
+              return Boolean(download.available && (download.href || artifactDownloadHref(artifact)) && Number.isFinite(sizeBytes) && sizeBytes > 0);
             }
 
             function artifactDetail(artifact, fallback) {

@@ -364,8 +364,10 @@ section.card{contain:layout paint;counter-increment:report-section;isolation:iso
 .card h2{align-items:center;display:flex;gap:10px;margin:0 0 14px}.card h2:before{background:var(--primary);border-radius:0;content:'';display:inline-block;height:12px;width:12px}section.card>h2{backdrop-filter:none;background:#fff;border-bottom:1px solid #dbeafe;margin:-22px -22px 16px;padding:16px 22px;position:sticky;top:-22px;z-index:3}section.card>h2:after{background:var(--primary);border-radius:2px;color:white;content:'Step ' counter(report-section);font-size:11px;font-weight:900;margin-left:auto;padding:5px 9px;text-transform:uppercase}
 .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}.metric{background:#fff;border:1px solid var(--line);border-left:3px solid var(--primary);border-radius:2px;padding:14px}.metric b{display:block;font-size:26px;margin-top:4px}
 .muted{color:var(--muted)}.risk-critical{color:#7f1d1d}.risk-high{color:#b91c1c}.risk-medium{color:#b45309}.risk-low{color:#047857}.risk-info{color:var(--primary-deep)}
+.known-malware-banner{background:#fff1f2;border-left:5px solid #be123c;color:#881337;display:grid;gap:6px;margin:16px 0 0;padding:12px 14px}.known-malware-banner strong{font-size:15px}.known-malware-banner span{line-height:1.5}.known-malware-banner a{color:#9f1239;font-weight:800}
+.known-malware-note{background:#fff1f2;border-left:5px solid #be123c;color:#881337;line-height:1.55;margin:0 0 14px;padding:12px 14px}.known-malware-note strong{display:block;margin-bottom:4px}
 .badge,.chip,.evidence-count{border:1px solid transparent;border-radius:2px;display:inline-block;font-weight:700;padding:5px 9px}.chip{font-size:12px;margin:2px 4px 2px 0;padding:3px 7px}.evidence-count{background:#f8fbff;border-color:#cfe6fb;color:#075985;font-size:12px;margin:2px 6px 2px 0}
-.badge-critical,.chip-critical{background:#fecaca;color:#7f1d1d}.badge-high,.chip-high{background:#fee2e2;color:#991b1b}.badge-medium,.chip-medium{background:#fef3c7;color:#92400e}.badge-low,.chip-low{background:#dcfce7;color:#166534}.badge-info,.chip-info{background:var(--primary-soft);color:#075985}
+ .badge-critical,.chip-critical{background:#fecaca;color:#7f1d1d}.badge-high,.chip-high{background:#fee2e2;color:#991b1b}.badge-medium,.chip-medium{background:#fef3c7;color:#92400e}.badge-low,.chip-low{background:#dcfce7;color:#166534}.badge-info,.chip-info{background:var(--primary-soft);color:#075985}.static-only-badge{background:#eef2ff;color:#3730a3;border-color:#c7d2fe}
 .section-note{background:#f7fbff;border:1px solid #dbeafe;border-left:4px solid var(--primary);border-radius:2px;color:#475569;margin:10px 0;padding:10px 12px}
 table{border-collapse:collapse;border-spacing:0;width:100%;margin-top:14px}td,th{border-bottom:1px solid #e5edf6;padding:10px;text-align:left;vertical-align:top}th{background:#f8fbff;color:#475569;font-size:12px;position:static;text-transform:uppercase}
 code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
@@ -468,6 +470,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("<h1>KSword Sandbox Report</h1>");
         html.AppendLine($"<p class=\"muted\">Job {E(report.JobId.ToString())} generated at {E(report.GeneratedAt.ToString("u"))}</p>");
         html.AppendLine($"<p><span class=\"badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</span></p>");
+        if (KnownMalwareProfiles.TryGet(report.Sample.Sha256, out var knownProfile))
+        {
+            html.AppendLine($"<div class=\"known-malware-banner\"><strong>Known malicious sample baseline: {E(knownProfile.Family)}</strong><span>Known malicious sample; insufficient runtime evidence does not mean safe. Public family capability is a calibration baseline, not proof that every behavior occurred in this run.</span><a href=\"{A(knownProfile.ReferenceUrl)}\" target=\"_blank\" rel=\"noreferrer\">Public family baseline</a></div>");
+        }
+
         html.AppendLine("<table><tbody>");
         Row(html, "Sample", report.Sample.FileName);
         Row(html, "SHA-256", report.Sample.Sha256);
@@ -618,11 +625,21 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var primaryFindings = PrimaryBehaviorFindings(report).ToList();
         var staticFindings = StaticTriageFindings(report).ToList();
         var diagnosticFindings = DiagnosticFindings(report).ToList();
-        html.AppendLine("<section id=\"risk\" class=\"card\"><h2>Risk summary</h2><div class=\"grid\">");
+        html.AppendLine("<section id=\"risk\" class=\"card\"><h2>Risk summary</h2>");
+        if (KnownMalwareProfiles.TryGet(report.Sample.Sha256, out var knownProfile))
+        {
+            html.AppendLine($"<div class=\"known-malware-note\"><strong>Known malicious sample baseline: {E(knownProfile.Family)} — runtime evidence boundary</strong><span>Known malicious sample; insufficient runtime evidence does not mean safe. {E(knownProfile.BaselineZh)}</span></div>");
+        }
+
+        html.AppendLine("<div class=\"grid\">");
         Metric(html, "High risk", (CountSeverity(primaryFindings, "critical") + CountSeverity(primaryFindings, "high")).ToString(), "risk-high");
         Metric(html, "Suspicious", CountSeverity(primaryFindings, "medium").ToString(), "risk-medium");
         Metric(html, "General / info", (CountSeverity(primaryFindings, "low") + CountSeverity(primaryFindings, "info")).ToString(), "risk-info");
-        Metric(html, "Static triage", staticFindings.Count.ToString(), staticFindings.Any(f => SeverityRank(f.Severity) <= SeverityRank("medium")) ? "risk-medium" : "risk-info");
+        // Static findings are capability clues only. Keep this metric informational
+        // even when a rule's internal severity is medium so the landing page does
+        // not imply that an import, URL, YARA match, or PE trait was observed at run
+        // time.
+        Metric(html, "Static triage", staticFindings.Count.ToString(), "risk-info");
         Metric(html, "Collection diagnostics", diagnosticFindings.Count.ToString(), diagnosticFindings.Count > 0 ? "risk-info" : "risk-low");
         Metric(html, "Collection health", report.Events.Count(IsCollectionHealthEvent).ToString(), report.Events.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-info");
         Metric(html, "MITRE techniques", primaryFindings.Where(f => !string.IsNullOrWhiteSpace(f.MitreTechniqueId)).Select(f => f.MitreTechniqueId).Distinct().Count().ToString(), "risk-low");
@@ -637,6 +654,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         Metric(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString(), "risk-info");
         Metric(html, "R0 health/readiness", report.Events.Count(IsR0CollectionHealthEvent).ToString(), "risk-info");
         html.AppendLine("</div>");
+        if (HasExecutionBlockedVerdict(report))
+        {
+            html.AppendLine("<div class=\"section-note failure-note\"><strong>Execution boundary:</strong> sample execution was blocked or ended before complete runtime behavior, so the runtime verdict is indeterminate. Static findings remain static-only evidence and do not establish execution.</div>");
+        }
+
         AppendCollectionSelfNoisePolicySummary(html, report);
         html.AppendLine("</section>");
     }
@@ -1220,13 +1242,45 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             return;
         }
 
-        html.AppendLine("<table><thead><tr><th>Severity</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>");
+        var isStaticTriage = string.Equals(title, "Static triage indicators", StringComparison.Ordinal);
+        html.AppendLine(isStaticTriage
+            ? "<table><thead><tr><th>Evidence class</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>"
+            : "<table><thead><tr><th>Severity</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>");
         foreach (var finding in findings)
         {
-            html.AppendLine($"<tr><td class=\"risk-{E(NormalizeSeverity(finding.Severity))}\">{E(finding.Severity)}</td><td><strong>{E(finding.Title)}</strong><br><span class=\"muted\">{E(finding.Summary)}</span></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
+            if (isStaticTriage)
+            {
+                html.AppendLine($"<tr><td><span class=\"badge static-only-badge\">Static-only / unverified</span><br><span class=\"muted\">Confidence: <span class=\"confidence-value\">{E(finding.Confidence)}</span></span></td><td><strong>{E(StaticFindingTitle(finding))}</strong><br><span class=\"muted\">{E(StaticFindingSummary(finding))}</span></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
+            }
+            else
+            {
+                html.AppendLine($"<tr><td class=\"risk-{E(NormalizeSeverity(finding.Severity))}\">{E(finding.Severity)}</td><td><strong>{E(finding.Title)}</strong><br><span class=\"muted\">{E(finding.Summary)}</span></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
+            }
         }
 
         html.AppendLine("</tbody></table></details>");
+    }
+
+    /// <summary>
+    /// Gives static findings an explicit capability-only label. Inputs are a
+    /// static finding; processing keeps the rule title intact after the label;
+    /// the method returns operator-facing text that cannot be mistaken for a
+    /// runtime behavior claim.
+    /// </summary>
+    private static string StaticFindingTitle(BehaviorFinding finding)
+    {
+        return $"Static capability clue (unverified): {finding.Title}";
+    }
+
+    /// <summary>
+    /// Adds one stable boundary sentence to static finding summaries. Inputs
+    /// are static finding metadata; processing preserves the rule explanation;
+    /// the method returns a summary that requires runtime corroboration.
+    /// </summary>
+    private static string StaticFindingSummary(BehaviorFinding finding)
+    {
+        const string boundary = " Static evidence only: imports, API-like strings, URLs, YARA matches, entropy, and PE metadata do not prove execution, credential access, anti-analysis, download, persistence, or exfiltration; require correlated runtime evidence.";
+        return $"{finding.Summary}{boundary}";
     }
 
     /// <summary>
@@ -1308,7 +1362,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             html.AppendLine("<table><thead><tr><th>Engine</th><th>Rule ID</th><th>Title</th><th>Severity</th></tr></thead><tbody>");
             foreach (var finding in report.Findings.OrderBy(f => f.RuleId))
             {
-                html.AppendLine($"<tr><td>KSword behavior rules</td><td><code>{E(finding.RuleId)}</code></td><td>{E(finding.Title)}</td><td>{E(finding.Severity)}</td></tr>");
+                var title = IsStaticTriageFinding(finding)
+                    ? StaticFindingTitle(finding)
+                    : finding.Title;
+                var severity = IsStaticTriageFinding(finding)
+                    ? "static-only / unverified"
+                    : finding.Severity;
+                html.AppendLine($"<tr><td>KSword behavior rules</td><td><code>{E(finding.RuleId)}</code></td><td>{E(title)}</td><td>{E(severity)}</td></tr>");
             }
 
             html.AppendLine("</tbody></table>");
@@ -1325,7 +1385,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     private static void AppendStaticAnalysis(StringBuilder html, AnalysisReport report)
     {
         var staticAnalysis = report.StaticAnalysis;
-        html.AppendLine("<section id=\"static\" class=\"card\"><h2>Static analysis</h2><table><tbody>");
+        html.AppendLine("<section id=\"static\" class=\"card\"><h2>Static analysis</h2>");
+        html.AppendLine("<div class=\"section-note\"><strong>Static evidence boundary.</strong> Imports, API-like strings, URLs, YARA matches, entropy, PE metadata, and family labels are capability clues for triage. They are unverified until correlated with sample-attributed runtime events; they do not prove execution, credential access, anti-analysis, download, persistence, or exfiltration.</div>");
+        html.AppendLine("<table><tbody>");
         Row(html, "File name", report.Sample.FileName);
         Row(html, "Full path", report.Sample.FullPath);
         Row(html, "File size", FormatBytes(report.Sample.SizeBytes));
@@ -3070,6 +3132,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         AnalysisReport report,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
+        AppendCollectionCoverageGaps(html, report, artifacts);
         var r0HealthEvents = report.Events.Where(IsR0HealthRowEvent).ToList();
         var vtEvents = report.Events.Where(IsVirusTotalEvent).ToList();
         var downloadable = artifacts.Count(artifact => !string.IsNullOrWhiteSpace(ArtifactHref(artifact)));
@@ -3111,6 +3174,153 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             $"downloadable={downloadable}/{artifacts.Count}; duplicates={duplicateMembers}; rejected={rejectedReferences}");
         html.AppendLine(CopyButton("Copy health narrative", copy));
         html.AppendLine("</div>");
+    }
+
+    /// <summary>
+    /// Renders explicit collection coverage gaps in one operator-facing lane.
+    /// Inputs are normalized events and artifact descriptors; processing keeps
+    /// disabled/missing evidence separate from risk verdicts and artifact-index
+    /// accounting, then emits bounded copyable gap details.
+    /// </summary>
+    private static void AppendCollectionCoverageGaps(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var gaps = new List<(string Name, string State, string Detail, string Evidence)>();
+        var wmiFailures = report.Events
+            .Where(evt => TextContainsAny(evt.EventType, "wmi.capture_failed", "wmi.capture-failed"))
+            .OrderBy(evt => evt.Timestamp)
+            .ToList();
+        if (wmiFailures.Count > 0)
+        {
+            var samplingMarker = report.Events.FirstOrDefault(evt => string.Equals(evt.EventType, "report.events.sampled", StringComparison.OrdinalIgnoreCase));
+            var markerCount = samplingMarker is null ? 0 : ParseNetworkCount(samplingMarker, "wmiCaptureFailedCount");
+            var phases = wmiFailures
+                .Select(evt => FirstEventDataValue(evt, "phase", "capturePhase", "diagnosticStage") ?? "unknown")
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var markerPhases = samplingMarker is null
+                ? []
+                : (FirstEventDataValue(samplingMarker, "wmiCaptureFailedPhases") ?? string.Empty)
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToList();
+            phases = phases
+                .Concat(markerPhases)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var failureCount = Math.Max(wmiFailures.Count, markerCount);
+            gaps.Add((
+                "WMI startup inventory",
+                "capture_failed",
+                $"capture_failed count={failureCount}; phases={string.Join(", ", phases)}",
+                string.Join("; ", wmiFailures.Take(8).Select(EventOneLine))));
+        }
+
+        var etwDisabled = report.Events
+            .Where(evt => IsEtwLiveCaptureDisabledEvent(evt))
+            .ToList();
+        if (etwDisabled.Count > 0)
+        {
+            gaps.Add((
+                "ETW live capture",
+                "disabled",
+                "Live ETW capture is disabled; provider/readiness metadata does not represent a live trace.",
+                string.Join("; ", etwDisabled.Take(4).Select(EventOneLine))));
+        }
+
+        var auditPartial = report.Events
+            .Where(IsAuditPolicyPartialEvent)
+            .ToList();
+        if (auditPartial.Count > 0)
+        {
+            var status = FirstEventDataValue(auditPartial[0], "auditPolicyStatus", "status", "captureState") ?? "partial";
+            gaps.Add((
+                "Security audit policy",
+                "partial",
+                $"Audit policy coverage is partial ({status}); missing success auditing can leave Security evidence unavailable.",
+                string.Join("; ", auditPartial.Take(4).Select(EventOneLine))));
+        }
+
+        var r0Events = report.Events.Where(IsR0Event).ToList();
+        var r0Disabled = r0Events.Count == 0 || r0Events.Any(evt =>
+            TextContainsAny(evt.EventType, "r0collector.disabled", "r0.disabled") ||
+            EventDataBoolFalse(evt, "r0Enabled", "r0CollectorEnabled", "collectorEnabled"));
+        if (r0Disabled)
+        {
+            gaps.Add((
+                "R0Collector",
+                "disabled/missing",
+                "No usable R0Collector health or telemetry rows were observed; kernel coverage is disabled or missing for this run.",
+                r0Events.Count == 0 ? "no r0collector/driver events" : string.Join("; ", r0Events.Take(4).Select(EventOneLine))));
+        }
+
+        var matrixRows = BuildArtifactEvidenceMatrixRows(report.Events, artifacts);
+        foreach (var card in BuildArtifactCollectionStatusCards(report, artifacts, matrixRows)
+                     .Where(card => !TextEqualsAny(card.Status, "captured", "observed")))
+        {
+            var state = TextEqualsAny(card.Status, "not observed", "skipped") ? "missing" : card.Status;
+            gaps.Add((
+                card.Name,
+                state,
+                $"{card.Name} coverage gap: status={card.Status}; artifacts={card.ArtifactCount}; events={card.EventCount}.",
+                card.CopyText));
+        }
+
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "Collection coverage gaps",
+                $"gapCount={gaps.Count}",
+                .. gaps.Select(gap => $"{gap.Name}: state={gap.State}; {gap.Detail}")
+            ]);
+        html.AppendLine("<h3 id=\"collection-coverage-gaps\" class=\"anchor-offset\">Collection coverage gaps</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Collection coverage gaps.</strong> Disabled, missing, or partial channels are listed explicitly as evidence-quality gaps. They do not count as sample behavior, but they lower confidence and prevent a safe conclusion from incomplete coverage.</div>");
+        if (gaps.Count == 0)
+        {
+            html.AppendLine("<div class=\"copy-hint\">No explicit collection coverage gaps were observed.</div>");
+            return;
+        }
+
+        html.AppendLine("<div class=\"evidence-summary-grid collection-coverage-gap-grid copyable\" data-copy=\"" + A(copy) + "\">");
+        foreach (var gap in gaps)
+        {
+            var css = TextEqualsAny(gap.State, "partial", "capture_failed", "failed", "disabled", "disabled/missing", "missing") ? "medium" : "info";
+            var evidence = string.IsNullOrWhiteSpace(gap.Evidence) ? "-" : gap.Evidence;
+            html.AppendLine("<article class=\"evidence-summary-card\">");
+            html.AppendLine("<div class=\"relationship-title\">");
+            html.AppendLine($"<h3>{E(gap.Name)}</h3><span class=\"badge badge-{E(css)}\">coverage gap · {E(gap.State)}</span>");
+            html.AppendLine("</div>");
+            html.AppendLine($"<p class=\"muted\">{E(gap.Detail)}</p>");
+            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand coverage gap evidence</summary><pre class=\"copyable\" data-copy=\"{A(evidence)}\">{E(evidence)}</pre></details>");
+            html.AppendLine("</article>");
+        }
+
+        html.AppendLine("</div>");
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy collection coverage gaps", copy)}</div>");
+    }
+
+    private static bool IsEtwLiveCaptureDisabledEvent(SandboxEvent evt)
+    {
+        if (!TextContainsAny(evt.EventType, "etw", "security_eventlog"))
+        {
+            return false;
+        }
+
+        return EventDataBoolFalse(evt, "etwLiveCaptureEnabled", "etwSessionStarted", "liveEtwEnabled") ||
+            TextEqualsAny(FirstEventDataValue(evt, "etwLiveCaptureState", "etwCaptureState") ?? string.Empty, "disabled", "not-enabled", "readiness-only");
+    }
+
+    private static bool IsAuditPolicyPartialEvent(SandboxEvent evt)
+    {
+        if (!TextContainsAny(evt.EventType, "audit_policy", "audit-policy"))
+        {
+            return false;
+        }
+
+        var status = FirstEventDataValue(evt, "auditPolicyStatus", "captureState", "status", "reason");
+        return TextEqualsAny(status ?? string.Empty, "partial", "targetPoliciesNotFullySuccessEnabled", "auditPolicyCoverageGap") ||
+            EventTextContainsAny(evt, "auditPolicyCoverageGap", "targetPoliciesNotFullySuccessEnabled");
     }
 
     private static void AppendHealthPill(StringBuilder html, string label, string state, string detail)
@@ -3222,6 +3432,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         {
             collectionName = "dropped-files";
             kind = ArtifactKind.DroppedFile;
+            return true;
+        }
+
+        if (TextContainsAny(eventType, "driver", "r0collector") ||
+            TextContainsAny(collection, "driver-events", "driver_event", "r0collector"))
+        {
+            collectionName = "driver-events";
+            kind = ArtifactKind.DriverEventsJsonLines;
             return true;
         }
 
@@ -3510,8 +3728,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 string.Equals(artifact.CollectionName, collectionName, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(MetadataValue(artifact.Metadata, "collectionName"), collectionName, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        var collectionEvents = events.Where(eventPredicate).OrderBy(evt => evt.Timestamp).ToList();
-        var status = InferArtifactCollectionStatus(collectionArtifacts, collectionEvents);
+        var collectionEvents = events
+            .Where(eventPredicate)
+            .Where(evt => !string.Equals(collectionName, "driver-events", StringComparison.OrdinalIgnoreCase) ||
+                !IsCollectorSelfNoiseEvent(evt))
+            .OrderBy(evt => evt.Timestamp)
+            .ToList();
+        var status = string.Equals(collectionName, "driver-events", StringComparison.OrdinalIgnoreCase)
+            ? InferDriverArtifactCollectionStatus(collectionArtifacts, collectionEvents)
+            : InferArtifactCollectionStatus(collectionArtifacts, collectionEvents);
         var css = status switch
         {
             "captured" => "low",
@@ -3596,6 +3821,53 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         }
 
         return events.Count > 0 ? "observed" : "not observed";
+    }
+
+    private static string InferDriverArtifactCollectionStatus(
+        IReadOnlyCollection<ArtifactDescriptor> artifacts,
+        IReadOnlyCollection<SandboxEvent> events)
+    {
+        var usableArtifacts = artifacts.Where(IsUsableDriverArtifact).ToList();
+        if (usableArtifacts.Count > 0)
+        {
+            return "captured";
+        }
+
+        if (events.Any(IsDisabledArtifactCollectionEvent) ||
+            events.Any(evt => TextEqualsAny(FirstEventDataValue(evt, "requested", "captureEnabled", "driverEventsRequested") ?? string.Empty,
+                "false", "0", "no", "off")))
+        {
+            return "disabled";
+        }
+
+        if (events.Any(evt => evt.EventType.Contains("missing", StringComparison.OrdinalIgnoreCase) ||
+                              evt.EventType.Contains("failed", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "missing";
+        }
+
+        // R0 lifecycle/health rows are not proof that driver-events.jsonl was
+        // created. Preserve an explicit missing state when no materialized file
+        // is indexed, even if those rows are present.
+        return events.Count > 0 ? "missing" : "not created";
+    }
+
+    private static bool IsUsableDriverArtifact(ArtifactDescriptor artifact)
+    {
+        if (artifact.Kind != ArtifactKind.DriverEventsJsonLines &&
+            !string.Equals(artifact.CollectionName, "driver-events", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(MetadataValue(artifact.Metadata, "collectionName"), "driver-events", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(MetadataValue(artifact.Metadata, "artifactExists"), "false", StringComparison.OrdinalIgnoreCase) ||
+            artifact.SizeBytes <= 0)
+        {
+            return false;
+        }
+
+        return string.IsNullOrWhiteSpace(artifact.FullPath) || File.Exists(artifact.FullPath);
     }
 
     /// <summary>
@@ -3967,11 +4239,176 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
+        AppendNetworkCoverageStatus(html, report);
         var networkEvents = report.Events.Where(IsSampleBehaviorNetworkEvent).ToList();
         html.AppendLine("<section id=\"network\" class=\"card\"><h2>Network behavior</h2>");
         AppendNetworkRelationshipCards(html, networkEvents, artifactLookup, artifacts);
         AppendEventRows(html, networkEvents, artifactLookup, artifacts);
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Adds an explicit network coverage state before sample-attributed
+    /// endpoint cards. Inputs are all normalized network rows; processing
+    /// separates environment/unknown rows from sample attribution and reports
+    /// a missing collection state when no network telemetry was observed.
+    /// </summary>
+    private static void AppendNetworkCoverageStatus(StringBuilder html, AnalysisReport report)
+    {
+        var observed = report.Events
+            .Where(IsNetworkEvent)
+            .Where(evt => !IsNetworkCollectionGapMarker(evt))
+            .ToList();
+        var importedSummaries = report.Events
+            .Where(IsNetworkImportSummaryEvent)
+            .ToList();
+        // Most VMware runs keep the raw netstat/sidecar rows in events.json
+        // and only inline network.import.summary. Use its counters so a
+        // populated environment network lane is not reported as "not
+        // collected" merely because report sampling folded the raw rows.
+        var summaryTotal = importedSummaries
+            .Select(evt => ParseNetworkCount(evt, "eventCount"))
+            .DefaultIfEmpty(0)
+            .Max();
+        var summaryAttributed = importedSummaries
+            .Select(evt => Math.Max(
+                ParseNetworkCount(evt, "canonicalBehaviorEventCount"),
+                ParseNetworkCount(evt, "behaviorCountedEventCount")))
+            .DefaultIfEmpty(0)
+            .Max();
+        var snapshotObserved = report.Events
+            .Where(IsNetworkSnapshotOrDiffEvent)
+            .Select(ParseNetworkSnapshotCount)
+            .DefaultIfEmpty(0)
+            .Max();
+        var observedTotal = Math.Max(Math.Max(observed.Count, summaryTotal), snapshotObserved);
+        var attributed = Math.Max(observed.Count(IsSampleBehaviorNetworkEvent), summaryAttributed);
+        var environment = observed.Count(IsEnvironmentNetworkEvent);
+        var unknown = observed.Count(IsUnknownNetworkEvent);
+        if (summaryTotal > 0)
+        {
+            // The summary does not carry per-row ownership. Treat rows not
+            // promoted to canonical sample behavior as environment/unknown
+            // evidence and keep the distinction explicit in the copyable
+            // counters below.
+            environment = Math.Max(environment, Math.Max(0, summaryTotal - summaryAttributed - unknown));
+        }
+        if (snapshotObserved > 0)
+        {
+            environment = Math.Max(environment, snapshotObserved);
+        }
+        var unattributed = Math.Max(0, observedTotal - attributed);
+        var state = observedTotal == 0
+            ? "not collected"
+            : attributed > 0
+                ? "sample-attributed network observed"
+                : "environment network observed; no sample attribution";
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "Network collection coverage",
+                $"state={state}",
+                $"observedNetworkRows={observedTotal}",
+                $"importSummaryRows={summaryTotal}",
+                $"snapshotOrDiffRows={snapshotObserved}",
+                $"sampleAttributedRows={attributed}",
+                $"environmentRows={environment}",
+                $"unknownOrUnattributedRows={unknown}",
+                "policy=environment/unknown network rows remain evidence and are not sample behavior"
+            ]);
+
+        html.AppendLine("<div class=\"section-note network-coverage-status\"><strong>Network collection coverage.</strong> Environment network can be present without sample attribution; this is separate from a network channel that was not collected.</div>");
+        html.AppendLine("<div class=\"overview-strip network-coverage-overview copyable\" data-copy=\"" + A(copy) + "\">");
+        AppendOverviewItem(
+            html,
+            "Network coverage",
+            state,
+            observedTotal == 0
+                ? "No network telemetry rows were observed; network collection is missing or disabled."
+                : $"Observed rows: {observedTotal}; sample-attributed: {attributed}; environment: {environment}; unknown/unattributed: {unknown}.",
+            observedTotal == 0 ? "risk-medium" : attributed > 0 ? "risk-info" : "risk-medium");
+        AppendOverviewItem(html, "Sample attribution", attributed.ToString(CultureInfo.InvariantCulture), "Rows with confirmed/probable sample correlation used by the network behavior lane.", attributed > 0 ? "risk-info" : "risk-low");
+        AppendOverviewItem(html, "Environment / unknown", $"{environment} / {unknown}", "Environment and unknown network evidence remains available for review but does not raise the sample behavior count.", environment + unknown > 0 ? "risk-medium" : "risk-low");
+        if (environment > 0)
+        {
+            AppendOverviewItem(html, "Environment network", "environment network observed; no sample attribution", "Environment network rows were observed without sample attribution; review them separately from a missing network collection.", "risk-medium");
+        }
+
+
+        var copyButton = CopyButton("Copy network coverage summary", copy);
+        html.AppendLine($"<div class=\"toolbar\">{copyButton}</div>");
+        html.AppendLine("</div>");
+    }
+
+    private static bool IsNetworkImportSummaryEvent(SandboxEvent evt)
+    {
+        return TextEqualsAny(
+            evt.EventType,
+            "network.import.summary",
+            "pcap.summary",
+            "pcap.import.summary");
+    }
+
+    private static int ParseNetworkCount(SandboxEvent evt, string key)
+    {
+        var value = FirstEventDataValue(evt, key);
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed > 0
+            ? parsed
+            : 0;
+    }
+
+    private static bool IsNetworkSnapshotOrDiffEvent(SandboxEvent evt)
+    {
+        var eventType = evt.EventType ?? string.Empty;
+        return IsNetworkEvent(evt) &&
+            (eventType.Contains(".snapshot", StringComparison.OrdinalIgnoreCase) ||
+             eventType.Contains(".diff", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static int ParseNetworkSnapshotCount(SandboxEvent evt)
+    {
+        var count = new[]
+        {
+            ParseNetworkCount(evt, "rowCount"),
+            ParseNetworkCount(evt, "emittedRows"),
+            ParseNetworkCount(evt, "entryCount"),
+            ParseNetworkCount(evt, "listenerCount"),
+            ParseNetworkCount(evt, "settingCount"),
+            ParseNetworkCount(evt, "addedCount"),
+            ParseNetworkCount(evt, "removedCount")
+        }.Max();
+        return count > 0 ? count : 1;
+    }
+
+    private static bool IsNetworkCollectionGapMarker(SandboxEvent evt)
+    {
+        return IsNetworkImportHealthEvent(evt) ||
+            TextContainsAny(evt.EventType, "packet_capture.disabled", "packet_capture.skipped", "pcap.disabled", "pcap.skipped") ||
+            evt.EventType.EndsWith(".capture_failed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsEnvironmentNetworkEvent(SandboxEvent evt)
+    {
+        if (!IsNetworkEvent(evt) || IsNetworkCollectionGapMarker(evt))
+        {
+            return false;
+        }
+
+        var label = FirstEventDataValue(evt, "sampleCorrelation", "sample_correlation", "sampleCorrelationStatus", "sample_correlation_status");
+        return TextEqualsAny(label ?? string.Empty, "environment", "session-only", "session_related", "session-related", "uncorrelated") ||
+            (string.IsNullOrWhiteSpace(label) && !IsSampleBehaviorNetworkEvent(evt));
+    }
+
+    private static bool IsUnknownNetworkEvent(SandboxEvent evt)
+    {
+        if (!IsNetworkEvent(evt) || IsNetworkCollectionGapMarker(evt))
+        {
+            return false;
+        }
+
+        var label = FirstEventDataValue(evt, "sampleCorrelation", "sample_correlation", "sampleCorrelationStatus", "sample_correlation_status");
+        return TextEqualsAny(label ?? string.Empty, "unknown", "not-correlated", "not_correlated", "unattributed") ||
+            (string.IsNullOrWhiteSpace(label) && !IsSampleBehaviorNetworkEvent(evt) && !IsEnvironmentNetworkEvent(evt));
     }
 
     /// <summary>
@@ -5450,7 +5887,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        var behaviorEvents = report.Events.Where(IsSampleBehaviorEvent).ToList();
+        var behaviorEvents = report.Events
+            .Where(IsSampleBehaviorEvent)
+            .Where(evt => !IsCollectorSelfNoiseEvent(evt))
+            .Where(evt => !TextLooksLikeCollectorSelfNoise(evt.ProcessName) &&
+                !TextLooksLikeCollectorSelfNoise(evt.Path) &&
+                !TextLooksLikeCollectorSelfNoise(evt.CommandLine))
+            .ToList();
         var starts = behaviorEvents
             .Where(evt => IsProcessTreeCandidate(evt) && evt.ProcessId.HasValue)
             .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
@@ -6420,7 +6863,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// </summary>
     private static IReadOnlyList<ProcessGraphNode> BuildProcessGraphNodes(AnalysisReport report)
     {
-        var behaviorEvents = report.Events.Where(IsSampleBehaviorEvent).ToList();
+        var behaviorEvents = report.Events
+            .Where(IsSampleBehaviorEvent)
+            .Where(evt => !IsCollectorSelfNoiseEvent(evt))
+            .Where(evt => !TextLooksLikeCollectorSelfNoise(evt.ProcessName) &&
+                !TextLooksLikeCollectorSelfNoise(evt.Path) &&
+                !TextLooksLikeCollectorSelfNoise(evt.CommandLine))
+            .ToList();
         var canonicalKeys = BuildProcessCanonicalKeyLookup(report);
         var eventsByProcess = behaviorEvents
             .Where(evt => evt.ProcessId.HasValue || !string.IsNullOrWhiteSpace(evt.ProcessName) || !string.IsNullOrWhiteSpace(evt.Path))
@@ -6535,6 +6984,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         return edges
             .GroupBy(edge => $"{edge.From}|{edge.Relation}|{edge.To}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
+            .Where(edge => !BehaviorGraphEdgeLooksLikeCollectorSelfNoise(edge))
             .ToList();
     }
 
@@ -7878,6 +8328,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// </summary>
     private static bool IsCollectionHealthEvent(SandboxEvent evt)
     {
+        // WMI startup inventory failures are probe diagnostics even when a
+        // legacy event payload omitted the collectionHealth marker.
+        if (TextContainsAny(evt.EventType, "wmi.capture_failed", "wmi.capture-failed"))
+        {
+            return true;
+        }
+
         if (EventDataBoolTrue(evt, "collectionHealth", "collection_health") ||
             (EventDataBoolTrue(evt, "nonbehavior", "notSampleBehavior", "not_sample_behavior") &&
              EventTextContainsAny(evt, "capture_failed", "collection", "probe", "wmi")))
@@ -8286,14 +8743,20 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// </summary>
     private static (string Label, string Css) DetermineVerdict(AnalysisReport report)
     {
+        var knownMalware = KnownMalwareProfiles.IsKnown(report.Sample.Sha256);
+        if (HasExecutionBlockedVerdict(report))
+        {
+            return (knownMalware ? "Known malicious sample / runtime indeterminate" : "Execution blocked / runtime indeterminate", "high");
+        }
+
         if (report.Status == AnalysisStatus.Failed)
         {
-            return ("Analysis failed", "high");
+            return (knownMalware ? "Known malicious sample / analysis failed" : "Analysis failed", "high");
         }
 
         if (IsStaticOnlyReport(report))
         {
-            return ("Static analysis only", "info");
+            return (knownMalware ? "Known malicious sample / static evidence only" : "Static analysis only", knownMalware ? "high" : "info");
         }
 
         var primaryFindings = PrimaryBehaviorFindings(report).ToList();
@@ -8312,13 +8775,70 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             return ("Suspicious", "medium");
         }
 
-        return ("No high-risk behavior", "info");
+        return (knownMalware ? "Known malicious sample / runtime evidence present" : "No high-risk behavior", knownMalware ? "high" : "info");
     }
 
     private static bool IsStaticOnlyReport(AnalysisReport report)
     {
         return report.Events.Any(IsStaticOnlyEvidenceEvent) &&
             !report.Events.Any(IsDynamicEvidenceEvent);
+    }
+
+    /// <summary>
+    /// Determines whether the report cannot support a runtime verdict because
+    /// the sample was blocked at launch or exited before producing complete
+    /// runtime behavior. Inputs are normalized report events; processing keeps
+    /// static evidence available while preventing a reassuring no-risk label;
+    /// the method returns true when execution coverage is indeterminate.
+    /// </summary>
+    private static bool HasExecutionBlockedVerdict(AnalysisReport report)
+    {
+        if (HasCompleteSampleBehavior(report))
+        {
+            return false;
+        }
+
+        return report.Events.Any(IsSampleStartBlockedEvent) ||
+            report.Events.Any(IsNonZeroSampleExitEvent);
+    }
+
+    /// <summary>
+    /// Determines whether an event records a failed sample launch. Inputs are
+    /// normalized events; processing recognizes the guest sample start failure
+    /// contract (including WinError 225/antivirus interception diagnostics);
+    /// the method returns true for launch-block evidence.
+    /// </summary>
+    private static bool IsSampleStartBlockedEvent(SandboxEvent evt)
+    {
+        return string.Equals(evt.EventType, "process.start_failed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Determines whether the report contains runtime behavior beyond launch,
+    /// exit, timeout, and execution-failure boundary rows. Inputs are report
+    /// events; processing excludes boundary diagnostics so a blocked or early
+    /// exit cannot masquerade as complete behavior; the method returns true
+    /// when at least one substantive dynamic event is present.
+    /// </summary>
+    private static bool HasCompleteSampleBehavior(AnalysisReport report)
+    {
+        return report.Events.Any(evt =>
+            IsDynamicEvidenceEvent(evt) &&
+            !IsExecutionBoundaryEvent(evt));
+    }
+
+    private static bool IsExecutionBoundaryEvent(SandboxEvent evt)
+    {
+        return TextEqualsAny(
+                evt.EventType,
+                "process.start",
+                "process.start_failed",
+                "process.exit",
+                "process.timeout",
+                "process.execution_failed",
+                "process.wait_failed",
+                "process.kill_failed") ||
+            IsOperationalFailureEvent(evt);
     }
 
     private static IEnumerable<BehaviorFinding> PrimaryBehaviorFindings(AnalysisReport report)
@@ -8552,6 +9072,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             return string.Empty;
         }
 
+        if (artifact.Kind == ArtifactKind.DriverEventsJsonLines && artifact.SizeBytes <= 0)
+        {
+            return string.Empty;
+        }
+
         if (!string.IsNullOrWhiteSpace(artifact.FullPath) &&
             !File.Exists(artifact.FullPath) &&
             (artifact.Kind is ArtifactKind.DriverEventsJsonLines or ArtifactKind.GuestEventsJson or ArtifactKind.ArtifactManifest))
@@ -8666,11 +9191,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     private static string RenderEventEvidenceDetails(SandboxEvent evt)
     {
         var compactFields = evt.Data
-            .Where(pair => !ShouldOmitEventField(evt, pair.Key) && !IsLongTechnicalEventField(pair.Key, pair.Value) && IsUserFacingEventFieldForEvent(evt, pair.Key))
+            .Where(pair => !ShouldOmitEventField(evt, pair.Key) && !IsInternalEvidenceField(evt, pair.Key) && !IsLongTechnicalEventField(pair.Key, pair.Value) && IsUserFacingEventFieldForEvent(evt, pair.Key))
             .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var technicalFields = evt.Data
-            .Where(pair => !ShouldOmitEventField(evt, pair.Key) && (IsLongTechnicalEventField(pair.Key, pair.Value) || !IsUserFacingEventFieldForEvent(evt, pair.Key)))
+            .Where(pair => !ShouldOmitEventField(evt, pair.Key) && !IsInternalEvidenceField(evt, pair.Key) && (IsLongTechnicalEventField(pair.Key, pair.Value) || !IsUserFacingEventFieldForEvent(evt, pair.Key)))
             .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
             .Select(pair => (Label: pair.Key, Value: pair.Value))
             .ToList();
@@ -8760,6 +9285,39 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var normalized = key.ToLowerInvariant();
         return normalized is not ("zhmessage" or "zhhint" or "capturestate" or "collectionhealth") ||
             IsCollectionDiagnosticFailure(evt);
+    }
+
+    /// <summary>
+    /// Identifies internal routing and policy fields that belong in raw
+    /// report.json/events.json evidence, not the analyst-facing event card.
+    /// Inputs are one event and field name; processing hides correlation,
+    /// sampling, and rule-plumbing metadata while preserving diagnostics.
+    /// </summary>
+    private static bool IsInternalEvidenceField(SandboxEvent evt, string key)
+    {
+        var normalized = key.Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace(".", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+        if (normalized is "omitteddatapairs" or "omittedfields" ||
+            normalized.Contains("samplecorrelation", StringComparison.Ordinal) ||
+            normalized.Contains("samplebehaviorcandidate", StringComparison.Ordinal) ||
+            normalized.Contains("sampleconclusion", StringComparison.Ordinal) ||
+            normalized.Contains("behaviorcounted", StringComparison.Ordinal) ||
+            normalized.Contains("behaviorcountingpolicy", StringComparison.Ordinal) ||
+            normalized.Contains("notsamplebehavior", StringComparison.Ordinal) ||
+            normalized.Contains("nonbehavior", StringComparison.Ordinal) ||
+            normalized.Contains("strongsamplecorrelation", StringComparison.Ordinal) ||
+            normalized.Contains("evidencedisposition", StringComparison.Ordinal) ||
+            normalized.Contains("normalbehaviorboundary", StringComparison.Ordinal) ||
+            normalized.Contains("collectorselfnoise", StringComparison.Ordinal) ||
+            normalized.Contains("collectornoise", StringComparison.Ordinal) ||
+            normalized is "staticonly" or "staticevidenceboundary" or "runtimecorrelationrequired")
+        {
+            return true;
+        }
+
+        return normalized is "reportlane" or "triagelevel" or "rulescope" or "rulekey" or "evidenceorigin" or "behaviorscope" or "collectionhealth";
     }
 
     private static bool ShouldOmitEventField(SandboxEvent evt, string key)
@@ -9030,6 +9588,16 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("<p class=\"muted\">Job ", "<p class=\"muted\">作业 "),
         (" generated at ", " 生成于 "),
         ("Analysis failed", "分析失败"),
+        ("Execution blocked / runtime indeterminate", "执行被阻断/运行期不可判定"),
+        ("Known malicious sample / runtime indeterminate", "已知恶意样本 / 运行期不可判定"),
+        ("Known malicious sample / analysis failed", "已知恶意样本 / 分析失败"),
+        ("Known malicious sample / static evidence only", "已知恶意样本 / 仅有静态证据"),
+        ("Known malicious sample / runtime evidence present", "已知恶意样本 / 已观察到运行期证据"),
+        ("Known malicious sample baseline", "已知恶意样本基线"),
+        ("Known malicious sample; insufficient runtime evidence does not mean safe.", "已知恶意样本；运行期证据不足不代表安全。"),
+        ("Public family capability is a calibration baseline, not proof that every behavior occurred in this run.", "公开家族能力是校准基线，不能证明本次运行发生了全部行为。"),
+        ("Public family baseline", "公开家族基线"),
+        ("runtime evidence boundary", "运行期证据边界"),
         ("Static analysis only", "仅静态分析"),
         ("No high-risk behavior", "未发现高风险行为"),
         ("Critical risk", "严重风险"),
@@ -9176,6 +9744,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("R0 health", "R0 健康"),
         ("Static triage", "静态分诊"),
         ("Collection diagnostics", "采集诊断"),
+        ("<strong>Execution boundary:</strong> sample execution was blocked or ended before complete runtime behavior, so the runtime verdict is indeterminate. Static findings remain static-only evidence and do not establish execution.", "<strong>执行边界：</strong>样本执行被阻断或在产生完整运行期行为前结束，因此运行期不可判定。静态命中仍保留为 static-only 证据，不能证明样本实际执行。"),
         ("Environment and evidence failures; sample exit outcomes are shown separately.", "环境与证据失败；样本退出结果单独显示。"),
         ("Operational failures", "运行失败"),
         ("Environment and evidence failures.", "环境与证据失败。"),
@@ -9207,6 +9776,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("No primary sample behavior rules matched. Static triage and collection diagnostics are separated below so operational health does not inflate the verdict.", "未命中主要样本行为规则。静态分诊和采集诊断已在下方分离展示，避免运行健康状态抬高判定。"),
         ("Static triage indicators", "静态分诊指标"),
         ("Static-only findings are useful triage signals, but they do not by themselves prove runtime malicious behavior.", "仅静态发现可作为有用分诊信号，但本身不能证明运行时恶意行为。"),
+        ("Evidence class", "证据类别"),
+        ("Static-only / unverified", "仅静态/未验证"),
+        ("static-only / unverified", "仅静态/未验证"),
+        ("Confidence:", "置信度："),
+        ("Static capability clue (unverified): ", "静态能力线索（未验证）："),
+        (" Static evidence only: imports, API-like strings, URLs, YARA matches, entropy, and PE metadata do not prove execution, credential access, anti-analysis, download, persistence, or exfiltration; require correlated runtime evidence.", " 静态证据仅供分诊：导入、API 类字符串、URL、YARA 命中、熵值和 PE 元数据不能证明执行、凭据访问、反分析、下载、持久化或外传；需要关联的运行时证据确认。"),
+        ("Static evidence boundary.", "静态证据边界。"),
+        ("Imports, API-like strings, URLs, YARA matches, entropy, PE metadata, and family labels are capability clues for triage. They are unverified until correlated with sample-attributed runtime events; they do not prove execution, credential access, anti-analysis, download, persistence, or exfiltration.", "导入、API 类字符串、URL、YARA 命中、熵值、PE 元数据和家族标签仅是分诊能力线索。除非与归属于样本的运行时事件关联，否则均未验证；它们不能证明执行、凭据访问、反分析、下载、持久化或外传。"),
         ("Collection and pipeline diagnostics", "采集与流水线诊断"),
         ("Collector health, runbook, import, and timing diagnostics explain evidence quality and are not sample behavior.", "采集器健康、运行手册、导入和时序诊断用于说明证据质量，不属于样本行为。"),
         ("Copy behavior evidence", "复制行为证据"),
@@ -9310,6 +9887,44 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("R0 / VT / Artifact health narrative.", "R0 / VT / 证据文件健康叙事。"),
         ("R0 / VT / Artifact health narrative", "R0 / VT / 证据文件健康叙事"),
         ("Copy health narrative", "复制健康叙事"),
+        ("Collection coverage gaps", "采集覆盖缺口"),
+        ("Collection coverage gap", "采集覆盖缺口"),
+        ("Disabled, missing, or partial channels are listed explicitly as evidence-quality gaps. They do not count as sample behavior, but they lower confidence and prevent a safe conclusion from incomplete coverage.", "已明确列出禁用、缺失或部分可用的采集通道，作为证据质量缺口。它们不计为样本行为，但会降低置信度，不能据此对覆盖不完整的样本下安全结论。"),
+        ("No explicit collection coverage gaps were observed.", "未观察到明确的采集覆盖缺口。"),
+        ("Expand coverage gap evidence", "展开覆盖缺口证据"),
+        ("Copy collection coverage gaps", "复制采集覆盖缺口"),
+        ("coverage gap · ", "覆盖缺口 · "),
+        ("WMI startup inventory", "WMI 启动项清单"),
+        ("ETW live capture", "ETW 实时采集"),
+        ("Live ETW capture is disabled; provider/readiness metadata does not represent a live trace.", "ETW 实时采集已禁用；provider/就绪度元数据不代表实时跟踪。"),
+        ("Security audit policy", "Windows 安全审核策略"),
+        ("R0Collector", "R0Collector"),
+        ("disabled/missing", "禁用/缺失"),
+        ("capture_failed", "采集失败"),
+        ("capture_failed count=", "采集失败次数="),
+        ("phases=", "阶段="),
+        ("No usable R0Collector health or telemetry rows were observed; kernel coverage is disabled or missing for this run.", "未观察到可用的 R0Collector 健康或遥测行；本次运行的内核覆盖已禁用或缺失。"),
+        ("coverage gap: status=", "覆盖缺口：状态="),
+        ("; artifacts=", "；证据文件="),
+        ("; events=", "；事件="),
+        ("latestReason=", "最近原因="),
+        ("artifactEvidenceMatrix", "证据矩阵"),
+        ("partial", "部分可用"),
+        ("missing", "缺失"),
+        ("not created", "未创建"),
+        ("Network collection coverage.", "网络采集覆盖状态。"),
+        ("Environment network can be present without sample attribution; this is separate from a network channel that was not collected.", "可能存在环境网络但没有样本归因；这与网络通道未采集是两种情况。"),
+        ("Network coverage", "网络覆盖"),
+        ("Network collection: not collected", "网络采集：未采集"),
+        ("not collected", "未采集"),
+        ("environment network observed; no sample attribution", "已观察到环境网络；没有样本归因"),
+        ("sample-attributed network observed", "已观察到样本归因网络"),
+        ("No network telemetry rows were observed; network collection is missing or disabled.", "未观察到网络遥测行；网络采集可能缺失或已禁用。"),
+        ("Sample attribution", "样本归因"),
+        ("Environment / unknown", "环境 / 未知"),
+        ("Rows with confirmed/probable sample correlation used by the network behavior lane.", "具有确认/可能样本关联的行会进入网络行为通道。"),
+        ("Environment and unknown network evidence remains available for review but does not raise the sample behavior count.", "环境和未知网络证据仍可复核，但不会抬高样本行为计数。"),
+        ("Copy network coverage summary", "复制网络覆盖摘要"),
         ("Network relation path", "网络关系路径"),
         ("DNS/HTTP/TLS/flow", "DNS/HTTP/TLS/流"),
         ("Evidence story.", "证据故事。"),
@@ -11048,6 +11663,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         return string.Join(
             Environment.NewLine,
             evt.Data.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Where(pair => !IsInternalEvidenceField(evt, pair.Key))
                 .Select(pair => $"{pair.Key}={pair.Value}"));
     }
 
@@ -11065,6 +11681,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         }
 
         var pairs = evt.Data
+            .Where(pair => !IsInternalEvidenceField(evt, pair.Key))
             .OrderBy(pair => BulkyEvidenceFieldRank(pair.Key))
             .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
             .Take(maxPairs)
@@ -11073,7 +11690,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var hidden = Math.Max(0, evt.Data.Count - pairs.Count);
         if (hidden > 0)
         {
-            pairs.Add($"__omittedDataPairs={hidden}");
+            pairs.Add($"Additional internal or technical fields hidden: {hidden}.");
         }
 
         return string.Join(Environment.NewLine, pairs);
@@ -11530,6 +12147,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                     ? ArtifactDescriptorFactory.FromExistingFile(hostPath, linkRoot, descriptor.Kind, metadata, descriptor.Category)
                     : ArtifactDescriptorFactory.FromKnownPath(hostPath, linkRoot, descriptor.Kind, metadata, descriptor.Category);
 
+                if (descriptor.Kind == ArtifactKind.DriverEventsJsonLines &&
+                    (!File.Exists(hostPath) || normalized.SizeBytes <= 0))
+                {
+                    metadata["artifactExists"] = "false";
+                    metadata["captureState"] = "missing";
+                    metadata["downloadAvailable"] = "false";
+                    metadata["downloadResolutionState"] = "missing";
+                }
+
                 descriptors.Add(normalized with
                 {
                     Name = string.IsNullOrWhiteSpace(descriptor.Name) ? normalized.Name : descriptor.Name,
@@ -11575,6 +12201,27 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             ["origin"] = "report",
             ["evidenceRole"] = evidenceRole
         };
+
+        if (kind == ArtifactKind.DriverEventsJsonLines)
+        {
+            try
+            {
+                if (!File.Exists(path) || new FileInfo(path).Length <= 0)
+                {
+                    metadata["artifactExists"] = "false";
+                    metadata["captureState"] = "missing";
+                    metadata["downloadAvailable"] = "false";
+                    metadata["downloadResolutionState"] = "missing";
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                metadata["artifactExists"] = "false";
+                metadata["captureState"] = "missing";
+                metadata["downloadAvailable"] = "false";
+                metadata["downloadResolutionState"] = "missing";
+            }
+        }
         descriptors.Add(ArtifactDescriptorFactory.FromKnownPath(path, reportRoot, kind, metadata));
     }
 

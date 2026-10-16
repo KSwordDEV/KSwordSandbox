@@ -417,6 +417,33 @@ public sealed class HyperVRunbookBuilder
             steps.Add(Step("open-vm-desktop", "Verify interactive VMware console window", BuildVMwareConsoleVerificationCommand(config), mutatesVmState: false));
         }
         steps.Add(Step("wait-guest-remoting", "Wait for PowerShell remoting in VMware guest", BuildWaitGuestSessionCommand(config, VirtualizationProvider.VMware, config.VMware.VmName), mutatesVmState: false));
+        if (config.VMware.DisableDefenderForLab)
+        {
+            steps.Add(Step("disable-defender-lab", "Disable Defender blocking for disposable VMware lab", BuildDisableDefenderForLabCommand(config, config.VMware.VmName)));
+        }
+    }
+
+    private static string BuildDisableDefenderForLabCommand(SandboxConfig config, string targetVmName)
+    {
+        var guestRoot = config.Guest.WorkingDirectory.TrimEnd('\\');
+        var command = string.Join(" ", new[]
+        {
+            "$session = $null;",
+            BuildGuestSessionAssignment(config, VirtualizationProvider.VMware, targetVmName),
+            "try {",
+            "Invoke-Command -Session $session -ScriptBlock {",
+            "$ErrorActionPreference = 'Stop';",
+            "$setMpPreference = Get-Command Set-MpPreference -ErrorAction Stop;",
+            "$addMpPreference = Get-Command Add-MpPreference -ErrorAction Stop;",
+            "& $setMpPreference -DisableRealtimeMonitoring $true -DisableBehaviorMonitoring $true -DisableIOAVProtection $true -DisableScriptScanning $true -DisableArchiveScanning $true -PUAProtection Disabled;",
+            $"foreach ($path in @({Q(guestRoot)}, {Q($"{guestRoot}\\incoming")}, {Q($"{guestRoot}\\out")})) {{ & $addMpPreference -ExclusionPath $path }};",
+            "$effective = Get-MpPreference;",
+            "if (-not $effective.DisableRealtimeMonitoring -or -not $effective.DisableBehaviorMonitoring -or -not $effective.DisableIOAVProtection) { throw 'Defender lab blocking policy did not apply.' };",
+            "Write-Host 'Defender real-time blocking disabled for disposable lab guest.';",
+            "} -ErrorAction Stop;",
+            "} finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
+        });
+        return WithGuestCredential(config, command);
     }
 
     private static string BuildVMwarePowerStateWaitCommand(bool expectedRunning, string operation)
