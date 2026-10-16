@@ -4226,7 +4226,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var collectionDiagnostics = report.Events
             .Where(evt => IsCollectionHealthAlertEvent(evt) && !failures.Contains(evt))
             .ToList();
-        html.AppendLine("<section id=\"failure\" class=\"card\"><h2>Failure reasons</h2>");
+        html.AppendLine("<section id=\"failure\" class=\"card\"><h2>Execution and collection diagnostics</h2>");
         if (report.Status != AnalysisStatus.Failed && failures.Count == 0 && sampleExitOutcomes.Count == 0 && collectionDiagnostics.Count == 0)
         {
             Empty(html, "No operational failure markers were collected for this job.");
@@ -4235,7 +4235,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         {
             html.AppendLine("<div class=\"section-note failure-note\"><strong>Failure attribution:</strong> Analysis environment / 分析环境. The job is marked Failed, but no normalized failure event was imported.</div>");
         }
-        else
+        else if (failures.Count > 0)
         {
             foreach (var failure in failures)
             {
@@ -8863,6 +8863,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             (">0 items<", ">0 项<"),
             (">Title<", ">标题<"),
             (">Type<", ">类型<"),
+            (">Time<", ">时间<"),
+            (">Source<", ">来源<"),
+            (">Process<", ">进程<"),
+            (">Path / Target<", ">路径 / 目标<"),
+            (">Data<", ">数据<"),
             (">Role<", ">角色<"),
             (">Name<", ">名称<"),
             (">VA<", ">虚拟地址<"),
@@ -9478,6 +9483,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("No non-health R0 driver telemetry rows were imported. Collection health rows above describe evidence quality rather than sample behavior.", "未导入非健康类 R0 驱动遥测行。上方采集健康行描述证据质量，而不是样本行为。"),
         ("No R0 collection health rows were imported.", "未导入 R0 采集健康行。"),
         ("Failure reasons", "失败原因"),
+        ("Execution and collection diagnostics", "执行与采集诊断"),
         ("No operational failure markers were collected for this job.", "本作业未采集到运行失败标记。"),
         ("Runbook failure detail.", "运行手册失败详情。"),
         ("Guest WinRM rejected the configured account (access denied). Re-run the guest bootstrap with the same username and password, then verify the account has WinRM/Administrators access.", "来宾 WinRM 拒绝了配置的账户（访问被拒绝）。请使用相同用户名和密码重新运行来宾引导，然后确认该账户具有 WinRM/Administrators 访问权限。"),
