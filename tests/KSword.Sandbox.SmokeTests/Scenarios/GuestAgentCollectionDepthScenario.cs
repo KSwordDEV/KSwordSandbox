@@ -89,6 +89,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "registry.etw", "ETW decoder must preserve registry rows as normalized evidence.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "fileio", "ETW kernel capture must request file I/O flags.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "decodedArtifactRelativePath", "ETW captured rows must expose the decoded XML artifact selector.");
+        var etwText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Collection", "EtwLiveTraceProbe.cs");
+        SmokeAssert.True(
+            !etwText.Contains("AddIfNotEmpty(data, \"rootProcessId\", context.RootProcessId", StringComparison.Ordinal),
+            "Decoded ETW rows must not inherit the sample root PID as a synthetic correlation hint.");
         SmokeAssert.True(programText.Contains("etw-live", StringComparison.Ordinal), "Guest Agent CLI must expose explicit --etw-live opt-in.");
         SmokeAssert.True(programText.Contains("edgePollIntervalMilliseconds", StringComparison.Ordinal) &&
                          programText.Contains("TimeSpan.FromMilliseconds(250)", StringComparison.Ordinal),

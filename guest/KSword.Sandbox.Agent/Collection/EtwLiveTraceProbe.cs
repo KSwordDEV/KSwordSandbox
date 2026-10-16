@@ -350,7 +350,12 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             ["rawDecoded"] = "true"
         };
         AddIfNotEmpty(data, "payload", payload);
-        AddIfNotEmpty(data, "rootProcessId", context.RootProcessId?.ToString(CultureInfo.InvariantCulture));
+        // Do not copy the Guest Agent's sample root PID onto every decoded
+        // ETW row. A rootProcessId field is a strong correlation hint in the
+        // host classifier; reusing the context PID for an unrelated kernel
+        // file/registry/network event would falsely promote ambient activity
+        // to sample behavior. Real process/parent IDs come from tracerpt
+        // payload fields above and are enough for lineage reconstruction.
         AddIfNotEmpty(data, "samplePath", context.SamplePath);
         return data;
     }
@@ -457,7 +462,6 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             AddIfNotEmpty(data, "processorNumber", GetField(fields, columns, "processornumber", "cpu"));
             AddIfNotEmpty(data, "kernelTime", GetField(fields, columns, "kerneltime"));
             AddIfNotEmpty(data, "userTime", GetField(fields, columns, "usertime"));
-            AddIfNotEmpty(data, "rootProcessId", context.RootProcessId?.ToString(CultureInfo.InvariantCulture));
             AddIfNotEmpty(data, "samplePath", context.SamplePath);
 
             rows.Add(new SandboxEvent
@@ -819,7 +823,10 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             Data = data
         };
         AddIfNotEmpty(data, "samplePath", context.SamplePath);
-        AddIfNotEmpty(data, "rootProcessId", context.RootProcessId?.ToString(CultureInfo.InvariantCulture));
+        // tracerpt's kernel event rows carry their own PID/parent fields when
+        // available. Do not copy the sample context root PID onto every
+        // decoded file/registry/image row; that would turn environment rows
+        // into false sample-attributed behavior on the host.
         AddIfNotEmpty(data, "rootImagePath", context.RootProcessPath ?? context.SamplePath);
         return evt;
     }
