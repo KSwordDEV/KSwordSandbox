@@ -26,7 +26,7 @@ param(
     [string]$MachineDefinitionPath = '',
     [ValidateSet('', 'qcow2', 'raw', 'vhdx', 'vmdk')]
     [string]$QemuDiskFormat = '',
-    [int]$DurationSeconds = 120,
+    [int]$DurationSeconds = 30,
     [switch]$NoBuild,
     [switch]$Json
 )

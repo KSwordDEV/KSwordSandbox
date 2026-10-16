@@ -2659,7 +2659,7 @@ try {
     $rdpFallbackEnabled = Get-BooleanOrDefault -Value (Get-ObjectPropertyValue -Object $hyperV -Name 'rdpFallbackEnabled' -DefaultValue $true) -DefaultValue $true
     $rdpTargetValue = Get-ObjectPropertyValue -Object $hyperV -Name 'rdpTarget' -DefaultValue $null
     $rdpTarget = if ([string]::IsNullOrWhiteSpace([string]$rdpTargetValue)) { '' } else { [string]$rdpTargetValue }
-    $defaultDuration = Get-IntOrDefault -Value (Get-ObjectPropertyValue -Object $analysis -Name 'defaultDurationSeconds' -DefaultValue 120) -DefaultValue 120
+    $defaultDuration = Get-IntOrDefault -Value (Get-ObjectPropertyValue -Object $analysis -Name 'defaultDurationSeconds' -DefaultValue 30) -DefaultValue 30
     $effectiveDurationSeconds = if ($DurationSeconds -gt 0) { $DurationSeconds } else { $defaultDuration }
     $effectiveExecutionTimeoutSeconds = if ($ExecutionTimeoutSeconds -gt 0) { $ExecutionTimeoutSeconds } else { [Math]::Max($effectiveDurationSeconds + 120, 180) }
 

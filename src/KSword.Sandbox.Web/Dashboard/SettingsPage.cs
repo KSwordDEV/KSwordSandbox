@@ -153,7 +153,7 @@ internal static class SettingsPage
                   <input id="settingsGoldenSnapshotName" placeholder="Clean" data-copy-label="clean baseline preset">
                   <p class="field-hint" data-copy="Hyper-V 检查点 / VMware 快照 / QEMU 每任务 overlay 或内部快照 / Hyper-V checkpoint / VMware snapshot / QEMU per-job overlay or internal snapshot" data-copy-label="clean baseline provider mapping" data-zh="按后端映射为 Hyper-V 检查点、VMware 快照，或 QEMU 每任务 overlay/内部快照。" data-en="Maps to a Hyper-V checkpoint, VMware snapshot, or QEMU per-job overlay/internal snapshot.">按后端映射为 Hyper-V 检查点、VMware 快照，或 QEMU 每任务 overlay/内部快照。</p>
                   <label for="settingsDurationSeconds" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
-                  <input id="settingsDurationSeconds" type="number" min="1" max="900" value="120" data-copy-label="analysis duration preset">
+                  <input id="settingsDurationSeconds" type="number" min="1" max="900" value="30" data-copy-label="analysis duration preset">
                   <p id="settingsDurationHint" class="field-hint" data-copy="" data-copy-label="duration preset hint">-</p>
                 </div>
                 <div id="vmPresetGuestCard" class="card" data-copy="Guest 用户预设加载中；密码仅从本机密钥环境变量读取 / Guest preset loading; password is read from local secret env only">

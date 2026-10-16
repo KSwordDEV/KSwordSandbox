@@ -24,7 +24,7 @@ param(
     [string]$EventsPath = '',
     [string]$RunbookExecutionPath = '',
     [string]$PlanPath = '',
-    [int]$DurationSeconds = 120,
+    [int]$DurationSeconds = 30,
     [ValidateRange(1, 7200)][int]$GuestReadyTimeoutSeconds = 180,
     [int]$StepTimeoutSeconds = 1800,
     [ValidateSet('', 'HyperV', 'VMware', 'Qemu')][string]$Provider = '',

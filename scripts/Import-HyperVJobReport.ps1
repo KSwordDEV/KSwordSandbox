@@ -18,7 +18,7 @@ param(
     [string]$ConfigPath = 'D:\Temp\KSwordSandbox\config\sandbox.local.json',
     [string]$RepoRoot = '',
     [string]$RuntimeRoot = '',
-    [int]$DurationSeconds = 120,
+    [int]$DurationSeconds = 30,
     [switch]$Json
 )
 
