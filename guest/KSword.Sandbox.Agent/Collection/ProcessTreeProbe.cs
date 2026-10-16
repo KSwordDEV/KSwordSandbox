@@ -3240,10 +3240,11 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
 
         var script = @"
 $ErrorActionPreference = 'Stop'
-$script:items = @()
+$script:items = [System.Collections.Generic.List[object]]::new()
+$script:errors = [System.Collections.Generic.List[object]]::new()
 function Add-Item($kind, $surface, $location, $name, $value, $description) {
   if ([string]::IsNullOrWhiteSpace($name)) { $name = '(unnamed)' }
-  $script:items += [pscustomobject]@{
+  [void]$script:items.Add([pscustomobject]@{
     Kind = $kind
     Surface = $surface
     Location = $location
@@ -3251,21 +3252,60 @@ function Add-Item($kind, $surface, $location, $name, $value, $description) {
     Value = $value
     ValueKind = 'WMI'
     Description = $description
+  })
+}
+function Add-QueryError($className, $exception) {
+  [void]$script:errors.Add([pscustomobject]@{
+    ClassName = $className
+    ExceptionType = $exception.GetType().FullName
+    Message = [string]$exception.Message
+  })
+}
+function Get-WmiRows($className) {
+  try {
+    return @(Get-CimInstance -Namespace root\subscription -ClassName $className -ErrorAction Stop)
+  } catch {
+    Add-QueryError $className $_.Exception
+    return @()
   }
 }
-Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -ErrorAction SilentlyContinue | ForEach-Object {
-  Add-Item 'wmi' 'wmi-event-filter' 'root\subscription:__EventFilter' $_.Name $_.Query 'WMI EventFilter query'
+function Format-Reference($reference) {
+  if ($null -eq $reference) { return '' }
+  if ($reference -is [string]) { return [string]$reference }
+  $properties = $reference.PSObject.Properties
+  foreach ($propertyName in @('__PATH', '__RELPATH', 'Name')) {
+    $property = $properties[$propertyName]
+    if ($null -ne $property -and $null -ne $property.Value) {
+      return [string]$property.Value
+    }
+  }
+  $cimProperties = $reference.PSObject.Properties['CimInstanceProperties']
+  if ($null -ne $cimProperties -and $null -ne $cimProperties.Value) {
+    foreach ($propertyName in @('__PATH', '__RELPATH', 'Name')) {
+      $property = @($cimProperties.Value | Where-Object Name -eq $propertyName | Select-Object -First 1)
+      if ($property.Count -gt 0 -and $null -ne $property[0].Value) {
+        return [string]$property[0].Value
+      }
+    }
+  }
+  return [string]$reference
 }
-Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -ErrorAction SilentlyContinue | ForEach-Object {
-  Add-Item 'wmi' 'wmi-commandline-consumer' 'root\subscription:CommandLineEventConsumer' $_.Name $_.CommandLineTemplate 'WMI CommandLineEventConsumer'
+foreach ($row in Get-WmiRows '__EventFilter') {
+  Add-Item 'wmi' 'wmi-event-filter' 'root\subscription:__EventFilter' $row.Name $row.Query 'WMI EventFilter query'
 }
-Get-CimInstance -Namespace root\subscription -ClassName ActiveScriptEventConsumer -ErrorAction SilentlyContinue | ForEach-Object {
-  Add-Item 'wmi' 'wmi-activescript-consumer' 'root\subscription:ActiveScriptEventConsumer' $_.Name $_.ScriptText 'WMI ActiveScriptEventConsumer'
+foreach ($row in Get-WmiRows 'CommandLineEventConsumer') {
+  Add-Item 'wmi' 'wmi-commandline-consumer' 'root\subscription:CommandLineEventConsumer' $row.Name $row.CommandLineTemplate 'WMI CommandLineEventConsumer'
 }
-Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -ErrorAction SilentlyContinue | ForEach-Object {
-  Add-Item 'wmi' 'wmi-filter-consumer-binding' 'root\subscription:__FilterToConsumerBinding' ($_.Filter + ' -> ' + $_.Consumer) ($_.Filter + ' -> ' + $_.Consumer) 'WMI FilterToConsumerBinding'
+foreach ($row in Get-WmiRows 'ActiveScriptEventConsumer') {
+  Add-Item 'wmi' 'wmi-activescript-consumer' 'root\subscription:ActiveScriptEventConsumer' $row.Name $row.ScriptText 'WMI ActiveScriptEventConsumer'
 }
-$script:items | ConvertTo-Json -Compress -Depth 4
+foreach ($row in Get-WmiRows '__FilterToConsumerBinding') {
+  $filter = Format-Reference $row.Filter
+  $consumer = Format-Reference $row.Consumer
+  $binding = $filter + ' -> ' + $consumer
+  Add-Item 'wmi' 'wmi-filter-consumer-binding' 'root\subscription:__FilterToConsumerBinding' $binding $binding 'WMI FilterToConsumerBinding'
+}
+[pscustomobject]@{ Items = @($script:items); Errors = @($script:errors) } | ConvertTo-Json -Compress -Depth 8
 ";
 
         var result = await BoundedProcessRunner.RunAsync(
@@ -3287,16 +3327,30 @@ $script:items | ConvertTo-Json -Compress -Depth 4
         try
         {
             using var document = JsonDocument.Parse(result.StandardOutput);
-            if (document.RootElement.ValueKind == JsonValueKind.Array)
+            var root = document.RootElement;
+            var itemElement = root;
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("Items", out var itemsElement))
             {
-                foreach (var element in document.RootElement.EnumerateArray())
+                itemElement = itemsElement;
+                if (root.TryGetProperty("Errors", out var errorsElement) && errorsElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var error in errorsElement.EnumerateArray())
+                    {
+                        diagnostics.Add(CreateWmiQueryFailureEvent(error));
+                    }
+                }
+            }
+
+            if (itemElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var element in itemElement.EnumerateArray())
                 {
                     AddWmiStartupItem(items, element);
                 }
             }
-            else if (document.RootElement.ValueKind == JsonValueKind.Object)
+            else if (itemElement.ValueKind == JsonValueKind.Object)
             {
-                AddWmiStartupItem(items, document.RootElement);
+                AddWmiStartupItem(items, itemElement);
             }
         }
         catch (JsonException ex)
@@ -3615,6 +3669,41 @@ $script:items | ConvertTo-Json -Compress -Depth 4
             evt.Data["stderrTruncated"] = (result.StandardError.Trim().Length > 512).ToString(CultureInfo.InvariantCulture);
         }
 
+        return evt;
+    }
+
+    /// <summary>
+    /// Creates a diagnostic event for one WMI subscription class query.
+    /// Inputs are the structured class/error object emitted by the PowerShell
+    /// helper; processing preserves the class and failure reason so one
+    /// unavailable class does not hide successful classes; returns an event.
+    /// </summary>
+    private static SandboxEvent CreateWmiQueryFailureEvent(JsonElement error)
+    {
+        var className = JsonProperty(error, "ClassName") ?? "unknown";
+        var exceptionType = JsonProperty(error, "ExceptionType");
+        var message = JsonProperty(error, "Message");
+        var evt = new SandboxEvent
+        {
+            EventType = "startup_item.wmi.capture_failed",
+            Source = "guest",
+            Path = $"root\\subscription:{className}",
+            Data =
+            {
+                ["source"] = "WMI permanent event subscriptions",
+                ["className"] = className,
+                ["failureScope"] = "class-query",
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true",
+                ["sampleBehaviorCandidate"] = "false",
+                ["behaviorCounted"] = "false",
+                ["reason"] = "WMI subscription class query failed; other classes were still queried.",
+                ["zhMessage"] = "WMI 启动项清单的单个类别查询失败；其他类别仍已继续采集。",
+                ["zhHint"] = "请结合 className、exceptionType 和 message 判断 WMI 命名空间权限、类别可用性或仓库状态。"
+            }
+        };
+        AddIfNotEmpty(evt.Data, "exceptionType", exceptionType);
+        AddIfNotEmpty(evt.Data, "message", message);
         return evt;
     }
 

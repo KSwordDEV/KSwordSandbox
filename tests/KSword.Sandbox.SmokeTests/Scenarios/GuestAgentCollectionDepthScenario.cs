@@ -66,6 +66,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "startup_item.created", "Process probe must emit startup item diff events.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "startup.created", "Process probe must emit unified startup diff events.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "wmi-permanent-event-subscription", "Startup diff must cover WMI permanent event subscription surfaces.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Get-WmiRows", "WMI startup inventory must query each subscription class independently.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Format-Reference", "WMI binding references must be formatted without CimInstance op_Addition failures.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "failureScope", "WMI class failures must be reported with an explicit class-level diagnostic.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Image File Execution Options", "Startup diff must cover IFEO persistence surfaces.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "WinSock2", "Startup diff must cover Winsock provider persistence surfaces.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Shell Extensions", "Startup diff must cover shell extension persistence surfaces.");
