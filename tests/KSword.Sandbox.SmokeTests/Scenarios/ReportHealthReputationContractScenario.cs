@@ -136,10 +136,7 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         RequireContains(rendererSource, "raw-events-shell", "Raw events should render inside a collapsed details shell.");
         RequireContains(rendererSource, "raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto", "Expanded raw events should have a finite scroll height.");
         RequireContains(rendererSource, "Raw events are collapsed by default.", "Rendered reports should explain the raw-event collapse.");
-        RequireContains(rendererSource, "IsR0CollectionHealthEvent", "Renderer should explicitly separate R0 collection health.");
-        RequireContains(rendererSource, "R0 unavailable, driver health, queue backpressure", "Renderer should describe R0 health as collection quality.");
-        RequireContains(rendererSource, "R0 noise policy", "Renderer should explain R0 health/self-noise separation.");
-        RequireContains(rendererSource, "R0HealthEvidenceInlineLimit", "Renderer should cap R0 health examples separately from raw events.");
+        RequireContains(rendererSource, "IsUserFacingEvent", "Renderer should filter the primary event explorer to sample-facing evidence.");
         RequireContains(rendererSource, "Raw evidence height limit: 58vh", "Renderer should state the raw evidence height cap.");
         RequireContains(rendererSource, "IsVirusTotalStatusIssue", "Renderer should explicitly separate VT status issues.");
         RequireContains(rendererSource, "Missing keys, rate limits, or not-found responses are enrichment status", "Renderer should describe VT status rows as enrichment status.");
@@ -189,22 +186,15 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
 
         var behaviorSection = ExtractSection(englishHtml, "behavior");
         var primaryBehaviorArea = TextBefore(behaviorSection, "<details class=\"relationship-details\"><summary>Static triage indicators");
-        RequireContains(primaryBehaviorArea, "No primary sample behavior rules matched.", "Primary behavior section should stay empty for health/status-only evidence.");
+        RequireContains(primaryBehaviorArea, "No sample-attributed behavior was observed in the captured runtime events.", "Primary behavior section should stay empty for health/status-only evidence.");
         RequireNotContains(primaryBehaviorArea, "R0 collector device unavailable", "R0 unavailable should not enter primary behavior rows.");
         RequireNotContains(primaryBehaviorArea, "VirusTotal hash not found", "VT not_found should not enter primary behavior rows.");
         RequireNotContains(primaryBehaviorArea, "VirusTotal lookup rate-limited", "VT rate-limit should not enter primary behavior rows.");
-        RequireContains(behaviorSection, "Collection and pipeline diagnostics", "Diagnostic findings should still be visible in a secondary group.");
+        RequireNotContains(behaviorSection, "Collection and pipeline diagnostics", "Collection diagnostics should stay out of the primary behavior UI.");
 
         var r0Section = ExtractSection(englishHtml, "r0");
-        RequireContains(r0Section, "Collection health status.", "R0 section should explain collection health.");
-        RequireContains(r0Section, "not malicious sample behavior", "R0 section should state health rows are not malicious behavior.");
-        RequireMetric(r0Section, "Collection health rows", "1", "risk-medium");
-        RequireMetric(r0Section, "Device unavailable", "1", "risk-medium");
-        RequireMetric(r0Section, "Driver telemetry rows", "0", "risk-info");
-        RequireContains(r0Section, "R0 availability", "R0 section should summarize availability.");
-        RequireContains(r0Section, "Unavailable / degraded", "R0 section should show unavailable as evidence-quality degradation.");
-        RequireContains(r0Section, "R0 health evidence examples", "R0 section should fold health examples by default.");
-        RequireContains(r0Section, "No non-health R0 driver telemetry rows were imported.", "R0 unavailable alone should not create driver telemetry evidence.");
+        RequireContains(r0Section, "No sample-attributed driver behavior was captured.", "R0 health-only evidence should not create a sample behavior section.");
+        RequireNotContains(r0Section, "Collection health status.", "R0 collection health should stay out of the primary report UI.");
 
         var vtSection = ExtractSection(englishHtml, "vt");
         RequireContains(vtSection, "Hash-only enrichment.", "VT section should describe reputation enrichment.");
