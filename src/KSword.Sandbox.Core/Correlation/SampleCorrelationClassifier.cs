@@ -176,6 +176,19 @@ public static class SampleCorrelationClassifier
         Dictionary<string, string> data,
         CorrelationContext context)
     {
+        // Guest event-log probes conservatively mark rows as nonbehavior when
+        // they cannot see the full process tree in real time.  Once the host
+        // has reconstructed a child PID under the submitted sample, that
+        // stale marker must not block the stronger host-side correlation.
+        if (IsSampleCorrelatedWindowsEventLogEvidence(evt, data, context))
+        {
+            return CorrelationDisposition.Confirmed(
+                "eventlog-process-id-matched-sample-process-tree",
+                "processId",
+                NormalBehaviorBoundary(evt, data, context),
+                true);
+        }
+
         if (IsExplicitNonBehaviorOrCollectionNoise(evt, data))
         {
             return CorrelationDisposition.Environment("explicit-nonbehavior-or-collection-noise", "behaviorCounted/nonbehavior");
@@ -757,8 +770,26 @@ public static class SampleCorrelationClassifier
             AddIfMissing(data, "evidenceDisposition", "behavior-candidate");
             AddIfMissing(data, "sampleConclusionPromoted", disposition.Kind == CorrelationKind.Confirmed ? "true" : "candidate");
             AddIfMissing(data, "sampleConclusionPolicy", disposition.Kind == CorrelationKind.Confirmed ? "strong-sample-correlation" : "probable-sample-correlation-review-required");
-            AddIfMissing(data, "sampleBehaviorCandidate", "true");
-            AddIfMissing(data, "behaviorCounted", "true");
+            if (disposition.OverrideExistingNonBehavior)
+            {
+                data["evidenceDisposition"] = "behavior-candidate";
+                data["sampleConclusionPromoted"] = "true";
+                data["sampleConclusionPolicy"] = "strong-sample-correlation";
+                data["sampleBehaviorCandidate"] = "true";
+                data["behaviorCounted"] = "true";
+                data["nonbehavior"] = "false";
+                data["notSampleBehavior"] = "false";
+                data.Remove("nonbehaviorReason");
+                data["sampleBehaviorCandidateReason"] = disposition.Reason;
+                data["behaviorCountingPolicy"] = "strong-sample-correlation-is-counted-as-sample-behavior";
+                data["zhBehaviorHint"] = "该事件的进程 PID 已通过主机进程树关联到样本，升级为样本行为证据。";
+                data["zhHint"] = "该事件的进程 PID 已通过主机进程树关联到样本，升级为样本行为证据。";
+            }
+            else
+            {
+                AddIfMissing(data, "sampleBehaviorCandidate", "true");
+                AddIfMissing(data, "behaviorCounted", "true");
+            }
             AddIfMissing(data, "sampleBehaviorCandidateReason", disposition.Reason);
             AddIfMissing(data, "normalBehaviorBoundary", disposition.Boundary);
             AddIfMissing(data, "zhBehaviorHint", disposition.Kind == CorrelationKind.Confirmed
@@ -787,6 +818,37 @@ public static class SampleCorrelationClassifier
             IsTruthy(Value(data, "selfNoise")) ||
             IsTruthy(Value(data, "selfProcess")) ||
             CollectionEventTypePrefixes.Any(prefix => evt.EventType.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsSampleCorrelatedWindowsEventLogEvidence(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context)
+    {
+        var eventType = evt.EventType ?? string.Empty;
+        var evidenceRole = Value(data, "evidenceRole");
+        if (eventType.EndsWith(".summary", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains(".collection.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains(".readiness.", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var isTargetedEventLog = eventType.StartsWith("eventlog.", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(evidenceRole, "targeted-windows-eventlog-behavior", StringComparison.OrdinalIgnoreCase);
+        var isSecurityAuditEvent = eventType.StartsWith("security.", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(evidenceRole, "privilege-security-audit-event", StringComparison.OrdinalIgnoreCase);
+
+        // Collection/readiness summaries use the same evidence role on some
+        // guest versions but are never behavior rows.  Their event type is
+        // deliberately kept outside the eventlog./security. namespaces.
+        if (!isTargetedEventLog && !isSecurityAuditEvent)
+        {
+            return false;
+        }
+
+        var processId = EventProcessId(evt, data);
+        return processId is not null && context.SampleProcessIds.Contains(processId.Value);
     }
 
     private static string NormalBehaviorBoundary(
@@ -1351,11 +1413,12 @@ public static class SampleCorrelationClassifier
         string Field,
         string Strength,
         bool Strong,
-        string Boundary)
+        string Boundary,
+        bool OverrideExistingNonBehavior = false)
     {
         public static CorrelationDisposition Unchanged() => new(CorrelationKind.Unchanged, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, false, string.Empty);
 
-        public static CorrelationDisposition Confirmed(string reason, string field, string boundary = "sample-attribution-boundary") => new(CorrelationKind.Confirmed, "confirmed", "correlated", reason, field, "strong", true, boundary);
+        public static CorrelationDisposition Confirmed(string reason, string field, string boundary = "sample-attribution-boundary", bool overrideExistingNonBehavior = false) => new(CorrelationKind.Confirmed, "confirmed", "correlated", reason, field, "strong", true, boundary, overrideExistingNonBehavior);
 
         public static CorrelationDisposition Probable(string reason, string field, string boundary = "probable-behavior-boundary") => new(CorrelationKind.Probable, "probable", "probable", reason, field, "medium", false, boundary);
 
