@@ -435,12 +435,12 @@ public sealed class HyperVRunbookBuilder
             "$ErrorActionPreference = 'Stop';",
             "$setMpPreference = Get-Command Set-MpPreference -ErrorAction Stop;",
             "$addMpPreference = Get-Command Add-MpPreference -ErrorAction Stop;",
-            "$policyAlreadyDisabled = $false;",
-            "try { & $setMpPreference -DisableRealtimeMonitoring $true -DisableBehaviorMonitoring $true -DisableIOAVProtection $true -DisableScriptScanning $true -DisableArchiveScanning $true -PUAProtection Disabled; } catch { $defenderError = $_.Exception.ToString(); if ($defenderError -match '0x800106ba|service.*not.*running|服务') { $policyAlreadyDisabled = $true; Write-Warning \"Defender service is unavailable; validating existing disabled policy.\" } else { throw } }",
-            $"foreach ($path in @({Q(guestRoot)}, {Q($"{guestRoot}\\incoming")}, {Q($"{guestRoot}\\out")})) {{ try {{ & $addMpPreference -ExclusionPath $path }} catch {{ $defenderError = $_.Exception.ToString(); if ($defenderError -notmatch '0x800106ba|service.*not.*running|服务') {{ throw }}; Write-Warning \"Defender exclusion update skipped because service is unavailable.\" }} }};",
+            "$policyAlreadyDisabled = $false; $serviceUnavailable = $false;",
+            "try { & $setMpPreference -DisableRealtimeMonitoring $true -DisableBehaviorMonitoring $true -DisableIOAVProtection $true -DisableScriptScanning $true -DisableArchiveScanning $true -PUAProtection Disabled; } catch { $defenderError = $_.Exception.ToString(); if ($defenderError -match '0x800106ba|service.*(unavailable|not\\s+running)|服务.*(不可用|未运行)') { $policyAlreadyDisabled = $true; $serviceUnavailable = $true; Write-Warning \"Defender service is unavailable; validating existing disabled policy.\" } else { throw } }",
+            $"foreach ($path in @({Q(guestRoot)}, {Q($"{guestRoot}\\incoming")}, {Q($"{guestRoot}\\out")})) {{ try {{ & $addMpPreference -ExclusionPath $path }} catch {{ $defenderError = $_.Exception.ToString(); if ($defenderError -notmatch '0x800106ba|service.*(unavailable|not\\s+running)|服务.*(不可用|未运行)') {{ throw }}; $serviceUnavailable = $true; Write-Warning \"Defender exclusion update skipped because service is unavailable.\" }} }};",
             "$effective = Get-MpPreference;",
             "if (-not $effective.DisableRealtimeMonitoring -or -not $effective.DisableBehaviorMonitoring -or -not $effective.DisableIOAVProtection) { throw 'Defender lab blocking policy did not apply.' };",
-            "Write-Host \"Defender real-time blocking disabled for disposable lab guest. policyAlreadyDisabled=$policyAlreadyDisabled\";",
+            "Write-Host \"Defender real-time blocking disabled for disposable lab guest. policyAlreadyDisabled=$policyAlreadyDisabled; serviceUnavailable=$serviceUnavailable\";",
             "} -ErrorAction Stop;",
             "} finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
         });
