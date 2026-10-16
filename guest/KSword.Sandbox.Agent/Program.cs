@@ -170,6 +170,15 @@ internal static class AgentProgram
                 executionProcessStartTimeUtc);
             events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterStart, runningProbeContext));
 
+            // Take one edge poll immediately after launch. Very short-lived
+            // samples can create a file, child process, or socket and finish
+            // before the regular 750 ms cadence gets its first turn.
+            events.AddRange(await probeRunner.CollectAsync(
+                ProbePhase.DuringRun,
+                runningProbeContext,
+                CancellationToken.None,
+                includeHealthSummary: false));
+
             executionStage = "wait";
             var exited = await WaitForExitWithPeriodicProbesAsync(
                 process,
