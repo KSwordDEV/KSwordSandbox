@@ -3952,9 +3952,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var telemetryEvents = candidateEvents
             .Where(IsSampleBehaviorEvent)
             .ToList();
-        var excludedEvents = candidateEvents
-            .Where(IsExcludedFromBehaviorStoryEvent)
-            .ToList();
         var securityOrEtwRows = telemetryEvents.Count(evt =>
             evt.EventType.StartsWith("security.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("etw.", StringComparison.OrdinalIgnoreCase));
@@ -3989,7 +3986,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 "Security / privilege telemetry",
                 $"candidateRows={candidateEvents.Count}",
                 $"sampleBehaviorRows={telemetryEvents.Count}",
-                $"excludedSelfNoiseOrNonbehaviorRows={excludedEvents.Count}",
                 $"securityOrEtwRows={securityOrEtwRows}",
                 $"processAccessRows={processAccessRows}",
                 $"privilegeRows={privilegeRows}",
@@ -4001,7 +3997,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             ]);
 
         html.AppendLine("<section id=\"security\" class=\"card\"><h2>Security / privilege telemetry</h2>");
-        html.AppendLine("<div class=\"section-note\"><strong>Security and privilege telemetry.</strong> Windows Security/ETW privilege rows and process-access style rows are shown as supporting evidence for sensitive access, token, privilege, or handle activity. This section does not label a row malicious by itself; correlate requested rights, target process/object, rule hits, and self-noise markers before drawing conclusions.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Security and privilege telemetry.</strong> Windows Security/ETW privilege rows and process-access style rows are shown as supporting evidence for sensitive access, token, privilege, or handle activity.</div>");
         html.AppendLine("<div class=\"overview-strip security-privilege-overview copyable\" data-copy=\"" + A(copy) + "\">");
         AppendOverviewItem(
             html,
@@ -4021,12 +4017,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             sensitivePrivilegeNames.Count.ToString(CultureInfo.InvariantCulture),
             sensitivePrivilegeNames.Count == 0 ? "No privilege-name field was available." : string.Join("; ", sensitivePrivilegeNames),
             sensitivePrivilegeNames.Count > 0 ? "risk-medium" : "risk-low");
-        AppendOverviewItem(
-            html,
-            "Self-noise excluded",
-            excludedEvents.Count.ToString(CultureInfo.InvariantCulture),
-            "Rows marked collector/self-noise, nonbehavior, or collection health remain outside this table and stay available in Raw normalized events/report.json.",
-            excludedEvents.Count > 0 ? "risk-info" : "risk-low");
         html.AppendLine("<div class=\"toolbar\">" + CopyButton("Copy security/privilege telemetry summary", copy) + "</div>");
         html.AppendLine("</div>");
 
@@ -5411,7 +5401,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("<h3>Process tree</h3>");
         html.AppendLine("<div class=\"section-note\"><strong>Process relationship tree.</strong> Native expandable process tree grouped by stable process key when available, with PID/PPID fallback; compact row labels, depth/key badges, activity sparklines, and path hints keep lineage readable.</div>");
         html.AppendLine("<div class=\"section-note\"><strong>Process tree default expansion.</strong> Key process nodes are open by default: roots, high-signal nodes, and the first relationship levels. Expand remaining nodes for full lineage.</div>");
-        AppendProcessTreeOverview(html, starts.Count, children, roots.Count, activityByProcess, report.Events.Count(IsCollectorSelfNoiseEvent), report.Events.Count(IsCollectionHealthEvent));
+        AppendProcessTreeOverview(html, starts.Count, children, roots.Count, activityByProcess);
         if (roots.Count == 0)
         {
             roots = starts
@@ -5433,19 +5423,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
     /// <summary>
     /// Appends a compact process-tree overview before the expandable lineage.
-    /// Inputs are process starts, resolved child edges, activity counters, and
-    /// noise counts; processing writes flat summary panels so operators can
-    /// understand what is included or deliberately excluded before expanding
-    /// raw process evidence.
+    /// Inputs are process starts, resolved child edges, and activity counters;
+    /// processing writes flat summary panels for sample-attributed lineage.
     /// </summary>
     private static void AppendProcessTreeOverview(
         StringBuilder html,
         int nodeCount,
         IReadOnlyDictionary<string, List<SandboxEvent>> children,
         int rootCount,
-        IReadOnlyDictionary<string, ProcessTreeActivity> activityByProcess,
-        int collectorNoiseCount,
-        int healthRowCount)
+        IReadOnlyDictionary<string, ProcessTreeActivity> activityByProcess)
     {
         var edgeCount = children.Sum(pair => pair.Value
             .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
@@ -5467,12 +5453,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             highSignalNodeCount.ToString(),
             "Nodes with file, registry, or network activity open by default for readable triage.",
             highSignalNodeCount > 0 ? "risk-medium" : "risk-low");
-        AppendOverviewItem(
-            html,
-            "Self-noise excluded",
-            collectorNoiseCount.ToString(),
-            $"Collector/health rows excluded from process tree evidence: {collectorNoiseCount + healthRowCount}.",
-            collectorNoiseCount > 0 ? "risk-info" : "risk-low");
         html.AppendLine("</div>");
     }
 
@@ -5686,7 +5666,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var cards = allCards.Take(RelationshipCardInlineLimit).ToList();
         var hiddenCardCount = Math.Max(0, allCards.Count - cards.Count);
         html.AppendLine("<h3 id=\"process-relationship-cards\" class=\"anchor-offset\">Process relationship cards</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Process relationship evidence / 进程关系证据.</strong> Cards summarize child, file, registry, network, and linked artifact evidence per stable process identity; long command lines stay folded and collector self-noise is excluded. Hint / 提示: artifact badges are compact proof anchors, while full descriptors remain in Artifact links and raw events.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Process relationship evidence / 进程关系证据.</strong> Cards summarize child, file, registry, network, and linked artifact evidence per stable process identity; long command lines stay folded. Artifact badges are compact proof anchors, while full descriptors remain in Artifact links and raw events.</div>");
         if (cards.Count == 0)
         {
             Empty(html, "No process relationship cards could be derived from normalized telemetry.");
