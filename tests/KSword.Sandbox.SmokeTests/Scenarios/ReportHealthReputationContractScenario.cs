@@ -213,7 +213,7 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
 
         RequireContains(chineseHtml, "<html lang=\"zh-CN\">", "Chinese report should keep zh-CN metadata.");
         RequireContains(chineseHtml, "R0 / 驱动事件", "Chinese report should include the localized R0 section.");
-        RequireContains(chineseHtml, "R0 可用性", "Chinese report should localize R0 availability.");
+        RequireNotContains(chineseHtml, "R0 可用性", "Chinese report should not expose the removed R0 health card in the main UI.");
         RequireContains(chineseHtml, "原始事件", "Chinese report should include the localized raw-event section.");
     }
 

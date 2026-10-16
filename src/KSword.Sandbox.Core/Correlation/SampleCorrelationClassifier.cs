@@ -220,6 +220,11 @@ public static class SampleCorrelationClassifier
             return ClassifyNetworkEvidence(evt, data, context);
         }
 
+        if (IsFileEvidence(evt))
+        {
+            return ClassifyFileEvidence(evt, data, context);
+        }
+
         if (IsDriverEvidence(evt))
         {
             return ClassifyDriverEvidence(evt, data, context);
@@ -352,7 +357,17 @@ public static class SampleCorrelationClassifier
             evt.CommandLine,
             evt.Path);
 
-        if (PathOrCommandMatchesSample(target, context))
+        var persistenceSurface = string.Join("|", new[]
+        {
+            target,
+            Value(data, "keyPath"),
+            Value(data, "registryKeyPath"),
+            Value(data, "location"),
+            Value(data, "taskName"),
+            Value(data, "serviceName")
+        }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+        if (PathOrCommandMatchesSample(persistenceSurface, context))
         {
             return CorrelationDisposition.Confirmed("service-or-task-target-points-to-submitted-sample", "imagePath/taskToRun");
         }
@@ -363,17 +378,53 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Confirmed("service-or-task-actor-pid-matched-sample-process-tree", "actorProcessId");
         }
 
-        if (LooksUserWritableOrPersistenceTarget(target, context))
+        if (LooksUserWritableOrPersistenceTarget(persistenceSurface, context))
         {
             return CorrelationDisposition.Probable("service-or-task-target-points-to-user-writable-location", "imagePath/taskToRun");
         }
 
-        if (IsKnownWindowsServiceChange(data, target) || IsKnownWindowsTaskChange(data, target))
+        if (IsKnownWindowsServiceChange(data, persistenceSurface) || IsKnownWindowsTaskChange(data, persistenceSurface))
         {
             return CorrelationDisposition.Environment("standard-windows-service-or-task-state-drift", "serviceName/taskName");
         }
 
         return CorrelationDisposition.Unknown("service-or-task-diff-has-no-sample-target-or-actor-correlation", "imagePath/taskToRun");
+    }
+
+    private static CorrelationDisposition ClassifyFileEvidence(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context)
+    {
+        var target = FirstNonEmpty(
+            evt.Path,
+            Value(data, "path"),
+            Value(data, "filePath"),
+            Value(data, "target"),
+            Value(data, "destinationPath"),
+            Value(data, "sourcePath"));
+        var operation = FirstNonEmpty(
+            Value(data, "operation"),
+            Value(data, "operationName"),
+            Value(data, "fileOperationName"),
+            evt.EventType);
+
+        if (PathOrCommandMatchesSample(target, context))
+        {
+            return CorrelationDisposition.Confirmed("file-target-points-to-submitted-sample", "path");
+        }
+
+        if (LooksUserWritableOrPersistenceTarget(target, context) && IsHighSignalMutation(evt, data))
+        {
+            return CorrelationDisposition.Probable("file-mutation-targets-user-writable-location", "path");
+        }
+
+        if (IsHighSignalMutation(evt, data) && !LooksSystemOnlyPath(target) && !string.IsNullOrWhiteSpace(operation))
+        {
+            return CorrelationDisposition.Probable("file-mutation-has-non-system-target", "path");
+        }
+
+        return CorrelationDisposition.Unknown("file-row-has-no-sample-path-or-lineage-match", "path");
     }
 
     private static CorrelationDisposition ClassifyProcessEvidence(
@@ -848,6 +899,13 @@ public static class SampleCorrelationClassifier
             evt.EventType.StartsWith("tls.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFileEvidence(SandboxEvent evt)
+    {
+        return evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("filesystem.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("dropped_file.", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsListenerEvent(SandboxEvent evt)

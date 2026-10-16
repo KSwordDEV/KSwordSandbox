@@ -30,17 +30,13 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(html, "Download selector / duplicate / rejection diagnostics", "Artifact rows should expose selector diagnostics.");
         RequireContains(html, "duplicateGroupCount=2", "Artifact evidence should include duplicate group metadata.");
         RequireContains(html, "unsafeGuestArtifactPath", "Artifact evidence should include rejection diagnostics.");
-        RequireContains(html, "Driver network status / WFP-ALE", "R0 section should narrate WFP/ALE network status.");
-        RequireContains(html, "Network status availability", "R0 network status should include availability card.");
-        RequireContains(html, "r0collector.driverNetworkStatus", "R0 network status should be copyable by event name.");
-        RequireContains(html, "activeLayerMask=0x00000007", "R0 network status copy block should include active WFP/ALE mask.");
+        RequireNotContains(html, "Driver network status / WFP-ALE", "R0 readiness diagnostics should stay out of the main report UI.");
+        RequireNotContains(html, "Network status availability", "R0 readiness diagnostics should stay out of the main report UI.");
         RequireContains(html, "VirusTotal official evidence", "VT section should summarize official file-object fields.");
         RequireContains(html, "VT reputation/community", "VT section should expose reputation/community score.");
         RequireContains(html, "vtEngineCount=71", "VT official evidence should include engine count.");
         RequireContains(html, "https://www.virustotal.com/gui/file/", "VT permalink should remain copyable evidence.");
-        RequireContains(html, "Evidence health narrative", "Report should narrate evidence health before dense evidence.");
-        RequireContains(html, "R0 / VT / Artifact health narrative", "Report should separate evidence health from sample behavior.");
-        RequireContains(html, "Copy health narrative", "Evidence health narrative should be explicitly copyable.");
+        RequireNotContains(html, "R0 / VT / Artifact health narrative", "Long health strategy text should stay out of the main report UI.");
         RequireContains(html, "Collection coverage gaps", "Report should list disabled, missing, and partial collection channels as explicit coverage gaps.");
         RequireContains(html, "WMI startup inventory", "Collection coverage should show WMI capture_failed counts and phases.");
         RequireContains(html, "capture_failed count=2", "WMI coverage should preserve before/after failure count.");
@@ -510,5 +506,10 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
     private static void RequireContains(string content, string expected, string message)
     {
         SmokeAssert.True(content.Contains(expected, StringComparison.Ordinal), message);
+    }
+
+    private static void RequireNotContains(string content, string unexpected, string message)
+    {
+        SmokeAssert.True(!content.Contains(unexpected, StringComparison.Ordinal), message);
     }
 }

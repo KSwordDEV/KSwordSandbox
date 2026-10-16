@@ -121,9 +121,7 @@ internal sealed class ReportR0CollectorSelfNoiseContractScenario : ISmokeTestSce
         RequireContains(rendererSource, "IsSampleBehaviorEvent", "Renderer should separate sample behavior from collection plumbing.");
         RequireContains(rendererSource, "IsSampleBehaviorFileEvent", "File behavior counts should use the sample-behavior filter.");
         RequireContains(rendererSource, "IsSampleBehaviorNetworkEvent", "Network behavior counts should use the sample-behavior filter.");
-        RequireContains(rendererSource, "Collector self-noise hidden", "R0 section should expose an auditable self-noise count.");
-        RequireContains(rendererSource, "R0 noise policy", "R0 section should explain that self-noise and health lanes do not affect behavior counts.");
-        RequireContains(rendererSource, "Self-noise excluded", "Process tree overview should disclose collector self-noise exclusion.");
+        RequireContains(rendererSource, "AppendCollectionCoverageGaps", "Collection gaps should remain available as a compact evidence-quality lane.");
     }
 
     /// <summary>
@@ -158,19 +156,14 @@ internal sealed class ReportR0CollectorSelfNoiseContractScenario : ISmokeTestSce
         RequireNotContains(graphSection, "KSword.Sandbox.R0Collector.exe", "Behavior graph should exclude collector self-noise.");
 
         var r0Section = ExtractSection(englishHtml, "r0");
-        RequireMetric(r0Section, "Driver telemetry rows", "1", "risk-info");
-        RequireMetric(r0Section, "Collector self-noise hidden", "2", "risk-info");
-        RequireContains(r0Section, "R0 noise policy.", "R0 section should explain the low-noise policy.");
-        RequireContains(r0Section, "Behavior impact", "R0 health summary should explicitly keep health impact out of behavior counts.");
-        RequireContains(r0Section, "Collector self-noise hidden from behavior sections.", "R0 section should explain self-noise filtering.");
-        RequireContains(r0Section, "collector-self-noise.tmp", "R0 self-noise summary should remain auditable.");
+        RequireNotContains(r0Section, "Collector self-noise", "R0 self-noise should stay out of the primary R0 UI.");
+        RequireNotContains(r0Section, "R0 noise policy", "R0 strategy text should stay out of the primary R0 UI.");
 
         var rawSection = ExtractSection(englishHtml, "events");
         RequireContains(rawSection, "KSword.Sandbox.R0Collector.exe", "Raw events should retain collector self-noise.");
         RequireContains(rawSection, "collector-self-noise.tmp", "Raw events should retain collector self-noise paths.");
 
-        RequireContains(chineseHtml, "采集器自噪声已隐藏", "Chinese report should localize the self-noise count.");
-        RequireContains(chineseHtml, "采集器自噪声已从行为章节隐藏。", "Chinese report should localize self-noise guidance.");
+        RequireNotContains(chineseHtml, "采集器自噪声已隐藏", "Chinese report should not expose removed self-noise strategy text.");
     }
 
     /// <summary>

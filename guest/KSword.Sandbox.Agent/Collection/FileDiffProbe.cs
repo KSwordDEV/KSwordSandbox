@@ -46,7 +46,7 @@ internal sealed class FileDiffProbe : IGuestProbe
 
         if (phase == ProbePhase.BeforeStart)
         {
-            baseline = snapshotProvider.Capture(context.WorkingDirectory, cancellationToken);
+            baseline = CaptureWatchedFiles(context, cancellationToken);
             return Task.FromResult<IReadOnlyList<SandboxEvent>>([]);
         }
 
@@ -55,7 +55,7 @@ internal sealed class FileDiffProbe : IGuestProbe
             return Task.FromResult<IReadOnlyList<SandboxEvent>>([]);
         }
 
-        var current = snapshotProvider.Capture(context.WorkingDirectory, cancellationToken);
+        var current = CaptureWatchedFiles(context, cancellationToken);
         var events = new List<SandboxEvent>();
 
         foreach (var (path, snapshot) in current.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
@@ -89,6 +89,43 @@ internal sealed class FileDiffProbe : IGuestProbe
         baseline = current;
 
         return Task.FromResult<IReadOnlyList<SandboxEvent>>(events);
+    }
+
+    private Dictionary<string, FileStateSnapshot> CaptureWatchedFiles(
+        GuestProbeContext context,
+        CancellationToken cancellationToken)
+    {
+        var merged = snapshotProvider.Capture(context.WorkingDirectory, cancellationToken);
+        var tempRoot = Environment.GetEnvironmentVariable("TEMP");
+        if (string.IsNullOrWhiteSpace(tempRoot) || !Directory.Exists(tempRoot))
+        {
+            return merged;
+        }
+
+        IEnumerable<string> fixtureDirectories;
+        try
+        {
+            fixtureDirectories = Directory.EnumerateDirectories(tempRoot, "KSwordSandboxFixture-*", SearchOption.TopDirectoryOnly);
+        }
+        catch (IOException)
+        {
+            return merged;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return merged;
+        }
+
+        foreach (var directory in fixtureDirectories)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var pair in snapshotProvider.Capture(directory, cancellationToken))
+            {
+                merged[pair.Key] = pair.Value;
+            }
+        }
+
+        return merged;
     }
 
     /// <summary>

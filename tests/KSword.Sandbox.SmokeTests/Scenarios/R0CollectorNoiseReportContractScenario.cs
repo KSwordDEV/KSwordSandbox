@@ -140,7 +140,7 @@ internal sealed class R0CollectorNoiseReportContractScenario : ISmokeTestScenari
         RequireContains(html, "<section id=\"registry\" class=\"card\"><h2>Registry behavior</h2>", "Report should keep the registry behavior section anchor and heading.");
         RequireContains(html, "<section id=\"r0\" class=\"card\"><h2>R0 / driver events</h2>", "Report should keep the R0 section anchor and heading.");
         RequireContains(html, "<section id=\"events\" class=\"card\"><h2>Raw normalized events</h2>", "Report should keep the raw-events section anchor and heading.");
-        RequireContains(html, "<span class=\"muted\">Collector self-noise hidden</span><b class=\"risk-info\">2</b>", "R0 section should expose the self-noise count as bounded evidence-quality metadata.");
+        RequireNotContains(html, "Collector self-noise hidden", "R0 section should not expose a separate self-noise strategy card.");
     }
 
     private static void AssertBehaviorSectionsExcludeCollectorNoise(string html)
@@ -160,9 +160,9 @@ internal sealed class R0CollectorNoiseReportContractScenario : ISmokeTestScenari
     private static void AssertR0AndRawSectionsPreserveCollectorNoiseAuditTrail(string html)
     {
         var r0Section = ExtractSection(html, "r0");
-        RequireContains(r0Section, "Collector self-noise hidden from behavior sections.", "R0 section should explain that collector self-noise is hidden from behavior sections.");
-        RequireContains(r0Section, CollectorFileNoise, "R0 section should keep a bounded example of hidden collector file self-noise.");
-        RequireContains(r0Section, CollectorRegistryNoise, "R0 section should keep a bounded example of hidden collector registry self-noise.");
+        RequireNotContains(r0Section, "Collector self-noise", "R0 section should keep collector self-noise out of the primary UI.");
+        RequireNotContains(r0Section, CollectorFileNoise, "R0 section should keep collector file self-noise out of the primary UI.");
+        RequireNotContains(r0Section, CollectorRegistryNoise, "R0 section should keep collector registry self-noise out of the primary UI.");
 
         var rawSection = ExtractSection(html, "events");
         RequireContains(rawSection, CollectorFileNoise, "Raw events should preserve collector file self-noise for auditability.");

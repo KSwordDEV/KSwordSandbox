@@ -84,19 +84,10 @@ progress-page 重新进入报告，避免自动打开失败时丢失上下文。
   而不是只散落在 raw rows 里。存在 `sourceArtifact*` 或 packet capture hints 时，
   Endpoint cards 还应展示中文优先的紧凑摘要和关联 PCAP/source artifacts，并提供显式复制按钮
   以及面向 report-relative artifacts 的安全 Open/Download links。
-- R0 与驱动事件 / R0 and driver events：
-  R0 采集健康状态（R0 collection health status）必须出现在 driver telemetry evidence 之前。Device unavailable、
-  driver health、queue backpressure 和 dropped-event counters 描述的是遥测质量，不能计入样本行为。
-  Health alerts 可以作为采集质量警告（collection-quality warnings）高亮。R0 availability summary 应显示
-  available、unavailable/degraded、attention-needed 或 absent-health-row 等采集质量状态，而不是恶意行为。
-  归因到 `KSword.Sandbox.R0Collector.exe`、sandbox agent、collector staging paths 或 KSword driver device
-  的 driver rows 属于 collection-side self-noise，必须从 behavior counts、behavior graphs 以及
-  file/registry/network/process behavior sections 中排除，同时保留在 R0 self-noise summary 和
-  Raw normalized events 中供审计。R0 health/unavailable examples 默认折叠并限制为少量代表样例，
-  完整证据留在 raw events 和 `report.json`。
-  `r0collector.driverNetworkStatus` 属于 R0/WFP/ALE readiness 诊断：展示
-  supported/active layer masks、producer counters、degrade reason、readinessState
-  和中文提示；不得把 IOCTL 不可用、degraded 或 queue/backpressure 诊断当作样本恶意行为。
+- R0 与驱动事件 / R0 and driver events：主报告行为视图只展示样本归因的驱动行为。
+  Device unavailable、driver health、queue backpressure、dropped-event counters、R0/WFP/ALE readiness
+  和采集器自噪声进入简短的 coverage gaps 区域或原始 `events.json`/`report.json`，不在主事件表、图谱或行为计数中展开。
+  未采到 R0 时必须显示 `missing`/`disabled`，不能写成 captured；完整 JSONL 仍可下载审计。
 - 失败原因 / Failure reasons。
 - 原始标准化事件 / Raw normalized events。
   该章节默认折叠并限制行数；折叠表格之前应展示小型 `Raw event distribution / 原始事件分布`
@@ -167,10 +158,9 @@ progress-page 重新进入报告，避免自动打开失败时丢失上下文。
   storage changes、network scope 和 artifact proof。它必须有界、可复制、弱交互，并在
   `report.html` / `report.zh.html` 中保持中文优先。它应包含一条 Narrative spine summary 和显式
   Copy narrative spine 按钮，让分析员无需打开 raw event pages 即可复制完整 analyst story。
-- Evidence story board 应 summary-first 且弱交互：每条 lane 必须展示紧凑 status badge、短 analyst narrative、
+- Evidence story board 应 summary-first 且弱交互：每条 lane 展示紧凑 status badge、短 analyst narrative、
   3-8 个 metric chips，以及原生折叠 evidence block。必需 lanes 包括 execution lineage、
-  dropped-file evidence、screenshot evidence、memory dump evidence、network/PCAP evidence
-  和 R0 health/noise boundary。
+  dropped-file evidence、screenshot evidence、memory dump evidence 和 network/PCAP evidence；采集健康细节放入 coverage gaps。
 - Artifact status、process cards 和 network cards 中的紧凑 evidence summaries 应先于密集表格可见，
   在默认简体中文报告中中文优先，并可通过显式按钮和右键复制。摘要使用有界 key/value summaries
   和紧凑 artifact lines，不要把完整 raw events 或完整 descriptor payloads 内联倾倒出来。

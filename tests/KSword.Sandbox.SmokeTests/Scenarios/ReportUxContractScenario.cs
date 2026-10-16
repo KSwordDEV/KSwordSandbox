@@ -236,7 +236,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireAnyContains(doc, ["Chinese and English", "中文和英文", "中英"], "Report UX doc should require Chinese and English report rendering support.");
         RequireAnyContains(doc, ["bilingual entry bar", "双语入口栏"], "Report UX doc should require stable in-report bilingual entry links.");
         RequireAnyContains(doc, ["default Simplified Chinese compatibility report", "默认简体中文兼容报告"], "Report UX doc should describe report.html default language.");
-        RequireContains(doc, "R0 availability", "Report UX doc should require R0 availability summaries.");
+        RequireContains(doc, "coverage gaps", "Report UX doc should require compact collection coverage gaps.");
         RequireContains(doc, "Network category view", "Report UX doc should require network category summaries.");
         RequireContains(doc, "Network relation path", "Report UX doc should require visible network relation paths.");
         RequireContains(doc, "report.zh.html", "Report UX doc should mention report.zh.html.");
@@ -415,10 +415,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Screenshot evidence", "Rendered HTML should include screenshot story evidence.");
         RequireContains(englishHtml, "Memory dump evidence", "Rendered HTML should include memory dump story evidence.");
         RequireContains(englishHtml, "Network and PCAP evidence", "Rendered HTML should include network/PCAP story evidence.");
-        RequireContains(englishHtml, "R0 health/noise boundary", "Rendered HTML should include R0 health/noise story evidence.");
-        RequireContains(englishHtml, "Driver network status / WFP-ALE", "Rendered HTML should include R0 WFP/ALE network status.");
-        RequireContains(englishHtml, "Network status availability", "Rendered HTML should include R0 network availability cards.");
-        RequireContains(englishHtml, "r0collector.driverNetworkStatus", "Rendered HTML should expose copyable R0 network status evidence.");
+        RequireNotContains(englishHtml, "R0 health/noise boundary", "Rendered HTML should keep R0 health/noise strategy text out of the main UI.");
+        RequireNotContains(englishHtml, "Driver network status / WFP-ALE", "Rendered HTML should keep R0 WFP/ALE readiness out of the main UI.");
         RequireContains(englishHtml, "Static PE resource story", "Rendered HTML should include structured static resource story.");
         RequireContains(englishHtml, "embedded-pe", "Rendered HTML should include static resourceRole evidence.");
         RequireContains(englishHtml, "Artifact index evidence", "Rendered HTML should include artifact selector/duplicate/rejection cards.");
@@ -452,7 +450,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Process relationship tree.", "Rendered HTML should explain stable process tree rendering.");
         RequireContains(englishHtml, "Process tree nodes", "Rendered HTML should include process-tree overview cards.");
         RequireContains(englishHtml, "High-signal nodes", "Rendered HTML should include high-signal process overview cards.");
-        RequireContains(englishHtml, "Self-noise excluded", "Rendered HTML should include process self-noise exclusion summary.");
+        RequireNotContains(englishHtml, "Self-noise excluded", "Rendered HTML should omit process self-noise strategy text.");
         RequireContains(englishHtml, "process-tree-node", "Rendered HTML should include expandable process tree nodes.");
         RequireContains(englishHtml, "process-tree-path", "Rendered process tree should keep image/path hints compact.");
         RequireContains(englishHtml, "depth 1", "Rendered process tree should expose depth badges for readability.");
@@ -469,9 +467,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "child=cmd.exe pid:4243", "Rendered process card relationship map should include child process evidence.");
         RequireBefore(englishHtml, "launcher.exe pid:4100 ppid:-", "contract-sample.exe pid:4242 ppid:4100", "Rendered process lineage should show parent before child.");
         RequireBefore(englishHtml, "contract-sample.exe pid:4242 ppid:4100", "cmd.exe pid:4243 ppid:4242", "Rendered process lineage should show sample before spawned child.");
-        RequireContains(englishHtml, "R0 noise policy.", "Rendered R0 section should explain health/self-noise separation.");
-        RequireContains(englishHtml, "R0 availability", "Rendered R0 section should include availability overview.");
-        RequireContains(englishHtml, "No R0 health rows", "Rendered R0 section should distinguish absent health rows from driver telemetry.");
+        RequireNotContains(englishHtml, "R0 noise policy.", "Rendered R0 section should omit health/self-noise strategy text.");
+        RequireNotContains(englishHtml, "R0 availability", "Rendered R0 section should omit the removed availability card.");
         RequireContains(englishHtml, "Raw evidence height limit: 58vh", "Rendered raw section should state the raw evidence height limit.");
         RequireContains(englishHtml, "Print/no-JS fallback", "Rendered HTML should include a print/no-JS fallback note.");
         RequireContains(englishHtml, "No JavaScript required for report navigation", "Rendered HTML should explain no-JS navigation.");
@@ -486,7 +483,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "时间线分组", "Chinese HTML should localize timeline grouping guidance.");
         RequireContains(chineseHtml, "进程关系树", "Chinese HTML should localize process relationship tree guidance.");
         RequireContains(chineseHtml, "进程树节点", "Chinese HTML should localize process-tree overview cards.");
-        RequireContains(chineseHtml, "R0 可用性", "Chinese HTML should localize R0 availability.");
+        RequireNotContains(chineseHtml, "R0 可用性", "Chinese HTML should omit the removed R0 availability card.");
         RequireContains(chineseHtml, "端点分组", "Chinese HTML should localize network endpoint overview cards.");
         RequireContains(chineseHtml, "证据故事板", "Chinese HTML should localize evidence story board.");
         RequireContains(chineseHtml, "稳定关系通道", "Chinese HTML should localize stable relationship lanes.");
@@ -514,7 +511,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "下载", "Chinese HTML should localize artifact download buttons.");
         RequireContains(chineseHtml, "命令行默认隐藏", "Chinese HTML should localize folded command-line details.");
         RequireContains(chineseHtml, "启动项 / 持久化差异", "Chinese HTML should localize the startup diff navigation label.");
-        RequireContains(chineseHtml, "图谱自噪声边界", "Chinese HTML should explain the graph noise boundary in Chinese.");
+        RequireNotContains(chineseHtml, "图谱自噪声边界", "Chinese HTML should omit the removed graph noise boundary strategy text.");
         RequireNotContains(chineseHtml, "not样本行为", "Chinese localization must not rewrite the notSampleBehavior technical key.");
         RequireNotContains(chineseHtml, "collectorSelf否ise", "Chinese localization must not corrupt collectorSelfNoise.");
         RequireNotContains(chineseHtml, "证据文件 turn event claims", "Chinese localization must not leave mixed narrative copy.");
