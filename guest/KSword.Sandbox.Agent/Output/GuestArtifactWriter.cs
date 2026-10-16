@@ -984,7 +984,7 @@ internal sealed class GuestArtifactWriter
         }
 
         if (relativePath.StartsWith("etw-traces/", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(extension, ".etl", StringComparison.OrdinalIgnoreCase))
+            extension is ".etl" or ".xml" or ".csv")
         {
             classification = new ArtifactClassification(ArtifactKind.Log, "trace", "etw-kernel-trace", "etw-traces");
             return true;

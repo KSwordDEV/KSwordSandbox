@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Text;
+using System.Xml.Linq;
 using KSword.Sandbox.Agent.Diagnostics;
 using KSword.Sandbox.Abstractions;
 
@@ -18,12 +20,14 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
     private const string CollectorSource = "etwLive";
     private const string CollectionName = "etw-traces";
     private const string LogmanExecutable = "logman.exe";
+    private const string TracerptExecutable = "tracerpt.exe";
     // Windows Kernel Trace is a system logger provider.  Windows rejects an
     // arbitrary session name with "provided session name is invalid"; the
     // supported logger name is NT Kernel Logger.  Keep the ETL filename unique
     // per run while reusing this required session identity.
     private const string KernelLoggerSessionName = "NT Kernel Logger";
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan DecodeTimeout = TimeSpan.FromSeconds(30);
     private EtwTraceSession? activeSession;
 
     public string ProbeId => "etw-live-trace";
@@ -150,6 +154,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             return [CreateFailureEvent("etlEmptyAfterStop", "after-run", context, session, result, info)];
         }
 
+        var decode = await DecodeAsync(session, context, cancellationToken).ConfigureAwait(false);
         var evt = CreateBaseEvent("etw_live.captured", "after-run", context, session);
         evt.Data["captureState"] = "captured";
         evt.Data["status"] = "captured";
@@ -160,12 +165,338 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         evt.Data["sizeBytes"] = info.Length.ToString(CultureInfo.InvariantCulture);
         evt.Data["lastWriteUtc"] = info.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture);
         evt.Data["artifactRelativePathStatus"] = "captured";
+        evt.Data["semanticRowsAvailable"] = decode.Rows.Count > 0 ? "true" : "false";
+        evt.Data["etlDecodeRequired"] = decode.Succeeded ? "false" : "true";
+        evt.Data["decodeAttempted"] = "true";
+        evt.Data["decodeTool"] = TracerptExecutable;
+        evt.Data["decodeCommandExitCode"] = FormatExitCode(decode.CommandResult?.ExitCode);
+        evt.Data["decodeCommandTimedOut"] = (decode.CommandResult?.TimedOut ?? false).ToString(CultureInfo.InvariantCulture);
+        evt.Data["parsedEventCount"] = decode.Rows.Count.ToString(CultureInfo.InvariantCulture);
+        evt.Data["decodedEventCount"] = decode.Rows.Count.ToString(CultureInfo.InvariantCulture);
+        evt.Data["decodedEventTypes"] = string.Join(",", decode.Rows
+            .Select(static row => row.EventType)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(decode.DecodedPath))
+        {
+            var decodedRelativePath = RelativeToOutput(context.OutputDirectory, decode.DecodedPath);
+            evt.Data["decodedArtifactRelativePath"] = decodedRelativePath;
+            evt.Data["decodedArtifactSelector"] = decodedRelativePath;
+            evt.Data["decodedArtifactExists"] = "true";
+        }
+
+        if (decode.Succeeded)
+        {
+            evt.Data["zhMessage"] = "ETW 内核实时会话已停止，并已通过 Windows tracerpt 解码为行为行。";
+            evt.Data["zhHint"] = "该事件包含 ETL 原始证据及其 CSV 解码结果；process/thread/image/file/registry 行仍需结合样本进程树进行归因。";
+            return [evt, ..decode.Rows];
+        }
+
+        evt.Data["decodeFailureReason"] = decode.FailureReason;
+        evt.Data["zhMessage"] = "ETW 内核实时会话已停止，但解码未完成；原始 ETL 仍已保存。";
+        evt.Data["zhHint"] = "tracerpt 解码失败或没有产生可解析行；不能把原始 ETL 当作已解析行为，报告会保留该采集缺口。";
+        var failure = CreateDecodeFailureEvent(context, session, decode);
+        return [evt, failure];
+    }
+
+    private static async Task<EtwDecodeResult> DecodeAsync(
+        EtwTraceSession session,
+        GuestProbeContext context,
+        CancellationToken cancellationToken)
+    {
+        var xmlPath = Path.ChangeExtension(session.EtlPath, ".xml");
+        try
+        {
+            if (File.Exists(xmlPath))
+            {
+                File.Delete(xmlPath);
+            }
+
+            var result = await BoundedProcessRunner.RunAsync(
+                TracerptExecutable,
+                [session.EtlPath, "-o", xmlPath, "-of", "XML", "-y", "-lr"],
+                DecodeTimeout,
+                cancellationToken).ConfigureAwait(false);
+            if (!result.Succeeded)
+            {
+                return new EtwDecodeResult(false, xmlPath, [], "tracerptFailed", result);
+            }
+
+            if (!File.Exists(xmlPath))
+            {
+                return new EtwDecodeResult(false, xmlPath, [], "decodedXmlMissing", result);
+            }
+
+            var info = new FileInfo(xmlPath);
+            if (info.Length <= 0)
+            {
+                return new EtwDecodeResult(false, xmlPath, [], "decodedXmlEmpty", result);
+            }
+
+            var rows = ParseTracerptXml(xmlPath, session, context);
+            if (rows.Count == 0)
+            {
+                return new EtwDecodeResult(false, xmlPath, [], "decodedXmlHasNoEventRows", result);
+            }
+
+            return new EtwDecodeResult(true, xmlPath, rows, string.Empty, result);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or FormatException or System.Xml.XmlException)
+        {
+            return new EtwDecodeResult(false, xmlPath, [], "decoderException:" + ex.GetType().Name, null);
+        }
+    }
+
+    private static IReadOnlyList<SandboxEvent> ParseTracerptXml(
+        string xmlPath,
+        EtwTraceSession session,
+        GuestProbeContext context)
+    {
+        var document = XDocument.Load(xmlPath, LoadOptions.PreserveWhitespace);
+        var rows = new List<SandboxEvent>();
+        foreach (var eventElement in document.Descendants().Where(static element => element.Name.LocalName.Equals("Event", StringComparison.OrdinalIgnoreCase)))
+        {
+            var system = eventElement.Elements().FirstOrDefault(static element => element.Name.LocalName.Equals("System", StringComparison.OrdinalIgnoreCase));
+            if (system is null)
+            {
+                continue;
+            }
+
+            var providerElement = system.Elements().FirstOrDefault(static element => element.Name.LocalName.Equals("Provider", StringComparison.OrdinalIgnoreCase));
+            var renderingInfo = eventElement.Elements().FirstOrDefault(static element => element.Name.LocalName.Equals("RenderingInfo", StringComparison.OrdinalIgnoreCase));
+            var provider = FirstNonEmpty(
+                providerElement?.Attribute("Name")?.Value,
+                providerElement?.Attribute("name")?.Value,
+                ChildValue(renderingInfo, "Provider"));
+            var eventId = ChildValue(system, "EventID", "EventId", "Id");
+            var opcode = FirstNonEmpty(ChildValue(system, "Opcode", "Operation"), ChildValue(renderingInfo, "Opcode", "Operation"));
+            var task = ChildValue(system, "Task");
+            var timestampElement = system.Elements().FirstOrDefault(static element => element.Name.LocalName.Equals("TimeCreated", StringComparison.OrdinalIgnoreCase));
+            var timestampText = FirstNonEmpty(timestampElement?.Attribute("SystemTime")?.Value, timestampElement?.Attribute("systemTime")?.Value);
+            var timestamp = ParseTimestamp(timestampText) ?? DateTimeOffset.UtcNow;
+            var execution = system.Elements().FirstOrDefault(static element => element.Name.LocalName.Equals("Execution", StringComparison.OrdinalIgnoreCase));
+            var processId = ParseProcessId(FirstNonEmpty(execution?.Attribute("ProcessID")?.Value, execution?.Attribute("ProcessId")?.Value));
+            var threadId = FirstNonEmpty(execution?.Attribute("ThreadID")?.Value, execution?.Attribute("ThreadId")?.Value);
+            var eventName = FirstNonEmpty(
+                ChildValue(renderingInfo, "EventName", "Name"),
+                ChildValue(system, "EventName", "Name"),
+                task,
+                opcode,
+                provider + ":" + eventId);
+            var payload = eventElement.Descendants().Where(static element => element.Name.LocalName.Equals("Data", StringComparison.OrdinalIgnoreCase));
+            var payloadValues = payload
+                .Select(element =>
+                {
+                    var name = FirstNonEmpty(element.Attribute("Name")?.Value, element.Attribute("name")?.Value);
+                    return string.IsNullOrWhiteSpace(name) ? element.Value : name + "=" + element.Value;
+                })
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .ToList();
+            var payloadByName = payload
+                .Select(element => (Name: NormalizeColumnName(FirstNonEmpty(element.Attribute("Name")?.Value, element.Attribute("name")?.Value)), Value: element.Value.Trim()))
+                .Where(static pair => !string.IsNullOrWhiteSpace(pair.Name))
+                .GroupBy(static pair => pair.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(static group => group.Key, static group => group.First().Value, StringComparer.OrdinalIgnoreCase);
+            var payloadProcessId = ParseProcessId(ValueOrEmpty(payloadByName, "processid", "pid"));
+            processId = payloadProcessId ?? processId;
+            var parentProcessId = ParseProcessId(ValueOrEmpty(payloadByName, "parentprocessid", "parentpid", "parentid"));
+            threadId = FirstNonEmpty(threadId, ValueOrEmpty(payloadByName, "threadid", "tthreadid"));
+            var image = ValueOrEmpty(payloadByName, "imagename", "imagefilename", "image", "processname", "process");
+            var path = ValueOrEmpty(payloadByName, "filename", "file", "path", "imagepath");
+            var commandLine = ValueOrEmpty(payloadByName, "commandline", "command");
+            var eventType = MapEventType(eventName, provider + " " + opcode + " " + task + " " + eventId);
+            var data = CreateDecodedData(eventType, eventName, provider, eventId, opcode, threadId, session, context, string.Join("; ", payloadValues));
+            rows.Add(new SandboxEvent
+            {
+                EventType = eventType,
+                Timestamp = timestamp,
+                Source = CollectorSource,
+                ProcessName = image,
+                ProcessId = processId,
+                ParentProcessId = parentProcessId,
+                Path = path,
+                CommandLine = commandLine,
+                Data = data
+            });
+        }
+
+        return rows;
+    }
+
+    private static Dictionary<string, string> CreateDecodedData(
+        string eventType,
+        string eventName,
+        string provider,
+        string eventId,
+        string opcode,
+        string threadId,
+        EtwTraceSession session,
+        GuestProbeContext context,
+        string payload)
+    {
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["collectorSource"] = CollectorSource,
+            ["captureSource"] = "etw-live-tracerpt",
+            ["eventName"] = eventName,
+            ["providerName"] = provider,
+            ["eventId"] = eventId,
+            ["opcode"] = opcode,
+            ["threadId"] = threadId,
+            ["traceSessionName"] = session.SessionName,
+            ["traceArtifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
+            ["semanticEventClass"] = EventClassForType(eventType),
+            ["semanticEventTags"] = "etw,windows-kernel," + EventClassForType(eventType),
+            ["rawDecoded"] = "true"
+        };
+        AddIfNotEmpty(data, "payload", payload);
+        AddIfNotEmpty(data, "rootProcessId", context.RootProcessId?.ToString(CultureInfo.InvariantCulture));
+        AddIfNotEmpty(data, "samplePath", context.SamplePath);
+        return data;
+    }
+
+    private static string ChildValue(XElement? parent, params string[] names)
+    {
+        if (parent is null)
+        {
+            return string.Empty;
+        }
+
+        foreach (var child in parent.Elements())
+        {
+            if (names.Any(name => child.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            {
+                return child.Value.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string ValueOrEmpty(IReadOnlyDictionary<string, string> values, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (values.TryGetValue(NormalizeColumnName(name), out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
+
+    private static IReadOnlyList<SandboxEvent> ParseTracerptCsv(
+        string csvPath,
+        EtwTraceSession session,
+        GuestProbeContext context)
+    {
+        var lines = File.ReadLines(csvPath).Where(static line => !string.IsNullOrWhiteSpace(line));
+        using var enumerator = lines.GetEnumerator();
+        if (!enumerator.MoveNext())
+        {
+            return [];
+        }
+
+        var header = ParseCsvLine(enumerator.Current);
+        if (!LooksLikeTracerptHeader(header))
+        {
+            return [];
+        }
+
+        var columns = header
+            .Select((value, index) => (Name: NormalizeColumnName(value), Index: index))
+            .Where(static item => !string.IsNullOrWhiteSpace(item.Name))
+            .GroupBy(static item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First().Index, StringComparer.OrdinalIgnoreCase);
+        var rows = new List<SandboxEvent>();
+        while (enumerator.MoveNext())
+        {
+            var fields = ParseCsvLine(enumerator.Current);
+            if (fields.Count == 0 || fields.All(static field => string.IsNullOrWhiteSpace(field)))
+            {
+                continue;
+            }
+
+            var eventName = GetField(fields, columns, "eventname", "event", "name");
+            var provider = GetField(fields, columns, "providername", "provider");
+            var eventId = GetField(fields, columns, "eventid", "id");
+            if (string.IsNullOrWhiteSpace(eventName) && string.IsNullOrWhiteSpace(provider))
+            {
+                continue;
+            }
+
+            var eventType = MapEventType(eventName, provider);
+            var processId = ParseProcessId(GetField(fields, columns, "processid", "pid"));
+            var parentProcessId = ParseProcessId(GetField(fields, columns, "parentprocessid", "parentpid"));
+            var threadId = GetField(fields, columns, "threadid", "tid");
+            var timestamp = ParseTimestamp(GetField(fields, columns, "timestamp", "timestamputc", "time")) ?? DateTimeOffset.UtcNow;
+            var image = GetField(fields, columns, "imagename", "image", "processname", "process");
+            var path = GetField(fields, columns, "filename", "file", "path", "imagepath");
+            var opcode = GetField(fields, columns, "opcode", "operation");
+            var payload = BuildPayload(fields, columns, "payload", "data", "userdata");
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["collectorSource"] = CollectorSource,
+                ["captureSource"] = "etw-live-tracerpt",
+                ["eventName"] = eventName,
+                ["providerName"] = provider,
+                ["eventId"] = eventId,
+                ["opcode"] = opcode,
+                ["threadId"] = threadId,
+                ["traceSessionName"] = session.SessionName,
+                ["traceArtifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
+                ["semanticEventClass"] = EventClassForType(eventType),
+                ["semanticEventTags"] = "etw,windows-kernel," + EventClassForType(eventType),
+                ["rawDecoded"] = "true"
+            };
+            AddIfNotEmpty(data, "payload", payload);
+            AddIfNotEmpty(data, "processorNumber", GetField(fields, columns, "processornumber", "cpu"));
+            AddIfNotEmpty(data, "kernelTime", GetField(fields, columns, "kerneltime"));
+            AddIfNotEmpty(data, "userTime", GetField(fields, columns, "usertime"));
+            AddIfNotEmpty(data, "rootProcessId", context.RootProcessId?.ToString(CultureInfo.InvariantCulture));
+            AddIfNotEmpty(data, "samplePath", context.SamplePath);
+
+            rows.Add(new SandboxEvent
+            {
+                EventType = eventType,
+                Timestamp = timestamp,
+                Source = CollectorSource,
+                ProcessName = image,
+                ProcessId = processId,
+                ParentProcessId = parentProcessId,
+                Path = path,
+                CommandLine = GetField(fields, columns, "commandline", "command"),
+                Data = data
+            });
+        }
+
+        return rows;
+    }
+
+    private static SandboxEvent CreateDecodeFailureEvent(
+        GuestProbeContext context,
+        EtwTraceSession session,
+        EtwDecodeResult decode)
+    {
+        var evt = CreateBaseEvent("etw_live.decode_failed", "after-run", context, session);
+        evt.Data["captureState"] = "failed";
+        evt.Data["status"] = "failed";
+        evt.Data["decodeAttempted"] = "true";
+        evt.Data["decodeTool"] = TracerptExecutable;
+        evt.Data["decodeFailureReason"] = decode.FailureReason;
+        evt.Data["nonfatal"] = "true";
         evt.Data["semanticRowsAvailable"] = "false";
         evt.Data["etlDecodeRequired"] = "true";
-        evt.Data["parsedEventCount"] = "0";
-        evt.Data["zhMessage"] = "ETW 内核实时会话已停止并保存 ETL 原始证据。";
-        evt.Data["zhHint"] = "该事件证明 ETW 原始文件已落盘；ETL 仍需使用 Windows ETW 解码器解析为 process/thread/image 行，不能把 readiness 或 ETL 文件本身当作样本行为命中。";
-        return [evt];
+        evt.Data["decodedArtifactRelativePath"] = RelativeToOutput(context.OutputDirectory, decode.DecodedPath);
+        evt.Data["zhMessage"] = "ETW 原始证据已保存，但 Windows tracerpt 解码失败。";
+        evt.Data["zhHint"] = "这是明确的 ETW 解码缺口；请保留 ETL 与 tracerpt 诊断，不要把它标记成未检出。";
+        AddIfNotEmpty(evt.Data, "decodeCommandExitCode", FormatExitCode(decode.CommandResult?.ExitCode));
+        AddIfNotEmpty(evt.Data, "decodeStderr", Truncate(decode.CommandResult?.StandardError));
+        return evt;
     }
 
     private static IReadOnlyList<string> BuildStartArguments(EtwTraceSession session)
@@ -181,11 +512,210 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             "start", session.SessionName,
             // Use the provider GUID so localized Windows builds do not depend
             // on the display name of Windows Kernel Trace.  The keyword group
-            // names are the documented process/thread/image kernel flags.
-            "-p", "{9e814aad-3204-11d2-9a82-006008a86939}", "(process,thread,img)",
+            // names are the documented process/thread/image/file/registry
+            // kernel flags.  These cover short-lived process edges and the
+            // file/registry providers without pretending ETL is decoded.
+            "-p", "{9e814aad-3204-11d2-9a82-006008a86939}", "(process,thread,img,file,fileio,registry)",
             "-o", session.EtlPath,
             "-ets"
         ];
+    }
+
+    private static bool LooksLikeTracerptHeader(IReadOnlyList<string> fields)
+    {
+        var normalized = fields.Select(NormalizeColumnName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return normalized.Contains("eventname") ||
+               normalized.Contains("event") ||
+               normalized.Contains("eventid") ||
+               normalized.Contains("timestamp") ||
+               normalized.Contains("providername");
+    }
+
+    private static string NormalizeColumnName(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in value.Trim().Trim('\uFEFF').ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(character);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string GetField(
+        IReadOnlyList<string> fields,
+        IReadOnlyDictionary<string, int> columns,
+        params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (columns.TryGetValue(name, out var index) && index < fields.Count)
+            {
+                return fields[index].Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static int? ParseProcessId(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim();
+        if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(normalized[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hex))
+        {
+            return hex;
+        }
+
+        return int.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pid)
+            ? pid
+            : null;
+    }
+
+    private static DateTimeOffset? ParseTimestamp(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(
+            value.Trim(),
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var timestamp)
+            ? timestamp
+            : null;
+    }
+
+    private static string BuildPayload(
+        IReadOnlyList<string> fields,
+        IReadOnlyDictionary<string, int> columns,
+        params string[] names)
+    {
+        var payload = GetField(fields, columns, names);
+        if (!string.IsNullOrWhiteSpace(payload))
+        {
+            return payload;
+        }
+
+        var knownIndexes = columns.Values.ToHashSet();
+        return string.Join(",", fields
+            .Select((value, index) => (value, index))
+            .Where(item => !knownIndexes.Contains(item.index) && !string.IsNullOrWhiteSpace(item.value))
+            .Select(item => item.value.Trim()));
+    }
+
+    private static string MapEventType(string eventName, string provider)
+    {
+        var value = (eventName + " " + provider).Trim();
+        if (ContainsAny(value, "processstart", "process/start", "process start", "processcreate") ||
+            (ContainsAny(value, "process") && ContainsAny(value, "start", "dcstart")) ||
+            (ContainsAny(value, "kernel-process", "kernel process", "kernelprocess") &&
+             ContainsAny(value, "start", "dcstart")))
+        {
+            return "process.start";
+        }
+
+        if (ContainsAny(value, "processstop", "process/stop", "process stop", "processexit") ||
+            (ContainsAny(value, "process") && ContainsAny(value, "stop", "dcstop", "exit")) ||
+            (ContainsAny(value, "kernel-process", "kernel process", "kernelprocess") &&
+             ContainsAny(value, "stop", "dcstop", "exit")))
+        {
+            return "process.exit";
+        }
+
+        if (ContainsAny(value, "threadstart", "thread/start", "thread start") ||
+            (ContainsAny(value, "thread") && ContainsAny(value, "start", "dcstart")) ||
+            (ContainsAny(value, "kernel-thread", "kernel thread", "kernelthread") &&
+             ContainsAny(value, "start", "dcstart")))
+        {
+            return "thread.start";
+        }
+
+        if (ContainsAny(value, "threadstop", "thread/stop", "thread stop", "threadexit") ||
+            (ContainsAny(value, "thread") && ContainsAny(value, "stop", "dcstop", "exit")) ||
+            (ContainsAny(value, "kernel-thread", "kernel thread", "kernelthread") &&
+             ContainsAny(value, "stop", "dcstop", "exit")))
+        {
+            return "thread.exit";
+        }
+
+        if (ContainsAny(value, "imageload", "image/load", "image load", "imageunload") ||
+            (ContainsAny(value, "image") && ContainsAny(value, "start", "dcstart", "load")))
+        {
+            return "image.load";
+        }
+
+        if (ContainsAny(value, "fileio", "file/io", "file io", "filecreate", "filedelete", "filerename"))
+        {
+            return "file.etw.io";
+        }
+
+        if (ContainsAny(value, "registry", "regkcb", "regset", "regdelete"))
+        {
+            return "registry.etw";
+        }
+
+        return "etw.kernel.event";
+    }
+
+    private static string EventClassForType(string eventType) => eventType switch
+    {
+        "process.start" or "process.exit" => "process",
+        "thread.start" or "thread.exit" => "thread",
+        "image.load" => "image",
+        "file.etw.io" => "file",
+        "registry.etw" => "registry",
+        _ => "kernel"
+    };
+
+    private static bool ContainsAny(string value, params string[] candidates) =>
+        candidates.Any(candidate => value.Contains(candidate, StringComparison.OrdinalIgnoreCase));
+
+    private static List<string> ParseCsvLine(string line)
+    {
+        var fields = new List<string>();
+        var field = new StringBuilder();
+        var quoted = false;
+        for (var index = 0; index < line.Length; index++)
+        {
+            var character = line[index];
+            if (character == '"')
+            {
+                if (quoted && index + 1 < line.Length && line[index + 1] == '"')
+                {
+                    field.Append('"');
+                    index++;
+                }
+                else
+                {
+                    quoted = !quoted;
+                }
+
+                continue;
+            }
+
+            if (character == ',' && !quoted)
+            {
+                fields.Add(field.ToString());
+                field.Clear();
+                continue;
+            }
+
+            field.Append(character);
+        }
+
+        fields.Add(field.ToString());
+        return fields;
     }
 
     private static SandboxEvent CreateDisabledEvent(GuestProbeContext context)
@@ -254,7 +784,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             ["capturePolicy"] = "explicit-opt-in-etw-kernel-trace",
             ["captureTool"] = LogmanExecutable,
             ["captureToolMode"] = "windows-logman-kernel-etw",
-            ["traceProviders"] = "Windows Kernel Trace(flags=process|thread|image-load)",
+            ["traceProviders"] = "Windows Kernel Trace(flags=process|thread|image-load|file-io|registry)",
             ["etwLiveCaptureEnabled"] = "true",
             ["etwSessionStarted"] = string.Equals(eventType, "etw_live.started", StringComparison.OrdinalIgnoreCase) ? "true" : "false",
             ["nonbehavior"] = "true",
@@ -325,4 +855,11 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         fileName + " " + string.Join(" ", args.Select(static arg => arg.Any(char.IsWhiteSpace) ? $"\"{arg}\"" : arg));
 
     private sealed record EtwTraceSession(string SessionName, string EtlPath, DateTimeOffset StartedAtUtc);
+
+    private sealed record EtwDecodeResult(
+        bool Succeeded,
+        string DecodedPath,
+        IReadOnlyList<SandboxEvent> Rows,
+        string FailureReason,
+        BoundedCommandResult? CommandResult);
 }
