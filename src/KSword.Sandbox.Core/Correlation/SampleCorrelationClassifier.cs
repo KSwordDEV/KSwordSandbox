@@ -832,6 +832,12 @@ public static class SampleCorrelationClassifier
                 continue;
             }
 
+            var kind = Value(evt.Data, "kind");
+            if (!TextEqualsAny(kind, "domain", "url", "ipv4", "ip", "host", "hostname"))
+            {
+                continue;
+            }
+
             AddStaticNetworkIndicator(indicators, Value(evt.Data, "value"));
         }
 
