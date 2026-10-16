@@ -44,7 +44,7 @@ public sealed class HtmlReportRenderer
     private const int TimelineGroupEventInlineLimit = 10;
     private const int EventTableInlineLimit = 40;
     private const int StaticStringInlineLimit = 200;
-    private const int RawEventInlineLimit = 30;
+    private const int RawEventInlineLimit = 20;
     private const int RawEventPageSize = 25;
     private const int RawEventIndexGroupInlineLimit = 16;
     private const int R0HealthEvidenceInlineLimit = 12;
@@ -8666,11 +8666,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     private static string RenderEventEvidenceDetails(SandboxEvent evt)
     {
         var compactFields = evt.Data
-            .Where(pair => !IsLongTechnicalEventField(pair.Key, pair.Value) && IsUserFacingEventField(pair.Key))
+            .Where(pair => !ShouldOmitEventField(evt, pair.Key) && !IsLongTechnicalEventField(pair.Key, pair.Value) && IsUserFacingEventFieldForEvent(evt, pair.Key))
             .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var technicalFields = evt.Data
-            .Where(pair => IsLongTechnicalEventField(pair.Key, pair.Value) || !IsUserFacingEventField(pair.Key))
+            .Where(pair => !ShouldOmitEventField(evt, pair.Key) && (IsLongTechnicalEventField(pair.Key, pair.Value) || !IsUserFacingEventFieldForEvent(evt, pair.Key)))
             .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
             .Select(pair => (Label: pair.Key, Value: pair.Value))
             .ToList();
@@ -8700,7 +8700,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 {
                     var copy = $"{pair.Key}={pair.Value}";
                     var displayValue = FormatBoundedEvidenceFieldValue(pair.Key, pair.Value, EventCompactFieldValueLimit);
-                    html.Append($"<li><span class=\"muted\">{E(EventFieldLabel(pair.Key))}</span> <code class=\"copyable\" data-copy=\"{A(copy)}\">{E(displayValue)}</code></li>");
+                    html.Append($"<li><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(EventFieldLabel(pair.Key))}={E(displayValue)}</code></li>");
                 }
 
                 if (hiddenCompactFields > 0)
@@ -8748,6 +8748,29 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             key.Equals("failureHint", StringComparison.OrdinalIgnoreCase) ||
             key.Equals("captureState", StringComparison.OrdinalIgnoreCase) ||
             key.Equals("collectionHealth", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsUserFacingEventFieldForEvent(SandboxEvent evt, string key)
+    {
+        if (!IsUserFacingEventField(key))
+        {
+            return false;
+        }
+
+        var normalized = key.ToLowerInvariant();
+        return normalized is not ("zhmessage" or "zhhint" or "capturestate" or "collectionhealth") ||
+            IsCollectionDiagnosticFailure(evt);
+    }
+
+    private static bool ShouldOmitEventField(SandboxEvent evt, string key)
+    {
+        if (IsCollectionDiagnosticFailure(evt))
+        {
+            return false;
+        }
+
+        var normalized = key.ToLowerInvariant();
+        return normalized is "zhmessage" or "zhhint" or "capturestate" or "collectionhealth";
     }
 
     private static string EventFieldLabel(string key) => key.ToLowerInvariant() switch
