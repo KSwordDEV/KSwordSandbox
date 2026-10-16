@@ -1197,6 +1197,15 @@ public static class ReportEventSampler
             return ReportSamplingBucket.FindingEvidence;
         }
 
+        // Keep a compact R0 readiness/coverage proof in report.json. These
+        // rows remain explicitly nonbehavior diagnostics, but hiding every
+        // collector row behind the small diagnostic quota makes a successful
+        // live driver run indistinguishable from an unconfigured one.
+        if (IsR0CoverageEvidenceEvent(evt))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
         if (string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "pcap.import.summary", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "network.import.summary", StringComparison.OrdinalIgnoreCase))
@@ -1498,6 +1507,26 @@ public static class ReportEventSampler
             EventDataEqualsAny(evt, "semanticLane", "nonbehavior", "non-behavior", "diagnostic", "collection-health") ||
             EventDataEqualsAny(evt, "sampleBehaviorBoundary", "nonbehavior-separated", "not-sample-behavior", "nonbehavior-evidence-quality") ||
             EventDataEqualsAny(evt, "collectorNoiseScope", "nonbehavior-evidence-quality", "collector-diagnostic", "collector-self-noise");
+    }
+
+    private static bool IsR0CoverageEvidenceEvent(SandboxEvent evt)
+    {
+        var eventType = NormalizeEventType(evt.EventType);
+        if (!eventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return TextEqualsAny(
+            eventType,
+            "r0collector.started",
+            "r0collector.deviceOpened",
+            "r0collector.driverHealth",
+            "r0collector.driverCapabilities",
+            "r0collector.driverProducerMask",
+            "r0collector.driverStatus",
+            "r0collector.driverReadEvents",
+            "r0collector.exited");
     }
 
     private static bool IsDisabledArtifactCollectionEvent(SandboxEvent evt)

@@ -336,6 +336,9 @@ public sealed partial class SandboxJobService
             : sampleLaunchBlocked
                 ? $"样本启动被来宾拦截且未观察到成功启动，报告状态已标记为 Failed：{resolvedEventsPath} / The guest blocked sample launch and no successful sample start was observed; report status is Failed: {resolvedEventsPath}."
             : $"已导入 {guestEvents.Count} 个来宾事件：{resolvedEventsPath} / Imported {guestEvents.Count} guest event(s) from {resolvedEventsPath}.";
+        var persistedSubmission = IsLiveRunbookExecution(job.RunbookExecutionResultPath)
+            ? job.Submission with { DryRun = false }
+            : job.Submission;
         if (guestEvents.Count == 0)
         {
             UpsertDurableHostEvent(jobId, CreateGuestImportOperationalMarker(
@@ -357,6 +360,7 @@ public sealed partial class SandboxJobService
         var updated = RegenerateReport(job with
         {
             Status = status,
+            Submission = persistedSubmission,
             GuestEventsPath = resolvedEventsPath,
             Messages = AppendMessage(job.Messages, message)
         }, status, guestEvents, resolvedEventsPath);
@@ -364,6 +368,24 @@ public sealed partial class SandboxJobService
         PersistGuestImportState(updated, resolvedEventsPath, guestEvents.Count, status, message);
         StoreJob(updated);
         return updated;
+    }
+
+    private static bool IsLiveRunbookExecution(string? resultPath)
+    {
+        if (string.IsNullOrWhiteSpace(resultPath) || !File.Exists(resultPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<SandboxRunbookExecutionResult>(File.ReadAllText(resultPath), JsonOptions);
+            return result?.Mode == SandboxRunbookExecutionMode.Live;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -403,6 +425,7 @@ public sealed partial class SandboxJobService
         var updated = RegenerateReport(job with
         {
             Status = AnalysisStatus.Completed,
+            Submission = job.Submission with { DryRun = false },
             Messages = AppendMessage(job.Messages, terminalMessage)
         }, AnalysisStatus.Completed, guestEvents, job.GuestEventsPath);
 
@@ -505,8 +528,8 @@ public sealed partial class SandboxJobService
         EnsureExternalImportPreservesPersistedIdentity(existingJob, normalizedSubmission);
         var runbook = existingJob?.Runbook ?? runbookBuilder.Build(jobConfig, jobId, sample);
         var persistedSubmission = existingJob?.Runbook is not null
-            ? existingJob.Submission
-            : normalizedSubmission;
+            ? existingJob.Submission with { DryRun = false }
+            : normalizedSubmission with { DryRun = false };
         var jsonPath = Path.Combine(jobRoot, "report.json");
         var htmlPath = Path.Combine(jobRoot, "report.html");
         var zhHtmlPath = Path.Combine(jobRoot, "report.zh.html");
