@@ -1100,6 +1100,14 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("prepare-guest-output", "Prepare job-specific guest output folder", BuildPrepareGuestOutputCommand(config, provider, targetVmName, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
         if (config.Driver.Enabled && !config.Driver.UseMockCollector && !string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
         {
+            steps.Add(Step(
+                "check-r0-driver-guest-readiness",
+                "Verify guest R0 driver signature and test-signing state",
+                BuildGuestR0DriverReadinessCommand(config, provider, targetVmName),
+                mutatesVmState: false));
+        }
+        if (config.Driver.Enabled && !config.Driver.UseMockCollector && !string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
+        {
             steps.Add(Step("install-driver-service", "Install and start guest R0 driver service", BuildInstallDriverServiceCommand(config, provider, targetVmName)));
         }
 
@@ -1489,6 +1497,44 @@ public sealed class HyperVRunbookBuilder
     }
 
     /// <summary>
+    /// Builds a read-only guest-side R0 prerequisite check. Inputs are the
+    /// configured guest transport and driver path; processing verifies the
+    /// staged image, Authenticode status, and the current boot test-signing
+    /// flag before SCM mutation. The method returns a self-contained command
+    /// string and never signs, installs, or changes the guest.
+    /// </summary>
+    private static string BuildGuestR0DriverReadinessCommand(
+        SandboxConfig config,
+        VirtualizationProvider provider,
+        string targetVmName)
+    {
+        var command = string.Join(" ", new[]
+        {
+            $"$driverPath = {Q(config.Driver.DriverPathInGuest)};",
+            $"$serviceName = {Q(config.Driver.ServiceName)};",
+            "$session = $null;",
+            BuildGuestSessionAssignment(config, provider, targetVmName),
+            "try { Invoke-Command -Session $session -ScriptBlock {",
+            "param($driverPath, $serviceName)",
+            "if (-not (Test-Path -LiteralPath $driverPath -PathType Leaf)) { throw \"R0 driver image was not staged: $driverPath\" }",
+            "$signatureStatus = 'Unavailable'; $signatureMessage = '';",
+            "$signatureCommand = Get-Command Get-AuthenticodeSignature -ErrorAction SilentlyContinue;",
+            "if ($null -ne $signatureCommand) { try { $signature = Get-AuthenticodeSignature -FilePath $driverPath -ErrorAction Stop; $signatureStatus = [string]$signature.Status; $signatureMessage = [string]$signature.StatusMessage } catch { $signatureStatus = 'Error'; $signatureMessage = $_.Exception.Message } }",
+            "$bcdOutput = @(& bcdedit.exe /enum '{current}' 2>&1); $bcdExitCode = $LASTEXITCODE;",
+            "$testSigningEnabled = (($bcdOutput -join \"`n\") -match '(?im)^\\s*testsigning\\s+(Yes|On|True)\\s*$');",
+            "Write-Host \"Guest R0 driver readiness: path=$driverPath; service=$serviceName; signature=$signatureStatus; testSigning=$testSigningEnabled; bcdExitCode=$bcdExitCode\";",
+            "if ($signatureStatus -eq 'NotSigned') { throw \"Guest R0 driver is unsigned. Sign the staged .sys with a trusted test certificate and enable Windows test-signing before live collection. SignatureMessage=$signatureMessage\" }",
+            "if (-not $testSigningEnabled -and $signatureStatus -ne 'Valid') { throw \"Guest R0 driver is not production-valid and guest test-signing is disabled. Enable test-signing and reboot the disposable VM before live collection. Signature=$signatureStatus; SignatureMessage=$signatureMessage\" }",
+            "if (-not $testSigningEnabled -and $signatureStatus -eq 'Valid') { Write-Warning 'Guest R0 driver has a valid production signature; test-signing is disabled, which is acceptable for this image.' }",
+            "if ($testSigningEnabled -and $signatureStatus -ne 'Valid') { Write-Warning \"Guest test-signing is enabled but Authenticode status is $signatureStatus; SCM start will prove whether the guest trusts this test certificate.\" }",
+            "} -ArgumentList $driverPath, $serviceName -ErrorAction Stop }",
+            "finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
+        });
+
+        return WithGuestCredential(config, command);
+    }
+
+    /// <summary>
     /// Starts the Guest Agent in the logged-on user's interactive desktop.
     /// The provider session registers an Interactive-logon scheduled task so
     /// GUI samples do not remain trapped in the remoting service session.
@@ -1682,7 +1728,12 @@ public sealed class HyperVRunbookBuilder
             // registry/network). Draft handle-access bit 0x40 stays off and
             // must remain an explicit future operator choice.
             "--r0-enable-mask",
-            "0x3F"
+            "0x3F",
+            // Live sample runs keep every eligible R0 row. The collector
+            // still drains in bounded batches; stride sampling is reserved
+            // for an explicit operator override.
+            "--r0-driver-event-sample-stride",
+            "1"
         };
 
         if (config.Driver.UseMockCollector)
