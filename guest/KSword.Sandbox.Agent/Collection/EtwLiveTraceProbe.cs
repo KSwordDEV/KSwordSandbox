@@ -306,7 +306,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             var parentProcessId = ParseProcessId(ValueOrEmpty(payloadByName, "parentprocessid", "parentpid", "parentid"));
             threadId = FirstNonEmpty(threadId, ValueOrEmpty(payloadByName, "threadid", "tthreadid"));
             var image = ValueOrEmpty(payloadByName, "imagename", "imagefilename", "image", "processname", "process");
-            var path = ValueOrEmpty(payloadByName, "filename", "file", "path", "imagepath");
+            var path = ValueOrEmpty(payloadByName, "filename", "file", "path", "imagepath", "keyname", "keypath", "objectname");
             var commandLine = ValueOrEmpty(payloadByName, "commandline", "command");
             var eventType = MapEventType(eventName, provider + " " + opcode + " " + task + " " + eventId);
             var data = CreateDecodedData(eventType, eventName, provider, eventId, opcode, threadId, session, context, string.Join("; ", payloadValues));

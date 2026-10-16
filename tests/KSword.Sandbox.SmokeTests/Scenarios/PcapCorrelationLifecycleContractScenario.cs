@@ -66,6 +66,7 @@ internal sealed class PcapCorrelationLifecycleContractScenario : ISmokeTestScena
                 PcapEvent("dns.query", inWindow, "c2.bad.test", 53),
                 PcapEvent("tls.connection", inWindow.AddMilliseconds(10), "c2.bad.test", 443),
                 PcapEvent("network.flow", inWindow.AddMilliseconds(20), "198.51.100.8", 443),
+                PcapFlowByIp(inWindow.AddMilliseconds(30), "203.0.113.44", 443),
                 PcapEvent("network.flow", outsideWindow, "c2.bad.test", 443),
                 PcapEvent("network.flow", inWindow, "c2.bad.test", 5986, rawCompatibility: true),
                 PcapEvent("network.flow", inWindow, "c2.bad.test", 5986)
@@ -77,6 +78,10 @@ internal sealed class PcapCorrelationLifecycleContractScenario : ISmokeTestScena
         SmokeAssert.True(dns.Data["pcapCorrelationStaticIocMatched"] == "true", "Probable DNS attribution must preserve static IOC match state.");
         SmokeAssert.True(dns.Data["pcapCorrelationOwnerPidAvailable"] == "false", "PCAP attribution must disclose missing owner PID.");
         SmokeAssert.True(dns.Data["behaviorCounted"] == "true", "Probable canonical PCAP rows must remain behavior candidates.");
+
+        var dnsAnswerFlow = classified.Single(evt => evt.EventType == "network.flow" && evt.Timestamp == inWindow.AddMilliseconds(30));
+        SmokeAssert.True(dnsAnswerFlow.Data["sampleCorrelation"] == "probable", "A flow to a static-IOC DNS answer must use DNS corroboration when no owner PID is available.");
+        SmokeAssert.True(dnsAnswerFlow.Data["pcapCorrelationDnsCorroborated"] == "true", "DNS-answer corroboration must be explicit in PCAP metadata.");
 
         var outside = Require(classified, "network.flow", outsideWindow);
         SmokeAssert.True(outside.Data["sampleCorrelation"] != "probable", "Packets outside the sample lifecycle must not be promoted.");
@@ -120,12 +125,39 @@ internal sealed class PcapCorrelationLifecycleContractScenario : ISmokeTestScena
             ["duplicateRole"] = rawCompatibility ? "raw-pcap-compatibility" : "normalized-canonical"
         };
 
+        if (eventType.StartsWith("dns", StringComparison.OrdinalIgnoreCase))
+        {
+            data["dnsAnswerIps"] = "203.0.113.44";
+            data["answersNormalized"] = "203.0.113.44";
+        }
+
         return new SandboxEvent
         {
             EventType = eventType,
             Source = "host",
             Timestamp = timestamp,
             Data = data
+        };
+    }
+
+    private static SandboxEvent PcapFlowByIp(DateTimeOffset timestamp, string destinationIp, int destinationPort)
+    {
+        return new SandboxEvent
+        {
+            EventType = "network.flow",
+            Source = "host",
+            Timestamp = timestamp,
+            Data = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["importSource"] = "pcap-native",
+                ["eventKind"] = "connection",
+                ["destinationIp"] = destinationIp,
+                ["destinationPort"] = destinationPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["behaviorCounted"] = "true",
+                ["nonbehavior"] = "false",
+                ["rawPcapCompatibilityRow"] = "false",
+                ["duplicateRole"] = "normalized-canonical"
+            }
         };
     }
 

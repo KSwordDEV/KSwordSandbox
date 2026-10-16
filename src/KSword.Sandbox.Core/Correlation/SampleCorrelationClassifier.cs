@@ -411,14 +411,24 @@ public static class SampleCorrelationClassifier
             .Select(target => (Target: target, Match: FindStaticIocMatch(target, context.StaticNetworkIndicators)))
             .FirstOrDefault(pair => !string.IsNullOrWhiteSpace(pair.Match));
         var matchedIoc = staticMatch.Match;
+        var dnsCorroborated = string.IsNullOrWhiteSpace(matchedIoc) && targets.Any(target => context.DnsCorroboratedTargets.Contains(target));
+        if (dnsCorroborated)
+        {
+            matchedIoc = "dns-answer-corroboration";
+        }
         data["pcapCorrelationStaticIocMatched"] = (!string.IsNullOrWhiteSpace(matchedIoc)).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        data["pcapCorrelationDnsCorroborated"] = dnsCorroborated.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         if (!string.IsNullOrWhiteSpace(matchedIoc))
         {
             data["pcapCorrelationStaticIoc"] = matchedIoc;
-            data["pcapCorrelationUncertainty"] = "owner-pid-unavailable; lifecycle-overlap; static-ioc-corroboration";
+            data["pcapCorrelationUncertainty"] = dnsCorroborated
+                ? "owner-pid-unavailable; lifecycle-overlap; dns-answer-corroboration"
+                : "owner-pid-unavailable; lifecycle-overlap; static-ioc-corroboration";
             disposition = CorrelationDisposition.Probable(
-                "pcap-lifecycle-overlap-static-ioc-corroboration",
-                "timestamp+staticIoc",
+                dnsCorroborated
+                    ? "pcap-lifecycle-overlap-dns-answer-corroboration"
+                    : "pcap-lifecycle-overlap-static-ioc-corroboration",
+                dnsCorroborated ? "timestamp+dnsAnswer" : "timestamp+staticIoc",
                 "probable-pcap-static-ioc-boundary",
                 true);
             return true;
@@ -758,7 +768,8 @@ public static class SampleCorrelationClassifier
         var networkOwners = BuildNetworkEndpointOwnerMap(events);
         var lifecycles = BuildSampleLifecycles(events, rootPids, samplePids);
         var staticIocs = BuildStaticNetworkIndicators(events);
-        return new CorrelationContext(sampleFullPath, sampleFileName, sampleDirectory, processes, samplePids, networkOwners, lifecycles, staticIocs);
+        var dnsCorroboratedTargets = BuildDnsCorroboratedTargets(events, staticIocs);
+        return new CorrelationContext(sampleFullPath, sampleFileName, sampleDirectory, processes, samplePids, networkOwners, lifecycles, staticIocs, dnsCorroboratedTargets);
     }
 
     private static IReadOnlyList<SampleLifecycleWindow> BuildSampleLifecycles(
@@ -849,6 +860,50 @@ public static class SampleCorrelationClassifier
                 indicators.Add(host);
             }
         }
+    }
+
+    private static HashSet<string> BuildDnsCorroboratedTargets(
+        IEnumerable<SandboxEvent> events,
+        IReadOnlySet<string> staticIndicators)
+    {
+        var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var evt in events)
+        {
+            var eventKind = Value(evt.Data, "eventKind");
+            if (!(evt.EventType.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
+                  evt.EventType.Equals("pcap.dns", StringComparison.OrdinalIgnoreCase) ||
+                  string.Equals(eventKind, "dns", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var query = NormalizeNetworkTarget(FirstNonEmpty(
+                Value(evt.Data, "queryName"), Value(evt.Data, "qname"), Value(evt.Data, "domain"), Value(evt.Data, "dnsQueryName")));
+            if (string.IsNullOrWhiteSpace(query) || string.IsNullOrWhiteSpace(FindStaticIocMatch(query, staticIndicators)))
+            {
+                continue;
+            }
+
+            foreach (var answer in new[]
+            {
+                Value(evt.Data, "answerAddress"),
+                Value(evt.Data, "dnsAnswerIps"),
+                Value(evt.Data, "answersNormalized"),
+                Value(evt.Data, "answers")
+            }.Where(value => !string.IsNullOrWhiteSpace(value)))
+            {
+                foreach (var token in answer!.Split(new[] { ',', ';', '|', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var normalized = NormalizeNetworkTarget(token);
+                    if (!string.IsNullOrWhiteSpace(normalized) && !IsCollectionNetworkTarget(normalized))
+                    {
+                        targets.Add(normalized);
+                    }
+                }
+            }
+        }
+
+        return targets;
     }
 
     private static Dictionary<int, ProcessFacts> BuildProcessFacts(IEnumerable<SandboxEvent> events)
@@ -1746,7 +1801,8 @@ public static class SampleCorrelationClassifier
         HashSet<int> SampleProcessIds,
         IReadOnlyDictionary<string, int> NetworkEndpointOwners,
         IReadOnlyList<SampleLifecycleWindow> SampleLifecycles,
-        IReadOnlySet<string> StaticNetworkIndicators);
+        IReadOnlySet<string> StaticNetworkIndicators,
+        IReadOnlySet<string> DnsCorroboratedTargets);
 
     private sealed record SampleLifecycleWindow(DateTimeOffset StartUtc, DateTimeOffset EndUtc);
 
