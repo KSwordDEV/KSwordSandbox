@@ -1498,8 +1498,8 @@ public static class ReportEventSampler
         var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["reason"] = "raw event volume exceeded report inline limit",
-            ["zhMessage"] = "报告内联事件数量超过上限，已保留代表性事件并保留原始事件文件路径。",
-            ["zhHint"] = "该行是 Host 报告采样标记，behaviorCounted=false；report.json 保留全部归属于样本的动态动作，普通静态/诊断行按配额采样；完整原始来源请查看 rawEventsPath/driverEventsPath 或已索引源文件。",
+            ["zhMessage"] = "报告内联事件数量超过上限，已保留全部动态动作和代表性其他证据，并保留原始事件文件路径。",
+            ["zhHint"] = "该行是 Host 报告采样标记，behaviorCounted=false；report.json 保留全部规范化动态动作（包括未归因行），普通静态/诊断行按配额采样；完整原始来源请查看 rawEventsPath/driverEventsPath 或已索引源文件。",
             ["behaviorCounted"] = "false",
             ["nonbehavior"] = "true",
             ["notSampleBehavior"] = "true",
