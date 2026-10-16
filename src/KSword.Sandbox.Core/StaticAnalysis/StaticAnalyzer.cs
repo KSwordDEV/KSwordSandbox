@@ -941,6 +941,14 @@ public sealed class StaticAnalyzer
         {
             return null;
         }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
         catch (IOException exception)
         {
             warnings.Add($"Managed metadata could not be read: {exception.Message}");
