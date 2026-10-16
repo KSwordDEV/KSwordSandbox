@@ -62,6 +62,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.watcher.dropped", "File watcher queue drops must remain explicit collection-health evidence.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "unknown-file-actor", "Filesystem watcher rows must not claim the sample root PID without an actor source.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "actorPidStatus", "Filesystem watcher rows must explain that actor PID attribution is unavailable.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "sourcePath\"] = change.OldPath", "Rename rows must retain the source path.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "destinationPath\"] = change.Path", "Rename rows must retain the destination path.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "MaxQueuedWatcherEvents", "Filesystem watcher queue capacity must remain bounded to expose collection pressure.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "InternalBufferSize = 64 * 1024", "Filesystem watcher buffers must be explicitly bounded.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "CaptureFast", "Process tree probe must use a low-latency edge capture during the run.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Toolhelp-only edge sweep", "Fast process capture must avoid the slow CIM path during in-flight polling.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.tcp.closed", "TCP diff probe must emit closed connection deltas.");
