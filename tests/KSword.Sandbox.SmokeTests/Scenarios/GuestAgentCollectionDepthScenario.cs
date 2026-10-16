@@ -74,6 +74,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("edgePollIntervalMilliseconds", StringComparison.Ordinal) &&
                          programText.Contains("TimeSpan.FromMilliseconds(250)", StringComparison.Ordinal),
             "Guest Agent must expose the bounded 250 ms in-flight edge cadence so short-lived process/network coverage is explicit.");
+        SmokeAssert.True(programText.Contains("ObserveAfterExitWithPeriodicProbesAsync", StringComparison.Ordinal) &&
+                         programText.Contains("postExitPolling", StringComparison.Ordinal),
+            "Guest Agent must keep process/file/network probes live after root exit so delayed handoffs remain observable.");
         SmokeAssert.True(guestAgentDoc.Contains("etw_live.captured", StringComparison.Ordinal), "Guest Agent documentation must explain ETW live capture and failure states.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "ipconfig.exe", "DNS cache collection must use a bounded ipconfig helper.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "netsh.exe", "WinHTTP proxy collection must use a bounded netsh helper.");

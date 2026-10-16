@@ -279,6 +279,8 @@ internal static class AgentProgram
                         ["remainingSeconds"] = Math.Ceiling(remainingAnalysisWindow.TotalSeconds).ToString(CultureInfo.InvariantCulture),
                         ["reason"] = "sampleExitedBeforeAnalysisDuration",
                         ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+                        ["postExitPolling"] = "true",
+                        ["postExitPollIntervalMilliseconds"] = "250",
                         ["imagePath"] = options.SamplePath,
                         ["processImagePath"] = options.SamplePath,
                         ["commandLine"] = executionCommandLine,
@@ -291,7 +293,16 @@ internal static class AgentProgram
                     events[^1].Data["startTimeUtc"] = executionProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
                 }
 
-                await Task.Delay(remainingAnalysisWindow);
+                // Keep the evidence lanes live for the rest of the configured
+                // window even after the root exits.  Malware commonly hands
+                // off to a child, WMI host, scheduled task, or delayed network
+                // worker at that boundary; a plain delay made those edges
+                // invisible and turned the remaining window into dead time.
+                await ObserveAfterExitWithPeriodicProbesAsync(
+                    remainingAnalysisWindow,
+                    probeRunner,
+                    runningProbeContext,
+                    events);
             }
 
             executionStage = "after-run-probes";
@@ -1437,6 +1448,39 @@ internal static class AgentProgram
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Continues bounded process/file/TCP edge polling after the sample root
+    /// exits. Inputs are the remaining analysis window, probe runner, root
+    /// context, and event sink; processing polls at the same 250 ms cadence
+    /// without health-summary noise; the method returns when the deadline is
+    /// reached.
+    /// </summary>
+    private static async Task ObserveAfterExitWithPeriodicProbesAsync(
+        TimeSpan timeout,
+        GuestProbeRunner probeRunner,
+        GuestProbeContext context,
+        List<SandboxEvent> events)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        var pollInterval = TimeSpan.FromMilliseconds(250);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            await Task.Delay(remaining < pollInterval ? remaining : pollInterval).ConfigureAwait(false);
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                break;
+            }
+
+            var edgeEvents = await probeRunner.CollectAsync(
+                ProbePhase.DuringRun,
+                context,
+                CancellationToken.None,
+                includeHealthSummary: false).ConfigureAwait(false);
+            events.AddRange(edgeEvents);
+        }
     }
 
     /// <summary>
