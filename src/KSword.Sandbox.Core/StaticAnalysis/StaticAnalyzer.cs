@@ -302,6 +302,134 @@ public sealed class StaticAnalyzer
         "Wow64DisableWow64FsRedirection"
     ];
 
+    // Capability clusters intentionally require multiple independent signals.
+    // A lone generic import (for example OpenProcessToken or
+    // QueryPerformanceCounter) is retained as static triage but never forms a
+    // high-signal capability hypothesis by itself.
+    private static readonly string[] KeyloggingApis =
+    [
+        "SetWindowsHookEx",
+        "GetAsyncKeyState",
+        "GetKeyState",
+        "GetKeyboardState",
+        "GetRawInputData",
+        "ToUnicode",
+        "ToUnicodeEx",
+        "MapVirtualKey",
+        "RegisterRawInputDevices"
+    ];
+
+    private static readonly string[] BrowserCredentialApis =
+    [
+        "CryptUnprotectData",
+        "IEGetProtectedModeCookie",
+        "VaultEnumerateItems",
+        "VaultGetItem",
+        "PStoreCreateInstance"
+    ];
+
+    private static readonly string[] ClipboardApis =
+    [
+        "OpenClipboard",
+        "GetClipboardData",
+        "GlobalLock",
+        "GlobalUnlock",
+        "IsClipboardFormatAvailable",
+        "AddClipboardFormatListener",
+        "SetClipboardViewer"
+    ];
+
+    private static readonly string[] ScreenshotApis =
+    [
+        "BitBlt",
+        "StretchBlt",
+        "PrintWindow",
+        "GetDC",
+        "CreateCompatibleBitmap",
+        "GetDIBits",
+        "CreateDesktopDuplication",
+        "DuplicateOutput"
+    ];
+
+    private static readonly string[] ExfilSourceApis =
+    [
+        "ReadFile",
+        "ReadFileEx",
+        "MapViewOfFile",
+        "CryptUnprotectData",
+        "GetClipboardData"
+    ];
+
+    private static readonly string[] ExfilTransportApis =
+    [
+        "InternetWriteFile",
+        "WinHttpWriteData",
+        "WSASend",
+        "send",
+        "FtpPutFile",
+        "HttpSendRequest",
+        "WinHttpSendRequest"
+    ];
+
+    private static readonly string[] BrowserCredentialStringMarkers =
+    [
+        "Login Data",
+        "Cookies",
+        "Web Data",
+        "Local State",
+        "Firefox\\Profiles",
+        "Chrome\\User Data",
+        "Edge\\User Data",
+        "autofill",
+        "wallet"
+    ];
+
+    private static readonly string[] KeyloggingStringMarkers =
+    [
+        "keylog",
+        "key logger",
+        "keyboard hook",
+        "GetAsyncKeyState",
+        "GetRawInputData"
+    ];
+
+    private static readonly string[] ClipboardStringMarkers =
+    [
+        "clipboard",
+        "WM_CLIPBOARDUPDATE",
+        "OpenClipboard",
+        "GetClipboardData"
+    ];
+
+    private static readonly string[] ScreenshotStringMarkers =
+    [
+        "screenshot",
+        "screen capture",
+        "desktop capture",
+        "BitBlt",
+        "PrintWindow"
+    ];
+
+    private static readonly string[] PersistenceStringMarkers =
+    [
+        "\\Run",
+        "\\RunOnce",
+        "CurrentControlSet\\Services",
+        "schtasks",
+        "TaskCache",
+        "Startup"
+    ];
+
+    private static readonly string[] ExecutionApis =
+    [
+        "CreateProcess",
+        "ShellExecute",
+        "WinExec",
+        "CreateProcessAsUser",
+        "CreateProcessWithLogon",
+        "CreateProcessWithToken"
+    ];
+
     private static readonly string[] SuspiciousApiStrings =
         ProcessInjectionApis
             .Concat(DynamicCodeApis)
@@ -654,7 +782,7 @@ public sealed class StaticAnalyzer
         var header = ParsePe(reader, stream.Length, tags, interestingStrings, warnings);
         ExtractStrings(fullPath, tags, urls, interestingStrings, warnings, stringEvidence);
 
-        return header with
+        var analyzed = header with
         {
             NetworkIndicators = stringEvidence.NetworkIndicators,
             PathIndicators = stringEvidence.PathIndicators,
@@ -664,6 +792,11 @@ public sealed class StaticAnalyzer
             Urls = urls.Take(MaxUrls).ToList(),
             InterestingStrings = interestingStrings.Take(MaxStrings).ToList(),
             Warnings = warnings
+        };
+
+        return analyzed with
+        {
+            CapabilityClusters = BuildCapabilityClusters(analyzed)
         };
     }
 
@@ -689,9 +822,15 @@ public sealed class StaticAnalyzer
     public static IReadOnlyList<SandboxEvent> CreateEvents(string samplePath, StaticAnalysisResult result)
     {
         var fullPath = Path.GetFullPath(samplePath);
+        if (result.CapabilityClusters.Count == 0)
+        {
+            result = result with { CapabilityClusters = BuildCapabilityClusters(result) };
+        }
+
         var events = new List<SandboxEvent>();
 
         AddStaticSummaryEvent(fullPath, result, events);
+        AddStaticCapabilityClusterEvents(fullPath, result, events);
         AddStaticSectionEvents(fullPath, result, events);
         AddStaticImportEvents(fullPath, result, events);
         AddStaticExportEvents(fullPath, result, events);
@@ -5330,6 +5469,229 @@ public sealed class StaticAnalyzer
     }
 
     /// <summary>
+    /// Builds high-signal static capability hypotheses. Inputs are structured
+    /// imports, bounded strings/paths, and resource metadata; processing
+    /// requires corroboration from at least two independent signals (and, for
+    /// injection/exfiltration, a strong API pair). The result remains a static
+    /// hint and explicitly requires runtime correlation.
+    /// </summary>
+    private static List<StaticCapabilityCluster> BuildCapabilityClusters(StaticAnalysisResult result)
+    {
+        var apiNames = result.Imports
+            .SelectMany(module => module.ApiNames)
+            .Concat(result.Imports.SelectMany(module => module.SuspiciousApiNames))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var stringValues = result.InterestingStrings
+            .Concat(result.PathIndicators.Select(indicator => indicator.Value))
+            .Concat(result.CommandIndicators.Select(indicator => indicator.Value))
+            .Concat(result.SuspiciousStrings.Select(finding => finding.Value))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var clusters = new List<StaticCapabilityCluster>();
+
+        AddCapabilityCluster(
+            clusters,
+            "keylogging",
+            "Keylogging capability",
+            MatchApiSignals(apiNames, KeyloggingApis),
+            MatchStringSignals(stringValues, KeyloggingStringMarkers),
+            requireApi: true,
+            requireIndependentSignal: true);
+        AddCapabilityCluster(
+            clusters,
+            "browser-credential-access",
+            "Browser credential and cookie access",
+            MatchApiSignals(apiNames, BrowserCredentialApis),
+            MatchStringSignals(stringValues, BrowserCredentialStringMarkers),
+            requireApi: false,
+            requireIndependentSignal: true);
+        AddCapabilityCluster(
+            clusters,
+            "clipboard-collection",
+            "Clipboard collection",
+            MatchApiSignals(apiNames, ClipboardApis),
+            MatchStringSignals(stringValues, ClipboardStringMarkers),
+            requireApi: true,
+            requireIndependentSignal: true);
+        AddCapabilityCluster(
+            clusters,
+            "screenshot-capture",
+            "Screenshot or desktop capture",
+            MatchApiSignals(apiNames, ScreenshotApis),
+            MatchStringSignals(stringValues, ScreenshotStringMarkers),
+            requireApi: true,
+            requireIndependentSignal: true);
+
+        var exfilTransport = MatchApiSignals(apiNames, ExfilTransportApis);
+        var exfilSource = MatchApiSignals(apiNames, ExfilSourceApis)
+            .Concat(MatchStringSignals(stringValues, BrowserCredentialStringMarkers))
+            .Concat(MatchStringSignals(stringValues, ClipboardStringMarkers))
+            .Concat(MatchStringSignals(stringValues, ScreenshotStringMarkers))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        AddCapabilityCluster(
+            clusters,
+            "exfiltration",
+            "Data collection with outbound transport",
+            exfilTransport,
+            exfilSource,
+            requireApi: true,
+            requireIndependentSignal: true,
+            requirePrimarySignals: true);
+
+        var persistenceApi = MatchApiSignals(apiNames, RegistryPersistenceApis.Concat(ServicePersistenceApis).ToArray());
+        AddCapabilityCluster(
+            clusters,
+            "persistence",
+            "Persistence setup capability",
+            persistenceApi,
+            MatchStringSignals(stringValues, PersistenceStringMarkers),
+            requireApi: false,
+            requireIndependentSignal: true);
+
+        var downloadSignals = MatchApiSignals(apiNames, DownloadApis)
+            .Concat(MatchStringSignals(stringValues, DownloadCommandMarkers))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var executionSignals = MatchApiSignals(apiNames, ExecutionApis)
+            .Concat(MatchStringSignals(stringValues, ScriptInterpreterMarkers))
+            .ToList();
+        if (result.Resources.Any(resource => resource.IsEmbeddedPe || resource.IsPayloadCandidate))
+        {
+            executionSignals.Add("resource:embedded-payload");
+        }
+
+        AddCapabilityCluster(
+            clusters,
+            "download-execute",
+            "Download and execute chain",
+            downloadSignals,
+            executionSignals,
+            requireApi: false,
+            requireIndependentSignal: true,
+            requirePrimarySignals: true);
+
+        var injectionSignals = MatchApiSignals(apiNames, ProcessInjectionApis);
+        if (injectionSignals.Count >= 2)
+        {
+            AddCapabilityCluster(
+                clusters,
+                "process-injection",
+                "Cross-process injection primitives",
+                injectionSignals,
+                [],
+                requireApi: true,
+                requireIndependentSignal: false,
+                requirePrimarySignals: false);
+        }
+
+        return clusters;
+    }
+
+    private static void AddCapabilityCluster(
+        List<StaticCapabilityCluster> clusters,
+        string name,
+        string displayName,
+        IReadOnlyList<string> primarySignals,
+        IReadOnlyList<string> corroboratingSignals,
+        bool requireApi,
+        bool requireIndependentSignal,
+        bool requirePrimarySignals = false)
+    {
+        var primary = primarySignals
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var corroborating = corroboratingSignals
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var total = primary.Concat(corroborating).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (total.Count < 2 || (requireApi && primary.Count == 0) ||
+            (requireIndependentSignal && (primary.Count == 0 || corroborating.Count == 0)) ||
+            (requirePrimarySignals && (primary.Count == 0 || corroborating.Count == 0)))
+        {
+            return;
+        }
+
+        clusters.Add(new StaticCapabilityCluster
+        {
+            Name = name,
+            DisplayName = displayName,
+            Confidence = total.Count >= 4 ? "medium" : "low",
+            EvidenceCount = total.Count,
+            Signals = total.Take(16).ToList(),
+            Evidence = total.Take(16).ToList(),
+            RuntimeCorrelationRequired = true
+        });
+    }
+
+    private static List<string> MatchApiSignals(IEnumerable<string> apiNames, IEnumerable<string> markers)
+    {
+        var names = apiNames.ToList();
+        return markers
+            .Where(marker => names.Any(name => ContainsAnyApiToken(name, marker)))
+            .Select(marker => $"api:{marker}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<string> MatchStringSignals(IEnumerable<string> values, IEnumerable<string> markers)
+    {
+        var strings = values.ToList();
+        return markers
+            .Select(marker =>
+            {
+                var value = strings.FirstOrDefault(candidate => candidate.Contains(marker, StringComparison.OrdinalIgnoreCase));
+                return value is null ? null : $"string:{marker}";
+            })
+            .Where(value => value is not null)
+            .Select(value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void AddStaticCapabilityClusterEvents(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        foreach (var cluster in result.CapabilityClusters)
+        {
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["cluster"] = cluster.Name,
+                ["featureCluster"] = cluster.Name,
+                ["displayName"] = cluster.DisplayName,
+                ["confidence"] = cluster.Confidence,
+                ["evidenceCount"] = cluster.EvidenceCount.ToString(CultureInfo.InvariantCulture),
+                ["runtimeCorrelationRequired"] = cluster.RuntimeCorrelationRequired.ToString(),
+                ["staticCapabilityOnly"] = "True"
+            };
+            AddDataList(data, "signals", cluster.Signals);
+            AddDataList(data, "evidence", cluster.Evidence);
+            AddDataList(data, "tags", ["static_capability_cluster", "static_only", $"capability_{cluster.Name.Replace('-', '_')}"]);
+            AddStaticRuleFacingFields(
+                data,
+                "static-capability-cluster",
+                "static.capability.cluster",
+                $"capability.{NormalizeStaticYaraTag(cluster.Name)}",
+                cluster.Name,
+                cluster.Confidence);
+            data["dynamicEvidenceGate"] = "requires runtime sample-attributed evidence before behavior verdict";
+
+            TryAddStaticEvent(
+                events,
+                "static.capability.cluster",
+                fullPath,
+                $"Static capability cluster {cluster.Name} requires runtime confirmation.",
+                $"静态能力簇 {cluster.DisplayName} 需要运行时证据确认。",
+                "该能力簇由多个静态信号组成；它不是已发生行为，必须与同一分析窗口中的样本归因动态事件交叉验证。",
+                data);
+        }
+    }
+
+    /// <summary>
     /// Adds the backward-compatible static.analysis.completed summary event.
     /// </summary>
     private static void AddStaticSummaryEvent(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
@@ -5344,6 +5706,7 @@ public sealed class StaticAnalyzer
             ["sectionCount"] = result.SectionCount.ToString(CultureInfo.InvariantCulture),
             ["importModuleCount"] = result.Imports.Count.ToString(CultureInfo.InvariantCulture),
             ["importApiClusterCount"] = result.ImportApiClusters.Count.ToString(CultureInfo.InvariantCulture),
+            ["capabilityClusterCount"] = result.CapabilityClusters.Count.ToString(CultureInfo.InvariantCulture),
             ["exportCount"] = result.ExportNames.Count.ToString(CultureInfo.InvariantCulture),
             ["tlsCallbackCount"] = tlsCallbackCount.ToString(CultureInfo.InvariantCulture),
             ["resourceCount"] = result.Resources.Count.ToString(CultureInfo.InvariantCulture),

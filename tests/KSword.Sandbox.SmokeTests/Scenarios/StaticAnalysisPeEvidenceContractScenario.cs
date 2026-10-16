@@ -163,6 +163,7 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         var projectedEvents = analyzer.AnalyzeToEvents(samplePath);
         AssertProjectedStaticEvents(projectedEvents);
         AssertProjectedStaticRuleConsumption(context, projectedEvents);
+        AssertHighSignalCapabilityClusters(context);
 
         return Task.FromResult(new SmokeTestResult
         {
@@ -170,6 +171,95 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             Passed = true,
             Message = "Static analyzer emits structured PE, overlay, signature, URL/IP/email, path, command, packer, and YARA-like event evidence."
         });
+    }
+
+    /// <summary>
+    /// Verifies capability clusters require corroborating signals and remain
+    /// static-only findings. A lone generic token must not create a cluster.
+    /// </summary>
+    private static void AssertHighSignalCapabilityClusters(SmokeTestContext context)
+    {
+        var result = new StaticAnalysisResult
+        {
+            Imports =
+            [
+                new PeImportModuleInfo
+                {
+                    ModuleName = "KERNEL32.dll",
+                    ApiNames =
+                    [
+                        "SetWindowsHookEx",
+                        "GetAsyncKeyState",
+                        "OpenClipboard",
+                        "GetClipboardData",
+                        "CryptUnprotectData",
+                        "WriteProcessMemory",
+                        "CreateRemoteThread",
+                        "InternetWriteFile",
+                        "ReadFile",
+                        "URLDownloadToFile",
+                        "CreateProcess",
+                        "RegSetValue"
+                    ]
+                }
+            ],
+            InterestingStrings =
+            [
+                "Chrome\\User Data\\Default\\Login Data",
+                "keylogger",
+                "clipboard",
+                "screenshot"
+            ]
+        };
+        var events = StaticAnalyzer.CreateEvents(
+            Path.Combine(context.RuntimeRoot, "synthetic-capability.exe"),
+            result);
+        var clusters = events
+            .Where(evt => string.Equals(evt.EventType, "static.capability.cluster", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var names = clusters
+            .Select(evt => evt.Data.TryGetValue("featureCluster", out var value) ? value : string.Empty)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var expected in new[]
+        {
+            "keylogging",
+            "browser-credential-access",
+            "clipboard-collection",
+            "exfiltration",
+            "download-execute",
+            "process-injection"
+        })
+        {
+            SmokeAssert.True(names.Contains(expected), $"High-signal capability cluster '{expected}' should be emitted.");
+        }
+
+        var rules = RuleEngine.LoadRuleSet(Path.Combine(context.RulesDirectory, "behavior-rules.json"));
+        var findings = new RuleEngine(rules).Classify(clusters);
+        SmokeAssert.True(
+            findings.All(finding => string.Equals(finding.Severity, "low", StringComparison.OrdinalIgnoreCase)),
+            "Static capability clusters must remain low-severity until runtime evidence exists.");
+        SmokeAssert.True(
+            clusters.All(evt => evt.Data.TryGetValue("runtimeCorrelationRequired", out var required) &&
+                string.Equals(required, "True", StringComparison.OrdinalIgnoreCase)),
+            "Static capability clusters must require runtime correlation.");
+
+        var loneApiResult = new StaticAnalysisResult
+        {
+            Imports =
+            [
+                new PeImportModuleInfo
+                {
+                    ModuleName = "ADVAPI32.dll",
+                    ApiNames = ["OpenProcessToken"]
+                }
+            ]
+        };
+        var loneApiEvents = StaticAnalyzer.CreateEvents(
+            Path.Combine(context.RuntimeRoot, "synthetic-lone-api.exe"),
+            loneApiResult);
+        SmokeAssert.True(
+            !loneApiEvents.Any(evt => string.Equals(evt.EventType, "static.capability.cluster", StringComparison.OrdinalIgnoreCase)),
+            "A lone generic API must not create a high-signal capability cluster.");
     }
 
     /// <summary>

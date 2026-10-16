@@ -304,6 +304,24 @@ above and continue to treat static-only rows as capability/triage evidence.
 
 ## False-positive guardrails
 
+## Multi-signal capability clusters
+
+`StaticAnalysisResult.CapabilityClusters` and the corresponding
+`static.capability.cluster` events represent static hypotheses built from
+independent signals. The current clusters cover keylogging, browser credential
+and cookie access, clipboard collection, screenshot capture, collection plus
+outbound transport, persistence, download-and-execute chains, and process
+injection. A generic API by itself (for example `OpenProcessToken` or
+`QueryPerformanceCounter`) cannot create one of these clusters.
+
+Each cluster includes `evidenceCount`, bounded `signals`,
+`runtimeCorrelationRequired=True`, and `dynamicEvidenceGate`. Rules consuming
+these rows are low-severity static triage only. A runtime process/file/network,
+input, screenshot, registry/service, or thread event attributed to the sample
+is required before a report can describe the capability as observed behavior.
+No family name, hash reputation result, or YARA match is used to create a
+cluster or to promote it to a verdict.
+
 Static tags are triage evidence, not a verdict. The analyzer avoids adding
 high-risk semantics for metadata-only observations:
 

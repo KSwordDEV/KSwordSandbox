@@ -30,6 +30,13 @@ public sealed record StaticAnalysisResult
 
     public List<PeImportApiClusterInfo> ImportApiClusters { get; init; } = [];
 
+    /// <summary>
+    /// High-signal capability clusters derived from multiple independent static
+    /// signals. These are triage hints only; each cluster requires runtime
+    /// evidence before it can be reported as observed behavior.
+    /// </summary>
+    public List<StaticCapabilityCluster> CapabilityClusters { get; init; } = [];
+
     public string? ExportModuleName { get; init; }
 
     public List<string> ExportNames { get; init; } = [];
@@ -119,6 +126,28 @@ public sealed record PeImportApiClusterInfo
     public int HitCount { get; init; }
 
     public List<string> ApiNames { get; init; } = [];
+}
+
+/// <summary>
+/// A bounded, multi-signal static capability hypothesis. Inputs are imported
+/// APIs and/or meaningful strings/paths; processing requires corroboration
+/// inside the cluster so one generic API cannot create a capability claim.
+/// </summary>
+public sealed record StaticCapabilityCluster
+{
+    public required string Name { get; init; }
+
+    public string DisplayName { get; init; } = string.Empty;
+
+    public string Confidence { get; init; } = "low";
+
+    public int EvidenceCount { get; init; }
+
+    public List<string> Signals { get; init; } = [];
+
+    public List<string> Evidence { get; init; } = [];
+
+    public bool RuntimeCorrelationRequired { get; init; } = true;
 }
 
 /// <summary>
