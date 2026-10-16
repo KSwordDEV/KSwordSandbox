@@ -1161,7 +1161,56 @@ public sealed partial class SandboxJobService
             }
         }
 
-        return events.Select(NormalizeEvent).ToList();
+        return NormalizeHostParsedProtocolSummary(events.Select(NormalizeEvent).ToList());
+    }
+
+    private static List<SandboxEvent> NormalizeHostParsedProtocolSummary(List<SandboxEvent> events)
+    {
+        var parsed = events.Where(static evt =>
+                evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) &&
+                !evt.EventType.EndsWith(".summary", StringComparison.OrdinalIgnoreCase) &&
+                !evt.EventType.Contains("parse_error", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (parsed.Count == 0)
+        {
+            return events;
+        }
+
+        var dns = parsed.Any(static evt => evt.EventType.Equals("pcap.dns", StringComparison.OrdinalIgnoreCase));
+        var http = parsed.Any(static evt => evt.EventType.Equals("pcap.http", StringComparison.OrdinalIgnoreCase));
+        var tls = parsed.Any(static evt => evt.EventType.Equals("pcap.tls", StringComparison.OrdinalIgnoreCase));
+        var protocols = string.Join(",", parsed
+            .SelectMany(static evt => new[] { evt.EventType.StartsWith("pcap.dns", StringComparison.OrdinalIgnoreCase) ? "dns" : string.Empty,
+                evt.EventType.StartsWith("pcap.http", StringComparison.OrdinalIgnoreCase) ? "http" : string.Empty,
+                evt.EventType.StartsWith("pcap.tls", StringComparison.OrdinalIgnoreCase) ? "tls" : string.Empty,
+                evt.EventType.StartsWith("pcap.flow", StringComparison.OrdinalIgnoreCase) ? "flow" : string.Empty })
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase));
+
+        return events.Select(evt =>
+        {
+            if (!evt.EventType.Equals("packet_capture.protocol_summary", StringComparison.OrdinalIgnoreCase))
+            {
+                return evt;
+            }
+
+            var data = new Dictionary<string, string>(evt.Data, StringComparer.OrdinalIgnoreCase)
+            {
+                ["protocolSummaryAvailable"] = "true",
+                ["protocolSummaryState"] = "parsed",
+                ["protocolSummaryStatus"] = "ok",
+                ["protocolSummaryReason"] = "nativePcapParser",
+                ["protocolSummaryFormat"] = "normalized-events",
+                ["protocolSummaryParser"] = "native-pcap",
+                ["protocolSummaryHostNormalized"] = "true",
+                ["protocolsObserved"] = string.IsNullOrWhiteSpace(protocols) ? "unknown" : protocols,
+                ["dnsSummaryState"] = dns ? "parsed" : "empty",
+                ["httpSummaryState"] = http ? "parsed" : "empty",
+                ["tlsSummaryState"] = tls ? "parsed" : "empty"
+            };
+            return evt with { Data = data };
+        }).ToList();
     }
 
     /// <summary>
@@ -1325,7 +1374,44 @@ public sealed partial class SandboxJobService
 
         return string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase)
             ? LoadEventsFromJsonLines(path)
-            : (JsonSerializer.Deserialize<List<SandboxEvent>>(File.ReadAllText(path), JsonOptions) ?? []).Select(NormalizeEvent).ToList();
+            : LoadEventsFromJsonArrayStreaming(path);
+    }
+
+    /// <summary>
+    /// Reads a guest events.json array incrementally. Inputs are a bounded
+    /// output path; processing keeps one event object at a time instead of
+    /// materializing the whole UTF-8 document as a second large string before
+    /// deserialization. The method returns normalized events and preserves the
+    /// existing malformed-document exception contract for import diagnostics.
+    /// </summary>
+    private static List<SandboxEvent> LoadEventsFromJsonArrayStreaming(string path)
+    {
+        var events = new List<SandboxEvent>();
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 64 * 1024,
+            options: FileOptions.SequentialScan);
+        var sequence = JsonSerializer.DeserializeAsyncEnumerable<SandboxEvent>(stream, JsonOptions);
+        var enumerator = sequence.GetAsyncEnumerator();
+        try
+        {
+            while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+            {
+                if (enumerator.Current is SandboxEvent evt)
+                {
+                    events.Add(NormalizeEvent(evt));
+                }
+            }
+        }
+        finally
+        {
+            enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        return events;
     }
 
     /// <summary>
