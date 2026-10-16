@@ -66,6 +66,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "destinationPath\"] = change.Path", "Rename rows must retain the destination path.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "MaxQueuedWatcherEvents", "Filesystem watcher queue capacity must remain bounded to expose collection pressure.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "InternalBufferSize = 64 * 1024", "Filesystem watcher buffers must be explicitly bounded.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "queuedWatcherKeys", "Repeated watcher callbacks must be coalesced before the bounded queue fills.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "CaptureFast", "Process tree probe must use a low-latency edge capture during the run.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Toolhelp-only edge sweep", "Fast process capture must avoid the slow CIM path during in-flight polling.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.tcp.closed", "TCP diff probe must emit closed connection deltas.");

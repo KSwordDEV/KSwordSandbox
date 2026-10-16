@@ -16,6 +16,7 @@ internal sealed class FileDiffProbe : IGuestProbe
     private readonly IFileSnapshotProvider snapshotProvider;
     private Dictionary<string, FileStateSnapshot> baseline = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<FileSystemChange> watcherChanges = new();
+    private readonly ConcurrentDictionary<string, byte> queuedWatcherKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<WatcherError> watcherErrors = new();
     private readonly ConcurrentDictionary<string, byte> watcherKnownPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<FileSystemWatcher> watchers = [];
@@ -360,8 +361,19 @@ internal sealed class FileDiffProbe : IGuestProbe
             }
         }
 
-        while (watcherChanges.Count >= MaxQueuedWatcherEvents && watcherChanges.TryDequeue(out _))
+        var queueKey = WatcherChangeKey(kind, path, oldPath);
+        // AppData and ProgramData can produce repeated Changed callbacks for a
+        // single write. Coalesce an identical edge until the next drain so a
+        // noisy profile cannot consume the bounded queue before the sample's
+        // create/rename/delete edge is observed.
+        if (!queuedWatcherKeys.TryAdd(queueKey, 0))
         {
+            return;
+        }
+
+        while (watcherChanges.Count >= MaxQueuedWatcherEvents && watcherChanges.TryDequeue(out var dropped))
+        {
+            queuedWatcherKeys.TryRemove(WatcherChangeKey(dropped.Kind, dropped.Path, dropped.OldPath), out _);
             Interlocked.Increment(ref droppedWatcherChanges);
         }
 
@@ -373,6 +385,7 @@ internal sealed class FileDiffProbe : IGuestProbe
         var changes = new List<FileSystemChange>();
         while (watcherChanges.TryDequeue(out var change))
         {
+            queuedWatcherKeys.TryRemove(WatcherChangeKey(change.Kind, change.Path, change.OldPath), out _);
             changes.Add(change);
         }
 
@@ -479,6 +492,7 @@ internal sealed class FileDiffProbe : IGuestProbe
         while (watcherChanges.TryDequeue(out _))
         {
         }
+        queuedWatcherKeys.Clear();
         while (watcherErrors.TryDequeue(out _))
         {
         }
@@ -497,6 +511,11 @@ internal sealed class FileDiffProbe : IGuestProbe
         }
 
         watcherErrors.Enqueue(new WatcherError(exception, root));
+    }
+
+    private static string WatcherChangeKey(WatcherChangeKind kind, string path, string? oldPath)
+    {
+        return string.Concat(kind.ToString(), "|", path, "|", oldPath ?? string.Empty);
     }
 
     private static SandboxEvent CreateWatcherFailureEvent(
