@@ -99,7 +99,10 @@ internal static class AgentProgram
                     ["captureScreenshots"] = options.CaptureScreenshots.ToString(),
                     ["screenshotPhases"] = options.ScreenshotOptions.FormatStages(),
                     ["screenshotCount"] = options.ScreenshotOptions.CaptureCount.ToString(CultureInfo.InvariantCulture),
-                    ["captureEtwLiveTrace"] = options.CaptureEtwLiveTrace.ToString()
+                    ["captureEtwLiveTrace"] = options.CaptureEtwLiveTrace.ToString(),
+                    ["edgePollIntervalMilliseconds"] = "250",
+                    ["shortLivedProcessCapture"] = "toolhelp-poll-plus-filesystem-watcher",
+                    ["shortLivedNetworkCapture"] = "owner-table-poll"
                 }
             }
         };
@@ -173,7 +176,7 @@ internal static class AgentProgram
 
             // Take one edge poll immediately after launch. Very short-lived
             // samples can create a file, child process, or socket and finish
-            // before the regular 750 ms cadence gets its first turn.
+            // before the regular 250 ms cadence gets its first turn.
             events.AddRange(await probeRunner.CollectAsync(
                 ProbePhase.DuringRun,
                 runningProbeContext,
@@ -1363,7 +1366,7 @@ internal static class AgentProgram
     /// <summary>
     /// Waits for the sample while taking bounded in-flight snapshots. Inputs
     /// are the sample process, analysis window, probe runner, root context,
-    /// and event sink; processing polls every 750 ms and records process/file/
+    /// and event sink; processing polls every 250 ms and records process/file/
     /// TCP deltas before they disappear, then returns whether the process exited
     /// before the deadline. Health summaries are suppressed for these frequent
     /// polls; probe failures remain explicit diagnostic events.
@@ -1377,7 +1380,13 @@ internal static class AgentProgram
     {
         var exitTask = process.WaitForExitAsync();
         var deadline = DateTimeOffset.UtcNow + timeout;
-        var pollInterval = TimeSpan.FromMilliseconds(750);
+        // Keep the in-flight edge sweep below the lifetime of most helper
+        // processes and short TCP sessions.  The probes themselves only emit
+        // deltas (rather than full environment snapshots), so a 250 ms cadence
+        // materially improves short-lived coverage without multiplying report
+        // noise.  FileSystemWatcher remains the primary source for transient
+        // file edges; this poll closes the process/network observation gap.
+        var pollInterval = TimeSpan.FromMilliseconds(250);
 
         while (DateTimeOffset.UtcNow < deadline)
         {

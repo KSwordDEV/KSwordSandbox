@@ -43,7 +43,7 @@ internal sealed class GuestProbeRunner
     {
         // DuringRun is the only latency-sensitive phase. Running independent
         // read-only probes concurrently prevents a slow CIM/EventLog query
-        // from turning the nominal 750 ms edge poll into a multi-second gap.
+        // from turning the nominal 250 ms edge poll into a multi-second gap.
         // Before/After phases remain ordered because they establish/consume
         // probe baselines and system snapshots.
         if (phase == ProbePhase.DuringRun)

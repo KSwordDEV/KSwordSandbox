@@ -68,6 +68,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "etw_live.failed", "ETW live probe must close startup/stop failures explicitly.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "semanticRowsAvailable", "ETW live probe must distinguish raw ETL from parsed behavior rows.");
         SmokeAssert.True(programText.Contains("etw-live", StringComparison.Ordinal), "Guest Agent CLI must expose explicit --etw-live opt-in.");
+        SmokeAssert.True(programText.Contains("edgePollIntervalMilliseconds", StringComparison.Ordinal) &&
+                         programText.Contains("TimeSpan.FromMilliseconds(250)", StringComparison.Ordinal),
+            "Guest Agent must expose the bounded 250 ms in-flight edge cadence so short-lived process/network coverage is explicit.");
         SmokeAssert.True(guestAgentDoc.Contains("etw_live.captured", StringComparison.Ordinal), "Guest Agent documentation must explain ETW live capture and failure states.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "ipconfig.exe", "DNS cache collection must use a bounded ipconfig helper.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "netsh.exe", "WinHTTP proxy collection must use a bounded netsh helper.");
