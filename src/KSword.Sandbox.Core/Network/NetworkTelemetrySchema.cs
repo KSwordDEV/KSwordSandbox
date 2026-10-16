@@ -309,9 +309,11 @@ public static class NetworkTelemetrySchema
             AddIfNotEmpty(data, "sourcePcapDownloadSafeLink", sourceSafeLink);
         }
 
+        var packetCaptureSource = IsPacketCaptureSource(source);
         foreach (var pair in source.Metadata ?? EmptyMetadata)
         {
-            if (pair.Key.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
+            if ((!packetCaptureSource || !IsProcessIdentityMetadataKey(pair.Key)) &&
+                (pair.Key.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
                 pair.Key.StartsWith("pcap", StringComparison.OrdinalIgnoreCase) ||
                 pair.Key.StartsWith("sourcePcap", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "captureState", StringComparison.OrdinalIgnoreCase) ||
@@ -356,13 +358,17 @@ public static class NetworkTelemetrySchema
                 string.Equals(pair.Key, "duplicateGroupCount", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "duplicateOrdinal", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "isDuplicate", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(pair.Key, "duplicateOfArtifactRelativePath", StringComparison.OrdinalIgnoreCase))
+                string.Equals(pair.Key, "duplicateOfArtifactRelativePath", StringComparison.OrdinalIgnoreCase)))
             {
                 AddIfNotEmpty(data, pair.Key, pair.Value);
             }
         }
 
-        AddMetadataAliases(data, source.Metadata);
+        // Packet captures carry the collector/sample context in their
+        // manifest, but the packets themselves do not contain an owning PID.
+        // Do not copy that context into process identity fields: doing so
+        // would make WinRM/DNS/background traffic look sample-attributed.
+        AddMetadataAliases(data, packetCaptureSource ? null : source.Metadata);
         AddSourceArtifactAliases(data);
         AddPcapSourceArtifactIdentity(data, source);
         ApplyProvenanceAndBehaviorMetadata(data);
@@ -406,6 +412,22 @@ public static class NetworkTelemetrySchema
         {
             data["sourceArtifactHashSkipped"] = ex.GetType().Name;
         }
+    }
+
+    private static bool IsProcessIdentityMetadataKey(string key)
+    {
+        return string.Equals(key, "processId", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "pid", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "parentProcessId", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "ppid", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "rootProcessId", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "rootPid", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "treeLineage", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "processName", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "imageName", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "commandLine", StringComparison.OrdinalIgnoreCase) ||
+            key.StartsWith("process.", StringComparison.OrdinalIgnoreCase) ||
+            key.StartsWith("collectorProcess", StringComparison.OrdinalIgnoreCase);
     }
 
     public static void ApplyHealthAndLocalization(Dictionary<string, string> data)

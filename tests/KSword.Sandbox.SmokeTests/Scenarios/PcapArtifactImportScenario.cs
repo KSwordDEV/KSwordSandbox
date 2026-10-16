@@ -237,6 +237,34 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireNonEmpty(nativeFlow, "byteCount");
         RequireNonEmpty(nativeFlow, "firstSeenUtc");
         RequireNonEmpty(nativeFlow, "lastSeenUtc");
+
+        var captureContextSource = NetworkArtifactSource.FromPath(
+            pcapPath,
+            root,
+            artifactKind: ArtifactKind.PacketCapture.ToString(),
+            collectionName: "packet-captures",
+            evidenceRole: "packet-capture",
+            importMode: "pcap-artifact",
+            metadata: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["processId"] = "4242",
+                ["rootProcessId"] = "4242",
+                ["parentProcessId"] = "4000",
+                ["processName"] = "sample.exe",
+                ["treeLineage"] = "4242"
+            });
+        var contextData = NetworkTelemetrySchema.CreateEndpointData(
+            "tcp",
+            "10.0.0.4",
+            53000,
+            "8.8.8.8",
+            443,
+            "connection",
+            "pcap-native",
+            captureContextSource);
+        SmokeAssert.True(!contextData.ContainsKey("processId"), "Packet flow rows must not inherit artifact-level sample process IDs.");
+        SmokeAssert.True(!contextData.ContainsKey("rootProcessId"), "Packet flow rows must not inherit artifact-level root process IDs.");
+        SmokeAssert.True(!contextData.ContainsKey("processName"), "Packet flow rows must not inherit artifact-level sample process names.");
         var sidecarDns = RequireEvent(events, "dns.query", "queryName", "sidecar.example.test");
         RequireData(sidecarDns, "answers", "2001:db8::44");
         RequireData(sidecarDns, "dns.answers.data", "2001:db8::44");
