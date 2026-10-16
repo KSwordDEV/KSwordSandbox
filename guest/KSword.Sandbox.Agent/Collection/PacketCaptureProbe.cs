@@ -88,20 +88,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             Path.Combine(captureDirectory, $"pktmon-{stamp}.pcapng"),
             DateTimeOffset.UtcNow);
 
-        var result = await BoundedProcessRunner.RunAsync(
-            PktmonExecutable,
-            [
-                "start",
-                "-c",
-                "--pkt-size",
-                PacketSizeBytes,
-                "-f",
-                session.EtlPath,
-                "-s",
-                "128"
-            ],
-            CommandTimeout,
-            cancellationToken).ConfigureAwait(false);
+        var result = await StartPktmonCaptureAsync(session, cancellationToken).ConfigureAwait(false);
 
         if (!result.Succeeded)
         {
@@ -141,7 +128,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["pcapngRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["diagnosticRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
                 ["captureStartedUtc"] = session.StartedAtUtc.ToString("O", CultureInfo.InvariantCulture),
-                ["captureToolCommand"] = "pktmon start -c --pkt-size 128 -f <etl> -s 128",
+                ["captureToolCommand"] = $"pktmon {result.Arguments}",
                 ["conversionTool"] = PktmonExecutable,
                 ["conversionCommand"] = "pktmon etl2pcap <etl> -o <pcapng>",
                 ["conversionStatus"] = "pending",
@@ -164,6 +151,64 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         AddExpectedArtifactEvidence(started.Data, "conversion-pending");
         AddRootProcessData(started, context);
         return [started];
+    }
+
+    private static async Task<BoundedCommandResult> StartPktmonCaptureAsync(
+        PacketCaptureSession session,
+        CancellationToken cancellationToken)
+    {
+        var modernArguments = new[]
+        {
+            "start",
+            "-c",
+            "--pkt-size",
+            PacketSizeBytes,
+            "-f",
+            session.EtlPath,
+            "-s",
+            "128"
+        };
+        var result = await BoundedProcessRunner.RunAsync(
+            PktmonExecutable,
+            modernArguments,
+            CommandTimeout,
+            cancellationToken).ConfigureAwait(false);
+        if (result.Succeeded || !LooksLikeLegacyPktmonSyntaxFailure(result))
+        {
+            return result;
+        }
+
+        // Older inbox PktMon builds interpret -c as a component selector and
+        // require the legacy ETW form. Component 4 is the lab guest's default
+        // adapter selector; the command/diagnostics remain in the event when
+        // this compatibility path is unavailable.
+        return await BoundedProcessRunner.RunAsync(
+            PktmonExecutable,
+            [
+                "start",
+                "--etw",
+                "-p",
+                "0",
+                "-c",
+                "4",
+                "-s",
+                "128",
+                "-f",
+                session.EtlPath
+            ],
+            CommandTimeout,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool LooksLikeLegacyPktmonSyntaxFailure(BoundedCommandResult result)
+    {
+        var diagnostic = $"{result.StandardOutput}\n{result.StandardError}\n{result.Message}";
+        return result.ExitCode == 87 &&
+            (diagnostic.Contains("requires a value", StringComparison.OrdinalIgnoreCase) ||
+             diagnostic.Contains("需要值", StringComparison.OrdinalIgnoreCase) ||
+             diagnostic.Contains("未知参数", StringComparison.OrdinalIgnoreCase) ||
+             diagnostic.Contains("unknown parameter", StringComparison.OrdinalIgnoreCase) ||
+             diagnostic.Contains("unrecognized", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
