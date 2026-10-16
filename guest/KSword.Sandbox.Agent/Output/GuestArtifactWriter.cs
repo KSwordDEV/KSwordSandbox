@@ -902,6 +902,8 @@ internal sealed class GuestArtifactWriter
             "pcapngRelativePath",
             "packetCaptureRelativePath",
             "etlRelativePath",
+            "decodedArtifactRelativePath",
+            "decodedArtifactSelector",
             "diagnosticRelativePath"
         })
         {
@@ -932,7 +934,9 @@ internal sealed class GuestArtifactWriter
             "pcapPath",
             "pcapngPath",
             "packetCapturePath",
-            "etlPath"
+            "etlPath",
+            "decodedArtifactPath",
+            "decodedPath"
         })
         {
             if (evt.Data.TryGetValue(key, out var eventPath) && !string.IsNullOrWhiteSpace(eventPath))
