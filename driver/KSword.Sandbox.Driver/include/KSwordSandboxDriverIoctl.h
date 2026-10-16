@@ -289,9 +289,18 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
      KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK | \
      KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS)
 
+/*
+ * Keep the boot-time queue quiet until the collector negotiates its explicit
+ * mask. File and registry callbacks are registered immediately, but their
+ * rows stay suppressed during service bring-up; the live collector enables
+ * them before the sample starts. This prevents Windows startup churn from
+ * overwriting the finite ring before R0Collector opens the device.
+ */
 #define KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT \
-    (KSWORD_SANDBOX_PRODUCER_MASK_CURRENT & \
-     ~KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS)
+    (KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER | \
+     KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS | \
+     KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE | \
+     KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK)
 
 /*
  * Event type values.

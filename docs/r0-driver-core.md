@@ -233,12 +233,15 @@ handle, or allocates callback context. The distinct payload contract is still th
 capability reply.
 
 `KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT` intentionally excludes the draft
-`processHandleAccess` bit even when the build supports it. This keeps the MVP
-live default from overloading the fixed R0 ring with global handle-open noise.
-Operators can still opt in with `SET_PRODUCER_ENABLE_MASK` / R0Collector
-`--enable-mask 0x7f`; reports should treat default-disabled handle telemetry as
-an explicit R0/ETW coverage boundary, not as proof that no handle access
-occurred.
+`processHandleAccess` bit and boot-time file/registry producers. The latter
+callbacks are registered but remain emission-suppressed until R0Collector
+negotiates its explicit live mask; this keeps Windows startup churn from
+overloading the fixed ring before the collector opens the device. The live
+runbook requests `0x3f` before the sample starts, so file/registry coverage is
+enabled for the observation window. Operators can still opt in with
+`SET_PRODUCER_ENABLE_MASK` / R0Collector `--enable-mask 0x7f`; reports should
+treat default-disabled producers as an explicit R0/ETW coverage boundary, not
+as proof that the corresponding behavior occurred or did not occur.
 
 The request `EnableMask` must be a subset of `SupportedProducerMask`. The driver
 rejects unsupported bits with `STATUS_INVALID_PARAMETER`. Disabling a producer
