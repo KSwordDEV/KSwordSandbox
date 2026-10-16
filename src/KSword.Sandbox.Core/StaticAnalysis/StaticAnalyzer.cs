@@ -5611,7 +5611,9 @@ public sealed class StaticAnalyzer
             .ToList();
         var total = primary.Concat(corroborating).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (total.Count < 2 || (requireApi && primary.Count == 0) ||
-            (requireIndependentSignal && (primary.Count == 0 || corroborating.Count == 0)) ||
+            (requireIndependentSignal &&
+                ((primary.Count > 0 && corroborating.Count == 0) ||
+                 (primary.Count == 0 && corroborating.Count < 2))) ||
             (requirePrimarySignals && (primary.Count == 0 || corroborating.Count == 0)))
         {
             return;
