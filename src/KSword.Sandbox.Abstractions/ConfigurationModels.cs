@@ -252,6 +252,12 @@ public sealed record ArtifactCollectionConfig
     public bool CaptureMemoryDumps { get; init; }
 
     public bool CapturePacketCapture { get; init; }
+
+    /// <summary>
+    /// Explicit opt-in for a Windows kernel ETW process/thread/image trace.
+    /// The trace is raw ETL evidence and remains disabled by default.
+    /// </summary>
+    public bool CaptureEtwLiveTrace { get; init; }
 }
 
 /// <summary>

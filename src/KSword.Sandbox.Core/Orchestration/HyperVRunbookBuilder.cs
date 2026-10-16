@@ -1640,6 +1640,11 @@ public sealed class HyperVRunbookBuilder
             arguments.Add("--packet-capture");
         }
 
+        if (config.ArtifactCollection.CaptureEtwLiveTrace)
+        {
+            arguments.Add("--etw-live");
+        }
+
         return arguments;
     }
 
