@@ -26,6 +26,7 @@ internal sealed class FileDiffProbe : IGuestProbe
     private readonly object watcherGate = new();
     private long droppedWatcherChanges;
     private string? tempRoot;
+    private string? workingRoot;
 
     public FileDiffProbe()
         : this(new FileSnapshotProvider())
@@ -235,6 +236,7 @@ internal sealed class FileDiffProbe : IGuestProbe
 
     private void StartWatchers(GuestProbeContext context)
     {
+        workingRoot = context.WorkingDirectory;
         tempRoot = Environment.GetEnvironmentVariable("TEMP");
         TryAddWatcher(context.WorkingDirectory, includeSubdirectories: true);
         if (!string.IsNullOrWhiteSpace(tempRoot))
@@ -348,7 +350,8 @@ internal sealed class FileDiffProbe : IGuestProbe
         else if (kind == WatcherChangeKind.Deleted &&
                  !lastKnownFileState.ContainsKey(path) &&
                  !watcherKnownPaths.ContainsKey(path) &&
-                 !File.Exists(path))
+                 !File.Exists(path) &&
+                 !IsLikelyPersistenceFilePath(path))
         {
             return;
         }
@@ -499,6 +502,7 @@ internal sealed class FileDiffProbe : IGuestProbe
         }
         Interlocked.Exchange(ref droppedWatcherChanges, 0);
         watcherKnownPaths.Clear();
+        workingRoot = null;
     }
 
     private void EnqueueWatcherError(Exception? exception, string? root = null)
@@ -517,6 +521,22 @@ internal sealed class FileDiffProbe : IGuestProbe
     private static string WatcherChangeKey(WatcherChangeKind kind, string path, string? oldPath)
     {
         return string.Concat(kind.ToString(), "|", path, "|", oldPath ?? string.Empty);
+    }
+
+    private bool IsLikelyPersistenceFilePath(string path)
+    {
+        if (!Path.HasExtension(path))
+        {
+            return false;
+        }
+
+        lock (watcherGate)
+        {
+            return watchedRoots.Any(root =>
+                !string.Equals(root, tempRoot, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(root, workingRoot, StringComparison.OrdinalIgnoreCase) &&
+                IsPathUnderRoot(root, path));
+        }
     }
 
     private static SandboxEvent CreateWatcherFailureEvent(

@@ -67,6 +67,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "MaxQueuedWatcherEvents", "Filesystem watcher queue capacity must remain bounded to expose collection pressure.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "InternalBufferSize = 64 * 1024", "Filesystem watcher buffers must be explicitly bounded.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "queuedWatcherKeys", "Repeated watcher callbacks must be coalesced before the bounded queue fills.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "IsLikelyPersistenceFilePath", "Deletion edges for existing persistence files must remain observable without a full profile snapshot.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "CaptureFast", "Process tree probe must use a low-latency edge capture during the run.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Toolhelp-only edge sweep", "Fast process capture must avoid the slow CIM path during in-flight polling.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.tcp.closed", "TCP diff probe must emit closed connection deltas.");
@@ -81,6 +82,13 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "etw_live.failed", "ETW live probe must close startup/stop failures explicitly.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "semanticRowsAvailable", "ETW live probe must distinguish raw ETL from parsed behavior rows.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "NT Kernel Logger", "ETW live probe must use the Windows system logger name for the kernel provider.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "tracerpt.exe", "ETW live probe must invoke the built-in Windows tracerpt decoder instead of reporting raw ETL as parsed.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "ParseTracerptXml", "ETW live probe must parse tracerpt XML into normalized rows.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "RenderingInfo", "ETW XML decoder must read RenderingInfo provider/event names used by kernel ETL.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "process.start", "ETW decoder must normalize kernel process start rows.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "registry.etw", "ETW decoder must preserve registry rows as normalized evidence.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "fileio", "ETW kernel capture must request file I/O flags.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "decodedArtifactRelativePath", "ETW captured rows must expose the decoded XML artifact selector.");
         SmokeAssert.True(programText.Contains("etw-live", StringComparison.Ordinal), "Guest Agent CLI must expose explicit --etw-live opt-in.");
         SmokeAssert.True(programText.Contains("edgePollIntervalMilliseconds", StringComparison.Ordinal) &&
                          programText.Contains("TimeSpan.FromMilliseconds(250)", StringComparison.Ordinal),
@@ -302,6 +310,8 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("flags.Contains(\"memory-dump\")", StringComparison.Ordinal), "Memory dump capture must require an explicit flag.");
         SmokeAssert.True(programText.Contains("CapturePacketCapture", StringComparison.Ordinal), "Agent options must carry explicit packet capture enablement.");
         SmokeAssert.True(programText.Contains("flags.Contains(\"packet-capture\")", StringComparison.Ordinal), "Packet capture must require an explicit flag.");
+        SmokeAssert.True(programText.Contains("R0CollectorEnableMask", StringComparison.Ordinal), "Agent options must carry the requested R0 producer mask.");
+        SmokeAssert.True(programText.Contains("--enable-mask", StringComparison.Ordinal), "Agent must forward the requested producer mask to R0Collector.");
 
         SmokeAssert.True(guestAgentDoc.Contains("process.tree", StringComparison.Ordinal), "Guest agent doc must document process.tree.");
         SmokeAssert.True(guestAgentDoc.Contains("network.tcp.closed", StringComparison.Ordinal), "Guest agent doc must document TCP closed deltas.");
