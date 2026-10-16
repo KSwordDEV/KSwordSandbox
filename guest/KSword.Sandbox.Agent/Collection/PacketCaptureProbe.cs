@@ -202,13 +202,10 @@ internal sealed class PacketCaptureProbe : IGuestProbe
 
     private static bool LooksLikeLegacyPktmonSyntaxFailure(BoundedCommandResult result)
     {
-        var diagnostic = $"{result.StandardOutput}\n{result.StandardError}\n{result.Message}";
-        return result.ExitCode == 87 &&
-            (diagnostic.Contains("requires a value", StringComparison.OrdinalIgnoreCase) ||
-             diagnostic.Contains("需要值", StringComparison.OrdinalIgnoreCase) ||
-             diagnostic.Contains("未知参数", StringComparison.OrdinalIgnoreCase) ||
-             diagnostic.Contains("unknown parameter", StringComparison.OrdinalIgnoreCase) ||
-             diagnostic.Contains("unrecognized", StringComparison.OrdinalIgnoreCase));
+        // Win32 ERROR_INVALID_PARAMETER is the stable signal on the legacy
+        // inbox parser; localized stderr is often mojibake over remoting and
+        // cannot be used as the gate.
+        return result.ExitCode == 87;
     }
 
     /// <summary>
