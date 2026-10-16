@@ -78,6 +78,33 @@ internal sealed class ReportSignalOnlyUiContractScenario : ISmokeTestScenario
                         ["nonbehavior"] = "true",
                         ["notSampleBehavior"] = "true"
                     }
+                },
+                new SandboxEvent
+                {
+                    EventType = "process.snapshot",
+                    Timestamp = timestamp.AddSeconds(2),
+                    Source = "guest",
+                    ProcessName = "svchost.exe",
+                    ProcessId = 1000
+                },
+                new SandboxEvent
+                {
+                    EventType = "agent.start",
+                    Timestamp = timestamp.AddSeconds(3),
+                    Source = "agent",
+                    ProcessName = "KSword.Sandbox.Agent.exe"
+                },
+                new SandboxEvent
+                {
+                    EventType = "network.netstat.snapshot",
+                    Timestamp = timestamp.AddSeconds(4),
+                    Source = "guest",
+                    ProcessName = "svchost.exe",
+                    Data =
+                    {
+                        ["behaviorCounted"] = "false",
+                        ["nonbehavior"] = "true"
+                    }
                 }
             ]
         };
@@ -99,7 +126,11 @@ internal sealed class ReportSignalOnlyUiContractScenario : ISmokeTestScenario
             "Behavior story routing",
             "R0 noise policy",
             "Collector self-noise hidden from behavior sections",
-            "environment.snapshot"
+            "environment.snapshot",
+            "process.snapshot",
+            "network.netstat.snapshot",
+            "svchost.exe",
+            "KSword.Sandbox.Agent.exe"
         })
         {
             SmokeAssert.True(!main.Contains(forbidden, StringComparison.Ordinal), $"Main report view must hide '{forbidden}'.");
