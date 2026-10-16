@@ -439,6 +439,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .event-explorer-details summary{background:#eaf5fb;border:0;border-radius:0;color:#1f5e7b;min-height:42px;padding:10px 12px}
 .modern-sandbox-report .event-explorer-detail{background:#f7fbfe;border:0;border-radius:0;margin-top:8px;max-height:52vh;min-height:180px;overflow:auto;padding:16px}
 .modern-sandbox-report .event-explorer-detail pre,.modern-sandbox-report .event-explorer-detail code{font-size:13px;line-height:1.6}
+.modern-sandbox-report .ui-field-label{font-weight:800;color:#24516b}
 .modern-sandbox-report .event-explorer-detail .event-evidence-fields{max-height:none}
 .modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:460px;width:42%}
 .modern-sandbox-report .copy-hint,.modern-sandbox-report #event-explorer>.section-note{display:none}
@@ -446,6 +447,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .badge,.modern-sandbox-report .chip{border:0;border-radius:0}
 .modern-sandbox-report .section-note{display:none}
 .modern-sandbox-report .section-note.failure-note{background:#fff5e5;border-left:0;display:block;margin:10px 0;padding:10px 12px}
+.modern-sandbox-report .focus-coverage-warning{background:#fff5e5;border-left:4px solid #d97706;color:#7c2d12;display:block;margin-top:12px;padding:10px 12px}
+.modern-sandbox-report .focus-coverage-warning strong{display:block;color:#9a3412;margin-bottom:3px}
 .modern-sandbox-report .raw-events-shell,.modern-sandbox-report .raw-event-page,.modern-sandbox-report .event-table-wrap{border:0}
 .modern-sandbox-report .raw-events-shell>summary,.modern-sandbox-report .raw-event-page>summary{background:#eaf4fa;border-radius:0}
 .modern-sandbox-report .language-entry{background:#e8f3f9;box-shadow:none}
@@ -684,6 +687,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         FocusMetric(html, "Sample exit outcomes", sampleExitOutcomes.ToString(CultureInfo.InvariantCulture), sampleExitOutcomes > 0 ? "risk-info" : "risk-low", "Non-zero sample exits are execution outcomes, not maliciousness verdicts.");
         FocusMetric(html, "Artifacts", artifactCount.ToString(CultureInfo.InvariantCulture), artifactCount > 0 ? "risk-low" : "risk-info", "Indexed files, screenshots, dumps, and packet captures.");
         html.AppendLine("</div>");
+        if (HasRuntimeCoverageGap(report))
+        {
+            html.AppendLine("<div class=\"focus-coverage-warning\"><strong>Collection coverage warning</strong><span>Runtime evidence coverage is incomplete; review Collection coverage gaps before treating a quiet result as evidence that the sample had no behavior.</span></div>");
+        }
         html.AppendLine("<div class=\"focus-next\">");
         html.AppendLine($"<div class=\"focus-next-copy copyable\" data-copy=\"{A(focusCopy)}\"><strong>Next review</strong><br><span>{E(topFinding?.Title ?? "Review static evidence and runtime events")}</span><small>{E(topFinding?.Summary ?? "No sample-attributed behavior was observed in the captured runtime events.")}</small></div>");
         html.AppendLine($"<a class=\"focus-action\" href=\"#event-explorer\">Open filtered event table</a><a class=\"focus-action secondary\" href=\"#failure\">Open failure log</a>");
@@ -9161,7 +9168,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 {
                     var copy = $"{pair.Key}={pair.Value}";
                     var displayValue = FormatBoundedEvidenceFieldValue(pair.Key, pair.Value, EventCompactFieldValueLimit);
-                    html.Append($"<li><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(EventFieldLabel(pair.Key))}={E(displayValue)}</code></li>");
+                    // Keep the label outside the protected evidence <code> block so
+                    // the Chinese renderer can localize chrome while the original
+                    // value remains byte-for-byte visible/copyable.
+                    html.Append($"<li><span class=\"ui-field-label\">{E(EventFieldLabel(pair.Key))}</span>=<code class=\"copyable\" data-copy=\"{A(copy)}\">{E(displayValue)}</code></li>");
                 }
 
                 if (hiddenCompactFields > 0)
@@ -10482,6 +10492,20 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Section", "章节"),
         ("Signal filter", "信号筛选"),
         ("Start here", "从这里开始"),
+        ("Collection coverage warning", "采集覆盖警告"),
+        ("Runtime evidence coverage is incomplete; review Collection coverage gaps before treating a quiet result as evidence that the sample had no behavior.", "运行时证据覆盖不完整；请先查看采集覆盖缺口，再把安静结果解读为样本没有行为。"),
+        ("additional behavior rows in report.json.", "条行为行仅在 report.json 中。"),
+        ("Observed rows: ", "观察到的行："),
+        ("; sample-attributed: ", "；样本归因："),
+        ("; environment: ", "；环境："),
+        ("; unknown/unattributed: ", "；未知/未归因："),
+        ("sample-attributed:", "样本归因："),
+        ("sample attribution", "样本归因"),
+        ("Audit policy coverage is partial (", "Windows 安全审核策略部分可用（"),
+        ("); missing success auditing can leave Security evidence unavailable.", "）；缺少成功审核可能导致 Windows 安全证据不可用。"),
+        ("Hidden technical field: ", "隐藏技术字段："),
+        ("Sample behavior graph.", "样本行为图谱。"),
+        ("Relationships below are derived from sample-attributed runtime evidence.", "以下关系来自归属于样本的运行时证据。"),
         // Keep the operator-facing narrative fully localized.  These strings
         // are emitted by the summary/story cards (outside raw evidence
         // <pre>/<code> blocks), so translating them here cannot alter the

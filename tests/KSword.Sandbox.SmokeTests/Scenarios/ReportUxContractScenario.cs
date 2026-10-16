@@ -3,6 +3,7 @@ using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.SmokeTests.Assertions;
 using KSword.Sandbox.SmokeTests.Framework;
+using System.Text.RegularExpressions;
 
 namespace KSword.Sandbox.SmokeTests.Scenarios;
 
@@ -328,6 +329,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         var defaultHtml = renderer.Render(report, artifacts);
         var englishHtml = renderer.RenderEnglish(report, artifacts);
         var chineseHtml = renderer.RenderChinese(report, artifacts);
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), "ksword-report-ux-zh.html"), chineseHtml);
+        var chineseVisibleText = Regex.Replace(chineseHtml, "<[^>]+>", string.Empty, RegexOptions.CultureInvariant);
         var documents = renderer.RenderBilingualReports(report, artifacts);
         var totalRawEvents = report.Events.Count;
         var hiddenRawEvents = Math.Max(0, totalRawEvents - 30);
@@ -348,6 +351,21 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "目标虚拟机", "Chinese report covers should localize the provider VM label.");
         RequireContains(chineseHtml, "干净基线", "Chinese report covers should localize the provider baseline label.");
         RequireContains(chineseHtml, "QEMU 基础磁盘", "Chinese report covers should localize the QEMU base-disk label.");
+        RequireContains(chineseHtml, "可见行；", "Chinese event explorer status should localize the visible-row label.");
+        RequireContains(chineseHtml, "条行为行仅在 report.json 中。", "Chinese event explorer status should explain report-only rows in Chinese.");
+        RequireContains(chineseHtml, "样本归因：", "Chinese network coverage should localize sample attribution labels.");
+        RequireNotContains(chineseHtml, "additional behavior rows in report.json", "Chinese report must not leak the event explorer report-only-row phrase.");
+        RequireNotContains(chineseVisibleText, "sample-attributed:", "Chinese report must not leak the English sample-attributed counter label.");
+        RequireNotContains(chineseVisibleText, "Read the verdict and high-signal evidence first.", "Chinese report must not leak the analyst-focus English lead.");
+        var coverageGapChinese = renderer.RenderChinese(
+            report with
+            {
+                Events = report.Events
+                    .Where(evt => evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase))
+                    .ToList()
+            });
+        RequireContains(coverageGapChinese, "采集覆盖警告", "Chinese report should surface incomplete runtime coverage before the detailed evidence sections.");
+        RequireContains(coverageGapChinese, "请先查看采集覆盖缺口", "Coverage warning should direct the operator to the detailed gap evidence before a quiet-result conclusion.");
         RequireContains(englishHtml, "#43A0FF", "Rendered HTML should include the required bright-blue accent color.");
         RequireContainsNormalized(englishHtml, "max-height:75vh", "Rendered major sections should be bounded to around 75vh.");
         RequireContainsNormalized(englishHtml, "overflow:auto", "Rendered major sections should scroll overflowing evidence.");
