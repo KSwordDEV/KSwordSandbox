@@ -1,4 +1,7 @@
 using System.Globalization;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Text.RegularExpressions;
 using KSword.Sandbox.Abstractions;
@@ -39,6 +42,15 @@ public sealed class StaticAnalyzer
     private const int MaxStaticYaraMatchedStringIds = 24;
     private const int MaxStaticAnalysisEvents = 256;
     private const int MaxStaticEventDataValueLength = 640;
+    private const int MaxManagedTypes = 64;
+    private const int MaxManagedMethods = 160;
+    private const int MaxManagedReferences = 96;
+    private const int MaxManagedResources = 64;
+    private const int MaxManagedMetadataEvents = 96;
+    private const int MaxManagedTypeEvents = 24;
+    private const int MaxManagedMethodEvents = 40;
+    private const int MaxManagedReferenceEvents = 20;
+    private const int MaxManagedResourceEvents = 10;
 
     private static readonly Regex UrlPattern = new(
         @"https?://[^\s""'<>]+",
@@ -780,10 +792,12 @@ public sealed class StaticAnalyzer
         using var stream = File.OpenRead(fullPath);
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         var header = ParsePe(reader, stream.Length, tags, interestingStrings, warnings);
+        var managedMetadata = ReadManagedMetadata(fullPath, warnings);
         ExtractStrings(fullPath, tags, urls, interestingStrings, warnings, stringEvidence);
 
         var analyzed = header with
         {
+            ManagedMetadata = managedMetadata,
             NetworkIndicators = stringEvidence.NetworkIndicators,
             PathIndicators = stringEvidence.PathIndicators,
             CommandIndicators = stringEvidence.CommandIndicators,
@@ -798,6 +812,184 @@ public sealed class StaticAnalyzer
         {
             CapabilityClusters = BuildCapabilityClusters(analyzed)
         };
+    }
+
+    /// <summary>
+    /// Reads bounded CLR metadata directly from a managed PE. This is a
+    /// host-side inventory pass only: no assembly is loaded or executed.
+    /// Metadata names are intentionally emitted as low-confidence static
+    /// evidence and must never be treated as runtime behavior.
+    /// </summary>
+    private static ManagedMetadataInfo? ReadManagedMetadata(string fullPath, List<string> warnings)
+    {
+        try
+        {
+            using var stream = File.OpenRead(fullPath);
+            using var peReader = new PEReader(stream, PEStreamOptions.LeaveOpen);
+            if (!peReader.HasMetadata)
+            {
+                return null;
+            }
+
+            var metadata = peReader.GetMetadataReader();
+            var result = new ManagedMetadataInfo
+            {
+                HasMetadata = true,
+                RuntimeVersion = string.IsNullOrWhiteSpace(metadata.MetadataVersion)
+                    ? null
+                    : metadata.MetadataVersion.Trim()
+            };
+
+            if (metadata.IsAssembly)
+            {
+                var assembly = metadata.GetAssemblyDefinition();
+                result = result with
+                {
+                    AssemblyName = ReadMetadataString(metadata, assembly.Name),
+                    AssemblyVersion = assembly.Version.ToString()
+                };
+            }
+
+            var module = metadata.GetModuleDefinition();
+            result = result with { ModuleName = ReadMetadataString(metadata, module.Name) };
+
+            var types = new List<ManagedTypeInfo>();
+            var methods = new List<ManagedMethodInfo>();
+            foreach (var typeHandle in metadata.TypeDefinitions.Take(MaxManagedTypes))
+            {
+                var type = metadata.GetTypeDefinition(typeHandle);
+                var typeName = BuildManagedTypeName(metadata, type.Namespace, type.Name);
+                var methodHandles = type.GetMethods().Take(Math.Max(0, MaxManagedMethods - methods.Count)).ToList();
+                types.Add(new ManagedTypeInfo
+                {
+                    Name = ReadMetadataString(metadata, type.Name) ?? "<unnamed>",
+                    Namespace = ReadMetadataString(metadata, type.Namespace),
+                    BaseType = GetManagedEntityName(metadata, type.BaseType),
+                    MethodCount = type.GetMethods().Count()
+                });
+
+                foreach (var methodHandle in methodHandles)
+                {
+                    var method = metadata.GetMethodDefinition(methodHandle);
+                    methods.Add(new ManagedMethodInfo
+                    {
+                        Name = ReadMetadataString(metadata, method.Name) ?? "<unnamed>",
+                        DeclaringType = typeName,
+                        ParameterCount = method.GetParameters().Count()
+                    });
+                }
+
+                if (methods.Count >= MaxManagedMethods)
+                {
+                    break;
+                }
+            }
+
+            var references = new List<ManagedReferenceInfo>();
+            foreach (var referenceHandle in metadata.AssemblyReferences.Take(MaxManagedReferences))
+            {
+                var reference = metadata.GetAssemblyReference(referenceHandle);
+                references.Add(new ManagedReferenceInfo
+                {
+                    Kind = "assembly",
+                    Name = ReadMetadataString(metadata, reference.Name) ?? "<unnamed>",
+                    Version = reference.Version.ToString()
+                });
+            }
+
+            if (references.Count < MaxManagedReferences)
+            {
+                var moduleReferenceCount = metadata.GetTableRowCount(TableIndex.ModuleRef);
+                for (var row = 1; row <= moduleReferenceCount && references.Count < MaxManagedReferences; row++)
+                {
+                    var moduleReferenceHandle = MetadataTokens.ModuleReferenceHandle(row);
+                    var moduleReference = metadata.GetModuleReference(moduleReferenceHandle);
+                    references.Add(new ManagedReferenceInfo
+                    {
+                        Kind = "module",
+                        Name = ReadMetadataString(metadata, moduleReference.Name) ?? "<unnamed>"
+                    });
+                }
+            }
+
+            var resources = metadata.ManifestResources
+                .Take(MaxManagedResources)
+                .Select(handle =>
+                {
+                    var resource = metadata.GetManifestResource(handle);
+                    return new ManagedResourceInfo
+                    {
+                        Name = ReadMetadataString(metadata, resource.Name) ?? "<unnamed>",
+                        IsEmbedded = resource.Implementation.IsNil
+                    };
+                })
+                .ToList();
+
+            return result with
+            {
+                Types = types,
+                Methods = methods,
+                References = references,
+                Resources = resources
+            };
+        }
+        catch (BadImageFormatException)
+        {
+            return null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+        catch (IOException exception)
+        {
+            warnings.Add($"Managed metadata could not be read: {exception.Message}");
+            return null;
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            warnings.Add($"Managed metadata could not be read: {exception.Message}");
+            return null;
+        }
+    }
+
+    private static string? ReadMetadataString(MetadataReader metadata, StringHandle handle)
+    {
+        return handle.IsNil ? null : metadata.GetString(handle);
+    }
+
+    private static string BuildManagedTypeName(MetadataReader metadata, StringHandle namespaceHandle, StringHandle nameHandle)
+    {
+        var name = ReadMetadataString(metadata, nameHandle) ?? "<unnamed>";
+        var @namespace = ReadMetadataString(metadata, namespaceHandle);
+        return string.IsNullOrWhiteSpace(@namespace) ? name : $"{@namespace}.{name}";
+    }
+
+    private static string? GetManagedEntityName(MetadataReader metadata, EntityHandle handle)
+    {
+        if (handle.IsNil)
+        {
+            return null;
+        }
+
+        return handle.Kind switch
+        {
+            HandleKind.TypeDefinition => GetManagedTypeDefinitionName(metadata, (TypeDefinitionHandle)handle),
+            HandleKind.TypeReference => GetManagedTypeReferenceName(metadata, (TypeReferenceHandle)handle),
+            _ => handle.Kind.ToString()
+        };
+    }
+
+    private static string GetManagedTypeDefinitionName(MetadataReader metadata, TypeDefinitionHandle handle)
+    {
+        var type = metadata.GetTypeDefinition(handle);
+        return BuildManagedTypeName(metadata, type.Namespace, type.Name);
+    }
+
+    private static string GetManagedTypeReferenceName(MetadataReader metadata, TypeReferenceHandle handle)
+    {
+        var type = metadata.GetTypeReference(handle);
+        return BuildManagedTypeName(metadata, type.Namespace, type.Name);
     }
 
     /// <summary>
@@ -830,6 +1022,7 @@ public sealed class StaticAnalyzer
         var events = new List<SandboxEvent>();
 
         AddStaticSummaryEvent(fullPath, result, events);
+        AddStaticManagedMetadataEvents(fullPath, result, events);
         AddStaticCapabilityClusterEvents(fullPath, result, events);
         AddStaticSectionEvents(fullPath, result, events);
         AddStaticImportEvents(fullPath, result, events);
@@ -5727,6 +5920,18 @@ public sealed class StaticAnalyzer
         AddDataIfNotBlank(data, "machine", result.Machine);
         AddDataIfNotBlank(data, "subsystem", result.Subsystem);
         AddDataIfNotBlank(data, "entryPointRva", result.EntryPointRva);
+        if (result.ManagedMetadata is { } managed)
+        {
+            data["managedMetadata"] = "True";
+            AddDataIfNotBlank(data, "managedRuntimeVersion", managed.RuntimeVersion);
+            AddDataIfNotBlank(data, "managedAssemblyName", managed.AssemblyName);
+            AddDataIfNotBlank(data, "managedAssemblyVersion", managed.AssemblyVersion);
+            AddDataIfNotBlank(data, "managedModuleName", managed.ModuleName);
+            data["managedTypeCount"] = managed.Types.Count.ToString(CultureInfo.InvariantCulture);
+            data["managedMethodCount"] = managed.Methods.Count.ToString(CultureInfo.InvariantCulture);
+            data["managedReferenceCount"] = managed.References.Count.ToString(CultureInfo.InvariantCulture);
+            data["managedResourceCount"] = managed.Resources.Count.ToString(CultureInfo.InvariantCulture);
+        }
         AddDataList(data, "tags", result.Tags);
         AddDataList(data, "warnings", result.Warnings);
         AddStaticRuleFacingFields(
@@ -5745,6 +5950,127 @@ public sealed class StaticAnalyzer
             "静态分析完成。",
             "该事件汇总主机侧静态分析结果；单个 PE、字符串和 YARA-like 命中会拆成后续事件。",
             data);
+    }
+
+    /// <summary>
+    /// Projects bounded CLR names into explicit low-confidence static events.
+    /// These rows make managed samples inspectable without implying that a
+    /// type, method, reference, or resource was reached at runtime.
+    /// </summary>
+    private static void AddStaticManagedMetadataEvents(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        if (result.ManagedMetadata is not { HasMetadata: true } managed)
+        {
+            return;
+        }
+
+        var summary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["confidence"] = "low",
+            ["runtimeCorrelationRequired"] = "True",
+            ["managedMetadataOnly"] = "True",
+            ["typeCount"] = managed.Types.Count.ToString(CultureInfo.InvariantCulture),
+            ["methodCount"] = managed.Methods.Count.ToString(CultureInfo.InvariantCulture),
+            ["referenceCount"] = managed.References.Count.ToString(CultureInfo.InvariantCulture),
+            ["resourceCount"] = managed.Resources.Count.ToString(CultureInfo.InvariantCulture)
+        };
+        AddDataIfNotBlank(summary, "runtimeVersion", managed.RuntimeVersion);
+        AddDataIfNotBlank(summary, "assemblyName", managed.AssemblyName);
+        AddDataIfNotBlank(summary, "assemblyVersion", managed.AssemblyVersion);
+        AddDataIfNotBlank(summary, "moduleName", managed.ModuleName);
+        AddStaticRuleFacingFields(summary, "managed-metadata", "static.managed.metadata", "managed.runtime", "managed-metadata", "low");
+        TryAddStaticEvent(
+            events,
+            "static.managed.metadata",
+            fullPath,
+            "Managed CLR metadata discovered.",
+            "发现 .NET/CLR 托管元数据。",
+            "这是静态程序集清单，不代表类型、方法或资源已经在动态运行中执行。",
+            summary);
+
+        var emitted = 1;
+        foreach (var type in managed.Types.Take(MaxManagedTypeEvents))
+        {
+            if (emitted >= MaxManagedMetadataEvents)
+            {
+                return;
+            }
+
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["name"] = type.Name,
+                ["kind"] = "type",
+                ["confidence"] = "low",
+                ["runtimeCorrelationRequired"] = "True",
+                ["methodCount"] = type.MethodCount.ToString(CultureInfo.InvariantCulture)
+            };
+            AddDataIfNotBlank(data, "namespace", type.Namespace);
+            AddDataIfNotBlank(data, "baseType", type.BaseType);
+            AddStaticRuleFacingFields(data, "managed-type", "static.managed.type", $"managed.type.{NormalizeStaticYaraTag(type.Name)}", "managed-metadata", "low");
+            TryAddStaticEvent(events, "static.managed.type", fullPath, $"Managed type {type.Name} discovered.", $"发现托管类型：{type.Name}。", "静态类型名仅用于定位程序集结构。", data);
+            emitted++;
+        }
+
+        foreach (var method in managed.Methods.Take(MaxManagedMethodEvents))
+        {
+            if (emitted >= MaxManagedMetadataEvents)
+            {
+                return;
+            }
+
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["name"] = method.Name,
+                ["kind"] = "method",
+                ["declaringType"] = method.DeclaringType,
+                ["parameterCount"] = method.ParameterCount.ToString(CultureInfo.InvariantCulture),
+                ["confidence"] = "low",
+                ["runtimeCorrelationRequired"] = "True"
+            };
+            AddStaticRuleFacingFields(data, "managed-method", "static.managed.method", $"managed.method.{NormalizeStaticYaraTag(method.Name)}", "managed-metadata", "low");
+            TryAddStaticEvent(events, "static.managed.method", fullPath, $"Managed method {method.Name} discovered.", $"发现托管方法：{method.Name}。", "静态方法名仅用于定位程序集结构，不能证明方法被调用。", data);
+            emitted++;
+        }
+
+        foreach (var reference in managed.References.Take(MaxManagedReferenceEvents))
+        {
+            if (emitted >= MaxManagedMetadataEvents)
+            {
+                return;
+            }
+
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["name"] = reference.Name,
+                ["kind"] = reference.Kind,
+                ["confidence"] = "low",
+                ["runtimeCorrelationRequired"] = "True"
+            };
+            AddDataIfNotBlank(data, "version", reference.Version);
+            AddStaticRuleFacingFields(data, "managed-reference", "static.managed.reference", $"managed.reference.{NormalizeStaticYaraTag(reference.Name)}", "managed-metadata", "low");
+            TryAddStaticEvent(events, "static.managed.reference", fullPath, $"Managed {reference.Kind} reference {reference.Name} discovered.", $"发现托管{reference.Kind}引用：{reference.Name}。", "静态引用不代表模块已被加载或调用。", data);
+            emitted++;
+        }
+
+        foreach (var resource in managed.Resources.Take(MaxManagedResourceEvents))
+        {
+            if (emitted >= MaxManagedMetadataEvents)
+            {
+                return;
+            }
+
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["name"] = resource.Name,
+                ["kind"] = "resource",
+                ["isEmbedded"] = resource.IsEmbedded.ToString(),
+                ["confidence"] = "low",
+                ["runtimeCorrelationRequired"] = "True"
+            };
+            AddStaticRuleFacingFields(data, "managed-resource", "static.managed.resource", $"managed.resource.{NormalizeStaticYaraTag(resource.Name)}", "managed-metadata", "low");
+            TryAddStaticEvent(events, "static.managed.resource", fullPath, $"Managed resource {resource.Name} discovered.", $"发现托管资源：{resource.Name}。", "静态资源名称不代表资源已经被读取或释放。", data);
+            emitted++;
+        }
     }
 
     /// <summary>
@@ -6659,7 +6985,7 @@ public sealed class StaticAnalyzer
             "execution-chain" or "script-execution" or "command-string" or "living-off-the-land" => "execution-chain",
             "anti-analysis" or "defense-evasion" => "anti-analysis-and-evasion",
             "credential-access" => "credential-access",
-            "pe-section-layout" or "pe-resource" or "pe-export" or "pe-imports" or "pe-signature-metadata" => "pe-structure",
+            "pe-section-layout" or "pe-resource" or "pe-export" or "pe-imports" or "pe-signature-metadata" or "managed-metadata" => "pe-structure",
             "static-analysis-summary" or "static-summary" => "static-summary",
             _ => "static-triage"
         };
@@ -6709,6 +7035,7 @@ public sealed class StaticAnalyzer
             "pe-export" => "PE 导出",
             "pe-signature-metadata" => "PE 签名/证书元数据",
             "static-signature" => "静态规则命中",
+            "managed-metadata" => "托管程序集元数据",
             "static-analysis-summary" or "static-summary" => "静态分析摘要",
             _ => "静态 triage 线索"
         };
@@ -6754,6 +7081,8 @@ public sealed class StaticAnalyzer
                 "下一步查看 LSASS/浏览器/凭据文件访问、dump 文件和可疑句柄事件。",
             "packing-or-obfuscation" or "packer" =>
                 "下一步结合高熵节、overlay、TLS callback、运行时解包和内存转储判断是否只是打包或存在恶意载荷。",
+            "managed-metadata" =>
+                "下一步结合 CLR 进程加载、模块、方法调用和资源释放事件，确认静态程序集清单是否在运行时被使用。",
             _ =>
                 "下一步结合动态事件、规则命中、网络、进程树和 artifacts 判断该静态线索是否被执行。"
         };

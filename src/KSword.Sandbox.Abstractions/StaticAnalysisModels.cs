@@ -47,6 +47,13 @@ public sealed record StaticAnalysisResult
 
     public List<PeResourceInfo> Resources { get; init; } = [];
 
+    /// <summary>
+    /// Managed CLR metadata discovered from the PE metadata directory. This is
+    /// static inventory only; it does not prove that any managed method or
+    /// resource was executed during the dynamic run.
+    /// </summary>
+    public ManagedMetadataInfo? ManagedMetadata { get; init; }
+
     public List<StaticNetworkIndicator> NetworkIndicators { get; init; } = [];
 
     public List<StaticPathIndicator> PathIndicators { get; init; } = [];
@@ -62,6 +69,78 @@ public sealed record StaticAnalysisResult
     public List<string> InterestingStrings { get; init; } = [];
 
     public List<string> Warnings { get; init; } = [];
+}
+
+/// <summary>
+/// Bounded CLR metadata inventory extracted from a managed PE.
+/// </summary>
+public sealed record ManagedMetadataInfo
+{
+    public bool HasMetadata { get; init; }
+
+    public string? RuntimeVersion { get; init; }
+
+    public string? AssemblyName { get; init; }
+
+    public string? AssemblyVersion { get; init; }
+
+    public string? ModuleName { get; init; }
+
+    public List<ManagedTypeInfo> Types { get; init; } = [];
+
+    public List<ManagedMethodInfo> Methods { get; init; } = [];
+
+    public List<ManagedReferenceInfo> References { get; init; } = [];
+
+    public List<ManagedResourceInfo> Resources { get; init; } = [];
+}
+
+/// <summary>
+/// One bounded managed type definition.
+/// </summary>
+public sealed record ManagedTypeInfo
+{
+    public required string Name { get; init; }
+
+    public string? Namespace { get; init; }
+
+    public string? BaseType { get; init; }
+
+    public int MethodCount { get; init; }
+}
+
+/// <summary>
+/// One bounded managed method definition.
+/// </summary>
+public sealed record ManagedMethodInfo
+{
+    public required string Name { get; init; }
+
+    public required string DeclaringType { get; init; }
+
+    public int ParameterCount { get; init; }
+}
+
+/// <summary>
+/// One managed assembly or module reference.
+/// </summary>
+public sealed record ManagedReferenceInfo
+{
+    public required string Kind { get; init; }
+
+    public required string Name { get; init; }
+
+    public string? Version { get; init; }
+}
+
+/// <summary>
+/// One manifest resource name from managed metadata.
+/// </summary>
+public sealed record ManagedResourceInfo
+{
+    public required string Name { get; init; }
+
+    public bool IsEmbedded { get; init; }
 }
 
 /// <summary>

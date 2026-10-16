@@ -3379,9 +3379,10 @@ function Convert-ToScalarText($value) {
 }
 function Format-Reference($reference) {
   # Emit one scalar string even when the provider supplied an array-valued
-  # association. Convert-ToScalarText has already flattened nested values.
+  # association. Convert-ToScalarText has already flattened nested values;
+  # `return` avoids PowerShell 7's Write-Output -NoEnumerate List wrapper.
   $text = [string](Convert-ToScalarText $reference)
-  Write-Output -NoEnumerate $text.Trim()
+  return $text.Trim()
 }
 foreach ($row in Get-WmiRows '__EventFilter') {
   Add-Item 'wmi' 'wmi-event-filter' 'root\subscription:__EventFilter' $row.Name $row.Query 'WMI EventFilter query'
