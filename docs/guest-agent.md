@@ -30,10 +30,10 @@ Guest Agent 运行在 analysis VM 内，负责按限定时间启动样本、采�
 ```
 
 默认 R0 sidecar 参数偏向 live 稳定性：每批最多读取 1024 条、批次数 `0` 表示不因批次
-上限提前停止、driver JSONL 默认每 16 条 eligible R0 行写 1 条。Collector 仍会 drain
-并统计被采样跳过的行，避免 Notepad 这类短运行也因全局 file/registry/image/handle
-噪声打满 ring；完整性请结合 `r0collector.driverStatus` 的 `lostCount`、`highWatermark`
-和 `producerDroppedMask` 判断。
+上限提前停止、真实 runbook 明确传入 `--r0-driver-event-sample-stride 1` 写出每条
+eligible R0 行；Collector 仍会 drain 并记录 `lostCount`、`highWatermark`、producer
+mask 和 backpressure，便于识别固定 ring 在启动突发流量下的丢失。低速/压力测试如需
+降输出，可由操作者显式传入更大的 stride。
 
 真实 R0 runbook 默认传入 `--r0-enable-mask 0x3F`，请求稳定的
 driver/process/image/file/registry/network producer；draft handle-access 位保持关闭，

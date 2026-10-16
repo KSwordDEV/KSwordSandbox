@@ -417,6 +417,10 @@ KSword.Sandbox.R0Collector.exe `
   eligible row and every nth eligible row after self-noise suppression; skipped
   rows remain counted in `r0collector.driverReadEvents.data.skipped` and
   `collectorSkippedEvents`.
+- `--poll-ms <ms>` / `--poll-interval-ms <ms>`: live ring drain interval;
+  the default is `10` ms so boot and sample-launch bursts are drained before
+  the fixed kernel ring overwrites records. Operators can increase it for
+  low-rate or stress-only runs.
 - Guest Agent 的默认 sidecar 参数面向 MVP live 稳定性：`--max-events 1024`、
   `--max-read-batches 0`（不因固定批次上限提前停读）以及
   `--driver-event-sample-stride 16`。这会持续 drain R0 ring 以降低 backpressure，

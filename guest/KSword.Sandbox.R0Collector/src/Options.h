@@ -11,7 +11,11 @@ struct Options {
     std::wstring serviceName = L"KSwordSandboxDriver";
     std::wstring outputPath = L"-";
     int durationSeconds = 0;
-    int pollIntervalMs = 500;
+    // Keep the live ring drain responsive during guest boot and sample launch.
+    // The producer queue is finite; a 500 ms default lets file/registry
+    // startup bursts overwrite records before the first drain. Operators can
+    // still override this with --poll-ms for low-rate or stress runs.
+    int pollIntervalMs = 10;
     int diagnoseReadTimeoutMs = 2000;
     int maxReadBatches = 0;
     unsigned long readEventsMaxEvents = kReadEventsMaxEvents;
