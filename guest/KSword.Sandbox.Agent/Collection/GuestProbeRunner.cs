@@ -11,7 +11,14 @@ namespace KSword.Sandbox.Agent.Collection;
 /// </summary>
 internal sealed class GuestProbeRunner
 {
-    private static readonly TimeSpan DefaultProbeTimeout = TimeSpan.FromSeconds(10);
+    // After-run ETW decoding uses Windows tracerpt and can take tens of
+    // seconds for a multi-megabyte ETL. This timeout bounds each probe without
+    // shortening the requested sample observation window.
+    private static readonly TimeSpan DefaultProbeTimeout = TimeSpan.FromSeconds(60);
+    // tracerpt can take longer than the ordinary probe budget when a 30-second
+    // kernel trace contains file/registry events. This extends only ETW
+    // decode/stop handling; the sample observation window is unchanged.
+    private static readonly TimeSpan EtwProbeTimeout = TimeSpan.FromSeconds(45);
     private readonly IReadOnlyList<IGuestProbe> probes;
     private readonly TimeSpan probeTimeout;
 
@@ -73,7 +80,7 @@ internal sealed class GuestProbeRunner
                         reason: "probeCompleted",
                         elapsed.Elapsed,
                         emittedEventCount: probeEvents.Count,
-                        probeTimeout,
+                        TimeoutFor(probe),
                         exception: null));
                 }
                 completedCount++;
@@ -93,7 +100,7 @@ internal sealed class GuestProbeRunner
                         reason: "probeTimeout",
                         elapsed.Elapsed,
                         emittedEventCount: 1,
-                        probeTimeout,
+                        TimeoutFor(probe),
                         exception: null));
                 }
                 timedOutCount++;
@@ -117,7 +124,7 @@ internal sealed class GuestProbeRunner
                         reason: "probeCanceled",
                         elapsed.Elapsed,
                         emittedEventCount: 1,
-                        probeTimeout,
+                        TimeoutFor(probe),
                         exception: ex));
                 }
                 failedCount++;
@@ -137,7 +144,7 @@ internal sealed class GuestProbeRunner
                         reason: "probeFailed",
                         elapsed.Elapsed,
                         emittedEventCount: 1,
-                        probeTimeout,
+                        TimeoutFor(probe),
                         exception: ex));
                 }
                 failedCount++;
@@ -182,7 +189,7 @@ internal sealed class GuestProbeRunner
                     result.Reason,
                     result.Elapsed,
                     result.Events.Count,
-                    probeTimeout,
+                        TimeoutFor(result.Probe),
                     result.Exception));
             }
 
@@ -280,6 +287,14 @@ internal sealed class GuestProbeRunner
     /// background; the method returns probe events or throws a diagnostic
     /// exception consumed by CollectAsync.
     /// </summary>
+    private TimeSpan TimeoutFor(IGuestProbe probe) =>
+        probe is EtwLiveTraceProbe ? EtwProbeTimeout : probeTimeout;
+
+    /// <summary>
+    /// Runs one guest probe under its bounded timeout. ETW receives a longer
+    /// post-run decode budget because tracerpt processes a completed ETL file;
+    /// this does not extend the sample execution duration.
+    /// </summary>
     private async Task<IReadOnlyList<SandboxEvent>> CollectProbeWithTimeoutAsync(
         IGuestProbe probe,
         ProbePhase phase,
@@ -289,7 +304,7 @@ internal sealed class GuestProbeRunner
         using var timeoutCts = new CancellationTokenSource();
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
         var probeTask = probe.CollectAsync(phase, context, linkedCts.Token);
-        var timeoutTask = Task.Delay(probeTimeout, cancellationToken);
+        var timeoutTask = Task.Delay(TimeoutFor(probe), cancellationToken);
 
         if (await Task.WhenAny(probeTask, timeoutTask).ConfigureAwait(false) == probeTask)
         {
@@ -349,7 +364,7 @@ internal sealed class GuestProbeRunner
                 ["reason"] = "probeTimeout",
                 ["zhMessage"] = "Guest 探针超时；该探针结果会标记为 failed，但不会中断整体采集。",
                 ["zhHint"] = "请结合 probeId、phase、timeoutMilliseconds 判断是否需要调大探针超时或降低该采集项依赖的系统调用成本。",
-                ["timeoutMilliseconds"] = probeTimeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture),
+                ["timeoutMilliseconds"] = TimeoutFor(probe).TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture),
                 ["elapsedMilliseconds"] = elapsed.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture)
             }
         };

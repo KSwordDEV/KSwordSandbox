@@ -235,6 +235,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "rootProcessId", "Probe summaries must preserve root process identity.");
         AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "collectionName", "Probe timeout/failure events must map known artifact probes to collection lanes.");
         AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "probeTimeout", "Probe timeout events must retain concrete failure reasons.");
+        AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "EtwProbeTimeout", "ETW tracerpt decode must have a bounded post-run timeout longer than the ordinary probe budget.");
         AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "nonfatal", "Probe failure diagnostics must mark collection failures as non-fatal.");
         AssertFileContains(Path.Combine(agentRoot, "Diagnostics", "BoundedProcessRunner.cs"), "Kill(entireProcessTree: true)", "Bounded helper commands must be terminated on timeout.");
 
