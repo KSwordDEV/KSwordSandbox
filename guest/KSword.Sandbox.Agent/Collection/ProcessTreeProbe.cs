@@ -3337,26 +3337,51 @@ function Get-WmiRows($className) {
     return @()
   }
 }
-function Format-Reference($reference) {
-  if ($null -eq $reference) { return '' }
-  if ($reference -is [string]) { return [string]$reference }
-  $properties = $reference.PSObject.Properties
+function Convert-ToScalarText($value) {
+  # CIM association properties can be a CimInstance, a CimProperty collection,
+  # or an array depending on the PowerShell/CIM provider version. Never let one
+  # of those objects escape the helper as pipeline output: callers need one
+  # stable string so `filter + ' -> ' + consumer` cannot invoke CimInstance
+  # op_Addition or accidentally emit multiple JSON items.
+  if ($null -eq $value) { return '' }
+  if ($value -is [string]) { return [string]$value }
+  if ($value -is [System.Array]) {
+    $parts = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in @($value)) {
+      $text = Convert-ToScalarText $item
+      if (-not [string]::IsNullOrWhiteSpace($text)) { [void]$parts.Add($text) }
+    }
+    return [string]::Join('; ', $parts.ToArray())
+  }
+
   foreach ($propertyName in @('__PATH', '__RELPATH', 'Name')) {
-    $property = $properties[$propertyName]
-    if ($null -ne $property -and $null -ne $property.Value) {
-      return [string]$property.Value
+    $property = @($value.PSObject.Properties | Where-Object { $_.Name -ieq $propertyName } | Select-Object -First 1)
+    if ($property.Count -gt 0 -and $null -ne $property[0].Value) {
+      $text = Convert-ToScalarText $property[0].Value
+      if (-not [string]::IsNullOrWhiteSpace($text)) { return $text }
     }
   }
-  $cimProperties = $reference.PSObject.Properties['CimInstanceProperties']
-  if ($null -ne $cimProperties -and $null -ne $cimProperties.Value) {
+
+  # New CIM cmdlets expose embedded references through the synthetic
+  # CimInstanceProperties collection instead of direct PSObject properties.
+  $cimProperties = @($value.PSObject.Properties | Where-Object { $_.Name -ieq 'CimInstanceProperties' } | Select-Object -First 1)
+  if ($cimProperties.Count -gt 0 -and $null -ne $cimProperties[0].Value) {
     foreach ($propertyName in @('__PATH', '__RELPATH', 'Name')) {
-      $property = @($cimProperties.Value | Where-Object Name -eq $propertyName | Select-Object -First 1)
+      $property = @($cimProperties[0].Value | Where-Object { $_.Name -ieq $propertyName } | Select-Object -First 1)
       if ($property.Count -gt 0 -and $null -ne $property[0].Value) {
-        return [string]$property[0].Value
+        $text = Convert-ToScalarText $property[0].Value
+        if (-not [string]::IsNullOrWhiteSpace($text)) { return $text }
       }
     }
   }
-  return [string]$reference
+
+  return [string]$value
+}
+function Format-Reference($reference) {
+  # Emit one scalar string even when the provider supplied an array-valued
+  # association. Convert-ToScalarText has already flattened nested values.
+  $text = [string](Convert-ToScalarText $reference)
+  Write-Output -NoEnumerate $text.Trim()
 }
 foreach ($row in Get-WmiRows '__EventFilter') {
   Add-Item 'wmi' 'wmi-event-filter' 'root\subscription:__EventFilter' $row.Name $row.Query 'WMI EventFilter query'
@@ -3370,7 +3395,7 @@ foreach ($row in Get-WmiRows 'ActiveScriptEventConsumer') {
 foreach ($row in Get-WmiRows '__FilterToConsumerBinding') {
   $filter = Format-Reference $row.Filter
   $consumer = Format-Reference $row.Consumer
-  $binding = $filter + ' -> ' + $consumer
+  $binding = [string]::Concat([string]$filter, ' -> ', [string]$consumer)
   Add-Item 'wmi' 'wmi-filter-consumer-binding' 'root\subscription:__FilterToConsumerBinding' $binding $binding 'WMI FilterToConsumerBinding'
 }
 [pscustomobject]@{ Items = @($script:items); Errors = @($script:errors) } | ConvertTo-Json -Compress -Depth 8

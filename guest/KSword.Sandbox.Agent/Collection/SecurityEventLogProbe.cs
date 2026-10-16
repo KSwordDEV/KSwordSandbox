@@ -1366,29 +1366,58 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             return evt;
         }
 
+        // auditpol can return exit code 0 with no CSV when the command is
+        // available but the policy provider is unavailable (for example in a
+        // restricted guest or during policy refresh). Treat that as unknown
+        // coverage instead of claiming every target is missing/disabled.
+        if (string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            evt.Data["captureState"] = "partial";
+            evt.Data["status"] = "partial";
+            evt.Data["reason"] = "auditPolicyOutputEmpty";
+            evt.Data["auditPolicyStatus"] = "querySucceededNoRows";
+            evt.Data["auditPolicyParsedRowCount"] = "0";
+            evt.Data["auditPolicyCoverageState"] = "unknown";
+            evt.Data["auditPolicyMissingTargets"] = string.Empty;
+            evt.Data["auditPolicyGapNotes"] = "auditpol returned no parseable CSV; target policy state is unknown, not disabled.";
+            evt.Data["auditPolicyRawCsvSnippet"] = string.Empty;
+            evt.Data["zhHint"] = "auditpol 返回成功但没有可解析行；不能据此判断目标审核策略未开启。请在来宾中重新运行 auditpol /get /category:* /r，或检查本地安全策略提供程序。";
+            return evt;
+        }
+
         var policyRows = ParseAuditPolicyRows(result.StandardOutput);
         var rowsByGuid = policyRows
             .Where(static row => !string.IsNullOrWhiteSpace(row.Guid))
             .GroupBy(static row => NormalizeGuid(row.Guid), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(static group => group.Key, static group => group.ToList(), StringComparer.OrdinalIgnoreCase);
 
         var observed = new List<string>();
         var enabled = new List<string>();
         var disabled = new List<string>();
         var missing = new List<string>();
         var notes = new List<string>();
+        var coverage = new List<string>();
+        var duplicateRows = 0;
 
         foreach (var expectation in AuditPolicyExpectations)
         {
-            if (!rowsByGuid.TryGetValue(NormalizeGuid(expectation.Guid), out var row))
+            if (!rowsByGuid.TryGetValue(NormalizeGuid(expectation.Guid), out var rows) || rows.Count == 0)
             {
                 missing.Add($"{expectation.EnglishName} ({expectation.SecurityEventIds})");
+                coverage.Add($"{expectation.Guid}=missing|{expectation.SecurityEventIds}");
                 continue;
             }
 
-            var label = $"{FirstNonEmpty(row.Subcategory, expectation.EnglishName)}={FirstNonEmpty(row.InclusionSetting, "unknown")}";
+            duplicateRows += Math.Max(0, rows.Count - 1);
+            var hasSuccess = rows.Any(static row => LooksSuccessAuditEnabled(row.InclusionSetting));
+            var hasExplicitNonSuccess = rows.Any(static row => !LooksSuccessAuditEnabled(row.InclusionSetting));
+            var settingState = hasSuccess
+                ? hasExplicitNonSuccess ? "successAndOther" : "successEnabled"
+                : "disabledOrUnknown";
+            var label = $"{FirstNonEmpty(rows[0].Subcategory, expectation.EnglishName)}={JoinDistinct(rows.Select(static row => FirstNonEmpty(row.InclusionSetting, "unknown")))}";
             observed.Add(label);
-            if (LooksSuccessAuditEnabled(row.InclusionSetting))
+            coverage.Add($"{expectation.Guid}={settingState}|{expectation.SecurityEventIds}");
+            if (hasSuccess)
             {
                 enabled.Add($"{expectation.EnglishName} ({expectation.SecurityEventIds})");
             }
@@ -1405,12 +1434,25 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         evt.Data["auditPolicyDisabledOrFailureOnlyTargets"] = JoinDistinct(disabled);
         evt.Data["auditPolicyMissingTargets"] = JoinDistinct(missing);
         evt.Data["auditPolicyGapNotes"] = JoinDistinct(notes);
+        evt.Data["auditPolicyCoverageByGuid"] = JoinDistinct(coverage);
+        evt.Data["auditPolicyObservedGuidCount"] = rowsByGuid.Count.ToString(CultureInfo.InvariantCulture);
+        evt.Data["auditPolicyDuplicateRowCount"] = duplicateRows.ToString(CultureInfo.InvariantCulture);
         evt.Data["auditPolicyRawCsvSnippet"] = Truncate(result.StandardOutput, MaxAuditPolicySnippetLength);
         evt.Data["auditPolicyLocalizationNote"] = "Rows are matched by stable subcategory GUIDs; inclusion-setting text can be localized.";
 
-        if (missing.Count == 0 && disabled.Count == 0)
+        if (policyRows.Count == 0)
+        {
+            evt.Data["captureState"] = "partial";
+            evt.Data["status"] = "partial";
+            evt.Data["reason"] = "auditPolicyRowsUnparseable";
+            evt.Data["auditPolicyStatus"] = "querySucceededRowsUnparseable";
+            evt.Data["auditPolicyCoverageState"] = "unknown";
+            evt.Data["zhHint"] = "auditpol 返回了内容但没有识别出带稳定 GUID 的策略行；不能把该结果当成目标策略全部缺失。请检查 auditPolicyRawCsvSnippet 的本地化表头或系统版本格式。";
+        }
+        else if (missing.Count == 0 && disabled.Count == 0)
         {
             evt.Data["auditPolicyStatus"] = "targetPoliciesSuccessEnabled";
+            evt.Data["auditPolicyCoverageState"] = "covered";
             evt.Data["zhHint"] = "目标 Security 事件相关审核策略看起来已开启成功审核；仍需注意 4656/4663 进程对象访问通常还依赖对象 SACL，缺失事件不一定代表样本未访问。";
         }
         else
@@ -1419,6 +1461,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             evt.Data["status"] = "partial";
             evt.Data["reason"] = "auditPolicyCoverageGap";
             evt.Data["auditPolicyStatus"] = missing.Count > 0 ? "targetPoliciesMissingOrLocalized" : "targetPoliciesNotFullySuccessEnabled";
+            evt.Data["auditPolicyCoverageState"] = missing.Count > 0 ? "partial" : "disabled";
             evt.Data["zhHint"] = "部分目标审核策略未确认开启成功审核；若需要补足 R0 无法解释的令牌/权限/句柄语义，请在快照中启用对应 Advanced Audit Policy，并对敏感进程对象配置必要 SACL。";
         }
 
@@ -2097,6 +2140,23 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         }
 
         var value = inclusionSetting.Trim();
+        // Do not treat a localized "No Auditing"/"Not Configured" value as
+        // enabled merely because another label or diagnostic contains the
+        // word "Success". Explicit negative states win over the broad
+        // success-token check below.
+        if (ContainsAny(value,
+                "No Auditing",
+                "Not Configured",
+                "未审核",
+                "未配置",
+                "无审核",
+                "未启用",
+                "Disabled",
+                "禁用"))
+        {
+            return false;
+        }
+
         return value.Contains("Success", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("成功", StringComparison.OrdinalIgnoreCase);
     }
