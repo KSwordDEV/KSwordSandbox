@@ -475,7 +475,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         Row(html, "Sample", report.Sample.FileName);
         Row(html, "SHA-256", report.Sample.Sha256);
         Row(html, "Size", FormatBytes(report.Sample.SizeBytes));
-        Row(html, "Status", report.Status.ToString());
+        Row(html, "Status", report.Status.ToString(), localizeStatusValue: true);
         Row(html, "Virtualization provider", report.Provider?.ToString() ?? "Unknown");
         if (!string.IsNullOrWhiteSpace(report.TargetVmName))
         {
@@ -6679,9 +6679,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// Inputs are a StringBuilder, label, and value; processing encodes text;
     /// the method returns no value.
     /// </summary>
-    private static void Row(StringBuilder html, string label, string value)
+    private static void Row(StringBuilder html, string label, string value, bool localizeStatusValue = false)
     {
-        html.AppendLine($"<tr><th>{E(label)}</th><td class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</td></tr>");
+        var renderedValue = localizeStatusValue
+            ? $"<span class=\"ui-status-value\">{E(value)}</span>"
+            : E(value);
+        html.AppendLine($"<tr><th>{E(label)}</th><td class=\"copyable\" data-copy=\"{A(value)}\">{renderedValue}</td></tr>");
     }
 
     /// <summary>
@@ -9384,6 +9387,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
     private static string NormalizeChineseRestoredChrome(string html)
     {
+        // The cover status value is wrapped explicitly so this replacement
+        // localizes the UI label without touching same-named evidence values.
+        html = html.Replace("ui-status-value\">Failed", "ui-status-value\">失败", StringComparison.Ordinal);
         var replacements = new (string English, string Chinese)[]
         {
             (">1 indexed<", ">1 已索引<"),
@@ -10265,7 +10271,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Copy network card", "复制网络卡"),
         ("Copied", "已复制"),
         ("Command line hidden by default", "命令行默认隐藏"),
-        ("Command/stdout/stderr/PowerShell fields hidden by default", "command/stdout/stderr/PowerShell 字段默认隐藏"),
+        ("Command/stdout/stderr/PowerShell fields hidden by default", "命令/stdout/stderr/PowerShell 字段默认隐藏"),
         ("Hidden technical field", "隐藏技术字段"),
         // Keep replacements scoped to visible suffixes: replacing bare
         // `chars` would corrupt the `<meta charset>` attribute (`字符et`).
@@ -10495,6 +10501,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Collection coverage warning", "采集覆盖警告"),
         ("Runtime evidence coverage is incomplete; review Collection coverage gaps before treating a quiet result as evidence that the sample had no behavior.", "运行时证据覆盖不完整；请先查看采集覆盖缺口，再把安静结果解读为样本没有行为。"),
         ("Read the verdict and high-signal evidence first.", "先阅读判定和高信号证据。"),
+        ("Search or filter by event type, source, stage, severity, and sample-behavior status.", "可按事件类型、来源、阶段、严重性和样本行为状态搜索或筛选。"),
+        ("command/stdout/stderr/PowerShell fields hidden by default", "命令/stdout/stderr/PowerShell 字段默认隐藏"),
+        ("No supporting sample-behavior evidence rows were collected for this lane.", "此通道未采集到可支持样本行为的证据行。"),
         ("additional behavior rows in report.json.", "条行为行仅在 report.json 中。"),
         ("Observed rows: ", "观察到的行："),
         ("; sample-attributed: ", "；样本归因："),
