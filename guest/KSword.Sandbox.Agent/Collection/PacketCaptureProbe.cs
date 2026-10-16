@@ -556,7 +556,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
     /// <summary>
     /// Converts a failed pktmon command into a packet_capture diagnostic event.
     /// Inputs are event type, phase, reason, command result, and session; the
-    /// method suppresses stdout/stderr while preserving exit and timeout data.
+    /// method preserves bounded stdout/stderr alongside exit and timeout data
+    /// so an invalid pktmon argument or guest capability gap is diagnosable.
     /// </summary>
     private static SandboxEvent CreateCommandFailureEvent(
         string eventType,
@@ -622,7 +623,9 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["commandTimeoutMilliseconds"] = result.Timeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture),
                 ["commandExceptionType"] = result.ExceptionType ?? string.Empty,
                 ["commandMessage"] = result.Message ?? string.Empty,
-                ["commandOutputSuppressed"] = "true"
+                ["commandOutputSuppressed"] = "false",
+                ["commandStandardOutput"] = BoundedDiagnosticText(result.StandardOutput),
+                ["commandStandardError"] = BoundedDiagnosticText(result.StandardError)
             }
         };
 
@@ -1063,6 +1066,17 @@ internal sealed class PacketCaptureProbe : IGuestProbe
     private static string FormatExitCode(int? exitCode)
     {
         return exitCode?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    private static string BoundedDiagnosticText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        const int maxLength = 2048;
+        return value.Length <= maxLength ? value : value[..maxLength];
     }
 
     private static string BuildSafeLink(string relativePath)

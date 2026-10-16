@@ -181,6 +181,8 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet_capture.started", "Packet capture probe must emit start evidence.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet_capture.captured", "Packet capture probe must emit captured PCAPNG evidence.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet_capture.failed", "Packet capture probe must emit non-fatal failure evidence.");
+        AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "commandStandardOutput", "Packet capture failures must preserve bounded stdout diagnostics.");
+        AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "commandStandardError", "Packet capture failures must preserve bounded stderr diagnostics.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet_capture.skipped", "Packet capture probe must keep unavailable capture non-fatal.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet-captures", "Packet capture probe must write to the packet-captures collection lane.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "artifactRelativePath", "Packet capture events must expose final PCAP artifact-relative paths.");
