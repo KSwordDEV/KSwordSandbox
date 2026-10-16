@@ -314,9 +314,14 @@ public sealed partial class SandboxJobService
 
         var resolvedEventsPath = ResolveGuestEventsPath(jobId, eventsPath);
         var guestEvents = LoadGuestEventsWithDriverJsonl(resolvedEventsPath);
-        var status = guestEvents.Count == 0 ? AnalysisStatus.Failed : AnalysisStatus.Completed;
+        var sampleLaunchBlocked = HasTerminalSampleStartFailure(guestEvents);
+        var status = guestEvents.Count == 0 || sampleLaunchBlocked
+            ? AnalysisStatus.Failed
+            : AnalysisStatus.Completed;
         var message = guestEvents.Count == 0
             ? $"来宾事件导入未发现事件，报告状态已标记为 Failed：{resolvedEventsPath} / Guest event import found no events in {resolvedEventsPath}."
+            : sampleLaunchBlocked
+                ? $"样本启动被来宾拦截且未观察到成功启动，报告状态已标记为 Failed：{resolvedEventsPath} / The guest blocked sample launch and no successful sample start was observed; report status is Failed: {resolvedEventsPath}."
             : $"已导入 {guestEvents.Count} 个来宾事件：{resolvedEventsPath} / Imported {guestEvents.Count} guest event(s) from {resolvedEventsPath}.";
         if (guestEvents.Count == 0)
         {
@@ -520,11 +525,14 @@ public sealed partial class SandboxJobService
             string.Equals(evt.EventType, "hyperv.e2e.failure_skeleton", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "vmware.e2e.failure_skeleton", StringComparison.OrdinalIgnoreCase));
         var failedRunbook = IsFailedRunbookExecution(resultPath);
-        var status = failureSkeleton || failedRunbook || guestEvents.Count == 0
+        var sampleLaunchBlocked = HasTerminalSampleStartFailure(guestEvents);
+        var status = failureSkeleton || failedRunbook || sampleLaunchBlocked || guestEvents.Count == 0
             ? AnalysisStatus.Failed
             : AnalysisStatus.Completed;
         var message = guestEvents.Count == 0
             ? $"External guest event import found no events in {eventsPath}."
+            : sampleLaunchBlocked
+                ? $"Imported {guestEvents.Count} diagnostic guest event(s) from {eventsPath}; no successful sample start was observed, so report status is Failed."
             : failedRunbook || failureSkeleton
                 ? $"Imported {guestEvents.Count} diagnostic guest event(s) from {eventsPath}; runbook failure keeps report status Failed."
                 : $"Imported {guestEvents.Count} external guest/driver event(s) from {eventsPath}.";
@@ -538,6 +546,31 @@ public sealed partial class SandboxJobService
         PersistGuestImportState(updated, Path.GetFullPath(eventsPath), guestEvents.Count, status, message);
         StoreJob(updated);
         return updated;
+    }
+
+    private static bool HasTerminalSampleStartFailure(IReadOnlyCollection<SandboxEvent> guestEvents)
+    {
+        var launchFailures = guestEvents
+            .Where(evt => string.Equals(evt.EventType, "process.start_failed", StringComparison.OrdinalIgnoreCase))
+            .Where(IsIncomingSampleProcessEvent)
+            .ToList();
+        if (launchFailures.Count == 0)
+        {
+            return false;
+        }
+
+        // A transient retry may emit process.start_failed before a successful
+        // retry. Only treat the launch as terminal when no matching successful
+        // start was observed in the guest event stream.
+        return !guestEvents.Any(evt =>
+            string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) &&
+            IsIncomingSampleProcessEvent(evt));
+    }
+
+    private static bool IsIncomingSampleProcessEvent(SandboxEvent evt)
+    {
+        return evt.Path?.Contains("\\incoming\\", StringComparison.OrdinalIgnoreCase) == true ||
+            evt.CommandLine?.Contains("\\incoming\\", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static bool IsFailedRunbookExecution(string? resultPath)
@@ -1903,16 +1936,50 @@ public sealed partial class SandboxJobService
         metrics["events.dynamicAction.raw"] = rawDynamicActionCount;
         metrics["events.dynamicAction.report"] = reportDynamicActionCount;
         metrics["events.dynamicAction.omitted"] = Math.Max(0, rawDynamicActionCount - reportDynamicActionCount);
-        metrics["events.networkTcp.raw"] = rawEvents.Count(IsTcpEvent);
-        metrics["events.networkTcp.report"] = reportEvents.Count(IsTcpEvent);
-        metrics["events.persistence.raw"] = rawEvents.Count(IsPersistenceEvent);
-        metrics["events.persistence.report"] = reportEvents.Count(IsPersistenceEvent);
-        metrics["events.dynamicAction.rawUnknown"] = rawEvents.Count(evt =>
-            IsDynamicActionEvent(evt) && !EventDataTruthy(evt, "behaviorCounted", "sampleBehaviorCandidate", "strongSampleCorrelation"));
+        var rawUnattributedDynamicActionCount = rawEvents.Count(evt =>
+            IsDynamicActionEvent(evt) && !IsSampleAttributedDynamicActionEvent(evt));
+        var reportUnattributedDynamicActionCount = reportEvents.Count(evt =>
+            IsDynamicActionEvent(evt) && !IsSampleAttributedDynamicActionEvent(evt));
+        metrics["events.dynamicAction.rawUnknown"] = rawUnattributedDynamicActionCount;
+        // Keep attribution and report-cap accounting separate. A large raw
+        // minus report delta is often expected environment traffic, not lost
+        // sample evidence. These counters make that distinction explicit in
+        // report.json and allow HTML to explain it without guessing.
+        metrics["events.dynamicAction.attributedRaw"] = rawDynamicActionCount - rawUnattributedDynamicActionCount;
+        metrics["events.dynamicAction.attributedReport"] = reportDynamicActionCount - reportUnattributedDynamicActionCount;
+        metrics["events.dynamicAction.attributedOmitted"] = Math.Max(
+            0,
+            metrics["events.dynamicAction.attributedRaw"] - metrics["events.dynamicAction.attributedReport"]);
+        metrics["events.dynamicAction.unattributedReport"] = reportUnattributedDynamicActionCount;
+        AddDynamicCategoryMetrics(metrics, "events.networkTcp", rawEvents, reportEvents, IsTcpEvent);
+        AddDynamicCategoryMetrics(metrics, "events.persistence", rawEvents, reportEvents, IsPersistenceEvent);
+        AddDynamicCategoryMetrics(metrics, "events.file", rawEvents, reportEvents, IsFileEvent);
         if (rawEventCount.HasValue)
         {
             metrics["events.rawProvided"] = rawEventCount.Value;
         }
+    }
+
+    private static void AddDynamicCategoryMetrics(
+        Dictionary<string, int> metrics,
+        string metricPrefix,
+        IReadOnlyCollection<SandboxEvent> rawEvents,
+        IReadOnlyCollection<SandboxEvent> reportEvents,
+        Func<SandboxEvent, bool> predicate)
+    {
+        var rawCount = rawEvents.Count(predicate);
+        var reportCount = reportEvents.Count(predicate);
+        var rawUnattributed = rawEvents.Count(evt => predicate(evt) && !IsSampleAttributedDynamicActionEvent(evt));
+        var reportUnattributed = reportEvents.Count(evt => predicate(evt) && !IsSampleAttributedDynamicActionEvent(evt));
+        metrics[$"{metricPrefix}.raw"] = rawCount;
+        metrics[$"{metricPrefix}.report"] = reportCount;
+        metrics[$"{metricPrefix}.omitted"] = Math.Max(0, rawCount - reportCount);
+        metrics[$"{metricPrefix}.rawUnknown"] = rawUnattributed;
+        metrics[$"{metricPrefix}.attributedRaw"] = rawCount - rawUnattributed;
+        metrics[$"{metricPrefix}.attributedReport"] = reportCount - reportUnattributed;
+        metrics[$"{metricPrefix}.attributedOmitted"] = Math.Max(
+            0,
+            metrics[$"{metricPrefix}.attributedRaw"] - metrics[$"{metricPrefix}.attributedReport"]);
     }
 
     private static bool IsDynamicActionEvent(SandboxEvent evt) =>
@@ -1929,6 +1996,25 @@ public sealed partial class SandboxJobService
         evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
         evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
         evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFileEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSampleAttributedDynamicActionEvent(SandboxEvent evt)
+    {
+        if (EventDataTruthy(evt, "behaviorCounted", "sampleBehaviorCandidate", "strongSampleCorrelation"))
+        {
+            return true;
+        }
+
+        return EventDataEqualsAny(evt, "sampleCorrelation", "confirmed", "probable", "candidate") ||
+            EventDataEqualsAny(evt, "sampleCorrelationStatus", "correlated", "confirmed", "probable", "candidate") ||
+            EventDataEqualsAny(evt, "evidenceDisposition", "behavior-candidate", "sample-attributed");
+    }
+
+    private static bool EventDataEqualsAny(SandboxEvent evt, string key, params string[] values) =>
+        evt.Data.TryGetValue(key, out var value) &&
+        values.Any(expected => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase));
 
     private static bool EventDataTruthy(SandboxEvent evt, params string[] keys) =>
         keys.Any(key => evt.Data.TryGetValue(key, out var value) &&

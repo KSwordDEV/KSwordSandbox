@@ -1732,6 +1732,17 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     private static void AppendDynamicAnalysis(StringBuilder html, AnalysisReport report)
     {
         var dynamicEventCount = report.Events.Count(IsDynamicEvidenceEvent);
+        var rawDynamicActionCount = ReportMetric(report, "events.dynamicAction.raw", dynamicEventCount);
+        var attributedRawDynamicActionCount = ReportMetric(
+            report,
+            "events.dynamicAction.attributedRaw",
+            dynamicEventCount);
+        var attributedReportDynamicActionCount = ReportMetric(
+            report,
+            "events.dynamicAction.attributedReport",
+            dynamicEventCount);
+        var unattributedDynamicActionCount = ReportMetric(report, "events.dynamicAction.rawUnknown");
+        var attributedOmittedDynamicActionCount = ReportMetric(report, "events.dynamicAction.attributedOmitted");
         html.AppendLine("<section id=\"dynamic\" class=\"card\"><h2>Dynamic analysis</h2><div class=\"grid\">");
         Metric(html, "Process starts", CountSampleBehaviorEvents(report, "process.start").ToString(), "risk-info");
         Metric(html, "Process exits", CountSampleBehaviorEvents(report, "process.exit").ToString(), "risk-info");
@@ -1740,7 +1751,19 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         Metric(html, "Startup diff events", report.Events.Count(IsSampleBehaviorStartupEvent).ToString(), "risk-medium");
         Metric(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString(), "risk-medium");
         Metric(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString(), "risk-info");
+        Metric(html, "Runtime actions (raw)", rawDynamicActionCount.ToString(CultureInfo.InvariantCulture), "risk-info");
+        Metric(html, "Attributable actions (raw)", attributedRawDynamicActionCount.ToString(CultureInfo.InvariantCulture), "risk-info");
+        Metric(html, "Attributable actions (report)", attributedReportDynamicActionCount.ToString(CultureInfo.InvariantCulture), "risk-info");
+        Metric(html, "Unattributed raw actions", unattributedDynamicActionCount.ToString(CultureInfo.InvariantCulture), "risk-low");
+        Metric(html, "Attributable actions omitted", attributedOmittedDynamicActionCount.ToString(CultureInfo.InvariantCulture), attributedOmittedDynamicActionCount > 0 ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
+        if (rawDynamicActionCount > 0)
+        {
+            var dynamicCoverageNote = attributedOmittedDynamicActionCount > 0
+                ? $"Raw runtime action rows: {rawDynamicActionCount}; sample-attributed: {attributedRawDynamicActionCount}; retained in report: {attributedReportDynamicActionCount}; attributed rows omitted by report quota: {attributedOmittedDynamicActionCount}."
+                : $"Raw runtime action rows: {rawDynamicActionCount}; sample-attributed: {attributedRawDynamicActionCount}; retained in report: {attributedReportDynamicActionCount}; unattributed environment rows excluded from the behavior view: {unattributedDynamicActionCount}.";
+            html.AppendLine($"<div class=\"section-note\"><strong>Runtime action coverage.</strong> {E(dynamicCoverageNote)} Raw source artifacts remain available for audit; unattributed rows are not treated as sample behavior.</div>");
+        }
         if (dynamicEventCount == 0)
         {
             Empty(html, "No attributable guest/runtime behavior events were retained in the bounded report. Raw guest telemetry and collection markers remain available in events.json; this does not prove that the sample had no runtime behavior.");
@@ -7603,6 +7626,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         return report.Events.Count(e => eventTypes.Any(type => string.Equals(type, e.EventType, StringComparison.OrdinalIgnoreCase)));
     }
 
+    private static int ReportMetric(AnalysisReport report, string key, int fallback = 0)
+    {
+        return report.Metrics.TryGetValue(key, out var value) ? value : fallback;
+    }
+
     private static int CountSampleBehaviorEvents(AnalysisReport report, params string[] eventTypes)
     {
         return report.Events.Count(e =>
@@ -10162,6 +10190,18 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("very-high-entropy-resource", "极高熵资源"),
         ("high-entropy-resource", "高熵资源"),
         ("Dynamic analysis", "动态分析"),
+        ("Runtime actions (raw)", "运行期动作（原始）"),
+        ("Attributable actions (raw)", "可归因动作（原始）"),
+        ("Attributable actions (report)", "可归因动作（报告）"),
+        ("Unattributed raw actions", "未归因原始动作"),
+        ("Attributable actions omitted", "可归因动作省略数"),
+        ("Runtime action coverage.", "运行期动作覆盖。"),
+        ("Raw runtime action rows:", "原始运行期动作行："),
+        ("sample-attributed:", "样本归因："),
+        ("retained in report:", "报告保留："),
+        ("attributed rows omitted by report quota:", "因报告配额省略的归因行："),
+        ("unattributed environment rows excluded from the behavior view:", "行为视图排除的未归因环境行："),
+        ("Raw source artifacts remain available for audit; unattributed rows are not treated as sample behavior.", "原始来源证据仍可用于审计；未归因行不会作为样本行为处理。"),
         ("No dynamic events were collected. Zero counters mean telemetry was not collected or imported for this section; they are not proof that the sample had no behavior.", "未采集到动态事件。本节的 0 计数表示遥测未采集或未导入，不代表样本没有行为。"),
         ("No attributable guest/runtime behavior events were retained in the bounded report. Raw guest telemetry and collection markers remain available in events.json; this does not prove that the sample had no runtime behavior.", "有界报告中没有保留可归因的来宾/运行时行为事件；原始来宾遥测和采集标记仍可在 events.json 中查看，这不能证明样本没有运行时行为。"),
         ("VirusTotal / reputation", "VirusTotal / 信誉"),

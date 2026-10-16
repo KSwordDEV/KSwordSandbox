@@ -41,6 +41,18 @@ internal sealed class JobPersistenceRecoveryScenario : ISmokeTestScenario
         AssertQemuOverlayReportRebuildIdentity(runtimeRoot, context.RulesDirectory, samplePath);
 
         var fallbackJob = CreateImportedJob(service, samplePath);
+        var blockedJob = service.Plan(CreateSubmission(samplePath));
+        var blockedEventsPath = WriteBlockedEventsJson(GetJobRootFromReport(blockedJob), blockedJob.JobId);
+        var blockedImport = service.ImportGuestEvents(blockedJob.JobId, blockedEventsPath);
+        SmokeAssert.True(
+            blockedImport.Status == AnalysisStatus.Failed,
+            "A terminal process.start_failed without a successful retry must mark guest import Failed.");
+        var blockedReport = JsonSerializer.Deserialize<AnalysisReport>(
+            File.ReadAllText(blockedImport.JsonReportPath ?? throw new InvalidOperationException("Blocked report path should exist.")),
+            JsonOptions);
+        SmokeAssert.True(
+            blockedReport?.Events.Any(evt => string.Equals(evt.EventType, "process.start_failed", StringComparison.OrdinalIgnoreCase)) == true,
+            "A terminal launch failure must remain visible in the regenerated report.");
         var earlyJob = service.Plan(CreateSubmission(samplePath));
         var hugeEventsJob = service.Plan(CreateSubmission(samplePath));
         var canceledJob = service.Plan(CreateSubmission(samplePath));
@@ -334,6 +346,30 @@ internal sealed class JobPersistenceRecoveryScenario : ISmokeTestScenario
                 ProcessName = "recovery-smoke",
                 ProcessId = 1001,
                 Path = @"C:\KSwordSandbox\incoming\recovery-sample.exe"
+            }
+        };
+        File.WriteAllText(eventsPath, JsonSerializer.Serialize(events, JsonOptions));
+        return eventsPath;
+    }
+
+    private static string WriteBlockedEventsJson(string jobRoot, Guid jobId)
+    {
+        var guestRoot = Path.Combine(jobRoot, "guest", jobId.ToString("N"));
+        Directory.CreateDirectory(guestRoot);
+        var eventsPath = Path.Combine(guestRoot, "events.json");
+        var events = new[]
+        {
+            new SandboxEvent
+            {
+                EventType = "process.start_failed",
+                Source = "guest",
+                ProcessName = "recovery-sample",
+                Path = @"C:\KSwordSandbox\incoming\recovery-sample.exe",
+                Data =
+                {
+                    ["win32ErrorCode"] = "225",
+                    ["failureReason"] = "The file contains a virus or potentially unwanted software."
+                }
             }
         };
         File.WriteAllText(eventsPath, JsonSerializer.Serialize(events, JsonOptions));
