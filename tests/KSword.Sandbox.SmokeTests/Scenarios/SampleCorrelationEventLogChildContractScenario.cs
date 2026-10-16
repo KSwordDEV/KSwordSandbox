@@ -48,6 +48,18 @@ internal sealed class SampleCorrelationEventLogChildContractScenario : ISmokeTes
                         ["processImagePath"] = @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
                     }
                 },
+                new SandboxEvent
+                {
+                    EventType = "file.created",
+                    Source = "guest",
+                    Path = @"C:\Users\SandboxUser\AppData\Roaming\sample.exe",
+                    Data = new(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["actorPidStatus"] = "unavailable-filesystem-watcher",
+                        ["operation"] = "file.created",
+                        ["evidenceRole"] = "file-change"
+                    }
+                },
                 EventLogChild(200, "eventlog.powershell.script_block", "targeted-windows-eventlog-behavior"),
                 EventLogChild(200, "security.process.created", "privilege-security-audit-event"),
                 EventLogChild(300, "eventlog.powershell.script_block", "targeted-windows-eventlog-behavior"),
@@ -68,6 +80,9 @@ internal sealed class SampleCorrelationEventLogChildContractScenario : ISmokeTes
 
         var summary = classified.Single(evt => evt.EventType == "eventlog.behavior.query.summary");
         SmokeAssert.True(summary.Data["sampleCorrelation"] == "environment", "Event-log summaries must never be promoted by a sample root PID.");
+
+        var basenameCollision = classified.Single(evt => evt.EventType == "file.created");
+        SmokeAssert.True(basenameCollision.Data["sampleCorrelation"] != "confirmed", "An unattributed watcher path sharing the sample basename must not be confirmed by filename alone.");
 
         return Task.FromResult(new SmokeTestResult
         {

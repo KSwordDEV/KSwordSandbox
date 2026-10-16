@@ -220,7 +220,11 @@ public static class SampleCorrelationClassifier
                 NormalBehaviorBoundary(evt, data, context));
         }
 
-        if (AnyFieldMatchesSamplePath(evt, data, context))
+        // A filesystem watcher has no actor PID.  Its path remains useful
+        // evidence, but a common file name under AppData/ProgramData must not
+        // be promoted to confirmed sample behavior merely because it contains
+        // the submitted sample's basename.
+        if (!IsUnattributedFileWatcherEvent(evt, data) && AnyFieldMatchesSamplePath(evt, data, context))
         {
             return CorrelationDisposition.Confirmed(
                 "path-or-command-matched-submitted-sample",
@@ -422,7 +426,10 @@ public static class SampleCorrelationClassifier
             Value(data, "fileOperationName"),
             evt.EventType);
 
-        if (PathOrCommandMatchesSample(target, context))
+        var targetMatchesSample = IsUnattributedFileWatcherEvent(evt, data)
+            ? ExactSamplePathMatches(target, context)
+            : PathOrCommandMatchesSample(target, context);
+        if (targetMatchesSample)
         {
             return CorrelationDisposition.Confirmed("file-target-points-to-submitted-sample", "path");
         }
@@ -1002,6 +1009,24 @@ public static class SampleCorrelationClassifier
         return evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("filesystem.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("dropped_file.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsUnattributedFileWatcherEvent(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data)
+    {
+        return IsFileEvidence(evt) &&
+            string.Equals(Value(data, "actorPidStatus"), "unavailable-filesystem-watcher", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ExactSamplePathMatches(string? value, CorrelationContext context)
+    {
+        if (string.IsNullOrWhiteSpace(value) || string.IsNullOrWhiteSpace(context.SampleFullPath))
+        {
+            return false;
+        }
+
+        return string.Equals(NormalizePath(value), context.SampleFullPath, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsListenerEvent(SandboxEvent evt)
