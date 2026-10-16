@@ -79,6 +79,9 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(importSummary, "parseErrorCount", "1");
         RequireData(importSummary, "collectionHealth", "degraded");
         RequireData(importSummary, "protocolHealth", "degraded");
+        RequireData(importSummary, "protocolSummaryAvailable", "true");
+        RequireData(importSummary, "protocolSummaryState", "parsed");
+        RequireData(importSummary, "protocolSummaryStatus", "ok");
         RequireNonEmpty(importSummary, "zhMessage");
         RequireNonEmpty(importSummary, "zhHint");
         SmokeAssert.True(summary.Data.TryGetValue("protocols", out var protocols) && protocols.Contains("dns", StringComparison.OrdinalIgnoreCase) && protocols.Contains("http", StringComparison.OrdinalIgnoreCase) && protocols.Contains("tls", StringComparison.OrdinalIgnoreCase), "pcap.summary should expose protocol rollup metadata.");
