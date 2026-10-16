@@ -1894,7 +1894,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             return;
         }
 
-        html.AppendLine("<div class=\"section-note\"><strong>Weak-interaction graph / 弱交互图谱.</strong> This section summarizes process, file, registry, network, security/privilege, and artifact relationships from normalized telemetry so the report remains stable without client-side graph libraries. Hint / 提示: artifact badges show indexed evidence already present in report.json/artifact-index; self-noise stays in raw evidence, not sample behavior.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Sample behavior graph.</strong> Relationships below are derived from sample-attributed runtime evidence.</div>");
         html.AppendLine("<div class=\"grid\">");
         Metric(html, "Graph processes", processNodes.Count.ToString(), "risk-info");
         Metric(html, "Graph edges", edges.Count.ToString(), "risk-info");
@@ -1906,7 +1906,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         AppendEvidenceNarrativeSpine(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts);
         AppendEvidenceSummaryCards(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
         AppendEvidenceStoryBoard(html, report, artifacts);
-        AppendEvidenceHealthNarrative(html, report, artifacts);
+        AppendCollectionCoverageGaps(html, report, artifacts);
         AppendStableRelationshipLanes(html, edges);
         AppendTopBehaviorChain(html, edges);
 
@@ -2567,22 +2567,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var tlsCount = networkEvents.Count(evt => string.Equals(NetworkCategoryLabel(evt), "TLS", StringComparison.OrdinalIgnoreCase));
         var flowCount = Math.Max(0, networkEvents.Count - dnsCount - httpCount - tlsCount);
 
-        var r0Events = report.Events.Where(IsR0Event).OrderBy(evt => evt.Timestamp).ToList();
-        var r0NetworkStatusEvents = r0Events.Where(IsR0DriverNetworkStatusEvent).ToList();
-        var r0HealthEvents = r0Events.Where(IsR0HealthRowEvent).ToList();
-        var r0SelfNoiseEvents = r0Events.Where(evt => !IsR0HealthRowEvent(evt) && !IsR0DriverNetworkStatusEvent(evt) && IsCollectorSelfNoiseEvent(evt)).ToList();
-        var r0TelemetryEvents = r0Events.Where(evt => !IsR0HealthRowEvent(evt) && !IsR0DriverNetworkStatusEvent(evt) && !IsCollectorSelfNoiseEvent(evt)).ToList();
-        var r0State = R0AvailabilityStoryState(r0HealthEvents);
-        var r0Evidence = r0NetworkStatusEvents
-            .Take(3)
-            .Select(R0NetworkStatusStoryLine)
-            .Concat(r0HealthEvents
-            .Take(6)
-            .Concat(r0TelemetryEvents.Take(4))
-            .Select(EventOneLine))
-            .Append($"R0 self-noise events hidden from behavior graph: {r0SelfNoiseEvents.Count}")
-            .ToList();
-
         return
         [
             CreateEvidenceStoryCard(
@@ -2594,8 +2578,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                     $"Process candidates: {processEvents.Count}",
                     $"Child/parent hints: {processChildHints}",
                     $"Graph nodes: {processNodes.Count}",
-                    $"Artifact matrix lanes ready: {artifactMatrixRows.Count(row => string.Equals(row.State, "ready", StringComparison.OrdinalIgnoreCase))}/{artifactMatrixRows.Count}",
-                    $"Collector/health excluded: {report.Events.Count(evt => IsCollectorSelfNoiseEvent(evt) || IsCollectionHealthEvent(evt))}"
+                    $"Artifact matrix lanes ready: {artifactMatrixRows.Count(row => string.Equals(row.State, "ready", StringComparison.OrdinalIgnoreCase))}/{artifactMatrixRows.Count}"
                 ],
                 processEvidence),
             CreateEvidenceStoryCard(
@@ -2662,20 +2645,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                     $"DNS/HTTP/TLS/flow: {dnsCount}/{httpCount}/{tlsCount}/{flowCount}",
                     ArtifactEvidenceMatrixMetric(packetMatrix)
                 ],
-                networkEvidence),
-            CreateEvidenceStoryCard(
-                "R0 health/noise boundary",
-                r0State,
-                r0HealthEvents.Any(IsCollectionHealthAlertEvent) || r0HealthEvents.Any(IsDeviceUnavailableHealthEvent) ? "medium" : "info",
-                "R0 availability, queue loss, and collector self-noise are called out as evidence-quality context, not sample behavior.",
-                [
-                    $"R0 health rows: {r0HealthEvents.Count}",
-                    $"R0 network status rows: {r0NetworkStatusEvents.Count}",
-                    $"R0 telemetry rows: {r0TelemetryEvents.Count}",
-                    $"Self-noise hidden: {r0SelfNoiseEvents.Count}",
-                    $"Health alerts: {r0HealthEvents.Count(IsCollectionHealthAlertEvent)}"
-                ],
-                r0Evidence)
+                networkEvidence)
         ];
     }
 
