@@ -140,6 +140,13 @@ public static class ReportEventSampler
     [
         "collectionName",
         "importMode",
+        "behaviorCounted",
+        "nonbehavior",
+        "notSampleBehavior",
+        "sampleBehaviorCandidate",
+        "sampleCorrelation",
+        "sampleCorrelationStatus",
+        "sampleCorrelationReason",
         "sourceArtifactRelativePath",
         "sourceArtifactSha256",
         "sourceArtifactSizeBytes",
@@ -149,7 +156,31 @@ public static class ReportEventSampler
         "eventFamily",
         "eventKind",
         "protocol",
-        "serviceHint"
+        "serviceHint",
+        "queryName",
+        "qname",
+        "domain",
+        "host",
+        "url",
+        "sni",
+        "serverName",
+        "networkTarget",
+        "destinationIp",
+        "destinationPort",
+        "protocolSummaryAvailable",
+        "protocolSummaryState",
+        "protocolSummaryStatus",
+        "protocolSummaryReason",
+        "protocolSummaryParser",
+        "pcapCorrelationAttempted",
+        "pcapCorrelationOwnerPidAvailable",
+        "pcapCorrelationWindowMatched",
+        "pcapCorrelationWindowStartUtc",
+        "pcapCorrelationWindowEndUtc",
+        "pcapCorrelationStaticIocMatched",
+        "pcapCorrelationStaticIoc",
+        "pcapCorrelationDnsCorroborated",
+        "pcapCorrelationUncertainty"
     ];
 
     // Synthetic R0 rows are plumbing evidence used to verify JSONL import and
@@ -1218,6 +1249,11 @@ public static class ReportEventSampler
             return false;
         }
 
+        if (EventDataEqualsAny(evt, "captureSource", "etw-live-tracerpt"))
+        {
+            return true;
+        }
+
         return type.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
@@ -1757,7 +1793,9 @@ public static class ReportEventSampler
             }
         }
 
-        if ((evt.EventType ?? string.Empty).StartsWith("pcap.", StringComparison.OrdinalIgnoreCase))
+        if ((evt.EventType ?? string.Empty).StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
+            TextEqualsAny(DataValue(evt.Data, "sourceArtifactKind"), "PacketCapture") ||
+            TextEqualsAny(DataValue(evt.Data, "evidenceRole"), "packet-capture"))
         {
             foreach (var key in PcapImportPriorityDataKeys)
             {
