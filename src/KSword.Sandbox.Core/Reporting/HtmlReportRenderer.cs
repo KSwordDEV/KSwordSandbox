@@ -8322,6 +8322,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             return false;
         }
 
+        // WMI/startup inventory probe failures belong to the coverage-gap
+        // lane. They are not sample execution failures and must not leak into
+        // the operator-facing failure/event tables.
+        if (IsWmiInventoryProbeFailureEvent(evt))
+        {
+            return false;
+        }
+
         if (IsCollectionHealthEvent(evt))
         {
             return false;
@@ -8329,6 +8337,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
         return IsFailureEvent(evt);
     }
+
+    private static bool IsWmiInventoryProbeFailureEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("startup_item.wmi.capture_failed", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("startup_item.wmi.capture-failed", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsCollectionDiagnosticFailure(SandboxEvent evt) =>
         IsCollectionHealthEvent(evt) && IsCollectionHealthAlertEvent(evt);
