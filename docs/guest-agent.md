@@ -35,7 +35,8 @@ eligible R0 行；Collector 仍会 drain 并记录 `lostCount`、`highWatermark`
 mask 和 backpressure，便于识别固定 ring 在启动突发流量下的丢失。低速/压力测试如需
 降输出，可由操作者显式传入更大的 stride。
 
-真实 R0 runbook 默认传入 `--r0-enable-mask 0x3F`，请求稳定的
+驱动启动默认 mask 是 `0x27`（`driver|process|image|network`），用于压住开机阶段的
+文件/注册表突发；真实 R0 runbook 在样本开始前显式传入 `--r0-enable-mask 0x3F`，请求稳定的
 driver/process/image/file/registry/network producer；draft handle-access 位保持关闭，
 除非操作者显式改动 collector 参数。
 

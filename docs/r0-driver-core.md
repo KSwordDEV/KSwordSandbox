@@ -232,7 +232,8 @@ handle, or allocates callback context. The distinct payload contract is still th
 `KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT` in the live
 capability reply.
 
-`KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT` intentionally excludes the draft
+`KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT` is `0x27` (`driver|process|image|network`)
+and intentionally excludes the draft
 `processHandleAccess` bit and boot-time file/registry producers. The latter
 callbacks are registered but remain emission-suppressed until R0Collector
 negotiates its explicit live mask; this keeps Windows startup churn from
