@@ -46,6 +46,8 @@ internal sealed class ProcessTreeProbe : IGuestProbe
     private readonly Dictionary<string, ProcessTreeObservation> observedSnapshots = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> monitoredProcessKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> emittedMissingProcessKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> emittedRootUnavailableKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> emittedRootSummaryKeys = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<int, ProcessTreeSnapshot> baselineByPid = [];
     private SystemChangeSnapshot baselineSystemState = SystemChangeSnapshot.Empty;
 
@@ -110,6 +112,8 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             observedSnapshots.Clear();
             monitoredProcessKeys.Clear();
             emittedMissingProcessKeys.Clear();
+            emittedRootUnavailableKeys.Clear();
+            emittedRootSummaryKeys.Clear();
             RememberVisibleProcesses(current, phase, capturedAtUtc);
             baselineByPid = current;
             baselineSystemState = await systemChangeSnapshotProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
@@ -191,8 +195,14 @@ internal sealed class ProcessTreeProbe : IGuestProbe
 
             var missingSnapshotEvents = CreateMissingProcessSnapshotEvents(current, phase, context, capturedAtUtc);
             events.AddRange(missingSnapshotEvents);
-            if (treeResult is not null)
+            if (treeResult is not null && emittedRootSummaryKeys.Add(
+                    treeResult.RootProcessId.ToString(CultureInfo.InvariantCulture) + "|" + ToPhaseLabel(phase)))
             {
+                // A 250 ms edge poll can observe the same root state many
+                // times. Keep the detailed process.tree rows available for
+                // each poll, while emitting one compact summary per root and
+                // phase so report totals do not turn collection health into
+                // noise.
                 events.Add(CreateProcessTreeSummaryEvent(treeResult, current, missingSnapshotEvents.Count, phase, context, capturedAtUtc));
             }
 
@@ -482,7 +492,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
     /// partial child trees when the root already exited; the method returns
     /// deterministic tree rows plus summary metadata.
     /// </summary>
-    private static ProcessTreeEventResult CreateTreeEvents(
+    private ProcessTreeEventResult CreateTreeEvents(
         IReadOnlyDictionary<int, ProcessTreeSnapshot> snapshot,
         int rootProcessId,
         ProbePhase phase,
@@ -498,7 +508,8 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         var processKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var rootVisible = snapshot.TryGetValue(rootProcessId, out var root) && IsSameRootProcess(root, context);
         var rootProcess = rootVisible ? root : null;
-        if (!rootVisible)
+        var unavailableKey = rootProcessId.ToString(CultureInfo.InvariantCulture) + "|" + ToPhaseLabel(phase);
+        if (!rootVisible && emittedRootUnavailableKeys.Add(unavailableKey))
         {
             events.Add(CreateRootUnavailableEvent(rootProcessId, phase, context, capturedAtUtc, root));
         }

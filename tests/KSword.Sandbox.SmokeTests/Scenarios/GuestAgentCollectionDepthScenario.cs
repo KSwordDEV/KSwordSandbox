@@ -43,6 +43,8 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "visibleDeeperDescendantProcessCount", "Process tree summaries must count deeper visible descendants separately.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootOrphanedTreeRecovered", "Process tree summaries must mark recovered orphaned root-child trees.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootTreeMetadata", "New process rows should reuse root-tree metadata when lineage is available.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "emittedRootUnavailableKeys", "Repeated root-unavailable polls must be de-duplicated by root and phase.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "emittedRootSummaryKeys", "Repeated process-tree summaries must be de-duplicated by root and phase.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "zhMessage", "Process tree events must include Chinese report text.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "reasonTaxonomy", "Process tree missing/summary rows must expose stable reason taxonomy.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "behaviorCounted", "Process tree diagnostic summary rows must be explicitly marked out of behavior counts.");
