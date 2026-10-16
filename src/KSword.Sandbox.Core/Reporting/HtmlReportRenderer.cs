@@ -57,7 +57,7 @@ public sealed class HtmlReportRenderer
     private const int RelationshipCardInlineLimit = 24;
     private const int RelationshipArtifactInlineLimit = 6;
     private const int EvidenceStoryInlineLimit = 12;
-    private const int EventExplorerInlineLimit = 30;
+    private const int EventExplorerInlineLimit = 100;
 
     private sealed record TimelineGroup(
         string Window,
@@ -654,7 +654,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static string EventExplorerQuickLinkCount(AnalysisReport report)
     {
-        var total = report.Events.Count(IsUserFacingEvent);
+        var total = report.Events.Count(IsEventExplorerEvent);
         var inline = Math.Min(total, EventExplorerInlineLimit);
         return $"{inline}/{total}";
     }
@@ -771,7 +771,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var rows = report.Events
-            .Where(IsUserFacingEvent)
+            .Where(IsEventExplorerEvent)
             .OrderByDescending(IsKeyOperationalEvent)
             .ThenBy(evt => evt.Timestamp)
             .Take(EventExplorerInlineLimit)
@@ -782,7 +782,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 EventExplorerSeverity(report, evt),
                 IsSampleBehaviorEvent(evt)))
             .ToList();
-        var hidden = Math.Max(0, report.Events.Count(IsUserFacingEvent) - rows.Count);
+        var hidden = Math.Max(0, report.Events.Count(IsEventExplorerEvent) - rows.Count);
         var types = rows.Select(row => row.Event.EventType).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var sources = rows.Select(row => string.IsNullOrWhiteSpace(row.Event.Source) ? "unknown" : row.Event.Source).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var stages = rows.Select(row => row.Stage).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
@@ -790,7 +790,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         var severities = rows.Select(row => row.Severity).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(SeverityRank).ToList();
 
         html.AppendLine("<section id=\"event-explorer\" class=\"card\"><h2>Key event explorer</h2>");
-        html.AppendLine("<div class=\"section-note\"><strong>Review the signal first.</strong> Search or filter by event type, source, stage, severity, and sample-behavior status.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Review the signal first.</strong> Search or filter by event type, source, stage, severity, and sample-behavior status. Rows marked No remain visible as captured but unattributed evidence.</div>");
         html.AppendLine("<div class=\"event-explorer-toolbar\">");
         html.AppendLine("<label>Search <input type=\"search\" data-event-search placeholder=\"type, path, process, target\"></label>");
         AppendEventExplorerSelect(html, "Event type", "data-event-type", types);
@@ -801,10 +801,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("<label>Sample behavior <select data-event-sample><option value=\"all\">All</option><option value=\"true\">Yes</option><option value=\"false\">No</option></select></label>");
         html.AppendLine("<button type=\"button\" class=\"focus-action secondary\" data-event-reset>Reset filters</button>");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"event-explorer-status\" data-event-count>{E(rows.Count.ToString(CultureInfo.InvariantCulture))} visible rows; {E(hidden.ToString(CultureInfo.InvariantCulture))} additional behavior rows in report.json.</div>");
+        html.AppendLine($"<div class=\"event-explorer-status\" data-event-count>{E(rows.Count.ToString(CultureInfo.InvariantCulture))} visible evidence rows; {E(hidden.ToString(CultureInfo.InvariantCulture))} more evidence rows are available in the report.</div>");
         if (rows.Count == 0)
         {
-            Empty(html, "No user-facing events were retained for the event explorer.");
+            Empty(html, "No dynamic evidence rows were retained for the event explorer.");
         }
         else
         {
@@ -1327,11 +1327,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         var compact = string.Join(Environment.NewLine, topEvidence.Select(EventOneLine));
         var full = string.Join(
             Environment.NewLine + Environment.NewLine,
-            topEvidence.Select(evt => EventToBoundedPlainText(evt, FindingEvidenceDataPairLimit, FindingEvidenceValueLimit)));
+            evidence.Select(evt => EventToBoundedPlainText(evt, FindingEvidenceDataPairLimit, FindingEvidenceValueLimit)));
         if (hidden > 0)
         {
-            compact += Environment.NewLine + $"... {hidden} more evidence events hidden in raw events/report.json";
-            full += Environment.NewLine + Environment.NewLine + $"... {hidden} more evidence events hidden in raw events/report.json";
+            compact += Environment.NewLine + $"... {hidden} more evidence events; expand or copy to view all";
         }
 
         return
@@ -2896,7 +2895,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             var matrix = FirstEventDataValue(evt, "artifactEvidenceMatrix");
             foreach (var row in ParseArtifactEvidenceMatrix(matrix, evt.EventType))
             {
-                rows[row.CollectionName] = row;
+                MergeArtifactEvidenceMatrixRow(rows, row);
             }
 
             MergeEventMatrixCount(rows, evt, "dropped-files", ArtifactKind.DroppedFile, "droppedFileArtifactCount", "droppedFileBytes");
@@ -2967,7 +2966,61 @@ html[lang="en"] .localized-evidence-field{display:none}
             ? parsedBytes
             : 0;
         var state = count > 0 ? "ready" : "missing";
-        rows[collectionName] = new ArtifactEvidenceMatrixRow(collectionName, kind, count, state, bytes, evt.EventType, FirstEventDataValue(evt, "primaryArtifactSelectors") ?? string.Empty);
+        MergeArtifactEvidenceMatrixRow(
+            rows,
+            new ArtifactEvidenceMatrixRow(
+                collectionName,
+                kind,
+                count,
+                state,
+                bytes,
+                evt.EventType,
+                FirstEventDataValue(evt, "primaryArtifactSelectors") ?? string.Empty));
+    }
+
+    private static void MergeArtifactEvidenceMatrixRow(
+        IDictionary<string, ArtifactEvidenceMatrixRow> rows,
+        ArtifactEvidenceMatrixRow incoming)
+    {
+        if (!rows.TryGetValue(incoming.CollectionName, out var existing))
+        {
+            rows[incoming.CollectionName] = incoming;
+            return;
+        }
+
+        // Import summaries and per-lane counters are emitted as separate
+        // events. A later counter often carries the count but omits byte size;
+        // keep the strongest values observed across all events.
+        var count = Math.Max(existing.Count, incoming.Count);
+        var bytes = Math.Max(existing.Bytes, incoming.Bytes);
+        var state = MatrixStateRank(incoming.State) > MatrixStateRank(existing.State)
+            ? incoming.State
+            : existing.State;
+        var source = incoming.Bytes > existing.Bytes || incoming.Count > existing.Count
+            ? incoming.Source
+            : existing.Source;
+        var selectors = string.IsNullOrWhiteSpace(incoming.Selectors)
+            ? existing.Selectors
+            : incoming.Selectors;
+        rows[incoming.CollectionName] = new ArtifactEvidenceMatrixRow(
+            incoming.CollectionName,
+            incoming.Kind,
+            count,
+            state,
+            bytes,
+            source,
+            selectors);
+    }
+
+    private static int MatrixStateRank(string? state)
+    {
+        return state?.Trim().ToLowerInvariant() switch
+        {
+            "ready" or "complete" or "ok" => 3,
+            "disabled" => 2,
+            "missing" or "unavailable" or "error" => 1,
+            _ => 0
+        };
     }
 
     private static void MergeDisabledArtifactCollectionState(
@@ -7763,6 +7816,53 @@ html[lang="en"] .localized-evidence-field{display:none}
         IsOperationalFailureEvent(evt) ||
         IsNonZeroSampleExitEvent(evt);
 
+    private static bool IsEventExplorerEvent(SandboxEvent evt)
+    {
+        if (IsUserFacingEvent(evt))
+        {
+            return true;
+        }
+
+        // The explorer is an evidence view. Keep dynamic rows even when the
+        // correlation classifier could not tie them to the sample so users can
+        // distinguish an unattributed observation from a missing collector.
+        if (IsStaticOnlyEvidenceEvent(evt) ||
+            IsCollectionHealthEvent(evt) ||
+            IsVirusTotalEvent(evt) ||
+            IsCollectorSelfNoiseEvent(evt) ||
+            IsLowValueOperationalEvent(evt))
+        {
+            return false;
+        }
+
+        var type = evt.EventType ?? string.Empty;
+        if (type.Contains(".snapshot", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains(".observed", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains(".diff", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains(".summary", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains("tree_unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return IsFileEvent(evt) ||
+            IsRegistryEvent(evt) ||
+            IsStartupEvent(evt) ||
+            IsNetworkEvent(evt) ||
+            IsSecurityPrivilegeEvent(evt) ||
+            IsR0Event(evt) ||
+            IsDynamicProcessActionEvent(evt) ||
+            type.StartsWith("security_eventlog.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("etw_security.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsDynamicProcessActionEvent(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        return type.StartsWith("process.", StringComparison.OrdinalIgnoreCase) &&
+            !TextEqualsAny(type, "process.new", "process.snapshot", "process.observed", "process.tree.summary");
+    }
+
     private static bool IsStaticOnlyEvidenceEvent(SandboxEvent evt) =>
         EventDataBoolTrue(evt, "staticOnly", "static_only") ||
         evt.EventType.StartsWith("static.", StringComparison.OrdinalIgnoreCase);
@@ -10050,6 +10150,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Lifecycle hidden", "已隐藏生命周期"),
         ("agent.start/stop rows hidden from the main story; raw evidence remains below.", "agent.start/stop 行从主叙事隐藏；原始证据仍保留在下方。"),
         ("Next review", "下一步检查"),
+        ("Review static evidence and runtime events", "查看静态证据和运行时事件"),
+        ("more evidence events; expand or copy to view all", "更多证据事件；展开或复制可查看全部"),
         ("Review static analysis and collection health", "检查静态分析和采集健康状态"),
         ("Open filtered event table", "打开筛选事件表"),
         ("Open failure log", "打开失败日志"),
@@ -10072,6 +10174,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Copy analyst focus", "复制分析重点"),
         ("Key event explorer", "关键事件筛选器"),
         ("Review the signal first.", "先查看信号。"),
+        ("Rows marked No remain visible as captured but unattributed evidence.", "标记为“否”的行仍会保留，表示已采集但尚未归因的证据。"),
         ("Search or filter by event type, source, stage, severity, and sample-behavior status. Agent lifecycle rows are omitted from this table; expand Raw normalized events for complete audit evidence.", "可按事件类型、来源、阶段、严重性和是否样本行为搜索或筛选。Agent 生命周期行不会出现在此表；展开原始规范化事件可查看完整审计证据。"),
         ("Event type", "事件类型"),
         ("Behavior family", "行为族"),
@@ -10092,10 +10195,13 @@ html[lang="en"] .localized-evidence-field{display:none}
         (">No<", ">否<"),
         ("Reset filters", "重置筛选"),
         ("visible rows; ", "可见行；"),
+        ("visible evidence rows; ", "可见证据行；"),
+        ("more evidence rows are available in the report.", "报告中还有更多证据行。"),
         (" report-only rows; ", " 报告专用行；"),
         (" lifecycle rows folded in Raw normalized events.", " 生命周期行已折叠在原始规范化事件中。"),
         (" matching rows; filters apply to the visible evidence table.", " 个匹配行；筛选器作用于可见证据表。"),
         ("No user-facing events were retained for the event explorer.", "事件筛选器没有保留面向用户的事件。"),
+        ("No dynamic evidence rows were retained for the event explorer.", "事件筛选器没有保留动态证据行。"),
         ("Event type", "事件类型"),
         ("Time", "时间"),
         ("Evidence", "证据"),

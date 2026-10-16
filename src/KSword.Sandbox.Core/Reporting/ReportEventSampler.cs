@@ -18,7 +18,7 @@ public sealed record ReportEventSamplingOptions
 
     public int MaxDiagnosticEvents { get; init; } = 12;
 
-    public int MaxEvidenceEventsPerFinding { get; init; } = 8;
+    public int MaxEvidenceEventsPerFinding { get; init; } = 50;
 
     public int MaxEventDataPairs { get; init; } = 24;
 
@@ -691,7 +691,45 @@ public static class ReportEventSampler
         "sourcePort",
         "destinationIp",
         "destinationPort",
-        "flowKey"
+        "flowKey",
+        "connection",
+        "local",
+        "remote",
+        "localAddress",
+        "localPort",
+        "remoteAddress",
+        "remotePort",
+        "owningPid",
+        "owningProcessId",
+        "processId",
+        "rootProcessId"
+    ];
+
+    private static readonly string[] FilePriorityDataKeys =
+    [
+        "artifactRelativePath",
+        "relativePath",
+        "sourcePath",
+        "guestFullPath",
+        "path",
+        "filePath",
+        "rootProcessPath",
+        "operation",
+        "status",
+        "captureState",
+        "captureSource",
+        "sizeBytes",
+        "previousSizeBytes",
+        "lastWriteUtc",
+        "previousLastWriteUtc",
+        "sha256",
+        "hash",
+        "hashStatus",
+        "artifactSelector",
+        "processId",
+        "rootProcessId",
+        "parentProcessId",
+        "treeLineage"
     ];
 
     // Import summaries are the only network evidence left in many reports
@@ -1180,7 +1218,14 @@ public static class ReportEventSampler
             return false;
         }
 
-        return type.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
+        return type.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("tls.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("pcap.dns", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("pcap.http", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("pcap.tls", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("pcap.flow", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
@@ -1653,6 +1698,28 @@ public static class ReportEventSampler
                 "valueName", "value", "expandedValue", "previousValue", "taskName", "taskPath",
                 "taskToRun", "commandLine", "author", "status", "nextRunTime", "lastRunTime"
             })
+            {
+                yield return key;
+            }
+        }
+
+        if (evt.EventType.StartsWith("service.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var key in new[]
+            {
+                "imagePath", "objectName", "displayName", "name", "previousImagePath",
+                "previousValue", "startType", "rawSummary", "signature", "target", "value"
+            })
+            {
+                yield return key;
+            }
+        }
+
+        if (evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var key in FilePriorityDataKeys)
             {
                 yield return key;
             }

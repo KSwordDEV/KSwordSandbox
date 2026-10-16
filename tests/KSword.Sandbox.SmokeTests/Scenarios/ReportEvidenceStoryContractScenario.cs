@@ -46,6 +46,8 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(html, "disabled/missing", "Collection coverage should show disabled R0/artifact lanes explicitly.");
         RequireContains(html, "environment network observed; no sample attribution", "Network coverage should distinguish environment network from missing collection.");
         RequireContains(html, "Network collection coverage", "Network coverage status should be rendered before endpoint cards.");
+        RequireContains(html, "198.51.100.40", "The event explorer should retain an unattributed dynamic network row for review.");
+        RequireContains(html, "packet-captures=1:ready:8192", "A later zero-byte counter must not erase artifact matrix byte evidence.");
 
         // VMware reports commonly inline only network.import.summary while raw
         // netstat/sidecar rows remain in events.json. Summary counters must
@@ -365,7 +367,19 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
                 ["remotePort"] = "443"
             }
         };
-        var events = new List<SandboxEvent> { processStart, r0NetworkStatus, staticResource, vt, networkFlow, artifactImportSummary, screenshot, memoryDump, packetCapture, wmiBefore, wmiAfter, etwReadiness, auditPartial, r0Disabled, environmentNetwork };
+        var lateZeroByteMatrixCounter = new SandboxEvent
+        {
+            EventType = "host.artifact.collection.completed",
+            Timestamp = timestamp.AddSeconds(9.5),
+            Source = "host",
+            Data =
+            {
+                ["artifactEvidenceMatrix"] = "packet-captures=1:ready:0",
+                ["packetCaptureArtifactCount"] = "1",
+                ["packetCaptureBytes"] = "0"
+            }
+        };
+        var events = new List<SandboxEvent> { processStart, r0NetworkStatus, staticResource, vt, networkFlow, artifactImportSummary, screenshot, memoryDump, packetCapture, wmiBefore, wmiAfter, etwReadiness, auditPartial, r0Disabled, environmentNetwork, lateZeroByteMatrixCounter };
         for (var index = 0; index < 30; index++)
         {
             events.Add(new SandboxEvent

@@ -1995,12 +1995,31 @@ public sealed partial class SandboxJobService
             metrics[$"{metricPrefix}.attributedRaw"] - metrics[$"{metricPrefix}.attributedReport"]);
     }
 
-    private static bool IsDynamicActionEvent(SandboxEvent evt) =>
-        evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase);
+    private static bool IsDynamicActionEvent(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        if (type.Contains(".snapshot", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains(".observed", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains(".diff", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains(".summary", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return type.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("tls.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("pcap.dns", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("pcap.http", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("pcap.tls", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("pcap.flow", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("service.", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsTcpEvent(SandboxEvent evt) =>
         evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase);

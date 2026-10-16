@@ -327,8 +327,8 @@ internal static class DashboardExperiencePage
                     <div class="preset-row" aria-label="样本运行预设 / Sample run presets">
                       <button type="button" onclick="applySamplePreset('quick')" data-copy="快速观察：30s，关闭敏感产物采集 / Quick observe: 30s, sensitive artifact collection off" data-zh="快速观察 30s" data-en="Quick 30s">快速观察 30s</button>
                       <button type="button" onclick="applySamplePreset('standard')" data-copy="标准动态：30s，落地文件+截图+PCAP / Standard dynamic: 30s, dropped files + screenshots + PCAP" data-zh="标准动态 30s" data-en="Standard 30s">标准动态 30s</button>
-                      <button type="button" onclick="applySamplePreset('evidence')" data-copy="证据优先：180s，强化落地文件、截图、PCAP / Evidence-first: 180s with dropped files, screenshots, PCAP" data-zh="证据优先" data-en="Evidence-first">证据优先</button>
-                      <button type="button" onclick="applySamplePreset('memory')" data-copy="内存取证：180s，启用内存 dump（支持时含子进程） / Memory forensic: 180s, memory dumps including children when supported" data-zh="内存取证" data-en="Memory forensic">内存取证</button>
+                      <button type="button" onclick="applySamplePreset('evidence')" data-copy="证据优先：30s，强化落地文件、截图、PCAP / Evidence-first: 30s with dropped files, screenshots, PCAP" data-zh="证据优先 30s" data-en="Evidence-first 30s">证据优先 30s</button>
+                      <button type="button" onclick="applySamplePreset('memory')" data-copy="内存取证：30s，启用内存 dump（支持时含子进程） / Memory forensic: 30s, memory dumps including children when supported" data-zh="内存取证 30s" data-en="Memory forensic 30s">内存取证 30s</button>
                     </div>
                     <button class="primary-cta" onclick="uploadAndPlan()" data-zh="开始分析：上传 → 提交 VM → 打开监控" data-en="Start analysis: upload → submit VM → monitor">开始分析：上传 → 提交 VM → 打开监控</button>
                     <p class="microcopy" data-copy="上传会创建任务、尝试提交 VM 分析并打开实时监控；若预检失败会保留任务上下文 / Upload creates a job, attempts VM analysis, and opens the live monitor" data-zh="点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。" data-en="After click, the browser shows real upload progress. If VM start preflight fails, the UI still preserves the created job, failure reason, and monitor/recent-job entry points so context is not lost.">点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。</p>
@@ -1618,20 +1618,20 @@ internal static class DashboardExperiencePage
                   message: t('已应用“标准动态”：30 秒，采集落地文件、截图和 PCAP。', 'Applied Standard dynamic: 30 seconds with dropped files, screenshots, and PCAP.')
                 },
                 evidence: {
-                  seconds: 180,
+                  seconds: 30,
                   collectDroppedFiles: true,
                   captureScreenshots: true,
                   captureMemoryDumps: false,
                   capturePacketCapture: true,
-                  message: t('已应用“证据优先”：180 秒，强化报告可见证据。', 'Applied Evidence-first: 180 seconds with stronger report-visible evidence.')
+                  message: t('已应用“证据优先”：30 秒，强化报告可见证据。', 'Applied Evidence-first: 30 seconds with stronger report-visible evidence.')
                 },
                 memory: {
-                  seconds: 180,
+                  seconds: 30,
                   collectDroppedFiles: true,
                   captureScreenshots: true,
                   captureMemoryDumps: true,
                   capturePacketCapture: true,
-                  message: t('已应用“内存取证”：180 秒，启用内存 dump；Guest 支持时包含子进程。', 'Applied Memory forensic: 180 seconds with memory dumps; child processes included when Guest supports it.')
+                  message: t('已应用“内存取证”：30 秒，启用内存 dump；Guest 支持时包含子进程。', 'Applied Memory forensic: 30 seconds with memory dumps; child processes included when Guest supports it.')
                 }
               };
               const preset = presets[name] || presets.standard;
