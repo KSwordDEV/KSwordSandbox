@@ -47,6 +47,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(program, "DashboardExperiencePage.Render()", "Program.cs should route the root WebUI through the Dashboard layer.");
         RequireContains(program, "\"/jobs/{jobId:guid}/execution-flow\"", "Program.cs should expose a dedicated execution-flow route.");
         RequireContains(program, "RunbookExecutionFlowPage.Render", "Program.cs should expose a separate execution-flow page for runbook details.");
+        RequireContains(executionFlow, "Execution mode (runbook authority)", "Execution-flow UI should show the actual persisted runbook execution mode.");
+        RequireContains(executionFlow, "Submission.DryRun is only the submission default", "Execution-flow UI should explain why submission DryRun does not override a live execution result.");
+        RequireContains(executionFlow, "Mode=Live", "Execution-flow UI should explicitly identify live mode as authoritative.");
+        RequireContains(executionFlow, "Mode=DryRun", "Execution-flow UI should explicitly identify dry-run mode as authoritative when selected.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/progress\"", "Program.cs should expose a UI-safe real runbook progress endpoint.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/start\"", "Program.cs should expose a background runbook start endpoint.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/cancel\"", "Program.cs should expose a background runbook cancellation endpoint.");
