@@ -17,10 +17,10 @@ internal sealed class PacketCaptureProbe : IGuestProbe
 {
     private const string CollectionName = "packet-captures";
     private const string PktmonExecutable = "pktmon.exe";
-    // Windows 10 20H2 builds differ in their handling of a zero packet size;
-    // 128 bytes is the documented/default capture size and is sufficient for
-    // Ethernet/IP/TCP/UDP/DNS endpoint attribution without an invalid-parameter
-    // start failure.
+    // Windows 10 20H2's inbox PktMon predates the modern long `--capture`,
+    // `--file-name`, and `--file-size` aliases.  Use the stable short switches
+    // (`-c`, `-f`, `-s`) accepted by that build; 128 bytes is sufficient for
+    // Ethernet/IP/TCP/UDP/DNS endpoint attribution.
     private const string PacketSizeBytes = "128";
     private const string ArtifactSelectorVersion = "artifact-selectors-v1";
     private const string ReasonTaxonomy = "guest-artifact.packet-capture.reason.v1";
@@ -92,12 +92,12 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             PktmonExecutable,
             [
                 "start",
-                "--capture",
+                "-c",
                 "--pkt-size",
                 PacketSizeBytes,
-                "--file-name",
+                "-f",
                 session.EtlPath,
-                "--file-size",
+                "-s",
                 "128"
             ],
             CommandTimeout,
@@ -141,7 +141,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["pcapngRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["diagnosticRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
                 ["captureStartedUtc"] = session.StartedAtUtc.ToString("O", CultureInfo.InvariantCulture),
-                ["captureToolCommand"] = "pktmon start --capture --pkt-size 128 --file-name <etl> --file-size 128",
+                ["captureToolCommand"] = "pktmon start -c --pkt-size 128 -f <etl> -s 128",
                 ["conversionTool"] = PktmonExecutable,
                 ["conversionCommand"] = "pktmon etl2pcap <etl> --out <pcapng>",
                 ["conversionStatus"] = "pending",

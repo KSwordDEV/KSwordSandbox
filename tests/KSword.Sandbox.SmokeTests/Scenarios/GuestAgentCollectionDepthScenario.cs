@@ -187,6 +187,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "commandStandardOutput", "Packet capture failures must preserve bounded stdout diagnostics.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "commandStandardError", "Packet capture failures must preserve bounded stderr diagnostics.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "PacketSizeBytes", "Packet capture must use a compatible bounded packet size on older Windows guests.");
+        AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "\"-c\"", "Packet capture must use the Windows 10-compatible short capture switch.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet_capture.skipped", "Packet capture probe must keep unavailable capture non-fatal.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet-captures", "Packet capture probe must write to the packet-captures collection lane.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "artifactRelativePath", "Packet capture events must expose final PCAP artifact-relative paths.");
