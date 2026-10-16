@@ -58,6 +58,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.watcher.failed", "File watcher failures must remain explicit collection-health evidence.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "watcherBufferOverflow", "File watcher buffer overflow must not be presented as complete capture.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "KSwordSandbox-*.txt", "File diff probe must include the sandbox TEMP root fixture files.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "PersistenceWatchRoots", "File diff probe must watch common AppData/ProgramData/Startup persistence roots.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.watcher.dropped", "File watcher queue drops must remain explicit collection-health evidence.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "unknown-file-actor", "Filesystem watcher rows must not claim the sample root PID without an actor source.");
+        AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "actorPidStatus", "Filesystem watcher rows must explain that actor PID attribution is unavailable.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "CaptureFast", "Process tree probe must use a low-latency edge capture during the run.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Toolhelp-only edge sweep", "Fast process capture must avoid the slow CIM path during in-flight polling.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.tcp.closed", "TCP diff probe must emit closed connection deltas.");

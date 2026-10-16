@@ -22,6 +22,7 @@ internal sealed class FileDiffProbe : IGuestProbe
     private readonly HashSet<string> watchedRoots = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FileStateSnapshot> lastKnownFileState = new(StringComparer.OrdinalIgnoreCase);
     private readonly object watcherGate = new();
+    private long droppedWatcherChanges;
     private string? tempRoot;
 
     public FileDiffProbe()
@@ -60,6 +61,7 @@ internal sealed class FileDiffProbe : IGuestProbe
             baseline = CaptureWatchedFiles(context, cancellationToken);
             lastKnownFileState.Clear();
             watcherKnownPaths.Clear();
+            Interlocked.Exchange(ref droppedWatcherChanges, 0);
             foreach (var pair in baseline)
             {
                 lastKnownFileState[pair.Key] = pair.Value;
@@ -87,6 +89,12 @@ internal sealed class FileDiffProbe : IGuestProbe
         foreach (var watcherError in DrainWatcherErrors())
         {
             events.Add(CreateWatcherFailureEvent(phase, context, watcherError));
+        }
+
+        var droppedChanges = Interlocked.Exchange(ref droppedWatcherChanges, 0);
+        if (droppedChanges > 0)
+        {
+            events.Add(CreateWatcherDroppedEvent(phase, context, droppedChanges));
         }
 
         // FileSystemWatcher is the primary edge source during the run. A
@@ -164,6 +172,8 @@ internal sealed class FileDiffProbe : IGuestProbe
             {
                 evt.Data["oldPath"] = change.OldPath;
                 evt.Data["previousPath"] = change.OldPath;
+                evt.Data["sourcePath"] = change.OldPath;
+                evt.Data["destinationPath"] = change.Path;
             }
             events.Add(evt);
         }
@@ -231,6 +241,37 @@ internal sealed class FileDiffProbe : IGuestProbe
             // files and fixture directories created after BeforeStart.
             TryAddWatcher(tempRoot, includeSubdirectories: true);
         }
+
+        // Persistence commonly lands outside the sample directory.  Watch the
+        // bounded user-writable roots that malware uses most often.  These
+        // roots are edge-only: snapshots remain limited to the sample and
+        // KSwordSandbox TEMP fixtures so a large profile cannot stall a run.
+        foreach (var root in PersistenceWatchRoots())
+        {
+            TryAddWatcher(root, includeSubdirectories: true);
+        }
+    }
+
+    private static IEnumerable<string> PersistenceWatchRoots()
+    {
+        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+        AddRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        AddRoot(roots, Environment.GetEnvironmentVariable("PROGRAMDATA"));
+
+        var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        AddRoot(roots, Path.Combine(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "Startup"));
+        var common = Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu);
+        AddRoot(roots, Path.Combine(common, "Programs", "Startup"));
+        return roots;
+
+        static void AddRoot(HashSet<string> target, string? root)
+        {
+            if (!string.IsNullOrWhiteSpace(root) && Directory.Exists(root))
+            {
+                target.Add(root);
+            }
+        }
     }
 
     private void TryAddWatcher(string root, bool includeSubdirectories)
@@ -264,20 +305,23 @@ internal sealed class FileDiffProbe : IGuestProbe
                 watcher.Changed += (_, args) => EnqueueWatcherChange(WatcherChangeKind.Changed, args.FullPath, null);
                 watcher.Deleted += (_, args) => EnqueueWatcherChange(WatcherChangeKind.Deleted, args.FullPath, null);
                 watcher.Renamed += (_, args) => EnqueueWatcherChange(WatcherChangeKind.Renamed, args.FullPath, args.OldFullPath);
-                watcher.Error += (_, args) => EnqueueWatcherError(args.GetException());
+                watcher.Error += (_, args) => EnqueueWatcherError(args.GetException(), root);
                 watchers.Add(watcher);
             }
-            catch (ArgumentException)
+            catch (ArgumentException ex)
             {
                 watchedRoots.Remove(root);
+                EnqueueWatcherError(ex, root);
             }
-            catch (IOException)
+            catch (IOException ex)
             {
                 watchedRoots.Remove(root);
+                EnqueueWatcherError(ex, root);
             }
-            catch (InvalidOperationException)
+            catch (InvalidOperationException ex)
             {
                 watchedRoots.Remove(root);
+                EnqueueWatcherError(ex, root);
             }
         }
     }
@@ -318,6 +362,7 @@ internal sealed class FileDiffProbe : IGuestProbe
 
         while (watcherChanges.Count >= MaxQueuedWatcherEvents && watcherChanges.TryDequeue(out _))
         {
+            Interlocked.Increment(ref droppedWatcherChanges);
         }
 
         watcherChanges.Enqueue(new FileSystemChange(kind, path, oldPath));
@@ -437,10 +482,11 @@ internal sealed class FileDiffProbe : IGuestProbe
         while (watcherErrors.TryDequeue(out _))
         {
         }
+        Interlocked.Exchange(ref droppedWatcherChanges, 0);
         watcherKnownPaths.Clear();
     }
 
-    private void EnqueueWatcherError(Exception? exception)
+    private void EnqueueWatcherError(Exception? exception, string? root = null)
     {
         // Keep diagnostics bounded if a broken watcher repeatedly signals the
         // same condition; the first rows retain the exception detail needed to
@@ -450,7 +496,7 @@ internal sealed class FileDiffProbe : IGuestProbe
         {
         }
 
-        watcherErrors.Enqueue(new WatcherError(exception));
+        watcherErrors.Enqueue(new WatcherError(exception, root));
     }
 
     private static SandboxEvent CreateWatcherFailureEvent(
@@ -464,8 +510,8 @@ internal sealed class FileDiffProbe : IGuestProbe
         {
             EventType = "file.watcher.failed",
             Source = "guest",
-            ProcessName = SampleProcessName(context.SamplePath),
-            ProcessId = context.RootProcessId,
+            ProcessName = null,
+            ProcessId = null,
             Path = context.WorkingDirectory,
             Data =
             {
@@ -481,7 +527,9 @@ internal sealed class FileDiffProbe : IGuestProbe
                 ["reason"] = overflow ? "watcherBufferOverflow" : "watcherError",
                 ["reasonCode"] = overflow ? "watcherBufferOverflow" : "watcherError",
                 ["reasonCategory"] = "file-capture",
-                ["capturePolicy"] = "always-on-working-directory-file-diff",
+                ["capturePolicy"] = "always-on-configured-file-diff-roots",
+                ["watchScope"] = "configured-file-roots",
+                ["actorPidStatus"] = "unavailable-filesystem-watcher",
                 ["samplePath"] = context.SamplePath,
                 ["workingDirectory"] = context.WorkingDirectory,
                 ["zhMessage"] = overflow
@@ -497,13 +545,48 @@ internal sealed class FileDiffProbe : IGuestProbe
             evt.Data["exceptionMessage"] = exception.Message;
         }
 
-        if (context.RootProcessId is not null)
+        if (!string.IsNullOrWhiteSpace(watcherError.Root))
         {
-            evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
-            evt.Data["treeLineage"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["watchRoot"] = watcherError.Root;
         }
 
         return evt;
+    }
+
+    private static SandboxEvent CreateWatcherDroppedEvent(
+        ProbePhase phase,
+        GuestProbeContext context,
+        long droppedChanges)
+    {
+        return new SandboxEvent
+        {
+            EventType = "file.watcher.dropped",
+            Source = "guest",
+            Path = context.WorkingDirectory,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["capturePhase"] = ToPhaseLabel(phase),
+                ["captureSource"] = "filesystem-watcher",
+                ["captureState"] = "degraded",
+                ["status"] = "degraded",
+                ["collectionHealth"] = "true",
+                ["nonfatal"] = "true",
+                ["nonbehavior"] = "true",
+                ["behaviorCounted"] = "false",
+                ["reason"] = "watcherQueueDrop",
+                ["reasonCode"] = "watcherQueueDrop",
+                ["reasonCategory"] = "file-capture",
+                ["droppedWatcherChanges"] = droppedChanges.ToString(CultureInfo.InvariantCulture),
+                ["capturePolicy"] = "always-on-configured-file-diff-roots",
+                ["watchScope"] = "configured-file-roots",
+                ["actorPidStatus"] = "unavailable-filesystem-watcher",
+                ["samplePath"] = context.SamplePath,
+                ["workingDirectory"] = context.WorkingDirectory,
+                ["zhMessage"] = "文件实时监视器队列丢弃了部分变更边沿；文件证据不完整。",
+                ["zhHint"] = "请结合 droppedWatcherChanges 判断文件事件是否存在采集缺口。"
+            }
+        };
     }
 
     private Dictionary<string, FileStateSnapshot> CaptureWatchedFiles(
@@ -573,7 +656,7 @@ internal sealed class FileDiffProbe : IGuestProbe
     /// previous snapshot; processing stores common path fields and string Data;
     /// the method returns a SandboxEvent.
     /// </summary>
-    private static SandboxEvent CreateFileEvent(
+    private SandboxEvent CreateFileEvent(
         string eventType,
         ProbePhase phase,
         GuestProbeContext context,
@@ -581,9 +664,7 @@ internal sealed class FileDiffProbe : IGuestProbe
         FileStateSnapshot? current,
         FileStateSnapshot? previous)
     {
-        var root = path.StartsWith(context.WorkingDirectory, StringComparison.OrdinalIgnoreCase)
-            ? context.WorkingDirectory
-            : (Environment.GetEnvironmentVariable("TEMP") ?? context.WorkingDirectory);
+        var root = ResolveWatchRoot(path, context);
         var phaseLabel = phase switch
         {
             ProbePhase.DuringRun => "during-run",
@@ -596,8 +677,8 @@ internal sealed class FileDiffProbe : IGuestProbe
             EventType = eventType,
             Source = "guest",
             Path = path,
-            ProcessName = SampleProcessName(context.SamplePath),
-            ProcessId = context.RootProcessId,
+            ProcessName = null,
+            ProcessId = null,
             Data =
             {
                 ["phase"] = phaseLabel,
@@ -605,15 +686,12 @@ internal sealed class FileDiffProbe : IGuestProbe
                 ["probePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
-                ["capturePolicy"] = "always-on-working-directory-file-diff",
-                ["droppedFileArtifactCopyPolicy"] = "explicit-opt-in-copy-after-run",
-                ["artifactRelativePath"] = string.Empty,
-                ["artifactRelativePathStatus"] = "not-created-by-file-diff",
-                ["artifactExists"] = "false",
-                ["artifactIntegrityState"] = "not-created-by-file-diff",
-                ["evidenceRole"] = "dropped-file-candidate",
+                ["capturePolicy"] = "always-on-configured-file-diff-roots",
+                ["evidenceRole"] = "file-change",
                 ["collectionName"] = "file-diff",
-                ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
+                ["processRole"] = "unknown-file-actor",
+                ["actorPidStatus"] = "unavailable-filesystem-watcher",
+                ["watchScope"] = WatchScope(root, context),
                 ["samplePath"] = context.SamplePath,
                 ["expectedRelativePath"] = "artifacts/dropped-files/**",
                 ["root"] = root,
@@ -624,17 +702,7 @@ internal sealed class FileDiffProbe : IGuestProbe
             }
         };
 
-        if (context.RootProcessId is not null)
-        {
-            evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
-            evt.Data["processId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
-            evt.Data["treeDepth"] = "0";
-            evt.Data["treeLineage"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
-        }
-
         AddIfNotEmpty(evt.Data, "processName", evt.ProcessName);
-        AddIfNotEmpty(evt.Data, "rootProcessPath", context.RootProcessPath);
-        AddIfNotEmpty(evt.Data, "rootCommandLine", context.RootCommandLine);
 
         if (current is not null)
         {
@@ -661,10 +729,52 @@ internal sealed class FileDiffProbe : IGuestProbe
         evt.Data["captureState"] = eventType.EndsWith(".deleted", StringComparison.OrdinalIgnoreCase) ? "deleted" : "observed";
         evt.Data["status"] = evt.Data["captureState"];
         evt.Data["nonfatal"] = "false";
+        evt.Data["operation"] = eventType;
         evt.Data["zhMessage"] = FileEventZhMessage(eventType);
         evt.Data["zhHint"] = FileEventZhHint(eventType);
 
         return evt;
+    }
+
+    private string ResolveWatchRoot(string path, GuestProbeContext context)
+    {
+        lock (watcherGate)
+        {
+            var match = watchedRoots
+                .Where(root => IsPathUnderRoot(root, path))
+                .OrderByDescending(root => root.Length)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(match))
+            {
+                return match;
+            }
+        }
+
+        return path.StartsWith(context.WorkingDirectory, StringComparison.OrdinalIgnoreCase)
+            ? context.WorkingDirectory
+            : (tempRoot ?? context.WorkingDirectory);
+    }
+
+    private bool IsPersistenceRoot(string root)
+    {
+        return !string.Equals(root, tempRoot, StringComparison.OrdinalIgnoreCase) &&
+               !watchedRoots.Any(candidate => string.Equals(candidate, root, StringComparison.OrdinalIgnoreCase) &&
+                                              candidate.Contains("KSwordSandbox", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string WatchScope(string root, GuestProbeContext context)
+    {
+        if (string.Equals(root, context.WorkingDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            return "sample-working-root";
+        }
+
+        if (string.Equals(root, tempRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return "sandbox-temp-fixture-root";
+        }
+
+        return IsPersistenceRoot(root) ? "persistence-root" : "configured-file-root";
     }
 
     /// <summary>
@@ -906,7 +1016,7 @@ internal sealed record FileSystemChange(WatcherChangeKind Kind, string Path, str
 /// Stores one FileSystemWatcher error until the next probe drain so capture
 /// loss is represented as collection-health evidence rather than discarded.
 /// </summary>
-internal sealed record WatcherError(Exception? Exception);
+internal sealed record WatcherError(Exception? Exception, string? Root);
 
 internal enum WatcherChangeKind
 {
