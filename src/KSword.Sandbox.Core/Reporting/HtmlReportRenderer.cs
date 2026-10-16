@@ -470,11 +470,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("<h1>KSword Sandbox Report</h1>");
         html.AppendLine($"<p class=\"muted\">Job {E(report.JobId.ToString())} generated at {E(report.GeneratedAt.ToString("u"))}</p>");
         html.AppendLine($"<p><span class=\"badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</span></p>");
-        if (KnownMalwareProfiles.TryGet(report.Sample.Sha256, out var knownProfile))
-        {
-            html.AppendLine($"<div class=\"known-malware-banner\"><strong>Known malicious sample baseline: {E(knownProfile.Family)}</strong><span>Known malicious sample; insufficient runtime evidence does not mean safe. Public family capability is a calibration baseline, not proof that every behavior occurred in this run.</span><a href=\"{A(knownProfile.ReferenceUrl)}\" target=\"_blank\" rel=\"noreferrer\">Public family baseline</a></div>");
-        }
-
         html.AppendLine("<table><tbody>");
         Row(html, "Sample", report.Sample.FileName);
         Row(html, "SHA-256", report.Sample.Sha256);
@@ -625,11 +620,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var primaryFindings = PrimaryBehaviorFindings(report).ToList();
         var staticFindings = StaticTriageFindings(report).ToList();
         html.AppendLine("<section id=\"risk\" class=\"card\"><h2>Risk summary</h2>");
-        if (KnownMalwareProfiles.TryGet(report.Sample.Sha256, out var knownProfile))
-        {
-            html.AppendLine($"<div class=\"known-malware-note\"><strong>Known malicious sample baseline: {E(knownProfile.Family)} — runtime evidence boundary</strong><span>Known malicious sample; insufficient runtime evidence does not mean safe. {E(knownProfile.BaselineZh)}</span></div>");
-        }
-
         html.AppendLine("<div class=\"grid\">");
         Metric(html, "High risk", (CountSeverity(primaryFindings, "critical") + CountSeverity(primaryFindings, "high")).ToString(), "risk-high");
         Metric(html, "Suspicious", CountSeverity(primaryFindings, "medium").ToString(), "risk-medium");
@@ -3852,7 +3842,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     {
         html.AppendLine("<section id=\"timeline\" class=\"card\"><h2>Timeline</h2>");
         var events = report.Events
-            .Where(evt => !IsLowValueOperationalEvent(evt))
+            .Where(IsUserFacingEvent)
             .OrderBy(e => e.Timestamp)
             .Take(TimelineEventInlineLimit)
             .ToList();
@@ -3863,18 +3853,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             return;
         }
 
-        var hiddenEvents = Math.Max(0, report.Events.Count(evt => !IsLowValueOperationalEvent(evt)) - events.Count);
-        var lifecycleEvents = report.Events.Count(IsLowValueOperationalEvent);
+        var hiddenEvents = Math.Max(0, report.Events.Count(IsUserFacingEvent) - events.Count);
         var groups = BuildTimelineGroups(events);
         html.AppendLine("<div class=\"section-note\"><strong>Timeline grouping.</strong> Grouped by UTC minute with process/type summaries; large buckets show representative events first.</div>");
         if (hiddenEvents > 0)
         {
             html.AppendLine($"<div class=\"copy-hint\">Timeline is capped for readability; open Raw normalized events or report.json for complete evidence. {E(hiddenEvents.ToString())} additional timeline events are hidden.</div>");
-        }
-
-        if (lifecycleEvents > 0)
-        {
-            html.AppendLine($"<div class=\"copy-hint\">{E(lifecycleEvents.ToString(CultureInfo.InvariantCulture))} agent lifecycle row(s) are hidden from the timeline; the folded Raw normalized events section retains them for audit.</div>");
         }
 
         html.AppendLine("<div class=\"timeline-groups\">");
@@ -8688,20 +8672,19 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// </summary>
     private static (string Label, string Css) DetermineVerdict(AnalysisReport report)
     {
-        var knownMalware = KnownMalwareProfiles.IsKnown(report.Sample.Sha256);
         if (HasExecutionBlockedVerdict(report))
         {
-            return (knownMalware ? "Known malicious sample / runtime indeterminate" : "Execution blocked / runtime indeterminate", "high");
+            return ("Execution blocked / runtime indeterminate", "high");
         }
 
         if (report.Status == AnalysisStatus.Failed)
         {
-            return (knownMalware ? "Known malicious sample / analysis failed" : "Analysis failed", "high");
+            return ("Analysis failed", "high");
         }
 
         if (IsStaticOnlyReport(report))
         {
-            return (knownMalware ? "Known malicious sample / static evidence only" : "Static analysis only", knownMalware ? "high" : "info");
+            return ("Static analysis only", "info");
         }
 
         var primaryFindings = PrimaryBehaviorFindings(report).ToList();
@@ -8720,7 +8703,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             return ("Suspicious", "medium");
         }
 
-        return (knownMalware ? "Known malicious sample / runtime evidence present" : "No high-risk behavior", knownMalware ? "high" : "info");
+        return ("No high-risk behavior", "info");
     }
 
     private static bool IsStaticOnlyReport(AnalysisReport report)
@@ -9534,15 +9517,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         (" generated at ", " 生成于 "),
         ("Analysis failed", "分析失败"),
         ("Execution blocked / runtime indeterminate", "执行被阻断/运行期不可判定"),
-        ("Known malicious sample / runtime indeterminate", "已知恶意样本 / 运行期不可判定"),
-        ("Known malicious sample / analysis failed", "已知恶意样本 / 分析失败"),
-        ("Known malicious sample / static evidence only", "已知恶意样本 / 仅有静态证据"),
-        ("Known malicious sample / runtime evidence present", "已知恶意样本 / 已观察到运行期证据"),
-        ("Known malicious sample baseline", "已知恶意样本基线"),
-        ("Known malicious sample; insufficient runtime evidence does not mean safe.", "已知恶意样本；运行期证据不足不代表安全。"),
-        ("Public family capability is a calibration baseline, not proof that every behavior occurred in this run.", "公开家族能力是校准基线，不能证明本次运行发生了全部行为。"),
-        ("Public family baseline", "公开家族基线"),
-        ("runtime evidence boundary", "运行期证据边界"),
         ("Static analysis only", "仅静态分析"),
         ("No high-risk behavior", "未发现高风险行为"),
         ("Critical risk", "严重风险"),
