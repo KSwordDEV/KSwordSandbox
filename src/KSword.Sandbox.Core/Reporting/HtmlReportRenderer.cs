@@ -1,5 +1,6 @@
 using System.Net;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -490,6 +491,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .focus-coverage-warning{background:#fff5e5;border-left:4px solid #d97706;color:#7c2d12;display:block;margin-top:12px;padding:10px 12px}
 .modern-sandbox-report .focus-coverage-warning strong{display:block;color:#9a3412;margin-bottom:3px}
 .modern-sandbox-report .raw-events-shell,.modern-sandbox-report .raw-event-page,.modern-sandbox-report .event-table-wrap{border:0}
+html[lang="en"] .localized-evidence-field{display:none}
 .modern-sandbox-report .raw-events-shell>summary,.modern-sandbox-report .raw-event-page>summary{background:#eaf4fa;border-radius:0}
 .modern-sandbox-report .language-entry{background:#e8f3f9;box-shadow:none}
 .modern-sandbox-report .language-entry .hint{display:none}
@@ -631,8 +633,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("<div class=\"quick-links\">");
         QuickLink(html, "risk", "Risk summary", PrimaryBehaviorFindings(report).Count().ToString());
         QuickLink(html, "focus", "Analyst focus", report.Events.Count(IsSampleBehaviorEvent).ToString());
-        QuickLink(html, "event-explorer", "Key event explorer", report.Events.Count(evt => !IsLowValueOperationalEvent(evt)).ToString());
-        QuickLink(html, "facts", "Behavior facts", BuildBehaviorFactCards(report, artifacts).Count(card => card.EvidenceLines.Count > 0).ToString());
+        QuickLink(html, "event-explorer", "Key event explorer", EventExplorerQuickLinkCount(report));
+        QuickLink(html, "facts", "Behavior facts", BuildBehaviorFactCards(report, artifacts).Count(IsPrimaryBehaviorFactCard).ToString());
         QuickLink(html, "process", "Process details", report.Events.Count(IsSampleBehaviorProcessEvent).ToString());
         QuickLink(html, "security", "Security / privilege", report.Events.Count(IsSampleBehaviorSecurityPrivilegeEvent).ToString());
         QuickLink(html, "files", "File system activity", report.Events.Count(IsSampleBehaviorFileEvent).ToString());
@@ -648,6 +650,19 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     private static void QuickLink(StringBuilder html, string href, string label, string count)
     {
         html.AppendLine($"<a class=\"quick-link\" href=\"#{E(href)}\"><strong>{E(label)}</strong><small>{E(count)}</small></a>");
+    }
+
+    private static string EventExplorerQuickLinkCount(AnalysisReport report)
+    {
+        var total = report.Events.Count(IsUserFacingEvent);
+        var inline = Math.Min(total, EventExplorerInlineLimit);
+        return $"{inline}/{total}";
+    }
+
+    private static bool IsPrimaryBehaviorFactCard(BehaviorFactCard card)
+    {
+        return card.EvidenceLines.Count > 0 &&
+            !string.Equals(card.Title, "Artifact evidence readiness", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -3288,9 +3303,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
         var matrixRows = BuildArtifactEvidenceMatrixRows(report.Events, artifacts);
         foreach (var card in BuildArtifactCollectionStatusCards(report, artifacts, matrixRows)
-                     .Where(card => !TextEqualsAny(card.Status, "captured", "observed")))
+                     .Where(card => !TextEqualsAny(card.Status, "captured", "observed", "observed-empty")))
         {
-            var state = TextEqualsAny(card.Status, "not observed", "skipped") ? "missing" : card.Status;
+            var state = TextEqualsAny(card.Status, "not-run", "skipped") ? "missing" : card.Status;
             gaps.Add((
                 card.Name,
                 state,
@@ -3900,6 +3915,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             "skipped" => "medium",
             "partial" => "medium",
             "observed" => "info",
+            "observed-empty" => "info",
+            "not-run" => "info",
             _ => "info"
         };
         var reason = collectionEvents
@@ -3975,7 +3992,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             return "skipped";
         }
 
-        return events.Count > 0 ? "observed" : "not observed";
+            return events.Count > 0 ? "observed-empty" : "not-run";
     }
 
     private static string InferDriverArtifactCollectionStatus(
@@ -4868,7 +4885,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
         if (orderedEvents.Count == 0)
         {
-            Empty(html, "No events were collected for this section.");
+            Empty(html, "No sample-attributed events of this type were found; see collection coverage for capture state.");
         }
         else
         {
@@ -5037,7 +5054,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     {
         if (inlineEvents.Count == 0)
         {
-            Empty(html, "No events were collected for this section.");
+            Empty(html, "No sample-attributed events of this type were found; see collection coverage for capture state.");
             return;
         }
 
@@ -5404,7 +5421,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     {
         if (events.Count == 0)
         {
-            Empty(html, "No events were collected for this section.");
+            Empty(html, "No sample-attributed events of this type were found; see collection coverage for capture state.");
             return;
         }
 
@@ -9537,10 +9554,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 {
                     var copy = $"{pair.Key}={pair.Value}";
                     var displayValue = FormatBoundedEvidenceFieldValue(pair.Key, pair.Value, EventCompactFieldValueLimit);
+                    var localizedClass = IsLocalizedEvidenceField(pair.Key) ? " localized-evidence-field" : string.Empty;
                     // Keep the label outside the protected evidence <code> block so
                     // the Chinese renderer can localize chrome while the original
                     // value remains byte-for-byte visible/copyable.
-                    html.Append($"<li><span class=\"ui-field-label\">{E(EventFieldLabel(pair.Key))}</span>=<code class=\"copyable\" data-copy=\"{A(copy)}\">{E(displayValue)}</code></li>");
+                    html.Append($"<li class=\"{localizedClass.Trim()}\"><span class=\"ui-field-label\">{E(EventFieldLabel(pair.Key))}</span>=<code class=\"copyable\" data-copy=\"{A(copy)}\">{E(displayValue)}</code></li>");
                 }
 
                 if (hiddenCompactFields > 0)
@@ -9558,7 +9576,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 {
                     var boundedValue = FormatBoundedEvidenceFieldValue(field.Label, field.Value, 1_200);
                     var copy = $"{field.Label}={boundedValue}";
-                    html.Append($"<details class=\"raw-technical-field\"><summary>Hidden technical field: {E(field.Label)} ({E(field.Value.Length.ToString())} chars)</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+                    var localizedClass = IsLocalizedEvidenceField(field.Label) ? " localized-evidence-field" : string.Empty;
+                    html.Append($"<details class=\"raw-technical-field{localizedClass}\"><summary>Hidden technical field: {E(field.Label)} ({E(field.Value.Length.ToString())} chars)</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
                 }
 
                 html.Append("</details>");
@@ -9588,6 +9607,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             key.Equals("failureHint", StringComparison.OrdinalIgnoreCase) ||
             key.Equals("captureState", StringComparison.OrdinalIgnoreCase) ||
             key.Equals("collectionHealth", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsLocalizedEvidenceField(string key)
+    {
+        return key.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsUserFacingEventFieldForEvent(SandboxEvent evt, string key)
@@ -10033,7 +10057,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("No sample-attributed behavior was observed in the captured runtime events.", "捕获的运行时事件中未观察到归属于样本的行为。"),
         ("No sample-attributed driver behavior was captured.", "未捕获归属于样本的驱动行为。"),
         ("No sample-attributed evidence for this lane.", "此通道没有归属于样本的证据。"),
-        ("No events were collected for this section.", "本节未采集到事件。"),
+        ("No sample-attributed events of this type were found; see collection coverage for capture state.", "未发现归属于样本的该类事件（采集状态见覆盖）。"),
         ("Raw normalized events", "原始规范化事件"),
         ("Raw event reading guide", "原始事件阅读指南"),
         ("Raw event slimming story", "原始事件精简说明"),
@@ -10432,6 +10456,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         (">partial<", ">部分采集<"),
         (">observed<", ">已观察<"),
         (">not observed<", ">未观察<"),
+        (">observed-empty<", ">已观察（空）<"),
+        (">not-run<", ">未运行<"),
         ("Dropped files", "落地文件"),
         ("File system activity", "文件系统活动"),
         ("Screenshots", "截图"),
@@ -10885,7 +10911,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("No R0Collector or driver-originated events were imported.", "未导入 R0Collector 或驱动来源事件。"),
         ("No failure reason was recorded.", "未记录失败原因。"),
         ("Analysis status is Failed, but no timeout/error/failure event was recorded in normalized telemetry.", "分析状态为失败，但规范化遥测中未记录超时、错误或失败事件。"),
-        ("No events were collected for this section.", "此章节未采集到事件。"),
+        ("No sample-attributed events of this type were found; see collection coverage for capture state.", "未发现归属于样本的该类事件（采集状态见覆盖）。"),
         ("No process start/tree events were available to build a process tree.", "没有可用于构建进程树的进程启动/树事件。"),
         ("No process start events were available to build a process tree.", "没有可用于构建进程树的进程启动事件。"),
         ("Evidence shown:", "已显示证据："),
@@ -13269,3 +13295,4 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 """);
     }
 }
+
