@@ -1564,9 +1564,12 @@ public sealed class HyperVRunbookBuilder
             "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue;",
             "Write-Warning 'Interactive desktop is unavailable; starting Guest Agent in the remoting session.';",
             "$fallbackArgs = @('-NoLogo', '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand);",
-            // Publish the detached fallback PID before returning so live sync
-            // can observe events while the Guest Agent is still running.
-            "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $fallbackArgs -WorkingDirectory $workingDirectory -PassThru; $fallback.Id | Set-Content -LiteralPath $pidPath -Encoding ASCII;",
+            // Run the remoting fallback synchronously. A detached PowerShell
+            // process can disappear from the remoting process table before
+            // the live-sync step observes it, leaving only the pid marker and
+            // no guest events. The encoded command publishes its own PID and
+            // exit marker, so the synchronous call preserves the real result.
+            "& powershell.exe @fallbackArgs; $fallbackExitCode = $LASTEXITCODE; if ($fallbackExitCode -ne 0) { throw \"Guest Agent fallback PowerShell exited with code $fallbackExitCode.\" }",
             "} ",
             $"}} -ArgumentList {Q(agentTaskName)}, {Q(config.Guest.UserName)}, {Q(guestRoot)}, {Q(agentPidPath)}, {Q(encodedCommand)} -ErrorAction Stop;",
             "}",
