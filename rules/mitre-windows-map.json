@@ -3,6 +3,13 @@
   "version": "2026-07-12-v20-high-signal-windows-behavior",
   "techniques": [
     {
+      "id": "T1056.001",
+      "name": "Keylogging",
+      "categories": [
+        "collection"
+      ]
+    },
+    {
       "id": "T1003",
       "name": "OS Credential Dumping",
       "categories": [
