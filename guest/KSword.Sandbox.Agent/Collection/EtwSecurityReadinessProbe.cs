@@ -550,6 +550,7 @@ internal sealed class EtwSecurityReadinessProbe : IGuestProbe
         {
             ProbePhase.BeforeStart => "before-start",
             ProbePhase.AfterStart => "after-start",
+            ProbePhase.DuringRun => "during-run",
             ProbePhase.AfterRun => "after-run",
             ProbePhase.Cleanup => "cleanup",
             _ => phase.ToString()

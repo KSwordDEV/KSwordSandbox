@@ -1559,6 +1559,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         return phase switch
         {
             ProbePhase.AfterStart => "after-start",
+            ProbePhase.DuringRun => "during-run",
             ProbePhase.AfterRun => "after-run",
             ProbePhase.BeforeStart => "before-start",
             ProbePhase.Cleanup => "cleanup",

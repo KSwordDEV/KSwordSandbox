@@ -768,6 +768,7 @@ internal sealed class ScreenshotProbe : IGuestProbe
         return phase switch
         {
             ProbePhase.AfterStart => "after-start",
+            ProbePhase.DuringRun => "during-run",
             ProbePhase.AfterRun => "after-run",
             ProbePhase.BeforeStart => "before-start",
             ProbePhase.Cleanup => "cleanup",
@@ -951,6 +952,7 @@ internal sealed record ScreenshotProbeOptions
         {
             ProbePhase.BeforeStart => "before-start",
             ProbePhase.AfterStart => "after-start",
+            ProbePhase.DuringRun => "during-run",
             ProbePhase.AfterRun => "after-run",
             ProbePhase.Cleanup => "cleanup",
             _ => phase.ToString()

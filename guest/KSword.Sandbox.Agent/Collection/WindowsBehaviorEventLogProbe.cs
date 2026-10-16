@@ -1049,6 +1049,7 @@ internal sealed class WindowsBehaviorEventLogProbe : IGuestProbe
         {
             ProbePhase.BeforeStart => "before-start",
             ProbePhase.AfterStart => "after-start",
+            ProbePhase.DuringRun => "during-run",
             ProbePhase.AfterRun => "after-run",
             ProbePhase.Cleanup => "cleanup",
             _ => phase.ToString()
