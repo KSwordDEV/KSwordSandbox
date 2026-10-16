@@ -280,7 +280,7 @@ void PrintUsage(const wchar_t* programName) {
         << L"      --service-name <name>    Driver service name for --diagnose (default: KSwordSandboxDriver) / --diagnose \u4f7f\u7528\u7684\u9a71\u52a8\u670d\u52a1\u540d\n"
         << L"  -o, --output, --out <path>   JSON Lines output path, or '-' for stdout (default: -) / JSONL \u8f93\u51fa\u8def\u5f84\uff0c'-' \u8868\u793a\u6807\u51c6\u8f93\u51fa\n"
         << L"  -t, --duration <seconds>     Poll duration; 0 opens once and exits (default: 0) / \u8f6e\u8be2\u6301\u7eed\u65f6\u95f4\uff1b0 \u8868\u793a\u4e00\u6b21\u6027\u6253\u5f00\u540e\u9000\u51fa\n"
-        << L"  -p, --poll-ms <ms>           Poll interval in milliseconds (default: 500) / \u8f6e\u8be2\u95f4\u9694\uff08\u6beb\u79d2\uff09\n"
+        << L"  -p, --poll-ms <ms>           Poll interval in milliseconds (default: 10) / \u8f6e\u95f4\u9694\uff08\u6beb\u79d2\uff09\n"
         << L"      --poll-interval-ms <ms>  Alias for --poll-ms / --poll-ms \u522b\u540d\n"
         << L"      --diagnose               Emit service/device/ABI/READ_EVENTS readiness diagnostics / \u53d1\u51fa\u670d\u52a1/\u8bbe\u5907/ABI/READ_EVENTS \u5c31\u7eea\u8bca\u65ad\n"
         << L"      --readiness              Alias for --diagnose / --diagnose \u522b\u540d\n"
