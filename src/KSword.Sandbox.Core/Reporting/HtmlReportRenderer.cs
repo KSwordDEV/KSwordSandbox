@@ -656,6 +656,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         var lifecycleEvents = report.Events.Count(IsAgentLifecycleEvent);
         var noiseEvents = report.Events.Count(IsExcludedFromBehaviorStoryEvent);
         var failures = report.Events.Count(IsOperationalFailureEvent);
+        var sampleExitOutcomes = report.Events.Count(IsNonZeroSampleExitEvent);
+        var collectionDiagnostics = report.Events.Count(IsCollectionDiagnosticFailure);
         var healthRows = report.Events.Count(IsCollectionHealthEvent);
         var artifactCount = artifacts.Count;
         var topFinding = primaryFindings.FirstOrDefault();
@@ -670,6 +672,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 $"excludedNoiseEvents={noiseEvents}",
                 $"agentLifecycleEventsHidden={lifecycleEvents}",
                 $"failureEvents={failures}",
+                $"sampleExitOutcomes={sampleExitOutcomes}",
+                $"collectionDiagnostics={collectionDiagnostics}",
                 $"collectionHealthRows={healthRows}",
                 $"artifacts={artifactCount}",
                 $"next={topFinding?.Title ?? "Review static analysis and collection health"}"
@@ -682,7 +686,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         FocusMetric(html, "Primary findings", primaryFindings.Count.ToString(CultureInfo.InvariantCulture), primaryFindings.Count > 0 ? "risk-medium" : "risk-low", "Rules that contribute to the sample verdict.");
         FocusMetric(html, "Sample behavior", sampleEvents.ToString(CultureInfo.InvariantCulture), sampleEvents > 0 ? "risk-medium" : "risk-info", "Events eligible for the behavior story.");
         FocusMetric(html, "Noise / diagnostics", noiseEvents.ToString(CultureInfo.InvariantCulture), noiseEvents > 0 ? "risk-info" : "risk-low", "Operational rows retained as evidence but excluded from the verdict.");
-        FocusMetric(html, "Failures", failures.ToString(CultureInfo.InvariantCulture), failures > 0 || report.Status == AnalysisStatus.Failed ? "risk-high" : "risk-low", "Open Failure reasons for the remediation hint.");
+        FocusMetric(html, "Operational failures", failures.ToString(CultureInfo.InvariantCulture), failures > 0 || report.Status == AnalysisStatus.Failed ? "risk-high" : "risk-low", "Environment and evidence failures.");
+        FocusMetric(html, "Sample exit outcomes", sampleExitOutcomes.ToString(CultureInfo.InvariantCulture), sampleExitOutcomes > 0 ? "risk-info" : "risk-low", "Non-zero sample exits are execution outcomes, not maliciousness verdicts.");
+        FocusMetric(html, "Collection diagnostics", collectionDiagnostics.ToString(CultureInfo.InvariantCulture), collectionDiagnostics > 0 ? "risk-info" : "risk-low", "Helper or telemetry gaps are separated from sample behavior.");
         FocusMetric(html, "Collection health", healthRows.ToString(CultureInfo.InvariantCulture), report.Events.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-low", "Health and readiness rows explain evidence quality.");
         FocusMetric(html, "Artifacts", artifactCount.ToString(CultureInfo.InvariantCulture), artifactCount > 0 ? "risk-low" : "risk-info", "Indexed files, screenshots, dumps, and packet captures.");
         html.AppendLine("</div>");
@@ -787,6 +793,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     {
         var eventType = evt.EventType ?? string.Empty;
         if (eventType.StartsWith("static.", StringComparison.OrdinalIgnoreCase)) return "static";
+        if (IsCollectionDiagnosticFailure(evt)) return "collection";
         if (IsFailureEvent(evt)) return "failure";
         if (IsCollectionHealthEvent(evt) || IsR0CollectionHealthEvent(evt)) return "collection";
         if (eventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase)) return "execution";
@@ -805,6 +812,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             .OrderBy(SeverityRank)
             .FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(matching)) return matching;
+        if (IsCollectionDiagnosticFailure(evt)) return "info";
+        if (IsNonZeroSampleExitEvent(evt)) return "info";
         if (IsOperationalFailureEvent(evt)) return "high";
         if (IsSampleBehaviorEvent(evt)) return "medium";
         return "info";
@@ -4213,12 +4222,16 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var failures = report.Events.Where(IsOperationalFailureEvent).ToList();
+        var sampleExitOutcomes = report.Events.Where(IsNonZeroSampleExitEvent).ToList();
+        var collectionDiagnostics = report.Events
+            .Where(evt => IsCollectionHealthAlertEvent(evt) && !failures.Contains(evt))
+            .ToList();
         html.AppendLine("<section id=\"failure\" class=\"card\"><h2>Failure reasons</h2>");
-        if (report.Status != AnalysisStatus.Failed && failures.Count == 0)
+        if (report.Status != AnalysisStatus.Failed && failures.Count == 0 && sampleExitOutcomes.Count == 0 && collectionDiagnostics.Count == 0)
         {
             Empty(html, "No operational failure markers were collected for this job.");
         }
-        else if (failures.Count == 0)
+        else if (failures.Count == 0 && report.Status == AnalysisStatus.Failed)
         {
             html.AppendLine("<div class=\"section-note failure-note\"><strong>Failure attribution:</strong> Analysis environment / 分析环境. The job is marked Failed, but no normalized failure event was imported.</div>");
         }
@@ -4234,6 +4247,18 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             }
 
             AppendEventRows(html, failures, artifactLookup, artifacts);
+        }
+
+        if (sampleExitOutcomes.Count > 0)
+        {
+            html.AppendLine("<div class=\"section-note failure-note\"><strong>Sample execution outcome:</strong> the sample process ended with a non-zero exit code. This indicates an incomplete or failed execution attempt; it is not a maliciousness verdict.</div>");
+            AppendEventRows(html, sampleExitOutcomes, artifactLookup, artifacts);
+        }
+
+        if (collectionDiagnostics.Count > 0)
+        {
+            html.AppendLine("<div class=\"section-note\"><strong>Collection diagnostics:</strong> helper or telemetry collection failed; this does not mean the sample failed or was malicious.</div>");
+            AppendEventRows(html, collectionDiagnostics, artifactLookup, artifacts);
         }
 
         html.AppendLine("</section>");
@@ -7853,6 +7878,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     /// </summary>
     private static bool IsCollectionHealthEvent(SandboxEvent evt)
     {
+        if (EventDataBoolTrue(evt, "collectionHealth", "collection_health") ||
+            (EventDataBoolTrue(evt, "nonbehavior", "notSampleBehavior", "not_sample_behavior") &&
+             EventTextContainsAny(evt, "capture_failed", "collection", "probe", "wmi")))
+        {
+            return true;
+        }
+
         if (IsR0CollectionHealthEvent(evt))
         {
             return true;
@@ -7959,10 +7991,25 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 
         if (IsCollectionHealthEvent(evt))
         {
-            return IsCollectionHealthAlertEvent(evt);
+            return false;
         }
 
         return IsFailureEvent(evt);
+    }
+
+    private static bool IsCollectionDiagnosticFailure(SandboxEvent evt) =>
+        IsCollectionHealthEvent(evt) && IsCollectionHealthAlertEvent(evt);
+
+    private static bool IsNonZeroSampleExitEvent(SandboxEvent evt)
+    {
+        if (!string.Equals(evt.EventType, "process.exit", StringComparison.OrdinalIgnoreCase) ||
+            !IsSampleBehaviorEvent(evt))
+        {
+            return false;
+        }
+
+        var exitCode = FirstEventDataValue(evt, "exitCode", "processExitCode", "code");
+        return long.TryParse(exitCode, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed != 0;
     }
 
     /// <summary>
@@ -8619,11 +8666,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     private static string RenderEventEvidenceDetails(SandboxEvent evt)
     {
         var compactFields = evt.Data
-            .Where(pair => !IsLongTechnicalEventField(pair.Key, pair.Value))
+            .Where(pair => !IsLongTechnicalEventField(pair.Key, pair.Value) && IsUserFacingEventField(pair.Key))
             .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var technicalFields = evt.Data
-            .Where(pair => IsLongTechnicalEventField(pair.Key, pair.Value))
+            .Where(pair => IsLongTechnicalEventField(pair.Key, pair.Value) || !IsUserFacingEventField(pair.Key))
             .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
             .Select(pair => (Label: pair.Key, Value: pair.Value))
             .ToList();
@@ -8653,7 +8700,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 {
                     var copy = $"{pair.Key}={pair.Value}";
                     var displayValue = FormatBoundedEvidenceFieldValue(pair.Key, pair.Value, EventCompactFieldValueLimit);
-                    html.Append($"<li><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(pair.Key)}={E(displayValue)}</code></li>");
+                    html.Append($"<li><span class=\"muted\">{E(EventFieldLabel(pair.Key))}</span> <code class=\"copyable\" data-copy=\"{A(copy)}\">{E(displayValue)}</code></li>");
                 }
 
                 if (hiddenCompactFields > 0)
@@ -8681,6 +8728,49 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.Append("</details>");
         return html.ToString();
     }
+
+    private static bool IsUserFacingEventField(string key)
+    {
+        return key.Equals("exitCode", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("processId", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("parentProcessId", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("imagePath", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("samplePath", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("phase", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("reason", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("message", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("status", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("target", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("remoteAddress", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("remotePort", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("zhMessage", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("zhHint", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("failureHint", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("captureState", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("collectionHealth", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string EventFieldLabel(string key) => key.ToLowerInvariant() switch
+    {
+        "exitcode" => "Exit code",
+        "processid" => "Process ID",
+        "parentprocessid" => "Parent process ID",
+        "imagepath" => "Image path",
+        "samplepath" => "Sample path",
+        "zhmessage" => "Message",
+        "zhhint" => "Hint",
+        "message" => "Message",
+        "status" => "Status",
+        "reason" => "Reason",
+        "phase" => "Phase",
+        "target" => "Target",
+        "remoteaddress" => "Remote address",
+        "remoteport" => "Remote port",
+        "failurehint" => "Failure hint",
+        "capturestate" => "Capture state",
+        "collectionhealth" => "Collection health",
+        _ => key
+    };
 
     /// <summary>
     /// Classifies raw event fields that should not be expanded inline.
@@ -9058,6 +9148,32 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("R0 health", "R0 健康"),
         ("Static triage", "静态分诊"),
         ("Collection diagnostics", "采集诊断"),
+        ("Environment and evidence failures; sample exit outcomes are shown separately.", "环境与证据失败；样本退出结果单独显示。"),
+        ("Operational failures", "运行失败"),
+        ("Environment and evidence failures.", "环境与证据失败。"),
+        ("Sample exit outcomes", "样本退出结果"),
+        ("Non-zero sample exits are execution outcomes, not maliciousness verdicts.", "样本非零退出属于执行结果，不是恶意性结论。"),
+        ("Helper or telemetry gaps are separated from sample behavior.", "辅助程序或遥测采集缺口已与样本行为分开。"),
+        ("Sample execution outcome", "样本执行结果"),
+        ("the sample process ended with a non-zero exit code. This indicates an incomplete or failed execution attempt; it is not a maliciousness verdict.", "样本进程以非零退出码结束。这表示本次执行可能不完整或失败，不代表恶意性结论。"),
+        ("Collection diagnostics", "采集诊断"),
+        ("helper or telemetry collection failed; this does not mean the sample failed or was malicious.", "辅助程序或遥测采集失败；这不表示样本执行失败或样本具有恶意性。"),
+        ("Exit code", "退出码"),
+        ("Process ID", "进程 ID"),
+        ("Parent process ID", "父进程 ID"),
+        ("Image path", "镜像路径"),
+        ("Sample path", "样本路径"),
+        ("Failure hint", "失败提示"),
+        ("Message", "消息"),
+        ("Hint", "提示"),
+        ("Status", "状态"),
+        ("Reason", "原因"),
+        ("Phase", "阶段"),
+        ("Target", "目标"),
+        ("Remote address", "远程地址"),
+        ("Remote port", "远程端口"),
+        ("Capture state", "采集状态"),
+        ("Collection health", "采集健康度"),
         ("Collection health", "采集健康状态"),
         (">Events<", ">事件<"),
         ("No primary sample behavior rules matched. Static triage and collection diagnostics are separated below so operational health does not inflate the verdict.", "未命中主要样本行为规则。静态分诊和采集诊断已在下方分离展示，避免运行健康状态抬高判定。"),
