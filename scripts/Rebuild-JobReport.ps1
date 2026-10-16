@@ -100,7 +100,11 @@ if (-not $Json) {
     Write-Host '[ksword-rebuild] VM action: none. / VM 操作：无。'
     Write-Host "[ksword-rebuild] JobTool target: $($jobToolTarget.Kind)"
 }
-$exitCode = Invoke-KSwordPortableTool -Target $jobToolTarget -Arguments $toolArgs -NoBuild:$NoBuild
+$toolOutput = @(Invoke-KSwordPortableTool -Target $jobToolTarget -Arguments $toolArgs -NoBuild:$NoBuild)
+$exitCode = $toolOutput | Select-Object -Last 1
+if (-not ($exitCode -is [int])) {
+    $exitCode = [int]$exitCode
+}
 if ($exitCode -ne 0) {
     throw "KSword.Sandbox.JobTool rebuild-report failed with exit code $exitCode."
 }
