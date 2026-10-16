@@ -38,6 +38,29 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
             });
         }
 
+        // Dynamic evidence must survive the report quota even when a process
+        // burst or collector noise fills the ordinary inline budget.
+        const int AttributedDynamicRows = 120;
+        for (var index = 0; index < AttributedDynamicRows; index++)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = "network.tcp",
+                Timestamp = timestamp.AddMilliseconds(2000 + index),
+                Source = "guest",
+                ProcessId = 4242,
+                Data =
+                {
+                    ["remote"] = $"198.51.100.{index % 200}:443",
+                    ["behaviorCounted"] = "true",
+                    ["sampleBehaviorCandidate"] = "true",
+                    ["sampleCorrelation"] = "confirmed",
+                    ["sampleCorrelationStatus"] = "correlated",
+                    ["strongSampleCorrelation"] = "true"
+                }
+            });
+        }
+
         events.Add(new SandboxEvent
         {
             EventType = "static.pe.import.module",
@@ -438,6 +461,9 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(sampleStartFailure, "exceptionType", "System.IO.FileNotFoundException");
         RequireEvent(result.Events, "process.start");
         RequireEvent(result.Events, "process.exit");
+        SmokeAssert.True(
+            result.Events.Count(evt => string.Equals(evt.EventType, "network.tcp", StringComparison.OrdinalIgnoreCase)) == AttributedDynamicRows,
+            "Every sample-attributed dynamic row must remain in report sampling even when it exceeds MaxInlineEvents.");
         RequireData(guestImportEvent, "guestImportMarker", "true");
         RequireData(guestImportEvent, "terminalStatus", "Completed");
 

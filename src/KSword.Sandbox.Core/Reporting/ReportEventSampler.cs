@@ -952,6 +952,7 @@ public static class ReportEventSampler
         var diagnosticQuota = Math.Max(0, Math.Min(options.MaxDiagnosticEvents, options.MaxInlineEvents));
         var selectedIndexes = new HashSet<int>();
         var perType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var boundedSelectedCount = 0;
 
         foreach (var bucket in ReportSamplingBucketPriority)
         {
@@ -962,13 +963,17 @@ public static class ReportEventSampler
 
             foreach (var candidate in inlineCandidates.Where(candidate => candidate.Bucket == bucket))
             {
-                if (selectedIndexes.Count >= options.MaxInlineEvents || selectedForBucket >= bucketQuota)
+                var completeDynamicEvidence = bucket == ReportSamplingBucket.DynamicActionEvidence;
+                if ((!completeDynamicEvidence && boundedSelectedCount >= options.MaxInlineEvents) ||
+                    (!completeDynamicEvidence && selectedForBucket >= bucketQuota))
                 {
                     break;
                 }
 
                 var eventType = NormalizeEventType(candidate.Event.EventType);
-                var typeLimit = TypeLimitForBucket(candidate.Event, bucket, options);
+                var typeLimit = completeDynamicEvidence
+                    ? int.MaxValue
+                    : TypeLimitForBucket(candidate.Event, bucket, options);
 
                 perType.TryGetValue(eventType, out var currentForType);
                 if (currentForType >= typeLimit)
@@ -978,6 +983,10 @@ public static class ReportEventSampler
 
                 selectedIndexes.Add(candidate.Index);
                 selectedForBucket++;
+                if (!completeDynamicEvidence)
+                {
+                    boundedSelectedCount++;
+                }
                 perType[eventType] = currentForType + 1;
             }
         }
@@ -1105,6 +1114,16 @@ public static class ReportEventSampler
             return ReportSamplingBucket.GeneralBehaviorEvidence;
         }
 
+        // Dynamic actions attributed to the submitted sample are evidence,
+        // even if a rule also references the same row. Route them through the
+        // complete dynamic-evidence bucket so process bursts cannot consume
+        // the global inline quota and hide file, registry, startup,
+        // scheduled-task, service, or network rows.
+        if (IsDynamicActionEvidenceEvent(evt) && IsSampleAttributedDynamicActionEvent(evt))
+        {
+            return ReportSamplingBucket.DynamicActionEvidence;
+        }
+
         // Findings may deliberately reference nonbehavior/diagnostic rows
         // (for example artifact manifest and collection-gap evidence). Resolve
         // that explicit reference before the diagnostic gate so evidence cannot
@@ -1112,14 +1131,6 @@ public static class ReportEventSampler
         if (findingEvidenceKeys.Contains(BuildEventEvidenceKey(evt)))
         {
             return ReportSamplingBucket.FindingEvidence;
-        }
-
-        // Keep bounded, high-value runtime edges visible only when the
-        // correlation layer has attributed them to the sample. Unknown edges
-        // remain in raw events/coverage metrics and stay out of the main UI.
-        if (IsDynamicActionEvidenceEvent(evt) && IsSampleAttributedDynamicActionEvent(evt))
-        {
-            return ReportSamplingBucket.DynamicActionEvidence;
         }
 
         if (IsDiagnosticReportEvent(evt))
