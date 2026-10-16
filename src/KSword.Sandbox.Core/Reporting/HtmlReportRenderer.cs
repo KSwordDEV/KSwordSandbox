@@ -10494,6 +10494,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Start here", "从这里开始"),
         ("Collection coverage warning", "采集覆盖警告"),
         ("Runtime evidence coverage is incomplete; review Collection coverage gaps before treating a quiet result as evidence that the sample had no behavior.", "运行时证据覆盖不完整；请先查看采集覆盖缺口，再把安静结果解读为样本没有行为。"),
+        ("Read the verdict and high-signal evidence first.", "先阅读判定和高信号证据。"),
         ("additional behavior rows in report.json.", "条行为行仅在 report.json 中。"),
         ("Observed rows: ", "观察到的行："),
         ("; sample-attributed: ", "；样本归因："),

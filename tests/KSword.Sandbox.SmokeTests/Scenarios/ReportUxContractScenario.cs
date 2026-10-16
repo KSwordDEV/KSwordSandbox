@@ -329,7 +329,6 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         var defaultHtml = renderer.Render(report, artifacts);
         var englishHtml = renderer.RenderEnglish(report, artifacts);
         var chineseHtml = renderer.RenderChinese(report, artifacts);
-        File.WriteAllText(Path.Combine(Path.GetTempPath(), "ksword-report-ux-zh.html"), chineseHtml);
         var chineseVisibleText = Regex.Replace(chineseHtml, "<[^>]+>", string.Empty, RegexOptions.CultureInvariant);
         var documents = renderer.RenderBilingualReports(report, artifacts);
         var totalRawEvents = report.Events.Count;
