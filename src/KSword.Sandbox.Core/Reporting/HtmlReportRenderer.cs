@@ -624,7 +624,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     {
         var primaryFindings = PrimaryBehaviorFindings(report).ToList();
         var staticFindings = StaticTriageFindings(report).ToList();
-        var diagnosticFindings = DiagnosticFindings(report).ToList();
         html.AppendLine("<section id=\"risk\" class=\"card\"><h2>Risk summary</h2>");
         if (KnownMalwareProfiles.TryGet(report.Sample.Sha256, out var knownProfile))
         {
@@ -640,26 +639,21 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         // not imply that an import, URL, YARA match, or PE trait was observed at run
         // time.
         Metric(html, "Static triage", staticFindings.Count.ToString(), "risk-info");
-        Metric(html, "Collection diagnostics", diagnosticFindings.Count.ToString(), diagnosticFindings.Count > 0 ? "risk-info" : "risk-low");
-        Metric(html, "Collection health", report.Events.Count(IsCollectionHealthEvent).ToString(), report.Events.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-info");
         Metric(html, "MITRE techniques", primaryFindings.Where(f => !string.IsNullOrWhiteSpace(f.MitreTechniqueId)).Select(f => f.MitreTechniqueId).Distinct().Count().ToString(), "risk-low");
         Metric(html, "Events", report.Events.Count.ToString(), "risk-info");
         Metric(html, "Rule hits", report.Findings.Count.ToString(), "risk-info");
-        Metric(html, "VT lookups", report.Events.Count(IsVirusTotalEvent).ToString(), "risk-info");
         Metric(html, "Static tags", (report.StaticAnalysis?.Tags.Count ?? 0).ToString(), "risk-info");
         Metric(html, "Static URL refs", (report.StaticAnalysis?.Urls.Count ?? 0).ToString(), "risk-info");
         Metric(html, "File events", report.Events.Count(IsSampleBehaviorFileEvent).ToString(), "risk-medium");
         Metric(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString(), "risk-medium");
         Metric(html, "Registry events", report.Events.Count(IsSampleBehaviorRegistryEvent).ToString(), "risk-medium");
         Metric(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString(), "risk-info");
-        Metric(html, "R0 health/readiness", report.Events.Count(IsR0CollectionHealthEvent).ToString(), "risk-info");
         html.AppendLine("</div>");
         if (HasExecutionBlockedVerdict(report))
         {
             html.AppendLine("<div class=\"section-note failure-note\"><strong>Execution boundary:</strong> sample execution was blocked or ended before complete runtime behavior, so the runtime verdict is indeterminate. Static findings remain static-only evidence and do not establish execution.</div>");
         }
 
-        AppendCollectionSelfNoisePolicySummary(html, report);
         html.AppendLine("</section>");
     }
 
@@ -675,12 +669,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             .ThenBy(finding => finding.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var sampleEvents = report.Events.Count(IsSampleBehaviorEvent);
-        var lifecycleEvents = report.Events.Count(IsAgentLifecycleEvent);
-        var noiseEvents = report.Events.Count(IsExcludedFromBehaviorStoryEvent);
         var failures = report.Events.Count(IsOperationalFailureEvent);
         var sampleExitOutcomes = report.Events.Count(IsNonZeroSampleExitEvent);
-        var collectionDiagnostics = report.Events.Count(IsCollectionDiagnosticFailure);
-        var healthRows = report.Events.Count(IsCollectionHealthEvent);
         var artifactCount = artifacts.Count;
         var topFinding = primaryFindings.FirstOrDefault();
         var verdict = DetermineVerdict(report);
@@ -691,14 +681,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 $"verdict={verdict.Label}",
                 $"primaryFindings={primaryFindings.Count}",
                 $"sampleBehaviorEvents={sampleEvents}",
-                $"excludedNoiseEvents={noiseEvents}",
-                $"agentLifecycleEventsHidden={lifecycleEvents}",
                 $"failureEvents={failures}",
                 $"sampleExitOutcomes={sampleExitOutcomes}",
-                $"collectionDiagnostics={collectionDiagnostics}",
-                $"collectionHealthRows={healthRows}",
                 $"artifacts={artifactCount}",
-                $"next={topFinding?.Title ?? "Review static analysis and collection health"}"
+                $"next={topFinding?.Title ?? "Review static evidence and runtime events"}"
             ]);
 
         html.AppendLine("<section id=\"focus\" class=\"card focus-panel\">");
@@ -707,15 +693,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("<div class=\"focus-grid\">");
         FocusMetric(html, "Primary findings", primaryFindings.Count.ToString(CultureInfo.InvariantCulture), primaryFindings.Count > 0 ? "risk-medium" : "risk-low", "Rules that contribute to the sample verdict.");
         FocusMetric(html, "Sample behavior", sampleEvents.ToString(CultureInfo.InvariantCulture), sampleEvents > 0 ? "risk-medium" : "risk-info", "Events eligible for the behavior story.");
-        FocusMetric(html, "Noise / diagnostics", noiseEvents.ToString(CultureInfo.InvariantCulture), noiseEvents > 0 ? "risk-info" : "risk-low", "Operational rows retained as evidence but excluded from the verdict.");
         FocusMetric(html, "Operational failures", failures.ToString(CultureInfo.InvariantCulture), failures > 0 || report.Status == AnalysisStatus.Failed ? "risk-high" : "risk-low", "Environment and evidence failures.");
         FocusMetric(html, "Sample exit outcomes", sampleExitOutcomes.ToString(CultureInfo.InvariantCulture), sampleExitOutcomes > 0 ? "risk-info" : "risk-low", "Non-zero sample exits are execution outcomes, not maliciousness verdicts.");
-        FocusMetric(html, "Collection diagnostics", collectionDiagnostics.ToString(CultureInfo.InvariantCulture), collectionDiagnostics > 0 ? "risk-info" : "risk-low", "Helper or telemetry gaps are separated from sample behavior.");
-        FocusMetric(html, "Collection health", healthRows.ToString(CultureInfo.InvariantCulture), report.Events.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-low", "Health and readiness rows explain evidence quality.");
         FocusMetric(html, "Artifacts", artifactCount.ToString(CultureInfo.InvariantCulture), artifactCount > 0 ? "risk-low" : "risk-info", "Indexed files, screenshots, dumps, and packet captures.");
         html.AppendLine("</div>");
         html.AppendLine("<div class=\"focus-next\">");
-        html.AppendLine($"<div class=\"focus-next-copy copyable\" data-copy=\"{A(focusCopy)}\"><strong>Next review</strong><br><span>{E(topFinding?.Title ?? "Review static analysis and collection health")}</span><small>{E(topFinding?.Summary ?? "No primary behavior rule matched; verify collection quality before concluding that the sample was quiet.")}</small></div>");
+        html.AppendLine($"<div class=\"focus-next-copy copyable\" data-copy=\"{A(focusCopy)}\"><strong>Next review</strong><br><span>{E(topFinding?.Title ?? "Review static evidence and runtime events")}</span><small>{E(topFinding?.Summary ?? "No sample-attributed behavior was observed in the captured runtime events.")}</small></div>");
         html.AppendLine($"<a class=\"focus-action\" href=\"#event-explorer\">Open filtered event table</a><a class=\"focus-action secondary\" href=\"#failure\">Open failure log</a>");
         html.AppendLine("</div>");
         html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy analyst focus", focusCopy)}</div>");
@@ -739,7 +722,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var rows = report.Events
-            .Where(evt => !IsLowValueOperationalEvent(evt))
+            .Where(IsUserFacingEvent)
             .OrderByDescending(IsKeyOperationalEvent)
             .ThenBy(evt => evt.Timestamp)
             .Take(EventExplorerInlineLimit)
@@ -750,8 +733,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 EventExplorerSeverity(report, evt),
                 IsSampleBehaviorEvent(evt)))
             .ToList();
-        var hidden = Math.Max(0, report.Events.Count(evt => !IsLowValueOperationalEvent(evt)) - rows.Count);
-        var lifecycle = report.Events.Count(IsLowValueOperationalEvent);
+        var hidden = Math.Max(0, report.Events.Count(IsUserFacingEvent) - rows.Count);
         var types = rows.Select(row => row.Event.EventType).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var sources = rows.Select(row => string.IsNullOrWhiteSpace(row.Event.Source) ? "unknown" : row.Event.Source).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var stages = rows.Select(row => row.Stage).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
@@ -770,7 +752,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine("<label>Sample behavior <select data-event-sample><option value=\"all\">All</option><option value=\"true\">Yes</option><option value=\"false\">No</option></select></label>");
         html.AppendLine("<button type=\"button\" class=\"focus-action secondary\" data-event-reset>Reset filters</button>");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"event-explorer-status\" data-event-count>{E(rows.Count.ToString(CultureInfo.InvariantCulture))} visible rows; {E(hidden.ToString(CultureInfo.InvariantCulture))} report-only rows; {E(lifecycle.ToString(CultureInfo.InvariantCulture))} lifecycle rows folded in Raw normalized events.</div>");
+        html.AppendLine($"<div class=\"event-explorer-status\" data-event-count>{E(rows.Count.ToString(CultureInfo.InvariantCulture))} visible rows; {E(hidden.ToString(CultureInfo.InvariantCulture))} additional behavior rows in report.json.</div>");
         if (rows.Count == 0)
         {
             Empty(html, "No user-facing events were retained for the event explorer.");
@@ -989,10 +971,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             .ThenBy(f => f.Title)
             .ToList();
         var staticFindings = StaticTriageFindings(report).OrderBy(f => SeverityRank(f.Severity)).ThenBy(f => f.Title).ToList();
-        var diagnosticFindings = DiagnosticFindings(report).OrderBy(f => f.Title).ToList();
         if (findings.Count == 0)
         {
-            Empty(html, "No primary sample behavior rules matched. Static triage and collection diagnostics are separated below so operational health does not inflate the verdict.");
+            Empty(html, "No sample-attributed behavior was observed in the captured runtime events.");
         }
         else
         {
@@ -1010,11 +991,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             "Static triage indicators",
             "Static-only findings are useful triage signals, but they do not by themselves prove runtime malicious behavior.",
             staticFindings);
-        AppendSecondaryFindingGroup(
-            html,
-            "Collection and pipeline diagnostics",
-            "Collector health, runbook, import, and timing diagnostics explain evidence quality and are not sample behavior.",
-            diagnosticFindings);
         html.AppendLine("</section>");
     }
 
@@ -1730,10 +1706,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         Metric(html, "Startup diff events", report.Events.Count(IsSampleBehaviorStartupEvent).ToString(), "risk-medium");
         Metric(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString(), "risk-medium");
         Metric(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString(), "risk-info");
-        Metric(html, "R0 health/readiness", report.Events.Count(IsR0CollectionHealthEvent).ToString(), "risk-info");
-        Metric(html, "Collection health", report.Events.Count(IsCollectionHealthEvent).ToString(), "risk-info");
-        Metric(html, "VT lookups", report.Events.Count(IsVirusTotalEvent).ToString(), "risk-info");
-        Metric(html, "Failure markers", report.Events.Count(IsOperationalFailureEvent).ToString(), "risk-high");
         html.AppendLine("</div>");
         if (dynamicEventCount == 0)
         {
@@ -1941,9 +1913,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         Metric(html, "Registry IOCs", registryIocs.Count.ToString(), "risk-medium");
         Metric(html, "Artifact IOCs", artifactIocs.Count.ToString(), "risk-info");
         html.AppendLine("</div>");
-        AppendGraphNoiseBoundaryCard(html, report);
-        AppendBehaviorStoryRouting(html, report);
-
         AppendEvidenceNarrativeSpine(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts);
         AppendEvidenceSummaryCards(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
         AppendEvidenceStoryBoard(html, report, artifacts);
@@ -4422,44 +4391,17 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        var r0Events = report.Events.Where(IsR0Event).ToList();
-        var networkStatusEvents = r0Events.Where(IsR0DriverNetworkStatusEvent).ToList();
-        var healthEvents = r0Events.Where(IsR0HealthRowEvent).ToList();
-        var selfNoiseEvents = r0Events.Where(evt => !IsR0HealthRowEvent(evt) && !IsR0DriverNetworkStatusEvent(evt) && IsCollectorSelfNoiseEvent(evt)).ToList();
-        var telemetryEvents = r0Events.Where(evt => !IsR0HealthRowEvent(evt) && !IsR0DriverNetworkStatusEvent(evt) && !IsCollectorSelfNoiseEvent(evt)).ToList();
+        var telemetryEvents = report.Events.Where(IsSampleBehaviorR0Event).ToList();
         html.AppendLine("<section id=\"r0\" class=\"card\"><h2>R0 / driver events</h2>");
-        if (r0Events.Count == 0)
+        if (telemetryEvents.Count == 0)
         {
-            Empty(html, "No R0Collector or driver-originated events were imported.");
+            Empty(html, "No sample-attributed driver behavior was captured.");
             html.AppendLine("</section>");
             return;
         }
 
-        html.AppendLine("<div class=\"grid\">");
-        Metric(html, "Collector lifecycle", r0Events.Count(e => e.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase)).ToString(), "risk-info");
-        Metric(html, "Collection health rows", healthEvents.Count.ToString(), healthEvents.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-info");
-        Metric(html, "R0 network status rows", networkStatusEvents.Count.ToString(), networkStatusEvents.Count > 0 ? "risk-info" : "risk-low");
-        Metric(html, "Driver telemetry rows", telemetryEvents.Count.ToString(), "risk-info");
-        Metric(html, "Collector self-noise hidden", selfNoiseEvents.Count.ToString(), selfNoiseEvents.Count > 0 ? "risk-info" : "risk-low");
-        Metric(html, "Kernel file rows", telemetryEvents.Count(IsFileEvent).ToString(), "risk-medium");
-        Metric(html, "Kernel registry rows", telemetryEvents.Count(IsRegistryEvent).ToString(), "risk-medium");
-        Metric(html, "Kernel network rows", telemetryEvents.Count(IsNetworkEvent).ToString(), "risk-medium");
-        Metric(html, "Health alerts", healthEvents.Count(IsCollectionHealthAlertEvent).ToString(), healthEvents.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-info");
-        html.AppendLine("</div>");
-        html.AppendLine("<div class=\"section-note\"><strong>R0 noise policy.</strong> Collection health, device unavailable, and collector self-noise rows are evidence-quality lanes. They stay out of behavior counts, process trees, network cards, and file/registry/network behavior tables.</div>");
-
-        AppendR0CollectionHealthStatus(html, healthEvents, networkStatusEvents, artifactLookup, artifacts);
-        AppendR0SelfNoiseSummary(html, selfNoiseEvents);
-
         html.AppendLine("<h3>Driver telemetry evidence</h3>");
-        if (telemetryEvents.Count == 0)
-        {
-            Empty(html, "No non-health R0 driver telemetry rows were imported. Collection health rows above describe evidence quality rather than sample behavior.");
-        }
-        else
-        {
-            AppendEventRows(html, telemetryEvents, artifactLookup, artifacts);
-        }
+        AppendEventRows(html, telemetryEvents, artifactLookup, artifacts);
 
         html.AppendLine("</section>");
     }
@@ -4660,11 +4602,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     {
         var failures = report.Events.Where(IsOperationalFailureEvent).ToList();
         var sampleExitOutcomes = report.Events.Where(IsNonZeroSampleExitEvent).ToList();
-        var collectionDiagnostics = report.Events
-            .Where(evt => IsCollectionHealthAlertEvent(evt) && !failures.Contains(evt))
-            .ToList();
         html.AppendLine("<section id=\"failure\" class=\"card\"><h2>Failure reasons</h2>");
-        if (report.Status != AnalysisStatus.Failed && failures.Count == 0 && sampleExitOutcomes.Count == 0 && collectionDiagnostics.Count == 0)
+        if (report.Status != AnalysisStatus.Failed && failures.Count == 0 && sampleExitOutcomes.Count == 0)
         {
             Empty(html, "No operational failure markers were collected for this job.");
         }
@@ -4690,12 +4629,6 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         {
             html.AppendLine("<div class=\"section-note failure-note\"><strong>Sample execution outcome:</strong> the sample process ended with a non-zero exit code. This indicates an incomplete or failed execution attempt; it is not a maliciousness verdict.</div>");
             AppendEventRows(html, sampleExitOutcomes, artifactLookup, artifacts);
-        }
-
-        if (collectionDiagnostics.Count > 0)
-        {
-            html.AppendLine("<div class=\"section-note\"><strong>Collection diagnostics:</strong> helper or telemetry collection failed; this does not mean the sample failed or was malicious.</div>");
-            AppendEventRows(html, collectionDiagnostics, artifactLookup, artifacts);
         }
 
         html.AppendLine("</section>");
@@ -7623,6 +7556,18 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             !IsCollectionHealthEvent(evt) &&
             !IsVirusTotalEvent(evt);
     }
+
+    /// <summary>
+    /// Selects rows suitable for the operator-facing event table. Inputs are
+    /// normalized events; processing keeps sample behavior plus execution
+    /// outcomes that explain a blocked or failed launch, while suppressing
+    /// collector, health, reputation, and lifecycle noise. Raw evidence keeps
+    /// every row available for audit.
+    /// </summary>
+    private static bool IsUserFacingEvent(SandboxEvent evt) =>
+        IsSampleBehaviorEvent(evt) ||
+        IsOperationalFailureEvent(evt) ||
+        IsNonZeroSampleExitEvent(evt);
 
     private static bool IsStaticOnlyEvidenceEvent(SandboxEvent evt) =>
         EventDataBoolTrue(evt, "staticOnly", "static_only") ||
