@@ -324,7 +324,38 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             });
         }
 
-        return rows;
+        return FilterRowsToSampleTree(rows, context.RootProcessId);
+    }
+
+    private static List<SandboxEvent> FilterRowsToSampleTree(
+        IReadOnlyList<SandboxEvent> rows,
+        int? rootProcessId)
+    {
+        if (rootProcessId is not int root || root <= 0)
+        {
+            return rows.ToList();
+        }
+
+        var processIds = new HashSet<int> { root };
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var row in rows)
+            {
+                if (row.ProcessId is int pid && pid > 0 &&
+                    row.ParentProcessId is int parent && processIds.Contains(parent) &&
+                    processIds.Add(pid))
+                {
+                    changed = true;
+                }
+            }
+        }
+
+        return rows
+            .Where(row => (row.ProcessId is int pid && processIds.Contains(pid)) ||
+                          (row.ParentProcessId is int parent && processIds.Contains(parent)))
+            .ToList();
     }
 
     private static Dictionary<string, string> CreateDecodedData(
@@ -520,10 +551,17 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             "start", session.SessionName,
             // Use the provider GUID so localized Windows builds do not depend
             // on the display name of Windows Kernel Trace.  The keyword group
-            // names are the documented process/thread/image/file/registry
-            // kernel flags.  These cover short-lived process edges and the
-            // file/registry providers without pretending ETL is decoded.
-            "-p", "{9e814aad-3204-11d2-9a82-006008a86939}", "(process,thread,img,file,fileio,registry)",
+            // names are the documented process/thread/image kernel flags.
+            // These cover short-lived process edges without pretending ETL is
+            // decoded; scoped file/registry probes cover their user-facing
+            // lanes.
+            // Keep the live kernel lane bounded. File/registry ETW produces a
+            // full-machine baseline (hundreds of thousands of rows in a
+            // 30-second run) and is already covered by the scoped file watcher
+            // and registry probes. Process/thread/image edges are the stable
+            // correlation spine; the raw ETL remains available for later
+            // opt-in forensic decoding.
+            "-p", "{9e814aad-3204-11d2-9a82-006008a86939}", "(process,thread,img)",
             "-o", session.EtlPath,
             "-ets"
         ];

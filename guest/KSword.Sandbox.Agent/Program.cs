@@ -351,13 +351,17 @@ internal static class AgentProgram
             new GuestProbeRunner(
             [
                 new ProcessTreeProbe(),
+                // Stop the time-bounded capture lanes first when the sample
+                // window ends. Event log and snapshot probes can be slow; they
+                // must not extend ETW/PCAP beyond the requested observation
+                // window.
+                new EtwLiveTraceProbe(),
+                new PacketCaptureProbe(),
                 new SecurityEventLogProbe(),
                 new WindowsBehaviorEventLogProbe(),
-                new EtwLiveTraceProbe(),
                 new EtwSecurityReadinessProbe(),
                 new FileDiffProbe(),
                 new TcpConnectionDiffProbe(),
-                new PacketCaptureProbe(),
                 new ScreenshotProbe(options.ScreenshotOptions),
                 memoryDumpProbe
             ]),
