@@ -21,7 +21,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
     private const string AbiVersion = "65536";
     private const string AbiVersionHex = "0x00010000";
     private const string CurrentProducerMaskHex = "0x0000007F";
-    private const string DefaultProducerMaskHex = "0x0000003F";
+    private const string DefaultProducerMaskHex = "0x00000027";
     private const int ExpectedEventRingCapacity = 1024;
     private const int ExpectedBackpressureQueueDepth = 768;
     private const int ExpectedStressDriverRows = 32;

@@ -260,7 +260,7 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
         RequireData(abiSelfCheck, "highWatermark", "0");
         RequireData(abiSelfCheck, "capabilityFlagsCurrentHex", "0x000000000007FFFF");
         RequireData(abiSelfCheck, "producerMaskCurrentHex", "0x0000007F");
-        RequireData(abiSelfCheck, "producerMaskDefaultHex", "0x0000003F");
+        RequireData(abiSelfCheck, "producerMaskDefaultHex", "0x00000027");
         RequireData(abiSelfCheck, "abiGuardPassed", "true");
         RequireData(abiSelfCheck, "eventHeaderSize", "104");
         RequireData(abiSelfCheck, "eventHeaderSequenceOffset", "16");
