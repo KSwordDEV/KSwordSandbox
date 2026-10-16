@@ -381,6 +381,7 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
 
             RequireStepContains(runbook, "run-agent", "New-ScheduledTaskPrincipal");
             RequireStepContains(runbook, "run-agent", "-LogonType Interactive");
+            RequireStepContains(runbook, "run-agent", $"--job-id '{jobId:D}'");
             RequireStep(runbook, "open-vm-desktop");
             RequireStepContains(runbook, "check-guest-credential", "SetEnvironmentVariable('KSWORDBOX_GUEST_PASSWORD', $null, 'Process')");
             var readinessStepId = runbook.Provider is VirtualizationProvider.HyperV
