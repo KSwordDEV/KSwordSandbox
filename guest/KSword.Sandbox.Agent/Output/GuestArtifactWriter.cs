@@ -44,6 +44,8 @@ internal sealed record GuestArtifactCollectionOptions
 
     public bool CapturePacketCapture { get; init; }
 
+    public bool CaptureEtwLiveTrace { get; init; }
+
     public bool DriverEventsRequested { get; init; }
 
     public bool R0CollectorRequested { get; init; }
@@ -439,7 +441,12 @@ internal sealed class GuestArtifactWriter
             CreateCollection(descriptors, events, "packet-captures", ArtifactKind.PacketCapture, "packet-capture", "packet-capture",
                 PacketCapturesDirectoryName, options.CapturePacketCapture, implemented: true,
                 capturedEventPrefixes: ["packet_capture.captured"], skippedEventPrefixes: ["packet_capture.skipped"],
-                disabledEventPrefixes: ["packet_capture.disabled"], reasonWhenDisabled: "packetCaptureNotRequested", failedEventPrefixes: ["packet_capture.failed"])
+                disabledEventPrefixes: ["packet_capture.disabled"], reasonWhenDisabled: "packetCaptureNotRequested", failedEventPrefixes: ["packet_capture.failed"]),
+            CreateCollection(descriptors, events, "etw-traces", ArtifactKind.Log, "trace", "etw-kernel-trace",
+                "etw-traces", options.CaptureEtwLiveTrace, implemented: true,
+                capturedEventPrefixes: ["etw_live.captured"], skippedEventPrefixes: [],
+                disabledEventPrefixes: ["etw_live.disabled"], reasonWhenDisabled: "etwLiveNotRequested",
+                failedEventPrefixes: ["etw_live.failed"])
         ];
     }
 
@@ -969,6 +976,13 @@ internal sealed class GuestArtifactWriter
             extension is ".pcap" or ".pcapng")
         {
             classification = new ArtifactClassification(ArtifactKind.PacketCapture, "packet-capture", "packet-capture", "packet-captures");
+            return true;
+        }
+
+        if (relativePath.StartsWith("etw-traces/", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(extension, ".etl", StringComparison.OrdinalIgnoreCase))
+        {
+            classification = new ArtifactClassification(ArtifactKind.Log, "trace", "etw-kernel-trace", "etw-traces");
             return true;
         }
 
@@ -1555,6 +1569,7 @@ internal sealed class GuestArtifactWriter
             "screenshots" => "screenshot",
             "memory-dumps" => "memory-dump",
             "packet-captures" => "packet-capture",
+            "etw-traces" => "etw-kernel-trace",
             "driver-events" => "driver-events",
             "r0-logs" => "diagnostic-log",
             _ => "artifact"
@@ -1575,6 +1590,7 @@ internal sealed class GuestArtifactWriter
             "screenshots" => "explicit-opt-in-screenshot",
             "memory-dumps" => "explicit-opt-in-sensitive-memory-dump",
             "packet-captures" => "explicit-opt-in-network-packet-capture",
+            "etw-traces" => "explicit-opt-in-etw-kernel-trace",
             "driver-events" => "explicit-input-driver-jsonl",
             "r0-logs" => "explicit-opt-in-r0collector-sidecar",
             _ => "guest-artifact-discovery"

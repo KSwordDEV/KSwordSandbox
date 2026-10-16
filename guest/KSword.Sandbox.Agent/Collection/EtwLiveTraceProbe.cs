@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Runtime.InteropServices;
 using KSword.Sandbox.Agent.Diagnostics;
 using KSword.Sandbox.Abstractions;
 
@@ -61,7 +60,10 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
 
         var traceDirectory = Path.Combine(context.OutputDirectory, CollectionName);
         Directory.CreateDirectory(traceDirectory);
-        var sessionName = "KSwordSandboxEtw_" + Guid.NewGuid().ToString("N");
+        // logman/ETW session names are limited on older Windows builds. Keep
+        // the deterministic prefix while staying below the 32-character
+        // limit so an otherwise valid request is not rejected as E_INVALIDARG.
+        var sessionName = "KSEtw_" + Guid.NewGuid().ToString("N")[..24];
         var etlPath = Path.Combine(traceDirectory, sessionName + ".etl");
         var session = new EtwTraceSession(sessionName, etlPath, DateTimeOffset.UtcNow);
         var result = await BoundedProcessRunner.RunAsync(
@@ -72,6 +74,11 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
 
         if (!result.Succeeded)
         {
+            // logman can leave a persistent trace definition behind even when
+            // `-ets` fails to start it (for example Access Denied).  Best
+            // effort cleanup prevents the next analysis from inheriting a
+            // stale session while retaining this failed evidence row.
+            await CleanupTraceDefinitionAsync(session, cancellationToken).ConfigureAwait(false);
             return [CreateFailureEvent(
                 result.TimedOut ? "logmanStartTimedOut" : "logmanStartFailed",
                 "before-start",
@@ -161,9 +168,10 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             "create", "trace", session.SessionName,
             "-o", session.EtlPath,
             "-ets",
-            "-p", "Microsoft-Windows-Kernel-Process", "0xFFFFFFFF", "0x5",
-            "-p", "Microsoft-Windows-Kernel-Thread", "0xFFFFFFFF", "0x5",
-            "-p", "Microsoft-Windows-Kernel-Image", "0xFFFFFFFF", "0x5"
+            // Windows Kernel Trace flags: process=0x1, thread=0x2,
+            // image-load=0x4.  A single legacy kernel provider is available
+            // on more guest builds than separate Kernel-Thread/Image names.
+            "-p", "Windows Kernel Trace", "0x7", "0x5"
         ];
     }
 
@@ -199,6 +207,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         AddIfNotEmpty(evt.Data, "exceptionType", result?.ExceptionType);
         AddIfNotEmpty(evt.Data, "message", result?.Message);
         AddIfNotEmpty(evt.Data, "stderr", Truncate(result?.StandardError));
+        AddIfNotEmpty(evt.Data, "stdout", Truncate(result?.StandardOutput));
         if (file is not null)
         {
             evt.Data["sizeBytes"] = file.Length.ToString(CultureInfo.InvariantCulture);
@@ -232,9 +241,9 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             ["capturePolicy"] = "explicit-opt-in-etw-kernel-trace",
             ["captureTool"] = LogmanExecutable,
             ["captureToolMode"] = "windows-logman-kernel-etw",
-            ["traceProviders"] = "Microsoft-Windows-Kernel-Process;Microsoft-Windows-Kernel-Thread;Microsoft-Windows-Kernel-Image",
+            ["traceProviders"] = "Windows Kernel Trace(flags=process|thread|image-load)",
             ["etwLiveCaptureEnabled"] = "true",
-            ["etwSessionStarted"] = session is not null && phase == "before-start" ? "true" : "false",
+            ["etwSessionStarted"] = string.Equals(eventType, "etw_live.started", StringComparison.OrdinalIgnoreCase) ? "true" : "false",
             ["nonbehavior"] = "true",
             ["notSampleBehavior"] = "true",
             ["behaviorCounted"] = "false",
@@ -301,6 +310,24 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
 
     private static string FormatCommand(string fileName, IEnumerable<string> args) =>
         fileName + " " + string.Join(" ", args.Select(static arg => arg.Any(char.IsWhiteSpace) ? $"\"{arg}\"" : arg));
+
+    private static async Task CleanupTraceDefinitionAsync(
+        EtwTraceSession session,
+        CancellationToken cancellationToken)
+    {
+        // Both operations are deliberately best effort.  Their failures are
+        // represented by the original start failure; cleanup must not hide it.
+        _ = await BoundedProcessRunner.RunAsync(
+            LogmanExecutable,
+            ["stop", session.SessionName, "-ets"],
+            TimeSpan.FromSeconds(5),
+            CancellationToken.None).ConfigureAwait(false);
+        _ = await BoundedProcessRunner.RunAsync(
+            LogmanExecutable,
+            ["delete", session.SessionName],
+            TimeSpan.FromSeconds(5),
+            CancellationToken.None).ConfigureAwait(false);
+    }
 
     private sealed record EtwTraceSession(string SessionName, string EtlPath, DateTimeOffset StartedAtUtc);
 }

@@ -64,9 +64,8 @@ PCAPNG。缺少工具或权限不足会记录为非致命 `packet_capture.*` 事
 [--etw-live | --etw | --kernel-etw]
 ```
 
-启用后，Agent 在 `before-start` 使用 `logman.exe` 创建包含
-`Microsoft-Windows-Kernel-Process`、`Microsoft-Windows-Kernel-Thread` 和
-`Microsoft-Windows-Kernel-Image` 的实时会话，在 `after-run` 停止会话并校验
+启用后，Agent 在 `before-start` 使用 `logman.exe` 创建 `Windows Kernel Trace`
+（process/thread/image-load flags）的实时会话，在 `after-run` 停止会话并校验
 `etw-traces/*.etl`。`etw_live.captured` 只证明 ETL 原始证据已落盘，仍标记
 `semanticRowsAvailable=false`、`etlDecodeRequired=true`，不会把未解析 ETL 伪装成行为命中。
 缺少管理员权限、`logman.exe`、会话启动/停止失败或空 ETL 会写 `etw_live.failed`；默认关闭
@@ -81,6 +80,8 @@ PCAPNG。缺少工具或权限不足会记录为非致命 `packet_capture.*` 事
   `MiniDumpNormal` 进程转储；Agent 会先捕获 root process，再在结束阶段扫 root/child 进程树。
 - `packet-captures/*.pcapng` - 显式传入 `--packet-capture`、`--pcap` 或
   `--network-capture` 且转换成功时，由 Windows `pktmon` 生成的可选抓包。
+- `etw-traces/*.etl` - 显式传入 `--etw-live`、`--etw` 或 `--kernel-etw` 且
+  `logman` 会话停止并通过完整性校验时保存的 Kernel ETW 原始追踪。
 - `artifacts/dropped-files/**` - 显式传入 `--collect-dropped-files` 或
   `--dropped-files` 时，样本工作目录下新增文件的可选副本。
 - `artifacts/manifest.json` - best-effort artifact manifest；即使敏感采集通道关闭，

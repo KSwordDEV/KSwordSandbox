@@ -1983,6 +1983,7 @@ internal static class AgentProgram
                     CollectDroppedFiles = options.CollectDroppedFiles,
                     CaptureMemoryDump = options.CaptureMemoryDump,
                     CapturePacketCapture = options.CapturePacketCapture,
+                    CaptureEtwLiveTrace = options.CaptureEtwLiveTrace,
                     DriverEventsRequested = !string.IsNullOrWhiteSpace(options.DriverEventsPath),
                     R0CollectorRequested = !string.IsNullOrWhiteSpace(options.R0CollectorPath) || options.R0Mock
                 });

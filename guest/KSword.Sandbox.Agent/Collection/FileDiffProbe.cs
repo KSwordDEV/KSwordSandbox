@@ -16,6 +16,7 @@ internal sealed class FileDiffProbe : IGuestProbe
     private readonly IFileSnapshotProvider snapshotProvider;
     private Dictionary<string, FileStateSnapshot> baseline = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<FileSystemChange> watcherChanges = new();
+    private readonly ConcurrentDictionary<string, byte> watcherKnownPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<FileSystemWatcher> watchers = [];
     private readonly HashSet<string> watchedRoots = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FileStateSnapshot> lastKnownFileState = new(StringComparer.OrdinalIgnoreCase);
@@ -57,9 +58,11 @@ internal sealed class FileDiffProbe : IGuestProbe
             DisposeWatchers();
             baseline = CaptureWatchedFiles(context, cancellationToken);
             lastKnownFileState.Clear();
+            watcherKnownPaths.Clear();
             foreach (var pair in baseline)
             {
                 lastKnownFileState[pair.Key] = pair.Value;
+                watcherKnownPaths[pair.Key] = 0;
             }
 
             StartWatchers(context);
@@ -109,6 +112,14 @@ internal sealed class FileDiffProbe : IGuestProbe
                 ? change.OldPath
                 : change.Path;
             lastKnownFileState.TryGetValue(previousStatePath, out var previousState);
+            if (change.Kind == WatcherChangeKind.Changed && currentState is null)
+            {
+                // A delayed Changed callback can arrive after a file was
+                // renamed/deleted. The create/rename/delete edge is already
+                // retained; do not turn the stale callback into a phantom
+                // modification row.
+                continue;
+            }
             if (currentState is not null)
             {
                 lastKnownFileState[change.Path] = currentState;
@@ -116,6 +127,15 @@ internal sealed class FileDiffProbe : IGuestProbe
             if (change.Kind == WatcherChangeKind.Deleted || change.Kind == WatcherChangeKind.Renamed)
             {
                 lastKnownFileState.TryRemove(previousStatePath, out _);
+            }
+            if (change.Kind == WatcherChangeKind.Deleted)
+            {
+                watcherKnownPaths.TryRemove(change.Path, out _);
+            }
+            else if (change.Kind == WatcherChangeKind.Renamed && !string.IsNullOrWhiteSpace(change.OldPath))
+            {
+                watcherKnownPaths.TryRemove(change.OldPath, out _);
+                watcherKnownPaths[change.Path] = 0;
             }
 
             var evt = CreateFileEvent(
@@ -270,9 +290,19 @@ internal sealed class FileDiffProbe : IGuestProbe
         }
         else if (kind == WatcherChangeKind.Deleted &&
                  !lastKnownFileState.ContainsKey(path) &&
+                 !watcherKnownPaths.ContainsKey(path) &&
                  !File.Exists(path))
         {
             return;
+        }
+
+        if (kind is WatcherChangeKind.Created or WatcherChangeKind.Changed or WatcherChangeKind.Renamed)
+        {
+            watcherKnownPaths[path] = 0;
+            if (!string.IsNullOrWhiteSpace(oldPath))
+            {
+                watcherKnownPaths[oldPath] = 0;
+            }
         }
 
         while (watcherChanges.Count >= MaxQueuedWatcherEvents && watcherChanges.TryDequeue(out _))
@@ -382,6 +412,7 @@ internal sealed class FileDiffProbe : IGuestProbe
         while (watcherChanges.TryDequeue(out _))
         {
         }
+        watcherKnownPaths.Clear();
     }
 
     private Dictionary<string, FileStateSnapshot> CaptureWatchedFiles(
