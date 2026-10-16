@@ -18,6 +18,11 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
     private const string CollectorSource = "etwLive";
     private const string CollectionName = "etw-traces";
     private const string LogmanExecutable = "logman.exe";
+    // Windows Kernel Trace is a system logger provider.  Windows rejects an
+    // arbitrary session name with "provided session name is invalid"; the
+    // supported logger name is NT Kernel Logger.  Keep the ETL filename unique
+    // per run while reusing this required session identity.
+    private const string KernelLoggerSessionName = "NT Kernel Logger";
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
     private EtwTraceSession? activeSession;
 
@@ -60,12 +65,18 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
 
         var traceDirectory = Path.Combine(context.OutputDirectory, CollectionName);
         Directory.CreateDirectory(traceDirectory);
-        // logman/ETW session names are limited on older Windows builds. Keep
-        // the deterministic prefix while staying below the 32-character
-        // limit so an otherwise valid request is not rejected as E_INVALIDARG.
-        var sessionName = "KSEtw_" + Guid.NewGuid().ToString("N")[..24];
-        var etlPath = Path.Combine(traceDirectory, sessionName + ".etl");
-        var session = new EtwTraceSession(sessionName, etlPath, DateTimeOffset.UtcNow);
+        var etlPath = Path.Combine(traceDirectory, "KSEtw_" + Guid.NewGuid().ToString("N") + ".etl");
+        var session = new EtwTraceSession(KernelLoggerSessionName, etlPath, DateTimeOffset.UtcNow);
+        var activeLogger = await BoundedProcessRunner.RunAsync(
+            LogmanExecutable,
+            ["query", KernelLoggerSessionName, "-ets"],
+            TimeSpan.FromSeconds(5),
+            cancellationToken).ConfigureAwait(false);
+        if (activeLogger.Succeeded)
+        {
+            return [CreateFailureEvent("captureAlreadyActive", "before-start", context, session, activeLogger, null)];
+        }
+
         var result = await BoundedProcessRunner.RunAsync(
             LogmanExecutable,
             BuildStartArguments(session),

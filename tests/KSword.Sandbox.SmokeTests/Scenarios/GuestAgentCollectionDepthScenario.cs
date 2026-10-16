@@ -69,6 +69,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "etw_live.captured", "ETW live probe must emit a captured row only after ETL validation.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "etw_live.failed", "ETW live probe must close startup/stop failures explicitly.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "semanticRowsAvailable", "ETW live probe must distinguish raw ETL from parsed behavior rows.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "NT Kernel Logger", "ETW live probe must use the Windows system logger name for the kernel provider.");
         SmokeAssert.True(programText.Contains("etw-live", StringComparison.Ordinal), "Guest Agent CLI must expose explicit --etw-live opt-in.");
         SmokeAssert.True(programText.Contains("edgePollIntervalMilliseconds", StringComparison.Ordinal) &&
                          programText.Contains("TimeSpan.FromMilliseconds(250)", StringComparison.Ordinal),
