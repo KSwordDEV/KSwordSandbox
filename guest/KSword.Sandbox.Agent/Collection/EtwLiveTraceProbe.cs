@@ -176,13 +176,16 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         // the per-run duration and the OS logger buffer policy.
         return
         [
-            "create", "trace", session.SessionName,
+            // The reserved kernel logger is started directly; `create trace`
+            // treats the reserved name as a normal data collector and can
+            // return the same invalid-session error seen in the field.
+            "start", session.SessionName,
+            // Use the provider GUID so localized Windows builds do not depend
+            // on the display name of Windows Kernel Trace.  The keyword group
+            // names are the documented process/thread/image kernel flags.
+            "-p", "{9e814aad-3204-11d2-9a82-006008a86939}", "(process,thread,img)",
             "-o", session.EtlPath,
-            "-ets",
-            // Windows Kernel Trace flags: process=0x1, thread=0x2,
-            // image-load=0x4.  A single legacy kernel provider is available
-            // on more guest builds than separate Kernel-Thread/Image names.
-            "-p", "Windows Kernel Trace", "0x7", "0x5"
+            "-ets"
         ];
     }
 
