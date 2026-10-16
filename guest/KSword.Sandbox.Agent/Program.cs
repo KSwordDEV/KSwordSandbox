@@ -3516,7 +3516,7 @@ internal sealed record AgentOptions
 
         var duration = values.TryGetValue("duration", out var rawDuration) && int.TryParse(rawDuration, out var parsedDuration)
             ? Math.Clamp(parsedDuration, 1, 3600)
-            : 120;
+            : 30;
 
         values.TryGetValue("driver-events", out var driverEventsPath);
         values.TryGetValue("driver-device", out var driverDevicePath);

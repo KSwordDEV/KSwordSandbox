@@ -305,7 +305,7 @@ internal static class DashboardExperiencePage
             <section id="plan">
               <h2 data-zh="上传与配置" data-en="Upload and configuration">上传与配置</h2>
               <p class="hint"><span data-zh="请选择一种提交方式：上传 EXE 会创建任务、尝试启动动态分析并打开监控；选择已有路径或扫描目录会先生成可复核计划。" data-en="Choose one submission method: upload creates a job, attempts to start dynamic analysis, and opens the monitor; existing path and folder scan create a reviewable plan first.">请选择一种提交方式：上传 EXE 会创建任务、尝试启动动态分析并打开监控；选择已有路径或扫描目录会先生成可复核计划。</span></p>
-              <input id="duration" type="hidden" value="120">
+              <input id="duration" type="hidden" value="30">
               <div class="tabs" role="tablist" aria-label="三种提交方式 / Three submission methods">
                 <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 .exe → 自动分析并打开监控" data-en="Upload .exe → auto analyze and open monitor">上传 .exe → 自动分析并打开监控</button>
                 <button id="tab-path" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-path" onclick="selectPlanTab('path')" data-zh="选择已有路径" data-en="Existing path">选择已有路径</button>
@@ -322,11 +322,11 @@ internal static class DashboardExperiencePage
                     </div>
                     <div id="selectedSampleSummary" class="selected-sample empty" data-copy="尚未选择样本 / no sample selected" data-copy-label="selected sample summary"></div>
                     <label for="uploadDuration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
-                    <input id="uploadDuration" type="number" min="1" max="900" value="120" data-copy-label="analysis duration">
+                    <input id="uploadDuration" type="number" min="1" max="900" value="30" data-copy-label="analysis duration">
                     <p id="durationHint" class="field-hint" data-copy="" data-copy-label="analysis duration hint" data-zh="后端会按配置限制分析时长；本次任务值会随上传一起提交；勾选“不限制运行时间”时会改用无限制语义。" data-en="The backend clamps bounded analysis duration by config; this per-job value is submitted with upload. When No runtime limit is checked, the request uses unlimited semantics.">后端会按配置限制分析时长；本次任务值会随上传一起提交；勾选“不限制运行时间”时会改用无限制语义。</p>
                     <div class="preset-row" aria-label="样本运行预设 / Sample run presets">
                       <button type="button" onclick="applySamplePreset('quick')" data-copy="快速观察：30s，关闭敏感产物采集 / Quick observe: 30s, sensitive artifact collection off" data-zh="快速观察 30s" data-en="Quick 30s">快速观察 30s</button>
-                      <button type="button" onclick="applySamplePreset('standard')" data-copy="标准动态：120s，落地文件+截图+PCAP / Standard dynamic: 120s, dropped files + screenshots + PCAP" data-zh="标准动态 120s" data-en="Standard 120s">标准动态 120s</button>
+                      <button type="button" onclick="applySamplePreset('standard')" data-copy="标准动态：30s，落地文件+截图+PCAP / Standard dynamic: 30s, dropped files + screenshots + PCAP" data-zh="标准动态 30s" data-en="Standard 30s">标准动态 30s</button>
                       <button type="button" onclick="applySamplePreset('evidence')" data-copy="证据优先：180s，强化落地文件、截图、PCAP / Evidence-first: 180s with dropped files, screenshots, PCAP" data-zh="证据优先" data-en="Evidence-first">证据优先</button>
                       <button type="button" onclick="applySamplePreset('memory')" data-copy="内存取证：180s，启用内存 dump（支持时含子进程） / Memory forensic: 180s, memory dumps including children when supported" data-zh="内存取证" data-en="Memory forensic">内存取证</button>
                     </div>
@@ -1610,12 +1610,12 @@ internal static class DashboardExperiencePage
                   message: t('已应用“快速观察”：30 秒，敏感产物采集关闭。', 'Applied Quick observe: 30 seconds, sensitive artifact collection off.')
                 },
                 standard: {
-                  seconds: 120,
+                  seconds: 30,
                   collectDroppedFiles: true,
                   captureScreenshots: true,
                   captureMemoryDumps: false,
                   capturePacketCapture: true,
-                  message: t('已应用“标准动态”：120 秒，采集落地文件、截图和 PCAP。', 'Applied Standard dynamic: 120 seconds with dropped files, screenshots, and PCAP.')
+                  message: t('已应用“标准动态”：30 秒，采集落地文件、截图和 PCAP。', 'Applied Standard dynamic: 30 seconds with dropped files, screenshots, and PCAP.')
                 },
                 evidence: {
                   seconds: 180,

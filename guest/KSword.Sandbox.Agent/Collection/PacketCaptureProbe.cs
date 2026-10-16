@@ -297,6 +297,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         AddRootProcessData(stopped, context);
         events.Add(stopped);
 
+        var conversionCommand = "pktmon etl2pcap <etl> -o <pcapng>";
         var convertResult = await BoundedProcessRunner.RunAsync(
             PktmonExecutable,
             [
@@ -307,6 +308,29 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             ],
             CommandTimeout,
             cancellationToken).ConfigureAwait(false);
+
+        // Windows 10 20H2 images in the lab can expose the older pcapng
+        // command even when pktmon start accepts the newer ETW switches. Try
+        // that spelling before declaring the packet lane unavailable.
+        if ((!convertResult.Succeeded || !File.Exists(session.PcapngPath)) &&
+            LooksLikeLegacyPktmonConversionFailure(convertResult))
+        {
+            var legacyConversionResult = await BoundedProcessRunner.RunAsync(
+                PktmonExecutable,
+                [
+                    "pcapng",
+                    session.EtlPath,
+                    "-o",
+                    session.PcapngPath
+                ],
+                CommandTimeout,
+                cancellationToken).ConfigureAwait(false);
+            if (legacyConversionResult.Succeeded && File.Exists(session.PcapngPath))
+            {
+                convertResult = legacyConversionResult;
+                conversionCommand = "pktmon pcapng <etl> -o <pcapng>";
+            }
+        }
 
         if (!convertResult.Succeeded || !File.Exists(session.PcapngPath))
         {
@@ -347,7 +371,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["fileCount"] = "1",
                 ["conversionStatus"] = "succeeded",
                 ["conversionTool"] = PktmonExecutable,
-                ["conversionCommand"] = "pktmon etl2pcap <etl> -o <pcapng>",
+                ["conversionCommand"] = conversionCommand,
                 ["conversionSourceFormat"] = "etl",
                 ["conversionTargetFormat"] = "pcapng",
                 ["etlPath"] = session.EtlPath,
@@ -383,6 +407,17 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         events.Add(captured);
         events.Add(CreateProtocolSummaryMetadataEvent(context, session, pcapInfo));
         return events;
+    }
+
+    private static bool LooksLikeLegacyPktmonConversionFailure(BoundedCommandResult result)
+    {
+        // Older builds report the missing etl2pcap verb as exit code 1 and
+        // localized stderr is unreliable over WinRM. Restrict the fallback
+        // to a failed command so a real conversion error is still surfaced.
+        return !result.Succeeded &&
+            (result.ExitCode == 1 ||
+             result.StandardError.Contains("etl2pcap", StringComparison.OrdinalIgnoreCase) ||
+             result.StandardOutput.Contains("etl2pcap", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

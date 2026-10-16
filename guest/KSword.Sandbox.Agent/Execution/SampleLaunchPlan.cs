@@ -11,5 +11,5 @@ internal sealed record SampleLaunchPlan
 
     public string WorkingDirectory { get; init; } = Environment.CurrentDirectory;
 
-    public TimeSpan Duration { get; init; } = TimeSpan.FromSeconds(120);
+    public TimeSpan Duration { get; init; } = TimeSpan.FromSeconds(30);
 }
