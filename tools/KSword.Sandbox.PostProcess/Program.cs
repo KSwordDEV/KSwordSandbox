@@ -61,7 +61,14 @@ internal static class PostProcessProgram
             var reportEvents = sampling.Events;
             var omittedReportEvents = sampling.OmittedEventCount;
 
-            var status = guestEvents.Count > 0 ? AnalysisStatus.Completed : AnalysisStatus.Failed;
+            // A static-only post-process run completed successfully even when
+            // no guest events were imported. Marking it Failed conflates an
+            // unavailable dynamic lane with a report-generation failure; the
+            // report renderer separately states that runtime evidence was not
+            // collected.
+            var status = guestEvents.Count > 0 || staticEvents.Count > 0
+                ? AnalysisStatus.Completed
+                : AnalysisStatus.Failed;
             var report = new AnalysisReport
             {
                 JobId = jobId,

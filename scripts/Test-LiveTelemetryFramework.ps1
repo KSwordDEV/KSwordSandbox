@@ -242,8 +242,12 @@ function Invoke-StaticContractChecks {
     Test-LiteralText -Content $executionFlowPage -Expected 'result?.ExitCode' -Name 'Execution-flow page exposes runbook exit code'
     Test-LiteralText -Content $executionFlowPage -Expected 'result.Message' -Name 'Execution-flow page exposes runbook step message'
 
-    Test-LiteralText -Content $dashboard -Expected 'Open served report' -Name 'Dashboard renders served report link'
-    Test-LiteralText -Content $dashboard -Expected 'Open local file' -Name 'Dashboard renders local report fallback link'
+    # The dashboard now uses the server-owned report route for every report
+    # link.  Keep the contract tied to the stable marker and the explicit
+    # not-ready state instead of obsolete button copy from the old local-file
+    # fallback UI.
+    Test-LiteralText -Content $dashboard -Expected 'data-report-current="true"' -Name 'Dashboard renders served report link'
+    Test-LiteralText -Content $dashboard -Expected 'Report not ready' -Name 'Dashboard renders report-not-ready state'
     Test-LiteralText -Content $dashboard -Expected 'guestImportPath' -Name 'Dashboard renders manual guest import path input'
     Test-LiteralText -Content $dashboard -Expected 'guest-events/import' -Name 'Dashboard calls manual guest import endpoint'
     Test-LiteralText -Content $dashboard -Expected 'JSON.stringify(explicitPath ? { eventsPath: explicitPath } : {})' -Name 'Dashboard sends optional manual guest import path JSON'
@@ -537,11 +541,14 @@ function Invoke-Main {
         Add-CheckResult -Name 'Runtime probe skipped' -Passed $true -Detail 'Provide -BaseUrl/-JobId or KSWORD_SMOKE_BASE_URL/KSWORD_SMOKE_JOB_ID without -ContractOnly to probe a running Web API.'
     }
 
-    $script:Results | Format-Table -AutoSize
+    # Keep formatting on the host stream.  Format-* emits formatting objects
+    # into the function pipeline; when Invoke-Main is used as the argument to
+    # `exit (...)`, those objects can mask the intended numeric exit code.
+    $script:Results | Format-Table -AutoSize | Out-Host
 
     if ($script:FailureCount -gt 0) {
         Write-Host "$($script:FailureCount) live telemetry framework check(s) failed." -ForegroundColor Red
-        $script:Results | Where-Object { -not $_.Passed } | Format-List
+        $script:Results | Where-Object { -not $_.Passed } | Format-List | Out-Host
         return 1
     }
 

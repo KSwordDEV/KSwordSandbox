@@ -99,7 +99,8 @@ public sealed class HtmlReportRenderer
         int CorrelationUnknown,
         int RetainedNotPromoted,
         int NormalInteractiveGuiBaseline,
-        int EvidenceDispositionRetainedNotPromoted);
+        int EvidenceDispositionRetainedNotPromoted,
+        int StaticOnlyEvidenceRows);
 
     private sealed record EvidenceNarrativeCard(
         string Step,
@@ -190,7 +191,7 @@ public sealed class HtmlReportRenderer
     };
 
     private static readonly Regex ChineseRawEvidenceFragmentRegex = new(
-        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<[^>]+>|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
+        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<option\\b[^>]*>[A-Za-z][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]*</option>|(?<![A-Za-z0-9_])(?:agent|guest|static|process|file|registry|network|r0|driver|artifact|startup|environment|service|scheduled_task|dns|vt|packet_capture|screenshot|memory_dump|api|security|etw|download)\\.[a-z0-9_.-]+|(?<![A-Za-z0-9_])report\\.(?:generated)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:behaviorCounted|nonbehavior|notSampleBehavior|collectorSelfNoise|collectorNoise|collectionHealthRows|vtQuietStates|r0HealthRows|sampleBehaviorEvents|excludedFromBehaviorStory|correlationConfirmed|correlationProbable|correlationEnvironment|correlationUnknown|retainedNotPromoted|normalInteractiveGuiBaseline|evidenceDispositionRetainedNotPromoted)(?![A-Za-z0-9_])|<[^>]+>|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
@@ -850,7 +851,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             correlationUnknown,
             events.Count(evt => IsWeakOrEnvironmentalSampleCorrelationEvent(evt) || IsNonBehaviorEvent(evt) || IsNotSampleBehaviorMarkerEvent(evt) || IsSampleBehaviorCandidateFalseEvent(evt) || TextEqualsAny(FirstEventDataValue(evt, "evidenceDisposition", "evidence_disposition") ?? string.Empty, "retained-not-promoted", "retained_not_promoted")),
             events.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "normalBehaviorBoundary", "sampleCorrelationBoundary") ?? string.Empty, "normal-interactive-gui-baseline")),
-            evidenceDispositionRetained);
+            evidenceDispositionRetained,
+            events.Count(IsStaticOnlyEvidenceEvent));
     }
 
     private static object BuildBehaviorRoutingStatsPayload(BehaviorRoutingStats stats) => new
@@ -871,6 +873,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         stats.RetainedNotPromoted,
         stats.NormalInteractiveGuiBaseline,
         stats.EvidenceDispositionRetainedNotPromoted,
+        stats.StaticOnlyEvidenceRows,
         correlation = new
         {
             confirmed = stats.CorrelationConfirmed,
@@ -908,6 +911,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
                 $"behaviorCountedFalse={behaviorCountedFalse}",
                 $"nonbehavior={nonBehavior}",
                 $"notSampleBehavior={notSampleBehavior}",
+                $"staticOnlyEvidenceRows={stats.StaticOnlyEvidenceRows}",
                 $"collectorSelfNoise={collectorSelfNoise}",
                 $"collectorNoise={stats.CollectorNoise}",
                 $"collectionHealthRows={stats.CollectionHealthRows}",
@@ -933,6 +937,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         html.AppendLine($"<span>behaviorCounted=false {E(behaviorCountedFalse.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>nonbehavior {E(nonBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>notSampleBehavior {E(notSampleBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>static-only evidence {E(stats.StaticOnlyEvidenceRows.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>collectorSelfNoise {E(collectorSelfNoise.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>VT quiet {E(vtQuiet.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>R0 health {E(r0Health.ToString(CultureInfo.InvariantCulture))}</span>");
@@ -7139,9 +7144,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
     private static bool IsSampleBehaviorEvent(SandboxEvent evt)
     {
         return !IsExcludedFromBehaviorStoryEvent(evt) &&
+            !IsStaticOnlyEvidenceEvent(evt) &&
             !IsCollectionHealthEvent(evt) &&
             !IsVirusTotalEvent(evt);
     }
+
+    private static bool IsStaticOnlyEvidenceEvent(SandboxEvent evt) =>
+        EventDataBoolTrue(evt, "staticOnly", "static_only") ||
+        evt.EventType.StartsWith("static.", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Determines whether an event is runtime telemetry rather than static PE
@@ -8234,6 +8244,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
             return ("Analysis failed", "high");
         }
 
+        if (IsStaticOnlyReport(report))
+        {
+            return ("Static analysis only", "info");
+        }
+
         var primaryFindings = PrimaryBehaviorFindings(report).ToList();
         if (CountSeverity(primaryFindings, "critical") > 0)
         {
@@ -8251,6 +8266,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         }
 
         return ("No high-risk behavior", "info");
+    }
+
+    private static bool IsStaticOnlyReport(AnalysisReport report)
+    {
+        return report.Events.Any(IsStaticOnlyEvidenceEvent) &&
+            !report.Events.Any(IsDynamicEvidenceEvent);
     }
 
     private static IEnumerable<BehaviorFinding> PrimaryBehaviorFindings(AnalysisReport report)
@@ -8724,11 +8745,115 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         }
 
         html = ChineseVisibleEventCountRegex.Replace(html, " 个事件");
+        // A few compact cards combine translated labels with interpolated
+        // values, so the general dictionary cannot match the whole sentence.
+        // Run this while raw evidence is still protected; machine-readable
+        // payloads and attributes are restored unchanged below.
+        html = NormalizeChineseVisibleFragments(html);
         html = RestoreChineseRawEvidenceFragments(html, protectedFragments);
+        // Closing tags are protected above, so run the visible count pass
+        // once more after raw fragments are restored. This keeps machine
+        // evidence text intact while localizing badges such as "21 events".
+        html = ChineseVisibleEventCountRegex.Replace(html, " 个事件");
         foreach (var (english, chinese) in ChineseCssTranslations)
         {
             html = html.Replace(english, chinese, StringComparison.Ordinal);
         }
+
+        html = NormalizeChineseRestoredChrome(html);
+
+        return html;
+    }
+
+    private static string NormalizeChineseRestoredChrome(string html)
+    {
+        var replacements = new (string English, string Chinese)[]
+        {
+            (">1 indexed<", ">1 已索引<"),
+            (">0 items<", ">0 项<"),
+            (">Title<", ">标题<"),
+            (">Type<", ">类型<"),
+            (">Role<", ">角色<"),
+            (">Name<", ">名称<"),
+            (">VA<", ">虚拟地址<"),
+            (">Entropy<", ">熵值<"),
+            (">Signal<", ">信号<"),
+            (">Flags<", ">标记<"),
+            (">Indicator<", ">指标<"),
+            (">No<", ">否<"),
+            (">No</option>", ">否</option>"),
+            (">否 MITRE ATT&CK techniques mapped yet.<", ">尚未映射 MITRE ATT&CK 技术。<"),
+            ("已索引证据包括落地文件=0, screenshots=0, 内存转储=0, 抓包=0. 主要选择器： events.json.", "已索引证据包括落地文件=0、截图=0、内存转储=0、抓包=0。主要选择器：events.json。"),
+            (">normal<", ">正常<"),
+            ("执行链路 is the anchor for attributing file, registry, 网络, startup, and artifact evidence to the sample instead / to sandbox plumbing.", "执行链路用于将文件、注册表、网络、启动项和证据文件归因到样本，而不是沙箱管道。"),
+            ("证据文件证据 readiness", "证据文件就绪状态"),
+            (", 采集器自噪声、VT 安静状态和 R0 健康/就绪诊断。这些行仍会在各自专用章节和原始规范化事件/report.json 中可见；原始分页和折叠证据保持不变。", "；采集器自噪声、VT 安静状态和 R0 健康/就绪诊断也仍在各自专用章节及原始规范化事件/report.json 中可见；原始分页和折叠证据保持不变。"),
+            ("Embedded IP-like 字符串已观察", "观察到内嵌 IP 类字符串"),
+            ("Structured <code>static.pe.resource</code> evidence highlights resourceRole, embedded-PE markers, entropy, and size so 候选载荷s are visible before opening raw 静态 events.", "结构化 <code>static.pe.resource</code> 证据突出 resourceRole、内嵌 PE 标记、熵值和大小，让候选载荷在打开原始静态事件前可见。"),
+            ("Normalized static.pe.resource 行 are preserved for behavior rules and raw evidence expansion.", "规范化 static.pe.resource 行会保留给行为规则和原始证据展开。"),
+            (">A static.yara.match row came from the built-in lightweight YARA-like engine. Treat it as 静态 signature triage until corroborated by runtime behavior.<", ">static.yara.match 行来自内置轻量 YARA-like 引擎；在运行时行为佐证前应作为静态签名分诊。<"),
+            (">No MITRE ATT&CK techniques mapped yet.<", ">尚未映射 MITRE ATT&CK 技术。<")
+        };
+
+        foreach (var (english, chinese) in replacements)
+        {
+            html = html.Replace(english, chinese, StringComparison.Ordinal);
+        }
+
+        return html;
+    }
+
+    private static string NormalizeChineseVisibleFragments(string html)
+    {
+        var replacements = new (string English, string Chinese)[]
+        {
+            ("Default report.html uses Simplified Chinese; report.en.html keeps English operator chrome.", "默认 report.html 使用简体中文；report.en.html 保留英文操作界面。"),
+            ("No JavaScript required for report navigation: native details, table scrolling, safe", "报告导航不依赖 JavaScript：原生 details、表格滚动、安全"),
+            ("artifact links and the print stylesheet remain usable.", "证据文件链接和打印样式仍可使用。"),
+            ("Copy buttons require JavaScript; without it, select visible evidence text or use report.json/raw source hints.", "复制按钮需要 JavaScript；无 JS 时请选中可见证据文本，或使用 report.json/原始来源提示。"),
+            ("Startup / 持久化 diff", "启动项 / 持久化差异"),
+            ("Graph self-noise boundary / 图谱自噪声边界", "图谱自噪声边界"),
+            ("样本行为 行 / 样本行为行:", "样本行为行："),
+            ("excluded 采集/信誉 行 / 已分离采集与信誉行:", "已分离采集与信誉行："),
+            ("Hint / 提示: these 行 remain copyable in R0/VT/Raw sections and report.json; graph cards do not promote them into 样本行为.", "提示：这些行仍可在 R0、VT 和原始事件章节及 report.json 中复制；图谱卡片不会将其提升为样本行为。"),
+            ("No runtime behavior 行 were promoted into graph/process/网络 sections.", "没有运行时行为行被纳入图谱、进程或网络章节。"),
+            ("Families kept out of sample behavior:", "未纳入样本行为的事件族："),
+            ("No explicit nonbehavior/self-noise 行 were observed.", "未观察到明确的非行为/自噪声行。"),
+            ("No matching evidence 行. Clear a filter or open 原始事件.", "没有匹配的证据行。请清除筛选条件或打开原始事件。"),
+            ("行为事实 before raw events.", "原始事件之前的行为事实。"),
+            ("This section groups normalized events into reviewer-facing facts. It does not remove evidence: raw normalized events, source JSON/JSONL, and artifact links remain 可用 later in the report.", "本节将规范化事件汇总为面向复核的事实，不会删除证据；原始规范化事件、来源 JSON/JSONL 和证据文件链接仍可在报告后部查看。"),
+            ("Startup 持久化 before/after diff", "启动项持久化前后差异"),
+            ("No startup.* or legacy startup diff 行 were collected or imported.", "未采集或导入 startup.* 及旧版启动项差异行。"),
+            ("落地文件 and user-writable writes are stronger evidence when paired with hashes, safe download selectors, or later 执行/startup references.", "落地文件与用户可写目录写入若同时具备哈希、安全下载选择器或后续执行/启动项关联，会形成更强证据。"),
+            ("Registry writes become more suspicious when they map to 持久化, credential access, policy weakening, COM hijack, IFEO, LSA, AppInit, or 其他 startup surfaces.", "注册表写入若关联持久化、凭据访问、策略削弱、COM 劫持、IFEO、LSA、AppInit 或其他启动面，风险会更高。"),
+            ("证据文件 turn event claims into reviewable evidence. Missing artifacts should be reported honestly as 采集 gaps rather than fabricated behavior.", "证据文件将事件声明转化为可复核证据；缺失证据应如实报告为采集缺口，不应伪造成样本行为。"),
+            ("memory dumps=", "内存转储="),
+            ("packet captures=", "抓包="),
+            ("Top selectors:", "主要选择器："),
+            ("A static.yara.match row came from the built-in lightweight YARA-like engine. Treat it as 静态 signature triage until corroborated by runtime behavior.", "static.yara.match 行来自内置轻量 YARA-like 引擎；在运行时行为佐证前应作为静态签名分诊。"),
+            ("Structured\nevidence highlights resourceRole, embedded-PE markers, entropy, and size so 候选载荷s are visible before opening raw 静态 events.", "结构化证据突出 resourceRole、内嵌 PE 标记、熵值和大小，让候选载荷在打开原始静态事件前可见。"),
+            ("Normalized static.pe.resource 行 are preserved for behavior rules and raw evidence expansion.", "规范化 static.pe.resource 行会保留给行为规则和原始证据展开。"),
+            ("No MITRE ATT&CK techniques mapped yet.", "尚未映射 MITRE ATT&CK 技术。")
+        };
+
+        foreach (var (english, chinese) in replacements)
+        {
+            html = html.Replace(english, chinese, StringComparison.Ordinal);
+        }
+
+        html = Regex.Replace(
+            html,
+            "(?<![A-Za-z])Events(?![A-Za-z])",
+            "事件",
+            RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "(?<![A-Za-z])Completed(?![A-Za-z])", "已完成", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "(?<![A-Za-z])No(?![A-Za-z])", "否", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "(?<=\\d) items\\b", " 项", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "(?<=\\d) indexed\\b", " 已索引", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "(?<=\\d) nodes\\b", " 个节点", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "(?<=\\d) artifacts\\b", " 个证据文件", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "(?<=\\d) captures\\b", " 个截图", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "(?<=\\d) dumps\\b", " 个转储", RegexOptions.CultureInvariant);
 
         return html;
     }
@@ -8787,6 +8912,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("<p class=\"muted\">Job ", "<p class=\"muted\">作业 "),
         (" generated at ", " 生成于 "),
         ("Analysis failed", "分析失败"),
+        ("Static analysis only", "仅静态分析"),
         ("No high-risk behavior", "未发现高风险行为"),
         ("Critical risk", "严重风险"),
         ("High risk", "高风险"),
@@ -8853,6 +8979,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Primary findings", "主要命中"),
         ("Rules that contribute to the sample verdict.", "会影响样本判定的规则。"),
         ("Sample behavior", "样本行为"),
+        ("Startup diff events", "启动项差异事件"),
+        ("Aggregated behavior facts", "行为事实汇总"),
         ("Events eligible for the behavior story.", "进入行为叙事的事件。"),
         ("Noise / diagnostics", "噪声 / 诊断"),
         ("Operational rows retained as evidence but excluded from the verdict.", "保留为证据但不计入判定的运行行。"),
@@ -8868,6 +8996,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Review static analysis and collection health", "检查静态分析和采集健康状态"),
         ("Open filtered event table", "打开筛选事件表"),
         ("Open failure log", "打开失败日志"),
+        ("No primary behavior rule matched; verify collection quality before concluding that the sample was quiet.", "未命中主要样本行为规则；请先核对采集质量，再判断样本是否没有继续活动。"),
         ("Copy analyst focus", "复制分析重点"),
         ("Key event explorer", "关键事件筛选器"),
         ("Review the signal first.", "先查看信号。"),
@@ -8888,7 +9017,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Search", "搜索"),
         ("All", "全部"),
         ("Yes", "是"),
-        ("No", "否"),
+        (">No<", ">否<"),
         ("Reset filters", "重置筛选"),
         ("visible rows; ", "可见行；"),
         (" report-only rows; ", " 报告专用行；"),
@@ -8914,9 +9043,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Collection/self-noise policy", "采集/自噪声策略"),
         ("Collection/self-noise policy.", "采集/自噪声策略。"),
         ("Behavior story counts exclude rows marked <code>behaviorCounted=false</code>, <code>nonbehavior</code>, <code>notSampleBehavior</code>, collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.", "行为叙事计数会排除标记为 <code>behaviorCounted=false</code>、<code>nonbehavior</code>、<code>notSampleBehavior</code>、采集器自噪声、VT 安静状态以及 R0 健康/就绪诊断的行。这些行仍会在各自专用章节和原始规范化事件/report.json 中可见；原始分页和折叠证据保持不变。"),
+        ("Behavior story counts exclude rows marked", "行为叙事会排除标记为"),
+        ("collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.", "采集器自噪声、VT 安静状态和 R0 健康/就绪诊断。这些行仍会在各自专用章节和原始规范化事件/report.json 中可见；原始分页和折叠证据保持不变。"),
         ("Behavior story counts exclude rows marked <code>behaviorCounted=false</code>, <code>nonbehavior</code>, collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.", "行为叙事计数会排除标记为 <code>behaviorCounted=false</code>、<code>nonbehavior</code>、采集器自噪声、VT 安静状态以及 R0 健康/就绪诊断的行。这些行仍会在各自专用章节和原始规范化事件/report.json 中可见；原始分页和折叠证据保持不变。"),
         ("Copy collection policy", "复制采集策略"),
         ("sample behavior", "样本行为"),
+        ("static-only evidence", "静态证据"),
         ("excluded union", "排除并集"),
         ("behaviorCounted=false", "behaviorCounted=false"),
         ("nonbehavior", "nonbehavior"),
@@ -9642,11 +9774,112 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
         ("Copy event", "复制事件"),
         ("All", "全部"),
         ("Yes", "是"),
-        ("No", "否"),
+        (">No<", ">否<"),
         ("Reset filters", "重置筛选"),
         ("Section", "章节"),
         ("Signal filter", "信号筛选"),
-        ("Start here", "从这里开始")
+        ("Start here", "从这里开始"),
+        // Keep the operator-facing narrative fully localized.  These strings
+        // are emitted by the summary/story cards (outside raw evidence
+        // <pre>/<code> blocks), so translating them here cannot alter the
+        // normalized telemetry values that remain copyable verbatim.
+        ("Behavior facts", "行为事实"),
+        ("Startup diff", "启动项差异"),
+        ("Startup diff events", "启动项差异事件"),
+        ("Aggregated behavior facts", "聚合行为事实"),
+        ("What happened:", "发生了什么："),
+        ("Why review:", "为什么需要复核："),
+        ("Execution and parent/child activity", "执行与父子进程活动"),
+        ("No sample-attributed process or process-access rows were embedded in this report view.", "此报告视图未内联归属于样本的进程或进程访问行。"),
+        ("New or modified autostart entries are high signal because they can survive reboot. User-writable targets, WMI subscriptions, drivers, services, IFEO, Winlogon, LSA, AppInit, Winsock, and shell-extension surfaces deserve priority review.", "新增或修改的自启动项可在重启后持续存在，属于高信号证据。用户可写目标、WMI 订阅、驱动、服务、IFEO、Winlogon、LSA、AppInit、Winsock 和 Shell 扩展面应优先复核。"),
+        ("Network communication scope", "网络通信范围"),
+        ("No sample-attributed DNS/HTTP/TLS/flow rows were embedded in this report view.", "此报告视图未内联归属于样本的 DNS/HTTP/TLS/流量行。"),
+        ("Network facts are grouped by endpoint/protocol so DNS, HTTP, TLS, PCAP, and R0 network rows do not overwhelm the reviewer as independent raw events.", "网络事实按端点和协议分组，避免 DNS、HTTP、TLS、PCAP 与 R0 网络行以独立原始事件形式淹没复核界面。"),
+        ("File and dropped-artifact activity", "文件与落地证据活动"),
+        ("No sample-attributed file writes or dropped-file artifacts were collected.", "未采集到归属于样本的文件写入或落地文件证据。"),
+        ("Registry mutation scope", "注册表变更范围"),
+        ("No sample-attributed registry mutation rows were embedded in this report view.", "此报告视图未内联归属于样本的注册表变更行。"),
+        ("R0/security gap-filling telemetry", "R0/安全补充遥测"),
+        ("No sample-attributed R0/security privilege rows were embedded in this report view.", "此报告视图未内联归属于样本的 R0/安全权限行。"),
+        ("R0 is treated as the primary source for process/image/kernel events; Windows Security/ETW-style rows fill privilege, service, task, object-access, and auxiliary gaps without being mixed with collector health.", "R0 作为进程/镜像/内核事件的主要来源；Windows Security/ETW 样式行用于补充权限、服务、任务、对象访问和辅助缺口，不与采集器健康状态混合。"),
+        ("Indexed artifacts include dropped files=", "已索引证据包括落地文件="),
+        ("Evidence files turn event claims into reviewable evidence. Missing artifacts should be reported honestly as collection gaps rather than fabricated behavior.", "证据文件将事件声明转化为可复核证据。缺失证据应如实报告为采集缺口，不应伪造成样本行为。"),
+        ("Weak-interaction graph / 弱交互图谱.", "弱交互图谱。"),
+        ("This section summarizes process, file, registry, network, security/privilege, and artifact relationships from normalized telemetry so the report remains stable without client-side graph libraries.", "本节从规范化遥测汇总进程、文件、注册表、网络、安全/权限和证据文件关系，无需客户端图谱库也能稳定呈现。"),
+        ("Hint / 提示: artifact badges show indexed evidence already present in report.json/artifact-index; self-noise stays in raw evidence, not sample behavior.", "提示：证据文件徽标表示 report.json/证据索引中已有的证据；自噪声保留在原始证据中，不计为样本行为。"),
+        ("Behavior story routing", "行为故事路由"),
+        ("The graph, process tree, network cards, file table, and registry table use only sample-behavior rows. Collection metadata, <code>nonbehavior</code>, <code>notSampleBehavior</code>, collector self-noise, VT quiet states, and R0 health remain visible in their own lanes and raw events.", "图谱、进程树、网络卡片、文件表和注册表表格只使用样本行为行。采集元数据、<code>nonbehavior</code>、<code>notSampleBehavior</code>、采集器自噪声、VT 安静状态和 R0 健康状态仍在各自通道及原始事件中可见。"),
+        ("Stable relationship lanes", "稳定关系通道"),
+        ("Weak-interaction lane map for process lineage, file paths, registry paths, network paths, and artifact proof. Counts and representative paths are visible before the dense edge table; complete edge evidence remains bounded below.", "进程谱系、文件路径、注册表路径、网络路径和证据文件证明的弱交互通道图。密集边表之前先展示计数和代表性路径；完整边证据在下方保持有界。"),
+        ("No inline evidence observed in this lane; check Raw normalized events/report.json and Artifact links for complete source data.", "此通道未观察到内联证据；请查看原始规范化事件/report.json 和证据文件链接获取完整来源数据。"),
+        ("R0 / VT / Artifact health narrative.", "R0 / VT / 证据文件健康叙事。"),
+        ("These health lanes explain evidence confidence separately from behavioral risk: R0 readiness, VT enrichment quality, and artifact selector/index integrity are visible, copyable, and bounded.", "这些健康通道独立于行为风险说明证据可信度：R0 就绪度、VT 增强质量和证据文件选择器/索引完整性均可见、可复制且有界。"),
+        ("VT enrichment", "VT 增强"),
+        ("not recorded", "未记录"),
+        ("not indexed", "未索引"),
+        ("rejections explained", "拒绝原因已说明"),
+        ("selectors ready", "选择器就绪"),
+        ("Artifact evidence cards.", "证据文件卡片。"),
+        ("Collection status, safe download selectors, duplicate grouping, and rejection diagnostics are summarized before the dense artifact table. Safe report-relative links can open or download; absolute host/guest paths remain copy-only evidence.", "密集证据文件表之前先汇总采集状态、安全下载选择器、重复分组和拒绝诊断。安全的报告相对链接可以打开或下载；主机/来宾绝对路径仅作为可复制证据。"),
+        ("Before/after startup diff.", "启动项前后差异。"),
+        ("This section shows aggregated startup facts projected from services, drivers, scheduled tasks, Run keys, Startup folders, WMI subscriptions, Winlogon, IFEO/SilentProcessExit, LSA, AppInit/AppCert, Winsock, shell extensions, Active Setup, time providers, print monitors, and Netsh helpers. If a surface is absent, the report says no rows were collected instead of inventing behavior.", "本节汇总从服务、驱动、计划任务、Run 键、启动文件夹、WMI 订阅、Winlogon、IFEO/SilentProcessExit、LSA、AppInit/AppCert、Winsock、Shell 扩展、Active Setup、时间提供程序、打印监视器和 Netsh 辅助项投影的启动事实。若某面不存在，报告会说明未采集到行，不会虚构行为。"),
+        ("No startup.* before/after diff rows were collected. This means the startup inventory did not observe created/modified/deleted entries in the inline report window, not that the sample cannot persist.", "未采集到 startup.* 前后差异行。这表示启动项清单在报告内联窗口中未观察到新建/修改/删除条目，不代表样本无法持久化。"),
+        ("Rows are split into ", "行拆分为 "),
+        (" native page(s), ", " 个原生分页，每页 "),
+        (" rows per page.", " 行。"),
+        ("Command lines, stdout/stderr, PowerShell, script blocks, and bulky values stay behind nested details.", "命令行、stdout/stderr、PowerShell、脚本块和大字段值保留在嵌套 details 中。"),
+        ("Raw source guide.", "原始来源指南。"),
+        ("report.json is a sampled normalized report view with findings and representative events; guest events, driver JSONL, and manifests are the complete original source artifacts when indexed. Safe report-relative paths get Open/Download buttons; host or guest absolute paths remain copy-only.", "report.json 是包含命中和代表性事件的采样规范化报告视图；索引存在时，来宾事件、驱动 JSONL 和 manifest 才是完整原始来源证据。安全的报告相对路径提供打开/下载按钮；主机或来宾绝对路径仅作为可复制证据。"),
+        ("Process relationship evidence / 进程关系证据.", "进程关系证据。"),
+        ("Cards summarize child, file, registry, network, and linked artifact evidence per stable process identity; long command lines stay folded and collector self-noise is excluded. Hint / 提示: artifact badges are compact proof anchors, while full descriptors remain in Artifact links and raw events.", "卡片按稳定进程身份汇总子进程、文件、注册表、网络和关联证据文件；长命令行保持折叠，采集器自噪声已排除。提示：证据文件徽标是紧凑证明锚点，完整描述保留在证据文件链接和原始事件中。"),
+        ("Network category view / 网络分类视图.", "网络分类视图。"),
+        ("Cards split DNS, HTTP, TLS, flow, and linked PCAP/source artifacts so endpoint relationships stay readable without opening raw rows. Hint / 提示: PCAP/source artifact badges only appear when current indexed data links them to the endpoint.", "卡片拆分 DNS、HTTP、TLS、流量和关联 PCAP/来源证据文件，使端点关系无需打开原始行也保持可读。提示：只有当前索引数据将 PCAP/来源证据关联到端点时，才显示对应徽标。"),
+        ("Process relationship evidence", "进程关系证据"),
+        ("Network category view", "网络分类视图"),
+        ("R0 self-noise events hidden from behavior graph", "已从行为图谱隐藏的 R0 自噪声事件"),
+        ("These health lanes explain evidence confidence separately from behavioral risk", "这些健康通道独立于行为风险说明证据可信度"),
+        ("Collection status, safe download selectors, duplicate grouping, and rejection diagnostics are summarized before the dense artifact table.", "密集证据文件表之前先汇总采集状态、安全下载选择器、重复分组和拒绝诊断。"),
+        ("Safe report-relative links can open or download; absolute host/guest paths remain copy-only evidence.", "安全的报告相对链接可以打开或下载；主机/来宾绝对路径仅作为可复制证据。")
+        ,("No sample-attributed evidence for this lane.", "此通道没有归属于样本的证据。")
+        ,("Copy behavior fact", "复制行为事实")
+        ,(">Virtual size<", ">虚拟大小<")
+        ,(">Raw size<", ">原始大小<")
+        ,(">RVA / file offset<", ">RVA / 文件偏移<")
+        ,("Imports, exports, resources, TLS, and indicators are grouped from", "导入、导出、资源、TLS 和指标分组来源：")
+        ,(", and prefixed", "，以及带前缀的")
+        ,("evidence so report JSON stays backward-compatible.", "证据，以保持 report JSON 向后兼容。")
+        ,("Created/modified:", "新建/修改：")
+        ,("Deleted:", "删除：")
+        ,("User-writable targets:", "用户可写目标：")
+        ,("lookups=", "查询=")
+        ,("statusIssues=", "状态问题=")
+        ,("downloadable=", "可下载=")
+        ,("duplicates=", "重复=")
+        ,("rejected=", "拒绝=")
+        ,("not observed", "未观察")
+        ,("shown ", "已显示 ")
+        ,("hidden ", "隐藏 ")
+        ,("GuestEventsJson / telemetry", "GuestEventsJson / 遥测")
+        ,(">Copy graph boundary<", ">复制图谱边界<")
+        ,(">No MITRE ATT&CK techniques mapped yet.<", ">尚未映射 MITRE ATT&CK 技术。<")
+        ,(">Windows GUI<", ">Windows 图形界面<")
+        ,(">Virtual size<", ">虚拟大小<")
+        ,(">Raw size<", ">原始大小<")
+        ,(">RVA / file offset<", ">RVA / 文件偏移<")
+        ,(">static.pe.resource normalized evidence (", ">静态 PE 资源规范化证据（")
+        ,(">collector ", ">采集器 ")
+        ,(">health ", ">健康 ")
+        ,(">behaviorCounted=false:", ">behaviorCounted=false：")
+        ,(">nonbehavior:", ">nonbehavior：")
+        ,(">notSampleBehavior:", ">notSampleBehavior：")
+        ,(">Rows beyond the inline cap stay out / HTML tables; the page index shows report.json-only row ranges.<", ">超过内联上限的行不会进入 HTML 表；页索引会显示仅在 report.json 中的行范围。<")
+        ,("Copy graph boundary", "复制图谱边界")
+        ,("No MITRE ATT&CK techniques mapped yet.", "尚未映射 MITRE ATT&CK 技术。")
+        ,("Windows GUI", "Windows 图形界面")
+        ,("Virtual size", "虚拟大小")
+        ,("Raw size", "原始大小")
+        ,("RVA / file offset", "RVA / 文件偏移")
+        ,("static.pe.resource normalized evidence", "静态 PE 资源规范化证据")
     ];
 
     private static readonly IReadOnlyList<(string English, string Chinese)> ChineseRuleHtmlTranslations =

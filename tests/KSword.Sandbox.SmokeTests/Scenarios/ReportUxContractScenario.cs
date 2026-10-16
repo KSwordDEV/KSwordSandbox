@@ -513,6 +513,13 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "打开", "Chinese HTML should localize artifact open buttons.");
         RequireContains(chineseHtml, "下载", "Chinese HTML should localize artifact download buttons.");
         RequireContains(chineseHtml, "命令行默认隐藏", "Chinese HTML should localize folded command-line details.");
+        RequireContains(chineseHtml, "启动项 / 持久化差异", "Chinese HTML should localize the startup diff navigation label.");
+        RequireContains(chineseHtml, "图谱自噪声边界", "Chinese HTML should explain the graph noise boundary in Chinese.");
+        RequireNotContains(chineseHtml, "not样本行为", "Chinese localization must not rewrite the notSampleBehavior technical key.");
+        RequireNotContains(chineseHtml, "collectorSelf否ise", "Chinese localization must not corrupt collectorSelfNoise.");
+        RequireNotContains(chineseHtml, "证据文件 turn event claims", "Chinese localization must not leave mixed narrative copy.");
+        RequireNotContains(chineseHtml, "Startup / 持久化 diff", "Chinese navigation must not leave the English startup diff label.");
+        RequireNotContains(chineseHtml, ">Title<", "Chinese tables must not leave the English Title header.");
         foreach (var expected in RequiredChineseSectionLabels())
         {
             RequireContains(chineseHtml, expected, $"Rendered Chinese report should include {expected}.");

@@ -85,3 +85,18 @@
 ### 修复后含构建质量门禁（2026-10-15 18:49 +08:00）
 
 `Test-QualityGates.ps1`（含 Debug build）重新生成 Abstractions/Core/SmokeTests，构建 **0 警告、0 错误**，3 个默认场景全部通过。说明前述 `report.ux.contract` 修复没有依赖旧二进制产物。
+
+### 当前候选复测（2026-10-15 22:55 +08:00）
+
+以下结果以当时已推送的 `7b400df` 为基线（复测开始时工作树干净），用于覆盖上文较早的历史快照；本段记录的监控脚本修复随后纳入最终提交：
+
+| 检查 | 当前结果 | 证据 |
+|---|---|---|
+| `dotnet build tests/KSword.Sandbox.SmokeTests/KSword.Sandbox.SmokeTests.csproj -c Release --no-restore` + 全 smoke | **通过** | Release 构建 0 警告、0 错误；全部场景输出 `Smoke tests passed.` |
+| `scripts/Test-QualityGates.ps1` | **通过** | 3 个默认离线质量门禁通过，构建 0 警告、0 错误。 |
+| `scripts/Test-ReleaseReadiness.ps1` | **通过** | 17 pass、0 warning、0 fail、2 skip；跳过项仅为未提供外部 runtime publish root 和默认不执行 light build。 |
+| `scripts/Invoke-LocalPipelineSmoke.ps1 -Configuration Release -NoBuild` | **通过** | `/health`、文件扫描、dry-run、live events、事件导入及中英文 HTML 报告均通过；Web stderr 为空。 |
+| `scripts/Test-LiveTelemetryFramework.ps1 -ContractOnly -RequireImplementedStream` | **通过** | SSE/polling、报告入口、手工导入及 dashboard 当前 server-owned 报告标记全部通过，退出码 0。 |
+| `run.ps1 -Mode CheckEnvironment -Json -NoBuild` | **通过（非 Live）** | `OverallStatus=ReadyForNonLive`、`WebUiReady=true`、`PlanOnlyReady=true`、`LiveReady=false`；明确报告硬件虚拟化未确认和 R0 host driver 缺失。 |
+
+本轮还修复了 `Test-LiveTelemetryFramework.ps1` 的返回码污染：格式化对象曾覆盖 `exit (...)` 的数值返回，导致“检查失败”仍返回 0；现已通过 `Out-Host` 隔离格式化输出，并把过时的 dashboard 文案检查换成当前 `data-report-current="true"`/`Report not ready` 契约。
