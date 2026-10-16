@@ -129,7 +129,14 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         {
             TrackRootProcess(context, current, phase, capturedAtUtc);
             RememberVisibleProcesses(current, phase, capturedAtUtc);
-            events.AddRange(CreateCurrentProcessSnapshotEvents(current, phase, context, capturedAtUtc));
+            // DuringRun is a high-frequency edge poll. Keep only new/tree
+            // evidence there; full environment snapshots remain at
+            // AfterStart/AfterRun so raw events do not balloon with repeated
+            // svchost/VMware/system rows.
+            if (phase != ProbePhase.DuringRun)
+            {
+                events.AddRange(CreateCurrentProcessSnapshotEvents(current, phase, context, capturedAtUtc));
+            }
             var rootTreeMetadata = CreateRootTreeMetadata(current, context);
 
             foreach (var process in current.Values.OrderBy(process => process.ProcessId).ThenBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase))
