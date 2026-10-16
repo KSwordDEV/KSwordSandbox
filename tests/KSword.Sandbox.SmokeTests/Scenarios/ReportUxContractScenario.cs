@@ -106,6 +106,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Copy event", "Report renderer should provide explicit copy buttons.");
         RequireContains(rendererSource, "Raw normalized events", "Report renderer should include raw event evidence.");
         RequireContains(rendererSource, "RawEventInlineLimit = 30", "Report renderer should cap inline raw event rendering to a slim release-ready sample.");
+        RequireContains(rendererSource, "EventExplorerQuickLinkCount", "Report renderer should label event explorer quick links with inline and total counts.");
+        RequireContains(rendererSource, "localized-evidence-field", "Report renderer should hide localized evidence fields from English report chrome.");
+        RequireContains(rendererSource, "No sample-attributed events of this type were found; see collection coverage for capture state.", "Report renderer should explain empty lanes without implying capture failure.");
+        RequireContains(rendererSource, "observed-empty", "Report renderer should distinguish observed-empty artifact lanes.");
+        RequireContains(rendererSource, "not-run", "Report renderer should distinguish artifact lanes that were not run.");
         RequireContains(rendererSource, "RawEventPageSize = 25", "Report renderer should page inline raw events into compact bounded chunks.");
         RequireContains(rendererSource, "AppendRawEventPages", "Report renderer should render native raw event pages.");
         RequireContains(rendererSource, "raw-events-shell", "Report renderer should collapse raw events with native HTML.");
@@ -345,6 +350,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(defaultHtml, "href=\"report.zh.html\"", "Default rendered HTML should link to report.zh.html.");
         RequireContains(defaultHtml, "href=\"report.en.html\"", "Default rendered HTML should link to report.en.html.");
         RequireContains(englishHtml, "Virtualization provider", "Rendered report covers should identify the selected provider.");
+        RequireContains(englishHtml, "href=\"#event-explorer\"", "Rendered report should expose the event explorer quick link.");
         RequireContains(englishHtml, "Qemu", "Rendered report covers should show the persisted provider value.");
         RequireContains(englishHtml, "Target VM", "Rendered report covers should identify the effective VM target.");
         RequireContains(englishHtml, "contract-qemu", "Rendered report covers should show the effective VM target value.");
