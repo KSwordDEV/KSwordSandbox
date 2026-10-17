@@ -32,6 +32,7 @@ public static class GuestFailureArtifactImporter
         var pidPath = FindNewest(root, "agent.pid");
         var eventsPath = FindNewest(root, "events.json");
         var summaryPath = FindNewest(root, "agent-summary.json");
+        var preflightPath = FindNewest(root, "guest-output-preflight.json");
         var r0FailurePath = FindNewest(root, "driver-events.jsonl.failure.json");
         var rows = new List<SandboxEvent>();
 
@@ -42,12 +43,44 @@ public static class GuestFailureArtifactImporter
         var missing = status?.MissingArtifacts ?? [];
         var hasAgentMarker = statusPath is not null || stderrPath is not null || exitPath is not null || pidPath is not null || summaryPath is not null;
         var hasR0Failure = r0FailurePath is not null;
+        var preflight = preflightPath is null ? null : ReadOutputPreflight(preflightPath);
+        var preflightFailed = preflight is not null &&
+            !string.Equals(preflight.State, "ready", StringComparison.OrdinalIgnoreCase);
         // Offline fixtures and older externally-produced events.json files do
         // not necessarily carry the Agent marker set. Do not invent a missing
         // summary failure for those already-complete event streams.
-        if (!hasAgentMarker && !hasR0Failure)
+        if (!hasAgentMarker && !hasR0Failure && !preflightFailed)
         {
             return rows;
+        }
+
+        if (preflightFailed && preflight is not null && preflightPath is not null)
+        {
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["collectionHealth"] = "true",
+                ["captureState"] = "failed",
+                ["status"] = "failed",
+                ["failureType"] = "guestOutputInsufficientSpace",
+                ["agentFailure"] = "true",
+                ["outputSpacePreflightFailure"] = "true",
+                ["preflightState"] = preflight.State ?? string.Empty,
+                ["availableFreeBytes"] = preflight.AvailableFreeBytes.ToString(CultureInfo.InvariantCulture),
+                ["requiredFreeBytes"] = preflight.RequiredFreeBytes.ToString(CultureInfo.InvariantCulture),
+                ["volumeRoot"] = preflight.VolumeRoot ?? string.Empty,
+                ["agentOutputRoot"] = preflight.OutputRoot ?? root,
+                ["preflightPath"] = preflightPath
+            };
+            if (!string.IsNullOrWhiteSpace(preflight.CheckedAtUtc))
+            {
+                values["checkedAtUtc"] = preflight.CheckedAtUtc!;
+            }
+
+            rows.Add(CreateFailureRow(
+                "guest.output.preflight.failed",
+                preflightPath,
+                values,
+                "来宾输出卷可用空间低于 Agent/R0 共享保留阈值；样本未启动，动态结果不可判定。"));
         }
 
         if (hasAgentMarker && missing.Count == 0)
@@ -316,6 +349,30 @@ public static class GuestFailureArtifactImporter
         }
     }
 
+    private static OutputPreflightSnapshot? ReadOutputPreflight(string path)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path), JsonOptions);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            return new OutputPreflightSnapshot(
+                ReadString(document.RootElement, "state"),
+                ReadString(document.RootElement, "outputRoot"),
+                ReadString(document.RootElement, "volumeRoot"),
+                ReadLong(document.RootElement, "availableFreeBytes"),
+                ReadLong(document.RootElement, "requiredFreeBytes"),
+                ReadString(document.RootElement, "checkedAtUtc"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return new OutputPreflightSnapshot("invalid-preflight-json", null, null, 0, 0, null);
+        }
+    }
+
     private static string? FindNewest(string root, string fileName)
     {
         try
@@ -392,4 +449,12 @@ public static class GuestFailureArtifactImporter
     }
 
     private sealed record StatusSnapshot(string? State, string? CapturedAtUtc, long StdoutBytes, long StderrBytes, List<string> MissingArtifacts);
+
+    private sealed record OutputPreflightSnapshot(
+        string? State,
+        string? OutputRoot,
+        string? VolumeRoot,
+        long AvailableFreeBytes,
+        long RequiredFreeBytes,
+        string? CheckedAtUtc);
 }

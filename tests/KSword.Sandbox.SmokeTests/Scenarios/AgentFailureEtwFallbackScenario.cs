@@ -27,6 +27,17 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
         }));
         File.WriteAllText(Path.Combine(root, "agent.stderr.log"), "disk full\r\n");
         File.WriteAllText(Path.Combine(root, "agent.exit"), "1\r\n");
+        File.WriteAllText(Path.Combine(root, "guest-output-preflight.json"), JsonSerializer.Serialize(new
+        {
+            schema = "ksword.guest-output-preflight.v1",
+            state = "insufficient-space",
+            outputRoot = root,
+            volumeRoot = "C:\\",
+            availableFreeBytes = 0L,
+            requiredFreeBytes = 134217728L,
+            reserveSource = "driver.r0CollectorMinFreeOutputBytes",
+            checkedAtUtc = DateTimeOffset.UtcNow.ToString("O")
+        }));
         File.WriteAllText(Path.Combine(etw, "sample.xml"), """
             <Events><Event><System><Provider Name="Microsoft-Windows-Kernel-Process"/><EventID>1</EventID><TimeCreated SystemTime="2026-01-01T00:00:00Z"/><Execution ProcessID="4242" ThreadID="11"/></System><RenderingInfo><Task>Process</Task><Opcode>Start</Opcode><EventName>ProcessStart</EventName></RenderingInfo><EventData><Data Name="ProcessId">4242</Data><Data Name="ParentProcessId">4</Data><Data Name="ImageFileName">sample.exe</Data></EventData></Event><Event><System><Provider Name="Microsoft-Windows-Kernel-Image"/><EventID>5</EventID><TimeCreated SystemTime="2026-01-01T00:00:01Z"/><Execution ProcessID="4242" ThreadID="11"/></System><RenderingInfo><Task>Image</Task><Opcode>Load</Opcode></RenderingInfo><EventData><Data Name="ProcessId">4242</Data><Data Name="ImageFileName">payload.dll</Data></EventData></Event><Event><System><Provider Name="Microsoft-Windows-Kernel-Process"/><EventID>2</EventID><TimeCreated SystemTime="2026-01-01T00:00:02Z"/><Execution ProcessID="4242" ThreadID="11"/></System><RenderingInfo><Task>Process</Task><Opcode>Stop</Opcode><EventName>ProcessExit</EventName></RenderingInfo><EventData><Data Name="ProcessId">4242</Data><Data Name="ExitStatus">1</Data></EventData></Event></Events>
             """);
@@ -39,6 +50,9 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
 
         var failures = GuestFailureArtifactImporter.Import(root);
         SmokeAssert.True(failures.Any(evt => evt.EventType == "agent.run.failed"), "Agent status/stderr/exit must produce a structured failure row.");
+        var preflightFailure = failures.Single(evt => evt.EventType == "guest.output.preflight.failed");
+        SmokeAssert.True(preflightFailure.Data["outputSpacePreflightFailure"] == "true", "Low guest output space must remain a distinct collection-health failure.");
+        SmokeAssert.True(preflightFailure.Data["availableFreeBytes"] == "0" && preflightFailure.Data["requiredFreeBytes"] == "134217728", "Output preflight must preserve measured and required free-space diagnostics.");
         var runbookPath = Path.Combine(context.RuntimeRoot, "agent-failure-etw", "runbook-execution.json");
         File.WriteAllText(runbookPath, JsonSerializer.Serialize(new SandboxRunbookExecutionResult
         {
