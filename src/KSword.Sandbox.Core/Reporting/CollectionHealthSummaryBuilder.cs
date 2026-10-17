@@ -66,7 +66,12 @@ public static class CollectionHealthSummaryBuilder
         var etwLossRows = raw.Where(IsEtwLossRow).ToList();
         var driverLossRows = raw.Where(IsDriverLossRow).ToList();
         var driverHealthRows = raw.Where(IsDriverHealthRow).ToList();
-        var failureRows = raw.Where(evt => IsFailureRow(evt, raw)).ToList();
+        // Keep the complete event context when classifying health rows. A
+        // timed sample's process.exit lives in the health lane, while its
+        // preceding process.timeout is a normal behavior row and is therefore
+        // not present in `raw`; dropping that context would misclassify the
+        // expected executor kill as an Agent failure.
+        var failureRows = raw.Where(evt => IsFailureRow(evt, rawEvents)).ToList();
         var omitted = Math.Max(0, raw.Count - report.Count);
         var driverQueueDepth = MaxDataUnsigned(driverHealthRows, DriverQueueDepthKeys);
         // A startup POLL/GET_STATUS snapshot is not the unread tail at stop.
@@ -85,8 +90,8 @@ public static class CollectionHealthSummaryBuilder
         var outputWriteFailureRows = raw.Count(IsOutputWriteFailureRow);
         var etwFailureRows = raw.Count(IsEtwFailure);
         var pcapFailureRows = raw.Count(IsPcapFailure);
-        var agentFailureRows = raw.Count(evt => IsAgentFailure(evt, raw));
-        var processTreeUnavailableRows = raw.Count(evt => IsProcessTreeUnavailableFailure(evt, raw));
+        var agentFailureRows = raw.Count(evt => IsAgentFailure(evt, rawEvents));
+        var processTreeUnavailableRows = raw.Count(evt => IsProcessTreeUnavailableFailure(evt, rawEvents));
         var stateReasons = BuildStateReasons(
             raw,
             driverHealthRows.Count,
