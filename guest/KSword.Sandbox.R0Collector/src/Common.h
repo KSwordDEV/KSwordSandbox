@@ -30,7 +30,10 @@ inline constexpr ULONG kReadEventsMaxEvents = 8192U;
 inline constexpr ULONG kAutomaticProducerEnableMask =
     KSWORD_SANDBOX_PRODUCER_MASK_CURRENT &
     ~KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS;
-inline constexpr size_t kMaxPayloadHexBytes = 256U;
+// Typed payload fields carry the behavior-relevant values. Keep only a short
+// opaque preview on every live row; the full contract and loss counters remain
+// in lifecycle rows and the host retains the complete JSONL stream.
+inline constexpr size_t kMaxPayloadHexBytes = 32U;
 inline constexpr int kSyntheticStressSequenceStart = 1200;
 inline constexpr int kSyntheticSemanticSequenceStart = 1100;
 inline constexpr int kSyntheticSemanticSelfCheckRows = 6;

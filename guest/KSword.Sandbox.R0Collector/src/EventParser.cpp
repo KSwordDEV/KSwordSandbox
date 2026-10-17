@@ -5156,17 +5156,15 @@ bool ShouldEmitCompactDriverField(
     // JSONL artifact, while this row contract retains every typed behavior
     // field consumed by the host report.
     if (contains({
-        "producer", "eventOrigin", "producerCategory", "subjectKind", "actorRole", "subjectRole",
-        "sequence", "sequenceMeaning", "sequenceConcrete", "sampleBehaviorCandidate",
+        "producer", "eventOrigin", "producerCategory", "sequence", "sequenceMeaning", "sequenceConcrete",
+        "sampleBehaviorCandidate",
         "sampleBehaviorCandidateReason", "behaviorCounted", "nonbehavior", "noise", "collectorNoise",
         "collectorSelfNoise", "selfProcess", "selfNoise", "collectorSuppressed", "lost", "lossObserved",
         "loss", "lostCount", "backpressure", "backpressureObserved", "backpressureReason",
-        "queueHighWatermark", "highWatermark", "lastEnqueueFailureStatus", "batchIndex", "recordOffset",
-        "version", "recordSize", "driverEventType", "driverEventTypeName", "flags", "timestampQpc",
-        "driverProcessId", "driverThreadId", "payloadSize", "payloadHexBytes", "payloadTruncated",
-        "payloadHex", "typedPayloadParsed", "payloadVersionStatus", "payloadSchema", "payloadSchemaExpected",
-        "r0CoverageCategory", "r0CoverageState", "r0CoverageKnownGaps", "r0ReadinessContribution",
-        "operationName", "status", "pathTruncated", "typedPayloadKind", "typedPayloadStatus",
+        "recordSize", "driverEventType", "driverEventTypeName", "flags", "driverProcessId",
+        "payloadSize", "payloadHexBytes", "payloadTruncated", "payloadHex", "typedPayloadParsed",
+        "payloadSchema", "typedPayloadKind", "typedPayloadStatus", "r0CoverageCategory", "r0CoverageState",
+        "operationName", "status", "pathTruncated",
         "semanticFamily", "behaviorLane", "activityKind", "evidenceReady", "operation", "operationFailed",
         "statusHex", "processId", "path"})) {
         return true;
