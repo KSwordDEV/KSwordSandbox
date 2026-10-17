@@ -849,8 +849,13 @@ html[lang="en"] .localized-evidence-field{display:none}
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        var rows = report.Events
+        // Build the filter universe before applying the inline/overflow
+        // rendering cap. Filters therefore describe the complete dynamic
+        // evidence population, while the table may still show compact rows.
+        var explorerEvents = report.Events
             .Where(IsEventExplorerEvent)
+            .ToList();
+        var rows = explorerEvents
             .OrderByDescending(IsKeyOperationalEvent)
             .ThenBy(evt => evt.Timestamp)
             .Select(evt => new EventExplorerRow(
@@ -868,8 +873,8 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Select(group => group.First())
             .ToList();
         var renderRows = rows.Take(inlineRows).Concat(overflowRows).ToList();
-        var types = rows.Select(row => row.Event.EventType).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
-        var sources = rows.Select(row => string.IsNullOrWhiteSpace(row.Event.Source) ? "unknown" : row.Event.Source).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
+        var types = explorerEvents.Select(evt => evt.EventType).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
+        var sources = explorerEvents.Select(evt => string.IsNullOrWhiteSpace(evt.Source) ? "unknown" : evt.Source).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var stages = rows.Select(row => row.Stage).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var families = rows.Select(row => row.Family).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var severities = rows.Select(row => row.Severity).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(SeverityRank).ToList();
