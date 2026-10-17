@@ -495,21 +495,29 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .event-explorer-toolbar input,.modern-sandbox-report .event-explorer-toolbar select{border:0;border-radius:0;box-shadow:inset 0 0 0 1px #c9e0ef;min-height:36px;padding:7px 10px}
 .modern-sandbox-report .event-explorer-toolbar input:focus,.modern-sandbox-report .event-explorer-toolbar select:focus{box-shadow:0 0 0 3px rgba(47,143,189,.2);outline:0}
 .modern-sandbox-report .event-explorer-wrap{background:#eef4f8;border:0;border-radius:0;max-height:70vh;padding:10px}
-.modern-sandbox-report .event-explorer-table{border-collapse:separate;border-spacing:0 6px;min-width:1080px}
-.modern-sandbox-report .event-explorer-table th{background:#dbeef8;border:0;color:#24516b;padding:12px 11px;text-transform:none}
-.modern-sandbox-report .event-explorer-table td{background:#fff;border:0;padding:13px 11px;vertical-align:top}
+.modern-sandbox-report .event-explorer-table{border-collapse:separate;border-spacing:0 2px;min-width:960px;table-layout:fixed}
+.modern-sandbox-report .event-explorer-table th{background:#dbeef8;border:0;color:#24516b;padding:7px 9px;text-transform:none;white-space:nowrap}
+.modern-sandbox-report .event-explorer-table td{background:#fff;border:0;line-height:1.3;padding:6px 9px;vertical-align:top}
 .modern-sandbox-report .event-explorer-table tbody tr[data-severity="critical"] td,.modern-sandbox-report .event-explorer-table tbody tr[data-severity="high"] td{background:#fff2f0}
 .modern-sandbox-report .event-explorer-table tbody tr[data-severity="medium"] td{background:#fff9e8}
 .modern-sandbox-report .event-explorer-table tbody tr[data-severity="low"] td{background:#effbf4}
 .modern-sandbox-report .event-explorer-table tbody tr td:first-child{border-radius:0}
 .modern-sandbox-report .event-explorer-table tbody tr td:last-child{border-radius:0}
-.modern-sandbox-report .event-explorer-details{display:block;min-width:460px;width:100%}
-.modern-sandbox-report .event-explorer-details summary{background:#eaf5fb;border:0;border-radius:0;color:#1f5e7b;min-height:42px;padding:10px 12px}
-.modern-sandbox-report .event-explorer-detail{background:#f7fbfe;border:0;border-radius:0;margin-top:8px;max-height:60vh;min-height:220px;min-width:0;overflow:auto;padding:16px 18px;width:100%}
-.modern-sandbox-report .event-explorer-detail pre,.modern-sandbox-report .event-explorer-detail code{font-size:13px;line-height:1.6}
+.modern-sandbox-report .event-explorer-details{display:block;min-width:0;width:100%}
+.modern-sandbox-report .event-explorer-details summary{background:#eaf5fb;border:0;border-radius:0;color:#1f5e7b;min-height:0;overflow:hidden;padding:6px 8px;text-overflow:ellipsis;white-space:nowrap}
+.modern-sandbox-report .event-explorer-detail{background:#f7fbfe;border:0;border-radius:0;margin-top:3px;max-height:42vh;min-height:0;min-width:0;overflow:auto;padding:8px 10px;width:100%}
+.modern-sandbox-report .event-explorer-detail pre,.modern-sandbox-report .event-explorer-detail code{font-size:12px;line-height:1.4}
 .modern-sandbox-report .ui-field-label{font-weight:800;color:#24516b}
-.modern-sandbox-report .event-explorer-detail .event-evidence-fields{max-height:44vh;overflow:auto}
-.modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:460px;width:42%}
+.modern-sandbox-report .event-explorer-detail .event-evidence-fields{max-height:none;overflow:visible}
+.modern-sandbox-report .event-explorer-table td:nth-child(1){width:10.5rem;white-space:nowrap}
+.modern-sandbox-report .event-explorer-table td:nth-child(2){width:9rem}
+.modern-sandbox-report .event-explorer-table td:nth-child(3){width:6rem}
+.modern-sandbox-report .event-explorer-table td:nth-child(4),.modern-sandbox-report .event-explorer-table td:nth-child(5),.modern-sandbox-report .event-explorer-table td:nth-child(6){min-width:4.5rem;width:4.5rem;white-space:nowrap;word-break:keep-all;overflow-wrap:normal;writing-mode:horizontal-tb}
+.modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:360px;width:38%}
+.modern-sandbox-report .event-explorer-table .chip{align-items:center;display:inline-flex;justify-content:center;line-height:1.2;min-width:3.2em;text-align:center;white-space:nowrap;word-break:keep-all;overflow-wrap:normal}
+.modern-sandbox-report .event-evidence-fields>summary,.modern-sandbox-report .raw-technical-fields>summary,.modern-sandbox-report .raw-technical-field>summary{line-height:1.25;padding:3px 0;white-space:nowrap}
+.modern-sandbox-report .event-evidence-fields,.modern-sandbox-report .raw-technical-fields,.modern-sandbox-report .raw-technical-field{margin-top:4px;padding-top:2px}
+.modern-sandbox-report .event-evidence-fields .raw-field-list{margin-top:3px}
 .modern-sandbox-report .copy-hint{display:none}
 .modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn{background:#e6f4fb;border:0;border-radius:0;color:#1e6385;padding:7px 11px}
 .modern-sandbox-report .badge,.modern-sandbox-report .chip{border:0;border-radius:0}
@@ -919,7 +927,6 @@ html[lang="en"] .localized-evidence-field{display:none}
         var severities = rows.Select(row => row.Severity).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(SeverityRank).ToList();
 
         html.AppendLine("<section id=\"event-explorer\" class=\"card\"><h2>Key event explorer</h2>");
-        html.AppendLine("<div class=\"section-note\"><strong>Review the signal first.</strong> Search or filter by event type, source, stage, severity, and sample-behavior status. Evidence disposition separates confirmed/probable sample links, unattributed observations, and collection diagnostics. Unattributed observations remain in raw evidence and appear when that disposition is selected.</div>");
         AppendCollectionCoverageBanner(html, report, explorerEvents);
         html.AppendLine("<div class=\"event-explorer-toolbar\">");
         html.AppendLine("<label>Search <input type=\"search\" data-event-search placeholder=\"type, path, process, target\"></label>");
@@ -932,7 +939,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("<label>Sample behavior <select data-event-sample><option value=\"all\">All</option><option value=\"true\">Yes</option><option value=\"false\">No</option></select></label>");
         html.AppendLine("<button type=\"button\" class=\"focus-action secondary\" data-event-reset>Reset filters</button>");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"event-explorer-status\" data-event-count>{E(inlineRowsSelected.Count.ToString(CultureInfo.InvariantCulture))} visible evidence rows; {E(hidden.ToString(CultureInfo.InvariantCulture))} more evidence rows are available in the report and can be revealed by filtering. Overflow rows use compact representatives; raw JSON/JSONL retains every event.</div>");
+        html.AppendLine($"<div class=\"event-explorer-status\" data-event-count>{E(inlineRowsSelected.Count.ToString(CultureInfo.InvariantCulture))} visible rows</div>");
         if (rows.Count == 0)
         {
             Empty(html, "No dynamic evidence rows were retained for the event explorer.");
@@ -958,8 +965,8 @@ html[lang="en"] .localized-evidence-field{display:none}
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
                 html.AppendLine($"<td><code>{E(evt.EventType)}</code></td><td>{E(string.IsNullOrWhiteSpace(evt.Source) ? "unknown" : evt.Source)}</td><td><span class=\"chip chip-info\">{E(row.Stage)}</span></td><td><span class=\"chip chip-{E(NormalizeSeverity(row.Severity))}\">{E(row.Severity)}</span></td><td><span class=\"chip chip-{E(EventDispositionCss(row.Disposition))}\">{E(row.Disposition)}</span>{(string.IsNullOrWhiteSpace(exitCode) ? string.Empty : $" <code class=\"exit-code\">{E(exitCode)}</code>")}</td>");
                 var detail = overflow
-                    ? $"<div class=\"muted\">Detailed fields remain in the raw event JSON; use the compact row to identify this event.</div>{RenderProcessExitOutcome(evt)}"
-                    : $"<div class=\"muted\">{E(DisplayEventTarget(evt, target))}</div>{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyButton("Copy event", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>";
+                    ? RenderProcessExitOutcome(evt)
+                    : $"{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyButton("Copy", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>";
                 html.AppendLine($"<td><details class=\"event-explorer-details\"><summary>{E(evt.ProcessName ?? target ?? "Open evidence")}</summary><div class=\"event-explorer-detail\">{detail}</div></details></td>");
                 html.AppendLine("</tr>");
             }
@@ -7233,9 +7240,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     private static void AppendTechnicalPathRow(StringBuilder html, string label, string value)
     {
         var hint = SafePathLeaf(value);
-        var summary = string.IsNullOrWhiteSpace(hint)
-            ? "Technical path hidden by default"
-            : $"Technical path hidden by default ({hint})";
+        var summary = string.IsNullOrWhiteSpace(hint) ? "Path" : hint;
         var disclosure = RenderTechnicalDisclosure(summary, value);
         html.AppendLine($"<tr><th>{E(label)}</th><td>{disclosure}</td></tr>");
     }
@@ -10009,7 +10014,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             return string.Empty;
         }
 
-        return $"<details class=\"technical-field\"><summary>{E(TechnicalFieldLabel(label))} hidden by default ({E(value.Length.ToString())} chars)</summary><pre class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</pre></details>";
+        return $"<details class=\"technical-field\"><summary>{E(TechnicalFieldLabel(label))}</summary><pre class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</pre></details>";
     }
 
     /// <summary>
@@ -10035,7 +10040,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         var html = new StringBuilder();
-        html.Append($"<details class=\"event-evidence-fields\" data-copy=\"{A(EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300))}\"><summary>Evidence fields ({compactFields.Count} compact / {technicalFields.Count} folded technical)</summary>");
+        html.Append($"<details class=\"event-evidence-fields\" data-copy=\"{A(EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300))}\"><summary>Evidence</summary>");
         var processExitContext = BuildProcessExitCodeContext(evt);
         if (!string.IsNullOrWhiteSpace(processExitContext))
         {
@@ -10076,13 +10081,13 @@ html[lang="en"] .localized-evidence-field{display:none}
 
             if (technicalFields.Count > 0)
             {
-                html.Append($"<details class=\"raw-technical-fields\"><summary>Command/stdout/stderr/PowerShell fields hidden by default ({technicalFields.Count})</summary>");
+                html.Append("<details class=\"raw-technical-fields\"><summary>Technical fields</summary>");
                 foreach (var field in technicalFields)
                 {
                     var boundedValue = FormatBoundedEvidenceFieldValue(field.Label, field.Value, 1_200);
                     var copy = $"{field.Label}={boundedValue}";
                     var localizedClass = IsLocalizedEvidenceField(field.Label) ? " localized-evidence-field" : string.Empty;
-                    html.Append($"<details class=\"raw-technical-field{localizedClass}\"><summary>Hidden technical field: {E(TechnicalFieldLabel(field.Label))} ({E(field.Value.Length.ToString())} chars)</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+                    html.Append($"<details class=\"raw-technical-field{localizedClass}\"><summary>{E(TechnicalFieldLabel(field.Label))}</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
                 }
 
                 html.Append("</details>");
@@ -10388,7 +10393,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         // runs so raw evidence tags remain byte stable. Translate this
         // operator-facing search hint after those fragments are restored.
         html = html.Replace("placeholder=\"type, path, process, target\"", "placeholder=\"事件类型、路径、进程或目标\"", StringComparison.Ordinal);
-        html = html.Replace(">Copy<", ">复制<", StringComparison.Ordinal);
+        html = html.Replace(">Copy</button>", ">复制</button>", StringComparison.Ordinal);
         // The cover status value is wrapped explicitly so this replacement
         // localizes the UI label without touching same-named evidence values.
         html = html.Replace("ui-status-value\">Failed", "ui-status-value\">失败", StringComparison.Ordinal);
