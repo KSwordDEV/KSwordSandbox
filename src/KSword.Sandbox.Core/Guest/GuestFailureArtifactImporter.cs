@@ -367,6 +367,30 @@ public static class GuestFailureArtifactImporter
         return new SandboxEvent { EventType = eventType, Source = "guest-agent", Path = path, Data = values };
     }
 
+    private static SandboxEvent CreateSampleRuntimeFailureRow(
+        string path,
+        Dictionary<string, string> values,
+        string hint)
+    {
+        values["behaviorCounted"] = "false";
+        values["nonbehavior"] = "true";
+        values["notSampleBehavior"] = "true";
+        values["sampleBehaviorCandidate"] = "false";
+        values["eventKind"] = "diagnostic";
+        values["evidenceRole"] = "collection-diagnostic";
+        values["sourceComponent"] = "runbook-preflight";
+        values["failureReason"] = "sample-runtime-preflight-failed";
+        values["zhMessage"] = "样本运行环境预检失败，样本未执行，动态结果不可判定。";
+        values["zhHint"] = hint;
+        return new SandboxEvent
+        {
+            EventType = "sample.runtime.preflight.failed",
+            Source = "host",
+            Path = path,
+            Data = values
+        };
+    }
+
     private static StatusSnapshot? ReadStatus(string path)
     {
         try
@@ -410,6 +434,41 @@ public static class GuestFailureArtifactImporter
         }
     }
 
+    private static SampleRuntimePreflightSnapshot? ReadSampleRuntimePreflight(string path)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path), JsonOptions);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var root = document.RootElement;
+            return new SampleRuntimePreflightSnapshot(
+                ReadString(root, "state"),
+                ReadString(root, "failureCode"),
+                ReadString(root, "sampleFileName"),
+                ReadString(root, "guestNetFx3State"),
+                ReadString(root, "error"),
+                ReadBool(root, "managedClrDetected"),
+                ReadBool(root, "legacyClrDetected"),
+                ReadBool(root, "guestSamplePresent"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return new SampleRuntimePreflightSnapshot(
+                "preflight-error",
+                "sample-runtime-preflight-json-invalid",
+                Path.GetFileName(path),
+                "query-failed",
+                "sample-runtime-preflight.json could not be parsed",
+                false,
+                false,
+                false);
+        }
+    }
+
     private static string? FindNewest(string root, string fileName)
     {
         try
@@ -419,6 +478,19 @@ public static class GuestFailureArtifactImporter
                 .FirstOrDefault();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    private static string? FindNewestParent(string root, string fileName)
+    {
+        try
+        {
+            var parent = Directory.GetParent(Path.GetFullPath(root))?.FullName;
+            return string.IsNullOrWhiteSpace(parent) ? null : FindNewest(parent, fileName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException or ArgumentException)
         {
             return null;
         }
@@ -448,6 +520,9 @@ public static class GuestFailureArtifactImporter
 
     private static string? ReadString(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static bool ReadBool(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
 
     private static string? ReadScalar(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) ? ScalarText(value) : null;
@@ -494,4 +569,14 @@ public static class GuestFailureArtifactImporter
         long AvailableFreeBytes,
         long RequiredFreeBytes,
         string? CheckedAtUtc);
+
+    private sealed record SampleRuntimePreflightSnapshot(
+        string? State,
+        string? FailureCode,
+        string? SampleFileName,
+        string? GuestNetFx3State,
+        string? Error,
+        bool ManagedClrDetected,
+        bool LegacyClrDetected,
+        bool GuestSamplePresent);
 }
