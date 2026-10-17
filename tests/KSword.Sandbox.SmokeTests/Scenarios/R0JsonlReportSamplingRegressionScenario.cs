@@ -86,6 +86,13 @@ internal sealed class R0JsonlReportSamplingRegressionScenario : ISmokeTestScenar
             driverEventsPaths.Contains("driver-events.jsonl", StringComparison.OrdinalIgnoreCase),
             "Sampling marker should expose every canonical and rotated driver JSONL source path.");
         SmokeAssert.True(
+            TryGetInt(samplingMarker.Data, "driverEventsPathCount", out var driverEventsPathCount) && driverEventsPathCount == 3,
+            "Sampling marker should count canonical plus every rotated driver JSONL source path.");
+        SmokeAssert.True(
+            TryGetInt(samplingMarker.Data, "rawR0DriverEventCount", out var rawR0DriverEventCount) && rawR0DriverEventCount > 0 &&
+            TryGetInt(samplingMarker.Data, "r0DriverEventOmittedCount", out _),
+            "Sampling marker should expose raw and omitted R0 driver-row coverage separately from generic event volume.");
+        SmokeAssert.True(
             report.Metrics.TryGetValue("events.omittedFromReport", out var omittedMetric) && omittedMetric == omittedEventCount,
             "Report metrics should carry the omitted-from-report count.");
         SmokeAssert.True(

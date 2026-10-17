@@ -130,6 +130,13 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         evt.Data["startCommand"] = FormatCommand(LogmanExecutable, BuildStartArguments(session));
         evt.Data["semanticRowsAvailable"] = "false";
         evt.Data["etlDecodeRequired"] = "true";
+        evt.Data["coverage.processLifecycle"] = "decode-failed";
+        evt.Data["coverage.threadLifecycle"] = "decode-failed";
+        evt.Data["coverage.moduleLoad"] = "decode-failed";
+        evt.Data["coverage.processAccess"] = "not-subscribed-security-audit";
+        evt.Data["coverage.tokenPrivilege"] = "not-subscribed-security-audit";
+        evt.Data["coverage.remoteThread"] = "not-subscribed-threat-intelligence";
+        evt.Data["coverageBoundary"] = "kernel ETL was saved but no semantic rows were decoded; Security audit and Threat-Intelligence surfaces are separate and were not implied by this trace.";
         evt.Data["zhMessage"] = "ETW 内核实时会话已启动，结束后将保存 ETL 原始证据。";
         evt.Data["zhHint"] = "started 只表示 logman 已创建会话；必须同时看到 etw_live.captured 和 ETL 文件校验字段，才能认为实时证据可用。ETL 尚未解析为行为行。";
         return [evt];
@@ -216,6 +223,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             .Select(static row => row.EventType)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase));
+        AddSemanticCoverageData(evt.Data, decode.Rows);
         if (!string.IsNullOrWhiteSpace(decode.DecodedPath))
         {
             var decodedRelativePath = RelativeToOutput(context.OutputDirectory, decode.DecodedPath);
@@ -413,7 +421,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             var image = ValueOrEmpty(payloadByName, "imagename", "imagefilename", "image", "processname", "process");
             var path = ValueOrEmpty(payloadByName, "filename", "file", "path", "imagepath", "keyname", "keypath", "objectname");
             var commandLine = ValueOrEmpty(payloadByName, "commandline", "command");
-            var eventType = MapEventType(eventName, provider + " " + opcode + " " + task + " " + eventId, payloadByName);
+            var eventType = MapEventType(eventName, provider + " " + opcode + " " + task + " " + eventId, payloadByName, eventId);
             var data = CreateDecodedData(eventType, eventName, provider, eventId, opcode, threadId, session, context, string.Join("; ", payloadValues));
             if (unnamedPayloadCount > 0)
             {
@@ -690,7 +698,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             var path = GetField(fields, columns, "filename", "file", "path", "imagepath", "keyname", "keypath", "objectname");
             var opcode = GetField(fields, columns, "opcode", "operation");
             var task = GetField(fields, columns, "task", "eventtask");
-            var eventType = MapEventType(eventName + " " + opcode + " " + task + " " + eventId, provider);
+            var eventType = MapEventType(eventName + " " + opcode + " " + task + " " + eventId, provider, eventId: eventId);
             var payload = BuildPayload(fields, columns, "payload", "data", "userdata");
             var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -780,6 +788,39 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             "-o", session.EtlPath,
             "-ets"
         ];
+    }
+
+    /// <summary>
+    /// Records which semantic ETW families were actually decoded and which
+    /// requested surfaces are outside this kernel logger session. Provider
+    /// manifests alone do not prove capture; these fields make the source
+    /// boundary explicit in the captured summary and prevent zero rows from
+    /// looking like a clean negative result.
+    /// </summary>
+    private static void AddSemanticCoverageData(
+        Dictionary<string, string> data,
+        IReadOnlyList<SandboxEvent> rows)
+    {
+        var processCount = rows.Count(static row => row.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase));
+        var threadCount = rows.Count(static row => row.EventType.StartsWith("thread.", StringComparison.OrdinalIgnoreCase));
+        var imageCount = rows.Count(static row => row.EventType.StartsWith("image.", StringComparison.OrdinalIgnoreCase));
+        var fileCount = rows.Count(static row => row.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase));
+        var registryCount = rows.Count(static row => row.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase));
+        data["decodedProcessEventCount"] = processCount.ToString(CultureInfo.InvariantCulture);
+        data["decodedThreadEventCount"] = threadCount.ToString(CultureInfo.InvariantCulture);
+        data["decodedImageEventCount"] = imageCount.ToString(CultureInfo.InvariantCulture);
+        data["decodedFileEventCount"] = fileCount.ToString(CultureInfo.InvariantCulture);
+        data["decodedRegistryEventCount"] = registryCount.ToString(CultureInfo.InvariantCulture);
+        data["coverage.processLifecycle"] = processCount > 0 ? "captured" : "no-decoded-rows";
+        data["coverage.threadLifecycle"] = threadCount > 0 ? "captured" : "no-decoded-rows";
+        data["coverage.moduleLoad"] = imageCount > 0 ? "captured" : "no-decoded-rows";
+        data["coverage.processAccess"] = "not-subscribed-security-audit";
+        data["coverage.tokenPrivilege"] = "not-subscribed-security-audit";
+        data["coverage.remoteThread"] = "not-subscribed-threat-intelligence";
+        data["coverage.fileRegistry"] = fileCount > 0 || registryCount > 0
+            ? "decoded-when-present"
+            : "not-in-kernel-session-scoped-probes-own-this-lane";
+        data["coverageBoundary"] = "kernel logger session captures process/thread/image families; Security audit and Threat-Intelligence provider subscriptions are separate surfaces and are not implied by ETW manifest readiness.";
     }
 
     private static bool LooksLikeTracerptHeader(IReadOnlyList<string> fields)
@@ -883,7 +924,8 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
     private static string MapEventType(
         string eventName,
         string provider,
-        IReadOnlyDictionary<string, string>? payloadByName = null)
+        IReadOnlyDictionary<string, string>? payloadByName = null,
+        string eventId = "")
     {
         var value = (eventName + " " + provider).Trim();
         if (ContainsAny(value, "processstart", "process/start", "process start", "processcreate") ||
@@ -938,6 +980,25 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         if (ContainsAny(value, "registry", "regkcb", "regset", "regdelete"))
         {
             return "registry.etw";
+        }
+
+        // Older tracerpt output can omit RenderingInfo names and leave only
+        // the Kernel-Process numeric event id. Apply this fallback after any
+        // explicit opcode/name semantics so an EventID=5 row marked Unload
+        // cannot be rewritten as ImageLoad.
+        if (ContainsAny(provider, "kernel-process", "kernel process", "kernelprocess", "kernel-image", "kernel image") &&
+            eventId.Trim() is "1" or "2" or "3" or "4" or "5" or "6")
+        {
+            return eventId.Trim() switch
+            {
+                "1" => "process.start",
+                "2" => "process.exit",
+                "3" => "thread.start",
+                "4" => "thread.exit",
+                "5" => "image.load",
+                "6" => "image.unload",
+                _ => "etw.kernel.event"
+            };
         }
 
         // If RenderingInfo is absent, use payload shape as a constrained
@@ -1043,6 +1104,13 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         evt.Data["nonfatal"] = "true";
         evt.Data["commandExitCode"] = FormatExitCode(result?.ExitCode);
         evt.Data["commandTimedOut"] = (result?.TimedOut ?? false).ToString(CultureInfo.InvariantCulture);
+        evt.Data["coverage.processLifecycle"] = "capture-failed";
+        evt.Data["coverage.threadLifecycle"] = "capture-failed";
+        evt.Data["coverage.moduleLoad"] = "capture-failed";
+        evt.Data["coverage.processAccess"] = "not-subscribed-security-audit";
+        evt.Data["coverage.tokenPrivilege"] = "not-subscribed-security-audit";
+        evt.Data["coverage.remoteThread"] = "not-subscribed-threat-intelligence";
+        evt.Data["coverageBoundary"] = "ETW kernel session did not complete; Security audit and Threat-Intelligence provider subscriptions are separate surfaces and remain independently diagnosed.";
         AddIfNotEmpty(evt.Data, "exceptionType", result?.ExceptionType);
         AddIfNotEmpty(evt.Data, "message", result?.Message);
         AddIfNotEmpty(evt.Data, "stderr", Truncate(result?.StandardError));

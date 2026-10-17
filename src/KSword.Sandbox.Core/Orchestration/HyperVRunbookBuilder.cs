@@ -1100,13 +1100,6 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("make-host-output", "Create host output folder", $"New-Item -ItemType Directory -Force -Path {Q(hostOut)} | Out-Null", mutatesVmState: false));
         steps.Add(Step("record-artifact-policy", "Record artifact collection policy", BuildRecordArtifactCollectionPolicyCommand(config, hostOut), requiresElevation: false, mutatesVmState: false));
         steps.Add(Step("prepare-guest-output", "Prepare job-specific guest output folder", BuildPrepareGuestOutputCommand(config, provider, targetVmName, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
-        // Check the volume after stale output cleanup and before the Agent
-        // starts. A full guest volume used to fail much later while JSONL/ETL
-        // output was being written, which made the resulting report look like
-        // a quiet sample. This remains a read-only capacity check; its small
-        // JSON diagnostic is written only so collection can preserve the
-        // measured value with the job output.
-        steps.Add(Step("check-guest-output-space", "Check guest output volume capacity", BuildGuestOutputSpacePreflightCommand(config, provider, targetVmName, guestOut), mutatesVmState: false));
         if (!config.Driver.Enabled)
         {
             // A user-mode-only run is an explicit mode, but a missing
@@ -1519,37 +1512,7 @@ public sealed class HyperVRunbookBuilder
             // parts, ETL/PCAP captures, and artifact trees behind.  Remove
             // every known output lane before launching the Agent so old data
             // can never be mistaken for this run's evidence.
-            $"Invoke-Command -Session $session -ScriptBlock {{ param($root) New-Item -ItemType Directory -Force -Path $root | Out-Null; $patterns = @('events.json','events.json.failure.json','driver-events.jsonl','driver-events.part-*.jsonl','*.jsonl','*.etl','*.etl.zip','*.pcap','*.pcapng','*.dmp','*.bmp','*.png','*.jpg','*.jpeg','agent.pid','agent.exit','agent.stdout.log','agent.stderr.log','guest-agent-run-status.json','agent-summary.json'); foreach ($pattern in $patterns) {{ Get-ChildItem -LiteralPath $root -Filter $pattern -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue }}; foreach ($directoryName in @('artifacts','screenshots','memory-dumps','packet-captures','etl','pcap')) {{ $directory = Join-Path $root $directoryName; if (Test-Path -LiteralPath $directory -PathType Container) {{ Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue }} }} }} -ArgumentList {Q(guestOut)} -ErrorAction Stop;",
-            "}",
-            "finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
-        });
-        return WithGuestCredential(config, command);
-    }
-
-    /// <summary>
-    /// Builds a read-only capacity preflight for the per-job guest output
-    /// volume.  Inputs are provider transport, output path, and the shared R0
-    /// free-space reserve; processing records the measured volume and reserve
-    /// in a small diagnostic JSON and fails before run-agent if the reserve is
-    /// not available.  The returned command never deletes files or changes VM
-    /// configuration.
-    /// </summary>
-    private static string BuildGuestOutputSpacePreflightCommand(
-        SandboxConfig config,
-        VirtualizationProvider provider,
-        string targetVmName,
-        string guestOut)
-    {
-        // Keep one reserve for Agent and R0 output.  The Agent forwards this
-        // same configured value to R0Collector in BuildDriverAgentArguments.
-        var reserveBytes = Math.Max(16 * 1024 * 1024, config.Driver.R0CollectorMinFreeOutputBytes);
-        var diagnosticPath = $"{guestOut}\\guest-output-preflight.json";
-        var command = string.Join(" ", new[]
-        {
-            "$session = $null;",
-            BuildGuestSessionAssignment(config, provider, targetVmName),
-            "try {",
-            $"Invoke-Command -Session $session -ScriptBlock {{ param($outputRoot, $diagnosticPath, $minimumFreeBytes) $volumeRoot = Split-Path -Path $outputRoot -Qualifier; if ([string]::IsNullOrWhiteSpace($volumeRoot)) {{ throw \"Could not resolve output volume for $outputRoot\" }}; $drive = Get-CimInstance -ClassName Win32_LogicalDisk -Filter (\"DeviceID='\" + $volumeRoot.TrimEnd('\\\\') + \"'\") -ErrorAction SilentlyContinue; $freeBytes = if ($null -ne $drive) {{ [int64]$drive.FreeSpace }} else {{ [int64]([IO.DriveInfo]::new($volumeRoot)).AvailableFreeSpace }}; $state = if ($freeBytes -ge [int64]$minimumFreeBytes) {{ 'ready' }} else {{ 'insufficient-space' }}; $diagnostic = [ordered]@{{ schema = 'ksword.guest-output-preflight.v1'; state = $state; outputRoot = $outputRoot; volumeRoot = $volumeRoot; availableFreeBytes = $freeBytes; requiredFreeBytes = [int64]$minimumFreeBytes; reserveSource = 'driver.r0CollectorMinFreeOutputBytes'; checkedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }}; New-Item -ItemType Directory -Force -Path (Split-Path -Parent $diagnosticPath) | Out-Null; $diagnostic | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $diagnosticPath -Encoding UTF8; Write-Host (\"Guest output preflight: state={{0}}; availableFreeBytes={{1}}; requiredFreeBytes={{2}}; volume={{3}}\" -f $state,$freeBytes,$minimumFreeBytes,$volumeRoot); if ($freeBytes -lt [int64]$minimumFreeBytes) {{ throw (\"Guest output volume has insufficient free space: available={{0}} bytes; required reserve={{1}} bytes; volume={{2}}\" -f $freeBytes,$minimumFreeBytes,$volumeRoot) }} }} -ArgumentList {Q(guestOut)}, {Q(diagnosticPath)}, {reserveBytes} -ErrorAction Stop;",
+            $"Invoke-Command -Session $session -ScriptBlock {{ param($root) New-Item -ItemType Directory -Force -Path $root | Out-Null; $patterns = @('events.json','events.json.failure.json','driver-events.jsonl','driver-events.part-*.jsonl','*.jsonl','*.etl','*.etl.zip','*.pcap','*.pcapng','*.dmp','*.bmp','*.png','*.jpg','*.jpeg','agent.pid','agent.exit','agent.stdout.log','agent.stderr.log','guest-agent-run-status.json','agent-summary.json','guest-output-preflight.json'); foreach ($pattern in $patterns) {{ Get-ChildItem -LiteralPath $root -Filter $pattern -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue }}; foreach ($directoryName in @('artifacts','screenshots','memory-dumps','packet-captures','etl','pcap')) {{ $directory = Join-Path $root $directoryName; if (Test-Path -LiteralPath $directory -PathType Container) {{ Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue }} }} }} -ArgumentList {Q(guestOut)} -ErrorAction Stop;",
             "}",
             "finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
         });

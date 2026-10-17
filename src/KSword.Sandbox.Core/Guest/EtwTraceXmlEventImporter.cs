@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using KSword.Sandbox.Abstractions;
 
@@ -14,6 +15,19 @@ public static class EtwTraceXmlEventImporter
 {
     private const long MaxXmlBytes = 128L * 1024 * 1024;
     private const int MaxRowsPerTrace = 100_000;
+    // tracerpt versions in the field sometimes emit kernel payload as one
+    // unnamed string. Keep the same bounded key vocabulary as the guest
+    // decoder so a whitespace-delimited payload does not collapse into an
+    // unattributed generic row during host recovery.
+    private const string UnnamedPayloadKeyPattern =
+        "UniqueProcessKey|ProcessId|Pid|ParentProcessId|ParentPid|ParentId|" +
+        "ThreadId|TThreadId|Tid|EventName|Task|Opcode|Operation|" +
+        "ImageFileName|ImageName|ProcessName|Process|FileName|Image|" +
+        "CommandLine|Command|ExitStatus|ExitTime|Status|Path|ImagePath|" +
+        "KeyName|KeyPath|ObjectName|ImageBase|ImageSize|ImageChecksum";
+    private static readonly Regex UnnamedPayloadFieldRegex = new(
+        $"(?ix)(?<![A-Za-z0-9_.-])(?<key>{UnnamedPayloadKeyPattern})\\s*=\\s*(?<value>.*?)(?=(?:\\s*[;,]\\s*|\\r?\\n|\\s+)(?:{UnnamedPayloadKeyPattern})\\s*=|$)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
     /// <summary>
     /// Returns whether the guest stream already contains semantic ETW rows.
@@ -238,10 +252,15 @@ public static class EtwTraceXmlEventImporter
             var providerElement = system.Elements().FirstOrDefault(child => child.Name.LocalName.Equals("Provider", StringComparison.OrdinalIgnoreCase));
             var rendering = element.Elements().FirstOrDefault(child => child.Name.LocalName.Equals("RenderingInfo", StringComparison.OrdinalIgnoreCase));
             var provider = First(providerElement?.Attribute("Name")?.Value, Child(rendering, "Provider"), "unknown");
-            var task = Child(rendering, "Task", "TaskName");
+            var task = First(Child(rendering, "Task", "TaskName"), Child(system, "Task", "TaskName"));
             var opcode = First(Child(rendering, "Opcode", "Operation"), Child(system, "Opcode", "Operation"));
             var eventId = Child(system, "EventID", "EventId", "Id");
-            var eventName = First(Child(rendering, "EventName", "Name"), task, opcode, provider + ":" + eventId);
+            var eventName = First(
+                Child(rendering, "EventName", "Name"),
+                Child(system, "EventName", "Name"),
+                task,
+                opcode,
+                provider + ":" + eventId);
             var timestamp = ParseTimestamp(system.Elements().FirstOrDefault(child => child.Name.LocalName.Equals("TimeCreated", StringComparison.OrdinalIgnoreCase))?.Attribute("SystemTime")?.Value) ?? DateTimeOffset.UtcNow;
             var execution = system.Elements().FirstOrDefault(child => child.Name.LocalName.Equals("Execution", StringComparison.OrdinalIgnoreCase));
             var processId = ParsePid(First(execution?.Attribute("ProcessID")?.Value, execution?.Attribute("ProcessId")?.Value));
@@ -258,10 +277,11 @@ public static class EtwTraceXmlEventImporter
             }
             processId = ParsePid(First(Value(payload, "processid", "pid"), processId?.ToString(CultureInfo.InvariantCulture)));
             var parentPid = ParsePid(Value(payload, "parentprocessid", "parentpid", "parentid"));
+            eventName = First(Value(payload, "eventname", "taskname"), eventName);
             var image = Value(payload, "imagefilename", "imagename", "processname", "image", "process");
             var commandLine = Value(payload, "commandline", "command");
             var pathValue = Value(payload, "filename", "file", "path", "imagepath", "keyname", "keypath", "objectname");
-            var type = MapType(eventName, provider, task, opcode, payload);
+            var type = MapType(eventName, provider, task, opcode, payload, eventId);
             if (!IsUsefulType(type))
             {
                 continue;
@@ -309,7 +329,13 @@ public static class EtwTraceXmlEventImporter
         type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
         type.StartsWith("network.", StringComparison.OrdinalIgnoreCase);
 
-    private static string MapType(string name, string provider, string task, string opcode, IReadOnlyDictionary<string, string> payload)
+    private static string MapType(
+        string name,
+        string provider,
+        string task,
+        string opcode,
+        IReadOnlyDictionary<string, string> payload,
+        string eventId = "")
     {
         var value = (name + " " + provider + " " + task + " " + opcode).ToLowerInvariant();
         if (value.Contains("process", StringComparison.Ordinal) && (value.Contains("start", StringComparison.Ordinal) || value.Contains("create", StringComparison.Ordinal) || value.Contains("dcstart", StringComparison.Ordinal))) return "process.start";
@@ -318,6 +344,23 @@ public static class EtwTraceXmlEventImporter
         if (value.Contains("image", StringComparison.Ordinal) && (value.Contains("load", StringComparison.Ordinal) || value.Contains("start", StringComparison.Ordinal) || value.Contains("dcstart", StringComparison.Ordinal))) return "image.load";
         if (value.Contains("thread", StringComparison.Ordinal) && (value.Contains("start", StringComparison.Ordinal) || value.Contains("dcstart", StringComparison.Ordinal))) return "thread.start";
         if (value.Contains("thread", StringComparison.Ordinal) && (value.Contains("stop", StringComparison.Ordinal) || value.Contains("end", StringComparison.Ordinal) || value.Contains("exit", StringComparison.Ordinal) || value.Contains("dcexit", StringComparison.Ordinal))) return "thread.exit";
+        // Older tracerpt XML can omit RenderingInfo names and leave only the
+        // Kernel-Process task plus numeric EventID. Apply this fallback after
+        // explicit opcode/name semantics so EventID=5 with Opcode=Unload is
+        // not incorrectly rewritten as ImageLoad.
+        if (provider.Contains("kernel-process", StringComparison.OrdinalIgnoreCase) ||
+            provider.Contains("kernel-image", StringComparison.OrdinalIgnoreCase))
+        {
+            switch (eventId.Trim().ToLowerInvariant())
+            {
+                case "1": return "process.start";
+                case "2": return "process.exit";
+                case "3": return "thread.start";
+                case "4": return "thread.exit";
+                case "5": return "image.load";
+                case "6": return "image.unload";
+            }
+        }
         if (value.Contains("file", StringComparison.Ordinal) || value.Contains("fileio", StringComparison.Ordinal)) return "file.etw";
         if (value.Contains("network", StringComparison.Ordinal) || value.Contains("tcp", StringComparison.Ordinal)) return "network.etw";
         // tracerpt can omit RenderingInfo for kernel rows. Mirror the live
@@ -388,6 +431,27 @@ public static class EtwTraceXmlEventImporter
 
     private static void ParseUnnamed(string text, Dictionary<string, string> payload)
     {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        var matches = UnnamedPayloadFieldRegex.Matches(text);
+        foreach (Match match in matches)
+        {
+            var key = Normalize(match.Groups["key"].Value);
+            var value = match.Groups["value"].Value.Trim().TrimEnd(';', ',').Trim();
+            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+            {
+                payload.TryAdd(key, value);
+            }
+        }
+
+        if (matches.Count > 0)
+        {
+            return;
+        }
+
         foreach (var chunk in text.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var separator = chunk.IndexOf('=');

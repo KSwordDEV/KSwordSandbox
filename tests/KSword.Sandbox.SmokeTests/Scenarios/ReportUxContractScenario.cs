@@ -506,6 +506,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Total events", "Rendered raw event overview should show the total count label.");
         RequireContains(englishHtml, "Hidden raw events", "Rendered raw event overview should show the hidden count label.");
         RequireContains(englishHtml, "Raw source paths", "Rendered raw event section should show source path hints.");
+        RequireContains(englishHtml, "Evidence completeness.", "Rendered raw event section should show an explicit sampled-vs-raw completeness boundary.");
+        RequireContains(englishHtml, "report.json is a sampled normalized view.", "Rendered report must identify report.json as a sampled view rather than complete raw telemetry.");
         RequireContains(englishHtml, "report.json", "Rendered raw event section should link or hint report.json.");
         RequireContains(englishHtml, "No raw source artifacts were indexed; report.json remains the sampled normalized report view, not proof that no additional raw telemetry existed.", "Rendered raw source hints should explain missing raw artifacts without overstating report.json completeness.");
         RequireContains(englishHtml, "class=\"artifact-btn artifact-open\" href=\"artifacts/contract-drop.bin\"", "Rendered artifact links should expose a safe Open button.");

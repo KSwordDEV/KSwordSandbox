@@ -817,7 +817,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             var completeness = qualityWarnings == 0 && remainingUnread == 0 && lostCount == 0
                 ? "采集完整性：无丢失或有界排空警告。"
                 : "Collection completeness requires review; a zero lostCount alone does not prove that every record was drained.";
-            html.AppendLine($"<div class=\"section-note\"><strong>R0 driver coverage.</strong> Raw/report rows by class (raw/report): {E(driverClassSummary)}. Collector loss markers: {E(loss.ToString(CultureInfo.InvariantCulture))}; lost count: {E(lostCount.ToString(CultureInfo.InvariantCulture))}/{E(processed.ToString(CultureInfo.InvariantCulture))} processed ({E(lossRate)}); backpressure markers: {E(backpressure.ToString(CultureInfo.InvariantCulture))}; queue depth/remaining unread: {E(queueDepth.ToString(CultureInfo.InvariantCulture))}/{E(remainingUnread.ToString(CultureInfo.InvariantCulture))}; suppressed events: {E(eventsSuppressed.ToString(CultureInfo.InvariantCulture))} (expected-disabled={E(expectedSuppressed.ToString(CultureInfo.InvariantCulture))}, unexpected={E(unexpectedSuppressed.ToString(CultureInfo.InvariantCulture))}, unsupported={E(unsupportedProducer.ToString(CultureInfo.InvariantCulture))}); drain deadline/batch-limit stops: {E(deadlineStop.ToString(CultureInfo.InvariantCulture))}/{E(batchLimitStop.ToString(CultureInfo.InvariantCulture))}; quality warnings: {E(qualityWarnings.ToString(CultureInfo.InvariantCulture))}. {E(completeness)} Raw driver-events.jsonl remains the complete source artifact.</div>");
+            html.AppendLine($"<div class=\"section-note\"><strong>R0 driver coverage.</strong> Raw/report rows by class (raw/report): {E(driverClassSummary)}. Collector loss markers: {E(loss.ToString(CultureInfo.InvariantCulture))}; lost count: {E(lostCount.ToString(CultureInfo.InvariantCulture))}/{E(processed.ToString(CultureInfo.InvariantCulture))} processed ({E(lossRate)}); backpressure markers: {E(backpressure.ToString(CultureInfo.InvariantCulture))}; queue depth/remaining unread: {E(queueDepth.ToString(CultureInfo.InvariantCulture))}/{E(remainingUnread.ToString(CultureInfo.InvariantCulture))}; suppressed events: {E(eventsSuppressed.ToString(CultureInfo.InvariantCulture))} (expected-disabled={E(expectedSuppressed.ToString(CultureInfo.InvariantCulture))}, unexpected={E(unexpectedSuppressed.ToString(CultureInfo.InvariantCulture))}, unsupported={E(unsupportedProducer.ToString(CultureInfo.InvariantCulture))}); drain deadline/batch-limit stops: {E(deadlineStop.ToString(CultureInfo.InvariantCulture))}/{E(batchLimitStop.ToString(CultureInfo.InvariantCulture))}; quality warnings: {E(qualityWarnings.ToString(CultureInfo.InvariantCulture))}. {E(completeness)} Complete raw R0 evidence is available through the indexed driver JSONL stream and all rotated segments.</div>");
         }
         if (HasExecutionBlockedVerdict(report))
         {
@@ -1226,12 +1226,12 @@ html[lang="en"] .localized-evidence-field{display:none}
                 $"correlationUnknown={stats.CorrelationUnknown}",
                 $"retainedNotPromoted={stats.RetainedNotPromoted}",
                 $"normalInteractiveGuiBaseline={stats.NormalInteractiveGuiBaseline}",
-                "Excluded rows are collection/reputation/health evidence, not sample behavior. Raw normalized events and source artifacts remain complete when indexed; report.json is a sampled normalized report view."
+                "Excluded rows are collection/reputation/health evidence, not sample behavior. Source artifacts remain complete when indexed; report.json is a sampled normalized report view."
             ]);
 
         html.AppendLine("<h3>Collection/self-noise policy</h3>");
         html.AppendLine("<div class=\"compact-evidence-summary copyable\" data-copy=\"" + A(copy) + "\"><strong>Collection/self-noise policy.</strong><br>");
-        html.AppendLine("Behavior story counts include only sample-attributed actions. Collection health, collector noise, enrichment status, and other excluded evidence remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.");
+        html.AppendLine("Behavior story counts include only sample-attributed actions. Collection health, collector noise, enrichment status, and other excluded evidence remain visible in their dedicated sections and sampled report events; complete raw rows remain in indexed source JSON/JSONL artifacts.");
         html.AppendLine("<div class=\"story-metrics\">");
         html.AppendLine($"<span>sample behavior {E(sampleBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>excluded union {E(excludedUnion.ToString(CultureInfo.InvariantCulture))}</span>");
@@ -1974,7 +1974,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         var hiddenCount = Math.Max(0, nonEmptyValues.Count - inlineValues.Count);
         if (hiddenCount > 0)
         {
-            html.AppendLine($"<div class=\"section-note\"><strong>Static list capped for readability.</strong> Inline entries: {E(inlineValues.Count.ToString())}/{E(nonEmptyValues.Count.ToString())}. Hidden entries: {E(hiddenCount.ToString())}. Open report.json for complete static evidence.</div>");
+            html.AppendLine($"<div class=\"section-note\"><strong>Static list capped for readability.</strong> Inline entries: {E(inlineValues.Count.ToString())}/{E(nonEmptyValues.Count.ToString())}. Hidden entries: {E(hiddenCount.ToString())}. Open report.json for all retained static rows; source artifacts contain the original sample bytes.</div>");
         }
 
         html.AppendLine("<ul class=\"bounded-list compact-list\">");
@@ -2315,7 +2315,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 $"collectorNoiseRows={collectorSelfNoise}",
                 $"collectionHealthRows={healthRows}",
                 $"enrichmentStatusRows={vtQuiet}",
-                "Complete source: Raw normalized events/report.json; pagination and folding unchanged"
+                "Complete source: indexed source JSON/JSONL artifacts; report.json is the sampled normalized view"
             ]);
 
         html.AppendLine($"<div class=\"compact-evidence-summary copyable\" data-copy=\"{A(copy)}\"><strong>Graph self-noise boundary / 图谱自噪声边界</strong><br>");
@@ -2789,7 +2789,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         var cards = BuildEvidenceStoryCards(report, artifacts);
         html.AppendLine("<h3 id=\"evidence-story-board\" class=\"anchor-offset\">Evidence story board</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Evidence story lanes.</strong> These stable weak-interaction lanes keep the analyst narrative visible before dense tables: process lineage, released files, screenshots, memory dumps, PCAP/network, and R0 collection quality. Each lane shows a short explanation, metric chips, and a bounded native-details evidence sample; complete rows stay in Raw normalized events/report.json and Artifact links.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Evidence story lanes.</strong> These stable weak-interaction lanes keep the analyst narrative visible before dense tables: process lineage, released files, screenshots, memory dumps, PCAP/network, and R0 collection quality. Each lane shows a short explanation, metric chips, and a bounded native-details evidence sample; complete raw rows stay in indexed source JSON/JSONL and Artifact links.</div>");
         html.AppendLine("<div class=\"evidence-story-board\">");
         foreach (var card in cards)
         {
@@ -2800,7 +2800,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 : Math.Min(card.EvidenceLines.Count, observedEvidenceCount);
             var evidenceScope = observedEvidenceCount == 0
                 ? "Evidence examples shown: 0 observed; lane includes guidance only."
-                : $"Evidence examples shown: {shownEvidenceCount}/{observedEvidenceCount}; expand stays bounded and full source remains in Raw normalized events/report.json.";
+                : $"Evidence examples shown: {shownEvidenceCount}/{observedEvidenceCount}; expand stays bounded and complete raw source remains in indexed JSON/JSONL artifacts.";
             html.AppendLine($"<article class=\"evidence-story-lane copyable\" data-copy=\"{A(card.CopyText)}\">");
             html.AppendLine("<div class=\"relationship-title\">");
             html.AppendLine($"<h3>{E(card.Title)}</h3><span class=\"badge badge-{E(card.Css)}\">{E(card.Status)}</span>");
@@ -2818,7 +2818,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine(CopyButton("Copy story lane", card.CopyText));
             html.AppendLine("</div>");
             html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand bounded story evidence ({E(shownEvidenceCount.ToString(CultureInfo.InvariantCulture))}/{E(observedEvidenceCount.ToString(CultureInfo.InvariantCulture))} observed rows)</summary>");
-            AppendEvidenceExpansionSummary(html, "Story evidence expansion summary", shownEvidenceCount, observedEvidenceCount, "Raw normalized events/report.json and Artifact links", card.EvidenceLines);
+            AppendEvidenceExpansionSummary(html, "Story evidence expansion summary", shownEvidenceCount, observedEvidenceCount, "Sampled report view and indexed source JSON/JSONL artifacts", card.EvidenceLines);
             html.AppendLine("<ol class=\"story-evidence-list\">");
             foreach (var line in card.EvidenceLines.Take(12))
             {
@@ -3008,7 +3008,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             .ToList();
         if (lines.Count == 0)
         {
-            lines.Add("No inline evidence observed in this lane; check Raw normalized events/report.json and Artifact links for complete source data.");
+            lines.Add("No inline evidence observed in this lane; check indexed source JSON/JSONL artifacts and Artifact links for complete source data.");
         }
 
         var shownEvidenceCount = sourceEvidenceCount == 0
@@ -3922,7 +3922,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy artifact matrix narrative", copy)}</div>");
         html.AppendLine("</div>");
         html.AppendLine("<details class=\"evidence-expansion-card\"><summary>Artifact evidence matrix narrative rows</summary>");
-        AppendEvidenceExpansionSummary(html, "Artifact matrix expansion summary", rows.Count, rows.Count, "Artifact links and Raw normalized events/report.json", matrixLines);
+        AppendEvidenceExpansionSummary(html, "Artifact matrix expansion summary", rows.Count, rows.Count, "Artifact links and indexed source JSON/JSONL", matrixLines);
         html.AppendLine("<ol class=\"compact-list\">");
         foreach (var line in matrixLines.Take(EvidenceStoryInlineLimit))
         {
@@ -4384,7 +4384,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("<div class=\"section-note\"><strong>Timeline grouping.</strong> Grouped by UTC minute with process/type summaries; large buckets show representative events first.</div>");
         if (hiddenEvents > 0)
         {
-            html.AppendLine($"<div class=\"copy-hint\">Timeline is capped for readability; open Raw normalized events or report.json for complete evidence. {E(hiddenEvents.ToString())} additional timeline events are hidden.</div>");
+            html.AppendLine($"<div class=\"copy-hint\">Timeline is capped for readability; open the sampled report view or indexed source JSON/JSONL for complete evidence. {E(hiddenEvents.ToString())} additional timeline events are hidden.</div>");
         }
 
         html.AppendLine("<div class=\"timeline-groups\">");
@@ -4405,7 +4405,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             var groupHidden = group.TotalEventCount - Math.Min(group.TotalEventCount, TimelineGroupEventInlineLimit);
             if (groupHidden > 0)
             {
-                html.AppendLine($"<div class=\"timeline-overflow\">{E(groupHidden.ToString())} additional events in this group are hidden; open Raw normalized events or report.json for complete evidence.</div>");
+            html.AppendLine($"<div class=\"timeline-overflow\">{E(groupHidden.ToString())} additional events in this group are hidden; open the sampled report view or indexed source JSON/JSONL for complete evidence.</div>");
             }
 
             html.AppendLine("</div></details>");
@@ -4932,7 +4932,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("</ul>");
         if (selfNoiseEvents.Count > sample.Count)
         {
-            html.AppendLine($"<div class=\"copy-hint\">{E((selfNoiseEvents.Count - sample.Count).ToString())} additional self-noise rows remain only in Raw normalized events/report.json.</div>");
+            html.AppendLine($"<div class=\"copy-hint\">{E((selfNoiseEvents.Count - sample.Count).ToString())} additional self-noise rows remain in indexed source JSON/JSONL artifacts.</div>");
         }
 
         html.AppendLine("</details>");
@@ -5078,7 +5078,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html,
             "Health rows folded",
             $"{Math.Min(R0HealthEvidenceInlineLimit, healthEvents.Count)}/{healthEvents.Count}",
-            "R0 health evidence is capped and collapsed here; complete rows remain in Raw normalized events/report.json.",
+            "R0 health evidence is capped and collapsed here; complete rows remain in indexed driver JSONL artifacts.",
             healthEvents.Count > R0HealthEvidenceInlineLimit ? "risk-medium" : "risk-info");
         AppendOverviewItem(
             html,
@@ -5180,6 +5180,69 @@ html[lang="en"] .localized-evidence-field{display:none}
     }
 
     /// <summary>
+    /// Appends a compact, truthful boundary between the sampled report view
+    /// and the complete source artifacts. Inputs are the report model and
+    /// indexed artifacts; processing emits counts and safe source guidance so
+    /// a quiet/short inline view cannot be mistaken for complete telemetry.
+    /// </summary>
+    private static void AppendReportEventCoverageNotice(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var marker = report.Events.FirstOrDefault(evt =>
+            string.Equals(evt.EventType, "report.events.sampled", StringComparison.OrdinalIgnoreCase));
+        var rawCount = ReportMetric(report, "events.raw", ReportMetric(report, "events.total", report.Events.Count));
+        var reportCount = ParseEventMetric(marker, "selectedRawEventCount");
+        if (reportCount <= 0)
+        {
+            reportCount = ReportMetric(report, "events.report", report.Events.Count);
+        }
+        var omittedCount = ReportMetric(report, "events.omittedFromReport", Math.Max(0, rawCount - reportCount));
+        var policyExcluded = ParseEventMetric(marker, "policyExcludedEventCount");
+        var highSignalOmitted = ParseEventMetric(marker, "omittedHighSignalCount");
+        var unknownOmitted = ParseEventMetric(marker, "unknownEventOmittedCount");
+        var dynamicOmitted = ParseEventMetric(marker, "dynamicActionOmittedCount") +
+            ParseEventMetric(marker, "dynamicActionPolicyExcludedCount");
+        var r0Omitted = ParseEventMetric(marker, "r0DriverEventOmittedCount");
+        var sourceCount = artifacts.Count(artifact => artifact.Kind is
+            ArtifactKind.GuestEventsJson or ArtifactKind.DriverEventsJsonLines);
+        var sourceNonEmptyCount = artifacts.Count(artifact =>
+            (artifact.Kind is ArtifactKind.GuestEventsJson or ArtifactKind.DriverEventsJsonLines) &&
+            artifact.SizeBytes > 0);
+        var boundaryClass = omittedCount > 0 || sourceNonEmptyCount == 0 ? "risk-medium" : "risk-info";
+        var sourceState = sourceNonEmptyCount == 0
+            ? "No indexed guest/driver source artifact; the report view cannot prove that no additional raw rows existed."
+            : $"{sourceNonEmptyCount} non-empty indexed guest/driver source artifact(s) provide the complete raw source, including rotated driver JSONL segments.";
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "Evidence completeness",
+                $"rawNormalizedEvents={rawCount}",
+                $"sampledReportEvents={reportCount}",
+                $"quotaOmittedEvents={omittedCount}",
+                $"policyExcludedEvents={policyExcluded}",
+                $"highSignalOmittedEvents={highSignalOmitted}",
+                $"unknownOmittedEvents={unknownOmitted}",
+                $"dynamicOmittedEvents={dynamicOmitted}",
+                $"r0DriverOmittedEvents={r0Omitted}",
+                $"indexedGuestDriverSourceArtifacts={sourceCount}",
+                $"nonEmptyGuestDriverSourceArtifacts={sourceNonEmptyCount}",
+                "reportJsonRole=sampled-normalized-view",
+                "completeSource=guest-events.json and driver-events*.jsonl artifacts when indexed"
+            ]);
+        html.AppendLine($"<div class=\"section-note coverage-boundary {boundaryClass} copyable\" data-copy=\"{A(copy)}\"><strong>Evidence completeness.</strong> Raw normalized rows: {E(rawCount.ToString(CultureInfo.InvariantCulture))}; sampled report rows: {E(reportCount.ToString(CultureInfo.InvariantCulture))}; quota omitted: {E(omittedCount.ToString(CultureInfo.InvariantCulture))}; policy excluded: {E(policyExcluded.ToString(CultureInfo.InvariantCulture))}; high-signal omitted: {E(highSignalOmitted.ToString(CultureInfo.InvariantCulture))}; unknown omitted: {E(unknownOmitted.ToString(CultureInfo.InvariantCulture))}; dynamic omitted: {E(dynamicOmitted.ToString(CultureInfo.InvariantCulture))}; R0 omitted: {E(r0Omitted.ToString(CultureInfo.InvariantCulture))}. report.json is a sampled normalized view. {E(sourceState)}</div>");
+    }
+
+    private static int ParseEventMetric(SandboxEvent? evt, string key)
+    {
+        return evt is not null && evt.Data.TryGetValue(key, out var value) &&
+            int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? Math.Max(0, parsed)
+            : 0;
+    }
+
+    /// <summary>
     /// Appends all normalized events for auditability.
     /// Inputs are a report and output builder, processing orders events by time,
     /// and the method returns no value.
@@ -5196,14 +5259,15 @@ html[lang="en"] .localized-evidence-field{display:none}
         var inlineEvents = SelectRawInlineEvents(orderedEvents);
         var hiddenCount = Math.Max(0, orderedEvents.Count - inlineEvents.Count);
 
-        html.AppendLine("<section id=\"events\" class=\"card\"><h2>Raw normalized events</h2>");
+        html.AppendLine("<section id=\"events\" class=\"card\"><h2>Raw normalized events</h2><span class=\"section-subtitle\">Sampled report view / 原始证据入口</span>");
+        AppendReportEventCoverageNotice(html, report, artifacts);
         html.AppendLine("<div class=\"grid\">");
         Metric(html, "Total events", orderedEvents.Count.ToString(), "risk-info");
         Metric(html, "Inline rendered", inlineEvents.Count.ToString(), "risk-low");
         Metric(html, "Inline pages", RawEventPageCount(inlineEvents.Count).ToString(), "risk-info");
         Metric(html, "Hidden raw events", hiddenCount.ToString(), hiddenCount > 0 ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"section-note\"><strong>Slim raw event sample.</strong> Raw events are collapsed by default. Key process, guest import, artifact, and failure rows are promoted into the inline sample before lower-signal rows. Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Raw evidence height limit: 58vh. Hidden raw events: {hiddenCount}. Inline raw pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row. Open report.json or raw source artifacts for complete evidence. Native details work without JavaScript and print labels call out folded evidence.</div>");
+        html.AppendLine($"<div class=\"section-note\"><strong>Slim report-event sample.</strong> Report events are collapsed by default. Key process, guest import, artifact, and failure rows are promoted into the inline sample before lower-signal rows. Report rows shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Raw evidence height limit: 58vh. Hidden report rows: {hiddenCount}. Inline pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row. report.json contains the sampled normalized view; indexed source JSON/JSONL artifacts are the complete raw source when available.</div>");
         AppendRawEventReadingGuide(html, orderedEvents, inlineEvents.Count, hiddenCount);
         AppendRawEventSlimmingCards(html, orderedEvents, inlineEvents.Count, hiddenCount);
         AppendRawSourceHints(html, report, artifacts);
@@ -5276,9 +5340,9 @@ html[lang="en"] .localized-evidence-field{display:none}
             "risk-info");
         AppendOverviewItem(
             html,
-            "4. Use report.json for hidden rows",
+            "4. Use source JSON/JSONL for raw rows",
             hiddenCount.ToString(CultureInfo.InvariantCulture),
-            "Rows beyond the inline cap stay out of HTML tables; the page index shows report.json-only row ranges.",
+            "Rows beyond the inline cap stay out of HTML tables; the page index shows sampled report row ranges, while indexed source JSON/JSONL holds complete raw rows.",
             hiddenCount > 0 ? "risk-medium" : "risk-low");
         html.AppendLine("</div>");
     }
@@ -5326,11 +5390,11 @@ html[lang="en"] .localized-evidence-field{display:none}
                 $"sampleBehaviorRows={sampleBehaviorCount}",
                 $"excludedBehaviorStoryRows={excludedBehaviorCount}",
                 $"excludedReasonSummary={excludedReasonSummary}",
-                "HTML keeps bounded representative rows; report.json and source artifacts remain complete evidence."
+                "HTML keeps bounded representative rows; indexed source JSON/JSONL artifacts remain the complete raw evidence."
             ]);
 
         html.AppendLine("<h3>Raw event slimming story</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Raw event slimming story.</strong> These cards summarize the bounded report view before any dense row expansion: visible pages are bounded, long technical payloads stay folded, and report.json/source artifacts remain the complete record.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Raw event slimming story.</strong> These cards summarize the bounded report view before any dense row expansion: visible pages are bounded, long technical payloads stay folded, and indexed source JSON/JSONL artifacts remain the complete raw record.");
         html.AppendLine("<div class=\"overview-strip raw-slimming-story\">");
         AppendOverviewItem(
             html,
@@ -5409,7 +5473,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                     .Take(3));
             html.AppendLine($"<details id=\"raw-page-{pageNumber}\" class=\"raw-event-page copyable\" data-copy=\"{A(copy)}\"{open}><summary>Raw event page {pageNumber}/{pageCount}: rows {first}-{last} of {totalEventCount}; families {E(FirstNonEmpty(pageFamilies, "-"))}; top types {E(FirstNonEmpty(pageTypes, "-"))}</summary>");
             html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy raw page", copy)}</div>");
-            html.AppendLine("<div class=\"copy-hint\">Page evidence sample. This page is a bounded native-details chunk; long command/output/script fields remain folded. Use the copy button or right-click to copy this inline page; open report.json/events.json for complete row payloads.</div>");
+            html.AppendLine("<div class=\"copy-hint\">Page evidence sample. This page is a bounded native-details chunk; long command/output/script fields remain folded. Use the copy button or right-click to copy this inline page; report.json contains all retained rows, while events.json/driver JSONL contain complete raw payloads when indexed.</div>");
             AppendEventRows(html, pageEvents, artifactLookup, artifacts);
             html.AppendLine("</details>");
             pageNumber++;
@@ -5562,8 +5626,8 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Select((evt, index) => new RawEventIndexRow(index + 1, evt))
             .ToList();
 
-        html.AppendLine("<details class=\"raw-event-index\"><summary>Raw event page index / 原始事件页索引</summary>");
-        html.AppendLine("<div class=\"section-note\"><strong>Raw event page index.</strong> This static index covers every normalized event, even rows hidden from inline rendering. Use event type, source, or family rows to decide whether to open inline pages, report.json, or original source artifacts. Row ranges are copyable; groups beyond the card cap are folded into an other-groups row instead of being dropped.</div>");
+        html.AppendLine("<details class=\"raw-event-index\"><summary>Report event page index / Raw event page index / 原始事件页索引</summary>");
+        html.AppendLine("<div class=\"section-note\"><strong>Report event page index.</strong> This static index covers every normalized row retained in report.json, even rows hidden from inline rendering. Use event type, source, or family rows to decide whether to open inline pages or indexed source artifacts. Row ranges are copyable; groups beyond the card cap are folded into an other-groups row instead of being dropped.</div>");
         html.AppendLine("<div class=\"evidence-summary-grid\">");
         AppendRawIndexCard(html, "Index by event type", BuildRawIndexGroups(indexed, row => string.IsNullOrWhiteSpace(row.Event.EventType) ? "(empty)" : row.Event.EventType));
         AppendRawIndexCard(html, "Index by source", BuildRawIndexGroups(indexed, row => string.IsNullOrWhiteSpace(row.Event.Source) ? "(empty)" : row.Event.Source));
@@ -5571,7 +5635,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("</div>");
         if (orderedEvents.Count > RawEventInlineLimit)
         {
-            html.AppendLine($"<div class=\"section-note copyable\" data-copy=\"Rows {RawEventInlineLimit + 1}-{orderedEvents.Count}: report.json only\">Rows {RawEventInlineLimit + 1}-{orderedEvents.Count}: report.json only. These raw rows are intentionally outside the inline cap; use report.json or raw source artifacts for complete copyable row ranges.</div>");
+            html.AppendLine($"<div class=\"section-note copyable\" data-copy=\"Rows {RawEventInlineLimit + 1}-{orderedEvents.Count}: sampled report.json only\">Rows {RawEventInlineLimit + 1}-{orderedEvents.Count}: sampled report.json only. These report rows are intentionally outside the inline cap; use indexed source JSON/JSONL artifacts for complete raw row ranges.</div>");
         }
 
         html.AppendLine("</details>");
@@ -5760,7 +5824,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         var hiddenCount = Math.Max(0, orderedEvents.Count - inlineEvents.Count);
         if (hiddenCount > 0)
         {
-            html.AppendLine($"<div class=\"section-note\"><strong>Event table capped for readability.</strong> Inline rows: {E(inlineEvents.Count.ToString())}/{E(orderedEvents.Count.ToString())}. Hidden rows: {E(hiddenCount.ToString())}. Open Raw normalized events or report.json for complete evidence.</div>");
+            html.AppendLine($"<div class=\"section-note\"><strong>Event table capped for readability.</strong> Inline rows: {E(inlineEvents.Count.ToString())}/{E(orderedEvents.Count.ToString())}. Hidden rows: {E(hiddenCount.ToString())}. Open the sampled report view for all retained rows; use indexed source JSON/JSONL artifacts for complete raw evidence.</div>");
         }
 
         html.AppendLine("<div class=\"event-table-wrap\">");
@@ -6288,7 +6352,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine(CopyButton("Copy process card", card.CopyText));
             html.AppendLine("</div>");
             html.AppendLine("<details class=\"evidence-expansion-card\"><summary>Expand top process evidence</summary>");
-            AppendEvidenceExpansionSummary(html, "Process evidence expansion summary", card.EvidenceLines.Count, card.EventCount, "Raw normalized events/report.json", card.EvidenceLines);
+            AppendEvidenceExpansionSummary(html, "Process evidence expansion summary", card.EvidenceLines.Count, card.EventCount, "Sampled report view and indexed source JSON/JSONL", card.EvidenceLines);
             html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
             html.AppendLine("</article>");
         }
@@ -6296,8 +6360,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("</div>");
         if (hiddenCardCount > 0)
         {
-            var copy = $"hiddenProcessRelationshipCards={hiddenCardCount}; renderedProcessRelationshipCards={cards.Count}; completeSource=Raw normalized events/report.json";
-            html.AppendLine($"<div class=\"section-note copyable\" data-copy=\"{A(copy)}\">{E(hiddenCardCount.ToString(CultureInfo.InvariantCulture))} additional process relationship cards are hidden from inline cards; use Raw normalized events/report.json for complete process relationships.</div>");
+            var copy = $"hiddenProcessRelationshipCards={hiddenCardCount}; renderedProcessRelationshipCards={cards.Count}; completeSource=indexed source JSON/JSONL artifacts";
+            html.AppendLine($"<div class=\"section-note copyable\" data-copy=\"{A(copy)}\">{E(hiddenCardCount.ToString(CultureInfo.InvariantCulture))} additional process relationship cards are hidden from inline cards; use indexed source JSON/JSONL artifacts for complete process relationships.</div>");
         }
     }
 
@@ -6504,7 +6568,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine(CopyButton("Copy network card", card.CopyText));
             html.AppendLine("</div>");
             html.AppendLine("<details class=\"evidence-expansion-card\"><summary>Expand top network evidence</summary>");
-            AppendEvidenceExpansionSummary(html, "Network evidence expansion summary", card.EvidenceLines.Count, card.EventCount, "Raw normalized events/report.json and packet artifacts", card.EvidenceLines);
+            AppendEvidenceExpansionSummary(html, "Network evidence expansion summary", card.EvidenceLines.Count, card.EventCount, "Sampled report view, indexed source JSON/JSONL, and packet artifacts", card.EvidenceLines);
             html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
             html.AppendLine("</article>");
         }
@@ -6512,8 +6576,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("</div>");
         if (hiddenCardCount > 0)
         {
-            var copy = $"hiddenNetworkRelationshipCards={hiddenCardCount}; renderedNetworkRelationshipCards={cards.Count}; completeSource=Raw normalized events/report.json";
-            html.AppendLine($"<div class=\"section-note copyable\" data-copy=\"{A(copy)}\">{E(hiddenCardCount.ToString(CultureInfo.InvariantCulture))} additional network relationship cards are hidden from inline cards; use Raw normalized events/report.json for complete endpoint evidence.</div>");
+            var copy = $"hiddenNetworkRelationshipCards={hiddenCardCount}; renderedNetworkRelationshipCards={cards.Count}; completeSource=indexed source JSON/JSONL and packet artifacts";
+            html.AppendLine($"<div class=\"section-note copyable\" data-copy=\"{A(copy)}\">{E(hiddenCardCount.ToString(CultureInfo.InvariantCulture))} additional network relationship cards are hidden from inline cards; use indexed source JSON/JSONL and packet artifacts for complete endpoint evidence.</div>");
         }
     }
 
@@ -6985,7 +7049,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("</ul>");
         if (hidden > 0)
         {
-            html.AppendLine($"<div class=\"copy-hint\">{E(hidden.ToString(CultureInfo.InvariantCulture))} additional linked artifacts are hidden from this compact card; use Artifact links or report.json for complete evidence.</div>");
+            html.AppendLine($"<div class=\"copy-hint\">{E(hidden.ToString(CultureInfo.InvariantCulture))} additional linked artifacts are hidden from this compact card; use Artifact links or the sampled report view for all retained evidence.</div>");
         }
 
         html.AppendLine($"<div class=\"toolbar\">{CopyButton(copyLabel, copy)}</div>");
@@ -11492,6 +11556,29 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("VMware Tools did not report a guest address after restore. Start VMware Tools in the baseline guest and retry address discovery.", "还原后 VMware Tools 未返回来宾地址。请在基线来宾中启动 VMware Tools，然后重试地址发现。"),
         ("Guest WinRM endpoint was unreachable. Verify the guest firewall, HTTPS listener, address, and TCP 5986 before retrying.", "来宾 WinRM 端点不可达。请检查来宾防火墙、HTTPS 监听器、地址和 TCP 5986 后再重试。"),
         ("Raw normalized events", "原始事件"),
+        ("<span class=\"section-subtitle\">Sampled report view / 原始证据入口</span>", "<span class=\"section-subtitle\">采样报告视图 / 原始证据入口</span>"),
+        ("Evidence completeness.", "证据完整性。"),
+        ("Raw normalized rows:", "原始规范化行："),
+        ("sampled report rows:", "采样报告行："),
+        ("quota omitted:", "配额省略："),
+        ("policy excluded:", "策略排除："),
+        ("high-signal omitted:", "高信号省略："),
+        ("unknown omitted:", "未知类型省略："),
+        ("dynamic omitted:", "动态动作省略："),
+        ("R0 omitted:", "R0 省略："),
+        ("report.json is a sampled normalized view.", "report.json 是采样规范化视图。"),
+        ("No indexed guest/driver source artifact; the report view cannot prove that no additional raw rows existed.", "未索引来宾/驱动原始来源；报告视图不能证明不存在其他原始行。"),
+        ("indexed guest/driver source artifact(s) provide the complete raw source, including rotated driver JSONL segments.", "个已索引来宾/驱动来源提供完整原始来源，其中包括旋转的驱动 JSONL 分段。"),
+        ("Slim report-event sample.", "精简报告事件样本。"),
+        ("Report rows shown inline:", "报告内联行："),
+        ("Hidden report rows:", "隐藏报告行："),
+        ("report.json contains the sampled normalized view; indexed source JSON/JSONL artifacts are the complete raw source when available.", "report.json 包含采样规范化视图；有可用索引时，来源 JSON/JSONL 证据文件才是完整原始来源。"),
+        ("Report event page index / Raw event page index / 原始事件页索引", "报告事件页索引 / 原始事件页索引"),
+        ("Report event page index.", "报告事件页索引。"),
+        ("This static index covers every normalized row retained in report.json, even rows hidden from inline rendering. Use event type, source, or family rows to decide whether to open inline pages or indexed source artifacts. Row ranges are copyable; groups beyond the card cap are folded into an other-groups row instead of being dropped.", "此静态索引覆盖 report.json 保留的每条规范化行，包括未内联渲染的隐藏行。可按事件类型、来源或事件族判断应打开内联页还是来源证据文件。行范围可复制；超过卡片上限的分组会折叠到其他分组行，而不是被丢弃。"),
+        ("4. Use source JSON/JSONL for raw rows", "4. 使用来源 JSON/JSONL 查看原始行"),
+        ("Rows beyond the inline cap stay out of HTML tables; the page index shows sampled report row ranges, while indexed source JSON/JSONL holds complete raw rows.", "超过内联上限的行不会进入 HTML 表；页索引显示采样报告行范围，已索引来源 JSON/JSONL 保存完整原始行。"),
+        ("indexed source JSON/JSONL artifacts remain the complete raw record.", "已索引来源 JSON/JSONL 证据文件仍是完整原始记录。"),
         ("Slim raw event sample.", "精简原始事件样本。"),
         ("Inline raw pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row.", "内联原始事件页使用原生 details；command、stdout、stderr、PowerShell、script block 和超大载荷会在每行中保持折叠。"),
         ("Raw event reading guide", "原始事件阅读指南"),

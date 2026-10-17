@@ -326,6 +326,11 @@ R0Collector 现在解析 `protocolName`、`directionName`、`addressFamilyName`�
 `transportProtocol`、`servicePort`、`serviceHint`、`semanticCandidate`、
 DNS/HTTP/TLS candidate booleans、`processIdPresent`、`flowHandleHex`、
 `transportEndpointHandleHex`、`layerIdHex`、`calloutIdHex` 和 `filterIdHex`。
+R0 网络行还保留 `ownerPid`、`ownerPidPresent`、`ownerPidSource` 和
+`owningProcessId`，这些字段明确表示 WFP metadata 提供的 socket owner PID；
+当 metadata 缺失时使用 `ownerPidPresent=false`/`ownerPidSource=unavailable`，不把
+事件头的回调 PID 冒充样本 owner。`localPort`/`remotePort` 是已经归一化的
+host-order 端口，和 PCAP endpoint/flowKey 使用同一数值。
 WFP event naming is also normalized for user mode: `wfpEventFamily`,
 `wfpEventName`, `wfpLayerSemanticName`, `wfpLayerDirection`,
 `wfpLayerAddressFamily`, `wfpInspectionAction`, `kernelNetworkProducerScope`,

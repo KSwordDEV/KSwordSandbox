@@ -482,8 +482,8 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
             "MapEventType",
             System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
         SmokeAssert.True(mapMethod is not null, "ETW parser should keep a semantic event-type mapper.");
-        var processEnd = (string)mapMethod!.Invoke(null, ["Process", "End", new Dictionary<string, string>()])!;
-        var threadEnd = (string)mapMethod.Invoke(null, ["Thread", "End", new Dictionary<string, string>()])!;
+        var processEnd = (string)mapMethod!.Invoke(null, ["Process", "End", new Dictionary<string, string>(), ""])!;
+        var threadEnd = (string)mapMethod.Invoke(null, ["Thread", "End", new Dictionary<string, string>(), ""])!;
         SmokeAssert.True(processEnd == "process.exit", "ETW Process End must normalize to process.exit.");
         SmokeAssert.True(threadEnd == "thread.exit", "ETW Thread End must normalize to thread.exit.");
     }

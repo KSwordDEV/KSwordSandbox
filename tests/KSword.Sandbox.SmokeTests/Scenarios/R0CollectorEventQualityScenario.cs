@@ -214,6 +214,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(ioctlClient, "request->Flags = 0", "Producer-mask request reserved flags must remain zero.");
         RequireContains(ioctlClient, "request.Flags = 0", "READ_EVENTS request reserved flags must remain zero.");
         RequireContains(ioctlClient, "reply.BytesWritten > availableEventBytes", "Collector must protect against malformed READ_EVENTS byte counts.");
+        RequireContains(ioctlClient, "QueryNetworkOwnerProcessName", "Collector must best-effort resolve a network owner PID for host correlation.");
+        RequireContains(ioctlClient, "KswSandboxEventTypeNetwork", "Collector must apply owner-PID resolution only to network payload rows.");
         RequireContains(ioctlClient, "kHealthReplyLegacyMinimumBytes", "Collector must tolerate old GET_HEALTH replies that contain the stable legacy prefix.");
         RequireContains(ioctlClient, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "Collector must gate GET_HEALTH producer masks on the advertised availability flag.");
         RequireContains(ioctlClient, "advertised producer masks without returning", "Collector must reject flagged GET_HEALTH replies that omit producer mask bytes.");
@@ -261,7 +263,11 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(eventParser, "zhHint", "Typed payload rows must include Chinese operator hints.");
         RequireContains(eventParser, "sourceEndpoint", "Network parser must include source endpoint semantics.");
         RequireContains(eventParser, "destinationEndpoint", "Network parser must include destination endpoint semantics.");
+        RequireContains(eventParser, "IPv6 literals must be bracketed", "Network parser must bracket IPv6 endpoints before appending ports for PCAP joins.");
         RequireContains(eventParser, "flowKey", "Network parser must include flow-key semantics.");
+        RequireContains(eventParser, "ownerPidPresent", "Network parser must expose whether WFP supplied an owner PID.");
+        RequireContains(eventParser, "ownerPidSource", "Network parser must identify the owner PID source.");
+        RequireContains(eventParser, "owningProcessId", "Network parser must preserve the owning-process PID alias for correlation.");
         RequireContains(eventParser, "flowKeyVersion", "Network parser must version flow-key semantics.");
         RequireContains(eventParser, "serviceHintSource", "Network parser must explain DNS/HTTP/TLS service-hint source.");
         RequireContains(eventParser, "serviceHintDns", "Network parser must emit DNS service-hint booleans.");
@@ -338,6 +344,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(syntheticMode, "sourceEndpoint", "Synthetic network rows should preserve source endpoint semantics.");
         RequireContains(syntheticMode, "destinationEndpoint", "Synthetic network rows should preserve destination endpoint semantics.");
         RequireContains(syntheticMode, "flowKey", "Synthetic network rows should preserve flow-key semantics.");
+        RequireContains(syntheticMode, "ownerPidSource", "Synthetic network rows should preserve owner-PID source semantics.");
         RequireContains(syntheticMode, "flowKeyVersion", "Synthetic network rows should preserve flow-key version semantics.");
         RequireContains(syntheticMode, "serviceHintTls", "Synthetic network rows should preserve TLS service-hint semantics.");
         RequireContains(syntheticMode, "semanticCompanionContract", "Synthetic semantic rows should declare that companion rows are not counted in stress.");

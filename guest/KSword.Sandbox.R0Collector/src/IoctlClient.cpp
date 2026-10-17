@@ -5,10 +5,47 @@
 #include <algorithm>
 #include <cwctype>
 #include <cstring>
+#include <limits>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace KSword::Sandbox::R0Collector {
+
+// Input: WFP owner PID copied from a network payload.
+// Processing: Resolves a short process image basename in user mode when the
+// owner metadata is present.  The lookup is best-effort because a short-lived
+// process may exit before the collector drains the event; the numeric owner
+// PID and ownerPidSource remain authoritative in that case.
+// Return: owner image basename, or empty when the PID cannot be queried.
+std::wstring QueryNetworkOwnerProcessName(const unsigned long long ownerPid) {
+    if (ownerPid == 0 ||
+        ownerPid > static_cast<unsigned long long>(std::numeric_limits<DWORD>::max())) {
+        return {};
+    }
+
+    const HANDLE process = OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION,
+        FALSE,
+        static_cast<DWORD>(ownerPid));
+    if (process == nullptr) {
+        return {};
+    }
+
+    wchar_t imagePath[32768] = {};
+    DWORD imagePathLength = static_cast<DWORD>(sizeof(imagePath) / sizeof(imagePath[0]));
+    const BOOL queried = QueryFullProcessImageNameW(
+        process,
+        0,
+        imagePath,
+        &imagePathLength);
+    CloseHandle(process);
+    if (!queried || imagePathLength == 0) {
+        return {};
+    }
+
+    return BaseNameFromPath(std::wstring(imagePath, imagePathLength));
+}
 
 // Input: Device path supplied by the user.
 // Processing: Opens the KSword driver control device with read/write access so
@@ -1242,6 +1279,23 @@ bool EmitDriverEventRecords(
     constexpr size_t kSerializedRowBatch = 256U;
     serializedRows.reserve(kSerializedRowBatch);
     serializedSequences.reserve(kSerializedRowBatch);
+    std::unordered_map<unsigned long long, std::wstring> networkOwnerProcessNameCache;
+    networkOwnerProcessNameCache.reserve(64);
+    const auto resolveNetworkOwnerProcessName = [&](const unsigned long long ownerPid) {
+        const auto cached = networkOwnerProcessNameCache.find(ownerPid);
+        if (cached != networkOwnerProcessNameCache.end()) {
+            return cached->second;
+        }
+
+        const std::wstring resolved = QueryNetworkOwnerProcessName(ownerPid);
+        // Keep the cache bounded because a busy VM can observe many short-lived
+        // owner PIDs during a single drain window. Empty results are cached too
+        // so an exited process does not trigger a query for every duplicate row.
+        if (networkOwnerProcessNameCache.size() < 256U) {
+            networkOwnerProcessNameCache.emplace(ownerPid, resolved);
+        }
+        return resolved;
+    };
 
     const auto commitSerializedRows = [&]() -> bool {
         if (serializedRows.empty()) {
@@ -1317,6 +1371,20 @@ bool EmitDriverEventRecords(
             ExtractTypedPayloadProcessName(header.Type, payload, header.PayloadSize);
         if (!processName.empty()) {
             event.processName = processName;
+        } else if (header.Type == KswSandboxEventTypeNetwork &&
+            header.PayloadSize >= sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD)) {
+            const auto* networkPayload =
+                reinterpret_cast<const KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD*>(payload);
+            const bool ownerPidPresent =
+                (networkPayload->Flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PROCESS_ID_PRESENT) != 0 &&
+                networkPayload->ProcessId != 0;
+            if (ownerPidPresent) {
+                // Network payloads carry no image path in the fixed ABI.  A
+                // bounded user-mode lookup restores the process-name edge for
+                // host correlation without changing the driver's ownership
+                // contract or inventing a name when the process has exited.
+                event.processName = resolveNetworkOwnerProcessName(networkPayload->ProcessId);
+            }
         }
         const std::wstring commandLine =
             ExtractTypedPayloadCommandLine(header.Type, payload, header.PayloadSize);

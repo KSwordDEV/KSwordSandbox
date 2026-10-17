@@ -84,6 +84,91 @@ internal sealed class SystemNativeDiscoveryVerdictRegressionScenario : ISmokeTes
             string.Equals(classifiedPrefetch.Data.GetValueOrDefault("behaviorCounted"), "false", StringComparison.OrdinalIgnoreCase),
             "PID 4 Prefetch writes for a native discovery utility must not count as sample behavior.");
 
+        var utilityPrefetch = prefetch with
+        {
+            ProcessName = "hostname.exe",
+            ProcessId = 7001,
+            Data = new Dictionary<string, string>(prefetch.Data, StringComparer.OrdinalIgnoreCase)
+            {
+                ["processId"] = "7001"
+            }
+        };
+        var classifiedUtilityPrefetch = SampleCorrelationClassifier.Apply([sample, hostname, utilityPrefetch], sample.Path)
+            .Single(evt => evt.EventType.Equals("driver.file", StringComparison.OrdinalIgnoreCase) && evt.ProcessId == 7001);
+        SmokeAssert.True(
+            string.Equals(classifiedUtilityPrefetch.Data.GetValueOrDefault("sampleCorrelation"), "environment", StringComparison.OrdinalIgnoreCase),
+            "Expected Windows Prefetch writes must remain environment evidence even when the utility PID owns the row.");
+
+        var utilityDriverRow = new SandboxEvent
+        {
+            EventType = "driver.file",
+            Timestamp = timestamp.AddMilliseconds(250),
+            Source = "driver",
+            ProcessName = "hostname.exe",
+            ProcessId = 7001,
+            Path = @"\Windows\System32\hostname.exe",
+            Data =
+            {
+                ["schema"] = "ksword.sandbox.r0.event",
+                ["eventOrigin"] = "kernel-driver",
+                ["producerCategory"] = "file",
+                ["operationName"] = "read"
+            }
+        };
+        var classifiedUtilityDriverRow = SampleCorrelationClassifier.Apply([sample, hostname, utilityDriverRow], sample.Path)
+            .Single(evt => ReferenceEquals(evt, utilityDriverRow) ||
+                (evt.EventType.Equals("driver.file", StringComparison.OrdinalIgnoreCase) && evt.ProcessId == 7001));
+        SmokeAssert.True(
+            string.Equals(classifiedUtilityDriverRow.Data.GetValueOrDefault("sampleCorrelation"), "environment", StringComparison.OrdinalIgnoreCase),
+            "R0 file rows owned by a signed System32 discovery utility should remain environment evidence.");
+
+        var hostStagingRow = new SandboxEvent
+        {
+            EventType = "driver.file",
+            Timestamp = timestamp.AddMilliseconds(275),
+            Source = "driver",
+            ProcessName = "csrss.exe",
+            ProcessId = 476,
+            Path = @"\KSwordSandbox\incoming\sample.exe.Config",
+            Data =
+            {
+                ["eventOrigin"] = "kernel-driver",
+                ["operationName"] = "create",
+                ["path"] = @"\KSwordSandbox\incoming\sample.exe.Config"
+            }
+        };
+        var classifiedHostStagingRow = SampleCorrelationClassifier.Apply([sample, hostStagingRow], sample.Path)
+            .Single(evt => evt.ProcessId == 476);
+        SmokeAssert.True(
+            string.Equals(classifiedHostStagingRow.Data.GetValueOrDefault("sampleCorrelation"), "environment", StringComparison.OrdinalIgnoreCase),
+            "System-owned incoming staging rows must not be promoted by the submitted sample path.");
+        SmokeAssert.True(
+            string.Equals(classifiedHostStagingRow.Data.GetValueOrDefault("behaviorCounted"), "false", StringComparison.OrdinalIgnoreCase),
+            "System-owned incoming staging rows must remain non-behavior evidence.");
+
+        var stagingRow = new SandboxEvent
+        {
+            EventType = "driver.file",
+            Timestamp = timestamp.AddMilliseconds(50),
+            Source = "driver",
+            ProcessName = "MSPCManagerService.exe",
+            ProcessId = 4596,
+            Path = @"C:\KSwordSandbox\incoming\sample.exe",
+            Data =
+            {
+                ["schema"] = "ksword.sandbox.r0.event",
+                ["eventOrigin"] = "kernel-driver",
+                ["producerCategory"] = "file",
+                ["processImagePath"] = @"C:\Program Files\WindowsApps\Microsoft.MicrosoftPCManager_3.23.0.0_x64__8wekyb3d8bbwe\PCManager\MSPCManagerService.exe",
+                ["operationName"] = "create"
+            }
+        };
+        var classifiedStagingRow = SampleCorrelationClassifier.Apply([sample, stagingRow], sample.Path)
+            .Single(evt => evt.ProcessId == 4596);
+        SmokeAssert.True(
+            string.Equals(classifiedStagingRow.Data.GetValueOrDefault("sampleCorrelation"), "environment", StringComparison.OrdinalIgnoreCase),
+            "Guest sample staging by MSPCManagerService must not be promoted by the submitted sample path.");
+
         var rules = RuleEngine.LoadRuleSet(Path.Combine(context.RulesDirectory, "behavior-rules.json"));
         var findings = new RuleEngine(rules).Classify(classified);
         SmokeAssert.True(

@@ -182,6 +182,11 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     private DateTimeOffset? collectionStartUtc;
     private DateTimeOffset? lastQueryUtc;
     private bool permanentlyUnavailable;
+    // Carry the before-start audit result into later query summaries so a
+    // zero-row Security query is distinguishable from a clean observation.
+    private string auditPolicyCoverageState = "unknown";
+    private string auditPolicyDisabledTargets = string.Empty;
+    private string auditPolicyEnabledTargets = string.Empty;
 
     public string ProbeId => "security-event-log";
 
@@ -215,6 +220,10 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             lastQueryUtc = null;
             seenEventKeys.Clear();
             observedLogonIds.Clear();
+            correlatedProcessIds.Clear();
+            auditPolicyCoverageState = "unknown";
+            auditPolicyDisabledTargets = string.Empty;
+            auditPolicyEnabledTargets = string.Empty;
             return
             [
                 CreateStartedEvent(phase, context),
@@ -712,6 +721,24 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         AddIfNotEmpty(data, "rootCommandLine", context.RootCommandLine);
         AddCommonSecurityAliases(data, rawEvent);
         AddRawEventData(data, rawEvent.EventData);
+
+        // Standard 4656/4663 audit payloads often contain ObjectName and a
+        // logon session but no actor ProcessId. Preserve this source-level
+        // limitation explicitly instead of making an uncorrelated row look
+        // like a clean negative result or guessing the PID from the provider
+        // execution context (which is commonly lsass.exe).
+        if (rawEvent.EventId is 4656 or 4663 && !CandidateProcessIds(rawEvent).Any())
+        {
+            data["sampleCorrelationLimitation"] = "standard-object-access-audit-row-has-no-actor-process-id";
+            data["correlationEvidenceMissing"] = "actorProcessId";
+            data["correlationSourceGap"] = "Security 4656/4663 require process-object SACL context but the standard payload does not identify the caller PID; retain as uncorrelated unless another source joins it.";
+        }
+        else if (rawEvent.EventId is 4703 or 4704 or 4705 or 4717 or 4718 && !CandidateProcessIds(rawEvent).Any())
+        {
+            data["sampleCorrelationLimitation"] = "security-policy-change-row-has-no-actor-process-id";
+            data["correlationEvidenceMissing"] = "actorProcessId";
+            data["correlationSourceGap"] = "This Security audit event supplies account/policy context but no caller PID; retain as context unless another source joins it.";
+        }
 
         return new SandboxEvent
         {
@@ -1212,7 +1239,11 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     /// </summary>
     private static IEnumerable<int> CandidateProcessIds(RawSecurityEvent rawEvent)
     {
-        foreach (var name in new[] { "NewProcessId", "ProcessId", "SourceProcessId", "TargetProcessId", "ClientProcessId" })
+        foreach (var name in new[]
+        {
+            "NewProcessId", "ProcessId", "ProcessID", "SourceProcessId", "TargetProcessId",
+            "ClientProcessId", "CallerProcessId", "InitiatorProcessId", "ServiceProcessId"
+        })
         {
             var parsed = ParseProcessId(Field(rawEvent.EventData, name));
             if (parsed is not null)
@@ -1227,9 +1258,13 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         return ParseProcessId(FirstNonEmpty(
             Field(rawEvent.EventData, "NewProcessId"),
             Field(rawEvent.EventData, "ProcessId"),
+            Field(rawEvent.EventData, "ProcessID"),
             Field(rawEvent.EventData, "SourceProcessId"),
             Field(rawEvent.EventData, "TargetProcessId"),
-            Field(rawEvent.EventData, "ClientProcessId")));
+            Field(rawEvent.EventData, "ClientProcessId"),
+            Field(rawEvent.EventData, "CallerProcessId"),
+            Field(rawEvent.EventData, "InitiatorProcessId"),
+            Field(rawEvent.EventData, "ServiceProcessId")));
     }
 
     private static int? ParentProcessId(RawSecurityEvent rawEvent)
@@ -1244,6 +1279,9 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         return FirstNonEmpty(
             Field(rawEvent.EventData, "NewProcessName"),
             Field(rawEvent.EventData, "ProcessName"),
+            Field(rawEvent.EventData, "CallerProcessName"),
+            Field(rawEvent.EventData, "InitiatorProcessName"),
+            Field(rawEvent.EventData, "TargetProcessName"),
             Field(rawEvent.EventData, "Application"),
             Field(rawEvent.EventData, "ServiceFileName"));
     }
@@ -1337,7 +1375,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     /// Inputs are phase/context; processing queries auditpol and matches
     /// target subcategory GUIDs; the method returns a health event.
     /// </summary>
-    private static async Task<SandboxEvent> CreateAuditPolicySummaryEventAsync(
+    private async Task<SandboxEvent> CreateAuditPolicySummaryEventAsync(
         ProbePhase phase,
         GuestProbeContext context,
         CancellationToken cancellationToken)
@@ -1357,6 +1395,9 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
 
         if (!result.Succeeded)
         {
+            auditPolicyCoverageState = "unknown";
+            auditPolicyDisabledTargets = string.Empty;
+            auditPolicyEnabledTargets = string.Empty;
             evt.Data["captureState"] = "partial";
             evt.Data["status"] = "partial";
             evt.Data["reason"] = result.TimedOut ? "auditPolicyQueryTimedOut" : "auditPolicyQueryFailed";
@@ -1372,6 +1413,9 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         // coverage instead of claiming every target is missing/disabled.
         if (string.IsNullOrWhiteSpace(result.StandardOutput))
         {
+            auditPolicyCoverageState = "unknown";
+            auditPolicyDisabledTargets = string.Empty;
+            auditPolicyEnabledTargets = string.Empty;
             evt.Data["captureState"] = "partial";
             evt.Data["status"] = "partial";
             evt.Data["reason"] = "auditPolicyOutputEmpty";
@@ -1445,6 +1489,9 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
 
         if (policyRows.Count == 0)
         {
+            auditPolicyCoverageState = "unknown";
+            auditPolicyDisabledTargets = JoinDistinct(disabled);
+            auditPolicyEnabledTargets = JoinDistinct(enabled);
             evt.Data["captureState"] = "partial";
             evt.Data["status"] = "partial";
             evt.Data["reason"] = "auditPolicyRowsUnparseable";
@@ -1454,12 +1501,18 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         }
         else if (missing.Count == 0 && disabled.Count == 0)
         {
+            auditPolicyCoverageState = "covered";
+            auditPolicyDisabledTargets = string.Empty;
+            auditPolicyEnabledTargets = JoinDistinct(enabled);
             evt.Data["auditPolicyStatus"] = "targetPoliciesSuccessEnabled";
             evt.Data["auditPolicyCoverageState"] = "covered";
             evt.Data["zhHint"] = "目标 Security 事件相关审核策略看起来已开启成功审核；仍需注意 4656/4663 进程对象访问通常还依赖对象 SACL，缺失事件不一定代表样本未访问。";
         }
         else
         {
+            auditPolicyCoverageState = missing.Count > 0 ? "partial" : "disabled";
+            auditPolicyDisabledTargets = JoinDistinct(disabled.Concat(missing));
+            auditPolicyEnabledTargets = JoinDistinct(enabled);
             evt.Data["captureState"] = "partial";
             evt.Data["status"] = "partial";
             evt.Data["reason"] = "auditPolicyCoverageGap";
@@ -1602,7 +1655,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         return evt;
     }
 
-    private static SandboxEvent CreateQuerySummaryEvent(
+    private SandboxEvent CreateQuerySummaryEvent(
         ProbePhase phase,
         GuestProbeContext context,
         DateTimeOffset querySinceUtc,
@@ -1620,10 +1673,29 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         evt.Data["maxEventsPerRead"] = MaxEventsPerRead.ToString(CultureInfo.InvariantCulture);
         evt.Data["possiblyTruncated"] = possiblyTruncated.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         evt.Data["targetEventIds"] = FormatTargetEventIds();
+        evt.Data["auditPolicyCoverageState"] = auditPolicyCoverageState;
+        evt.Data["auditPolicyEnabledTargets"] = auditPolicyEnabledTargets;
+        evt.Data["auditPolicyDisabledTargets"] = auditPolicyDisabledTargets;
+        evt.Data["zeroRowInterpretation"] = emittedEventCount > 0
+            ? "target-security-events-observed"
+            : auditPolicyCoverageState switch
+            {
+                "disabled" => "no-target-events-observed-policy-disabled",
+                "partial" => "no-target-events-observed-policy-partially-enabled",
+                "covered" => "no-target-events-observed-with-policy-covered",
+                _ => "no-target-events-observed-policy-coverage-unknown"
+            };
+        evt.Data["coverageSource"] = "security_eventlog.audit_policy.summary";
         evt.Data["zhMessage"] = emittedEventCount == 0
-            ? "本阶段未读取到目标 Windows 安全日志事件；这可能表示没有相关行为、审计策略未开启或日志不可读。"
+            ? auditPolicyCoverageState switch
+            {
+                "disabled" => "本阶段未读取到目标 Windows 安全日志事件；目标审核策略未开启，因此该补充面不能判定为未发生。",
+                "partial" => "本阶段未读取到目标 Windows 安全日志事件；目标审核策略仅部分开启，安全日志覆盖面不完整。",
+                "covered" => "本阶段未读取到目标 Windows 安全日志事件；目标审核策略已覆盖，但本阶段未观察到对应事件。",
+                _ => "本阶段未读取到目标 Windows 安全日志事件；审核策略覆盖状态未知，不能据此判定未发生。"
+            }
             : "本阶段 Windows 安全日志补充查询完成。";
-        evt.Data["zhHint"] = "summary 不代表样本行为；只有 sampleCorrelationStatus=correlated 且 behaviorCounted=true 的安全日志事件才计入样本行为候选。";
+        evt.Data["zhHint"] = "summary 不代表样本行为；只有 sampleCorrelationStatus=correlated 且 behaviorCounted=true 的安全日志事件才计入样本行为候选。zeroRowInterpretation 用于区分未观察到事件与审核策略缺口。";
         return evt;
     }
 

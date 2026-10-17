@@ -2513,6 +2513,7 @@ public sealed partial class SandboxJobService
         CollectionHealthSummaryBuilder.AddMetrics(
             metrics,
             CollectionHealthSummaryBuilder.Build(rawEvents ?? events, events));
+        AddEtwCoverageMetrics(metrics, rawEvents ?? events);
         if (importSummary is not null)
         {
             metrics["events.sources.total"] = importSummary.SourceCount;
@@ -2587,6 +2588,20 @@ public sealed partial class SandboxJobService
             metrics[$"events.r0.driver.{category}.raw"] = rawDriverRows.Count(evt => R0DriverCategory(evt) == category);
             metrics[$"events.r0.driver.{category}.report"] = reportDriverRows.Count(evt => R0DriverCategory(evt) == category);
         }
+    }
+
+    private static void AddEtwCoverageMetrics(
+        Dictionary<string, int> metrics,
+        IReadOnlyCollection<SandboxEvent> rawEvents)
+    {
+        var captured = rawEvents.Where(evt =>
+            evt.EventType.Equals("etw_live.captured", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Equals("etw_live.decode_failed", StringComparison.OrdinalIgnoreCase));
+        var parsed = MaxDataUnsigned(captured, "parsedEventCount", "decodedEventCount");
+        metrics["events.etw.parsedEventCount"] = ToMetricInt(parsed);
+        metrics["etw.parsedEventCount"] = ToMetricInt(parsed);
+        metrics["events.etw.etlDecodeRequired"] = captured.Any(evt =>
+            EventDataBoolTrue(evt, "etlDecodeRequired")) ? 1 : 0;
     }
 
     private static bool IsR0DriverTelemetryRow(SandboxEvent evt) =>

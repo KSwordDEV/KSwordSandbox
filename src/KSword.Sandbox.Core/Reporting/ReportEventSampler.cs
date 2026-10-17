@@ -422,6 +422,7 @@ public static class ReportEventSampler
     // decoders that expose parent/image/command/exit fields when available.
     private static readonly string[] EtwKernelEventPriorityDataKeys =
     [
+        "captureSource",
         "eventName",
         "opcode",
         "eventId",
@@ -1304,6 +1305,30 @@ public static class ReportEventSampler
             }
         }
 
+        // A dynamic row can also satisfy a higher-priority lifecycle or
+        // coverage predicate. If that predicate was capped, the row must
+        // still consume the dedicated dynamic quota rather than becoming an
+        // unexplained policy omission. Fill any remaining dynamic capacity
+        // from the complete dynamic candidate set before calculating the
+        // omission ledger.
+        if (dynamicActionSelectedCount < dynamicActionQuota)
+        {
+            foreach (var candidate in inlineCandidates
+                         .Where(candidate => IsDynamicActionEvidenceEvent(candidate.Event) &&
+                                             !selectedIndexes.Contains(candidate.Index))
+                         .OrderBy(candidate => DynamicActionPriority(candidate.Event))
+                         .ThenBy(candidate => candidate.Index))
+            {
+                if (dynamicActionSelectedCount >= dynamicActionQuota)
+                {
+                    break;
+                }
+
+                selectedIndexes.Add(candidate.Index);
+                dynamicActionSelectedCount++;
+            }
+        }
+
         // If the first pass did not reach the requested max because most events
         // were one noisy type, keep the report intentionally smaller. Raw JSONL
         // remains the authority; avoiding a fill pass prevents driver.file or
@@ -1453,6 +1478,26 @@ public static class ReportEventSampler
             return ReportSamplingBucket.FindingEvidence;
         }
 
+        // ETW capture summaries prove whether the live trace was decoded and
+        // which semantic lanes were actually observed. Keep the summary row
+        // even when it contains no individual sample action, otherwise a
+        // successful ETW decode disappears behind the diagnostic quota.
+        if (string.Equals(eventType, "etw_live.captured", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(eventType, "etw_live.decode_failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
+        // Route every dynamic action through the dedicated lane before the
+        // lifecycle/diagnostic buckets. Some dynamic rows also carry
+        // nonbehavior or operational metadata; evaluating those buckets first
+        // made a small subset disappear as policy-excluded even though the
+        // dynamic quota still had room.
+        if (IsDynamicActionEvidenceEvent(evt))
+        {
+            return ReportSamplingBucket.DynamicActionEvidence;
+        }
+
         if (string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "pcap.import.summary", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "network.import.summary", StringComparison.OrdinalIgnoreCase))
@@ -1474,19 +1519,6 @@ public static class ReportEventSampler
         if (IsNetworkSnapshotOrDiffEvent(evt))
         {
             return ReportSamplingBucket.GeneralBehaviorEvidence;
-        }
-
-        // Every normalized dynamic action is evidence, including rows that
-        // remain environment/unknown after correlation. Route all of them
-        // through the dedicated dynamic-evidence bucket so TCP edges,
-        // rename/delete rows, registry writes, startup/task changes, and
-        // PowerShell children compete for an explicit hard budget instead of
-        // disappearing into the small diagnostic quota. Correlation fields
-        // still decide whether a row contributes to a sample verdict;
-        // retention and attribution are separate concerns.
-        if (IsDynamicActionEvidenceEvent(evt))
-        {
-            return ReportSamplingBucket.DynamicActionEvidence;
         }
 
         // Findings may deliberately reference nonbehavior/diagnostic rows
@@ -1550,7 +1582,8 @@ public static class ReportEventSampler
         var type = NormalizeEventType(evt.EventType);
         if (type.Contains(".snapshot", StringComparison.OrdinalIgnoreCase) ||
             type.Contains(".observed", StringComparison.OrdinalIgnoreCase) ||
-            type.Contains(".diff", StringComparison.OrdinalIgnoreCase))
+            type.Contains(".diff", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains(".summary", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -1679,16 +1712,79 @@ public static class ReportEventSampler
             return false;
         }
 
-        return !EventDataBoolTrue(
+        // Correlation intentionally marks network rows owned by a known
+        // system process as environment/nonbehavior.  They are still real
+        // R0 network evidence and must remain visible when the row carries a
+        // process/owner PID or flow identity.  Excluding them here caused
+        // every driver.network row in live reports to spill even though the
+        // dedicated dynamic lane had ample capacity.  Keep explicit
+        // collector/noise rows excluded; retain attributed, environment, and
+        // unknown network rows as evidence with their correlation fields
+        // intact.
+        var explicitNoise = EventDataBoolTrue(
             evt,
             "noise",
-            "nonbehavior",
             "collectionNoise",
             "collectorNoise",
             "collectorSelfNoise",
             "selfNoise",
-            "metadataOnly",
             "collectionDiagnostic");
+        if (explicitNoise)
+        {
+            return false;
+        }
+
+        var isNetworkEvidence = type.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
+        if (isNetworkEvidence && HasNetworkEvidenceIdentity(evt))
+        {
+            return true;
+        }
+
+        return !EventDataBoolTrue(evt, "nonbehavior", "metadataOnly");
+    }
+
+    /// <summary>
+    /// Returns whether a typed R0 network row has enough concrete identity to
+    /// be useful evidence even when correlation labels it environment/unknown.
+    /// Owner/process IDs and flow keys are preferred; endpoint paths are a
+    /// final fallback for older driver payloads.
+    /// </summary>
+    private static bool HasNetworkEvidenceIdentity(SandboxEvent evt)
+    {
+        if (evt.ProcessId is > 0)
+        {
+            return true;
+        }
+
+        foreach (var key in new[]
+        {
+            "owningProcessId",
+            "ownerPid",
+            "processId",
+            "driverProcessId",
+            "flowKey",
+            "networkFlowJoinKey",
+            "pcapFlowKeyCandidate",
+            "pcapCorrelationKey",
+            "localEndpoint",
+            "remoteEndpoint",
+            "sourceEndpoint",
+            "destinationEndpoint"
+        })
+        {
+            var value = DataValue(evt.Data, key);
+            if (!string.IsNullOrWhiteSpace(value) &&
+                !string.Equals(value, "unknown", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(value, "none", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        var path = evt.Path ?? string.Empty;
+        return path.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("udp://", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("icmp://", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsStrongSampleBehaviorEvent(SandboxEvent evt)
@@ -2103,8 +2199,8 @@ public static class ReportEventSampler
         var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["reason"] = "raw event volume exceeded report inline limit",
-            ["zhMessage"] = "报告内联事件数量超过上限，已保留全部动态动作和代表性其他证据，并保留原始事件文件路径。",
-            ["zhHint"] = "该行是 Host 报告采样标记，behaviorCounted=false；report.json 保留全部规范化动态动作（包括未归因行），普通静态/诊断行按配额采样；完整原始来源请查看 rawEventsPath/driverEventsPath 或已索引源文件。",
+            ["zhMessage"] = "报告内联事件按证据优先级保留；动态动作、未知事件和采集诊断的配额边界均已单独计数，原始来源文件路径同时保留。",
+            ["zhHint"] = "该行是 Host 报告采样标记，behaviorCounted=false；report.json 只是采样规范化视图，不等同于完整 raw telemetry。动态动作、未知事件和 R0 行的保留/省略计数见本行字段；完整原始来源请查看 rawEventsPath/driverEventsPaths 或已索引源文件。",
             ["behaviorCounted"] = "false",
             ["nonbehavior"] = "true",
             ["notSampleBehavior"] = "true",
@@ -2139,6 +2235,44 @@ public static class ReportEventSampler
             ["omittedEventTypeCounts"] = FormatOmittedEventTypeCounts(result.OmittedEventTypeCounts)
         };
 
+        // Keep explicit boundaries for rows that the generic report metrics
+        // cannot distinguish after policy routing. A dynamic row may be
+        // excluded as collector/lifecycle noise even when it is counted by
+        // the broad dynamic coverage metric; unknown event types may also be
+        // capped by the diagnostic lane. Expose both counts so the report
+        // cannot imply that every raw dynamic/unknown row is inline.
+        var rawDynamicActionCount = orderedEvents.Count(IsDynamicActionEvidenceEvent);
+        var selectedDynamicActionCount = result.Events.Count(IsDynamicActionEvidenceEvent);
+        var dynamicActionPolicyExcludedCount = Math.Max(
+            0,
+            rawDynamicActionCount - selectedDynamicActionCount - result.DynamicActionOmittedCount);
+        var rawUnknownEventCount = orderedEvents.Count(evt =>
+            string.Equals(NormalizeEventType(evt.EventType), "unknown", StringComparison.OrdinalIgnoreCase));
+        var selectedUnknownEventCount = result.Events.Count(evt =>
+            string.Equals(NormalizeEventType(evt.EventType), "unknown", StringComparison.OrdinalIgnoreCase));
+        var unknownEventOmittedCount = Math.Max(0, rawUnknownEventCount - selectedUnknownEventCount);
+        var rawR0DriverEventCount = orderedEvents.Count(CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow);
+        var selectedR0DriverEventCount = result.Events.Count(CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow);
+        var r0DriverEventOmittedCount = Math.Max(0, rawR0DriverEventCount - selectedR0DriverEventCount);
+        var selectedEvidenceKeys = result.Events.Select(BuildEventEvidenceKey).ToHashSet(StringComparer.Ordinal);
+        var dynamicPolicyExcludedTypeCounts = orderedEvents
+            .Where(evt => IsDynamicActionEvidenceEvent(evt) && !selectedEvidenceKeys.Contains(BuildEventEvidenceKey(evt)))
+            .GroupBy(evt => NormalizeEventType(evt.EventType), StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => $"{group.Key}={group.Count()}")
+            .ToArray();
+        data["rawDynamicActionCount"] = rawDynamicActionCount.ToString();
+        data["selectedDynamicActionCount"] = selectedDynamicActionCount.ToString();
+        data["dynamicActionPolicyExcludedCount"] = dynamicActionPolicyExcludedCount.ToString();
+        data["rawUnknownEventCount"] = rawUnknownEventCount.ToString();
+        data["selectedUnknownEventCount"] = selectedUnknownEventCount.ToString();
+        data["unknownEventOmittedCount"] = unknownEventOmittedCount.ToString();
+        data["rawR0DriverEventCount"] = rawR0DriverEventCount.ToString();
+        data["selectedR0DriverEventCount"] = selectedR0DriverEventCount.ToString();
+        data["r0DriverEventOmittedCount"] = r0DriverEventOmittedCount.ToString();
+        data["dynamicActionPolicyExcludedTypes"] = string.Join(";", dynamicPolicyExcludedTypeCounts);
+
         var wmiFailures = orderedEvents
             .Where(evt => TextContainsAny(evt.EventType, "wmi.capture_failed", "wmi.capture-failed"))
             .ToList();
@@ -2169,6 +2303,7 @@ public static class ReportEventSampler
             // Keep the legacy singular key for the active canonical stream,
             // while exposing every rotated segment to prevent evidence loss.
             data["driverEventsPaths"] = string.Join(";", allDriverPaths);
+            data["driverEventsPathCount"] = allDriverPaths.Length.ToString();
         }
 
         return new SandboxEvent
@@ -2212,7 +2347,7 @@ public static class ReportEventSampler
         }
 
         var prioritySeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var maxPairs = IsR0ReportEvent(evt)
+        var maxPairs = IsR0ReportEvent(evt) || IsReportSamplingMarkerEvent(evt)
             ? Math.Max(options.MaxEventDataPairs, 40)
             : options.MaxEventDataPairs;
         foreach (var key in BuildPriorityDataKeys(evt))
@@ -2276,6 +2411,11 @@ public static class ReportEventSampler
                 "maxDynamicActionEvents", "dynamicActionEventsAlwaysRetained",
                 "maxInlineEventsExcludesDynamicActions", "dynamicActionSelectedCount",
                 "dynamicActionOmittedCount", "dynamicActionSpillPolicy",
+                "rawDynamicActionCount", "selectedDynamicActionCount",
+                "dynamicActionPolicyExcludedCount", "rawUnknownEventCount",
+                "selectedUnknownEventCount", "unknownEventOmittedCount",
+                "rawR0DriverEventCount", "selectedR0DriverEventCount",
+                "r0DriverEventOmittedCount", "dynamicActionPolicyExcludedTypes", "driverEventsPathCount",
                 "rawEventsPath", "driverEventsPath", "driverEventsPaths"
             })
             {

@@ -239,6 +239,16 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Environment("row-belongs-to-sandbox-collector-or-agent", "processName");
         }
 
+        if (IsGuestSampleStagingProcess(evt, data))
+        {
+            return CorrelationDisposition.Environment("row-belongs-to-guest-sample-staging-process", "processImagePath");
+        }
+
+        if (IsExpectedSystemCacheArtifact(evt, data))
+        {
+            return CorrelationDisposition.Environment("driver-row-targets-expected-windows-cache-artifact", "path");
+        }
+
         if (IsBenignWindowsDiscoveryUtility(evt, data, context))
         {
             return CorrelationDisposition.Environment(
@@ -1685,6 +1695,23 @@ public static class SampleCorrelationClassifier
             !LooksUserWritableOrPersistenceTarget(targetPath);
     }
 
+    private static bool IsExpectedSystemCacheArtifact(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data)
+    {
+        if (!IsDriverEvidence(evt))
+        {
+            return false;
+        }
+
+        var targetPath = NormalizeSlashes(FirstNonEmpty(
+            evt.Path,
+            Value(data, "path"),
+            Value(data, "filePath"),
+            Value(data, "imagePath")));
+        return targetPath.Contains("\\Windows\\Prefetch\\", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsDriverEvidence(SandboxEvent evt)
     {
         return string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase) ||
@@ -1741,7 +1768,15 @@ public static class SampleCorrelationClassifier
         IReadOnlyDictionary<string, string> data,
         CorrelationContext context)
     {
-        if (!IsProcessEvidence(evt))
+        // R0 file/registry/image rows carry the actor name on the kernel
+        // payload even though their event type is not process.*. Restricting
+        // this guard to process rows left ordinary System32 utilities' DLL
+        // loads and discovery reads marked as confirmed sample behavior.
+        var isProcessOrDriverEvidence = IsProcessEvidence(evt) ||
+            evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("image.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("load.", StringComparison.OrdinalIgnoreCase);
+        if (!isProcessOrDriverEvidence)
         {
             return false;
         }
@@ -1858,6 +1893,43 @@ public static class SampleCorrelationClassifier
         var processFacts = TryGetEventProcessFacts(evt, data, context);
         return processFacts is not null &&
             TextEqualsAny(TrimExe(processFacts.Name), "ksword.sandbox.agent", "ksword.sandbox.r0collector");
+    }
+
+    private static bool IsGuestSampleStagingProcess(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data)
+    {
+        var processName = TrimExe(FirstNonEmpty(
+            evt.ProcessName,
+            Value(data, "processName"),
+            Value(data, "actorProcessName")));
+        var processPath = NormalizeSlashes(FirstNonEmpty(
+            Value(data, "processImagePath"),
+            Value(data, "imagePath"),
+            Value(data, "actorProcessImagePath"),
+            evt.Path));
+        if (TextEqualsAny(processName, "mspcmanagerservice") ||
+            processPath.Contains("\\WindowsApps\\Microsoft.MicrosoftPCManager_", StringComparison.OrdinalIgnoreCase) &&
+            processPath.EndsWith("\\MSPCManagerService.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // VMware/WinRM staging can be completed by a system-owned helper
+        // before the submitted process starts.  Those rows carry the incoming
+        // path but are not sample activity; keep the path visible as setup
+        // evidence without attributing it to the sample.
+        var target = NormalizeSlashes(FirstNonEmpty(
+            Value(data, "path"),
+            Value(data, "targetPath"),
+            evt.Path));
+        var operation = FirstNonEmpty(
+            Value(data, "operationName"),
+            Value(data, "fileOperationName"),
+            Value(data, "operation"));
+        var isIncomingSetupPath = target.Contains("\\KSwordSandbox\\incoming\\", StringComparison.OrdinalIgnoreCase) &&
+            ContainsAny(operation, "create", "open", "read", "close", "cleanup", "query");
+        return isIncomingSetupPath && TextEqualsAny(processName, "csrss", "system");
     }
 
     private static ProcessFacts? TryGetEventProcessFacts(
@@ -1999,13 +2071,41 @@ public static class SampleCorrelationClassifier
             Value(data, "registryOperationName"),
             Value(data, "operation"),
             evt.EventType);
-        return ContainsAny(operation, "write", "create", "set", "rename", "delete", "setValue", "createKey", "setinfo") ||
-            IsTruthy(Value(data, "deleteIntent")) ||
+        if (IsTruthy(Value(data, "deleteIntent")) ||
             IsTruthy(Value(data, "renameIntent")) ||
             IsTruthy(Value(data, "droppedFileCandidate")) ||
+            IsTruthy(Value(data, "writeIntent")) ||
+            IsTruthy(Value(data, "fileWrite")) ||
             IsTruthy(Value(data, "startupRegistryCandidate")) ||
             IsTruthy(Value(data, "servicePersistenceCandidate")) ||
-            IsTruthy(Value(data, "persistenceCandidate"));
+            IsTruthy(Value(data, "persistenceCandidate")))
+        {
+            return true;
+        }
+
+        // R0 uses CreateFile/open-style operation names for ordinary reads,
+        // DLL loads and metadata probes.  Treat those as observation noise;
+        // only an explicit write/set/delete/rename operation is a mutation.
+        if (IsFileEvidence(evt) || evt.EventType.Equals("driver.file", StringComparison.OrdinalIgnoreCase))
+        {
+            if (ContainsAny(operation, "write", "setinfo", "rename", "delete"))
+            {
+                return true;
+            }
+
+            // Some R0 producers encode a user-writable file creation as
+            // `create`, while the same value is used for ordinary opens in
+            // System32/Windows cache paths.  Preserve the mutation signal
+            // only when the target itself is a writable/persistence location.
+            var target = FirstNonEmpty(
+                Value(data, "path"),
+                Value(data, "targetPath"),
+                Value(data, "filePath"),
+                evt.Path);
+            return ContainsAny(operation, "create", "set") && LooksUserWritableOrPersistenceTarget(target);
+        }
+
+        return ContainsAny(operation, "write", "create", "set", "rename", "delete", "setValue", "createKey", "setinfo");
     }
 
     private static bool IsPathTruncated(IReadOnlyDictionary<string, string> data)

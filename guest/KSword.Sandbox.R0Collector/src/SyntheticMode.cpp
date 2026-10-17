@@ -274,6 +274,10 @@ MockExtraData BuildNetworkSemanticExtra(
     extra.push_back({"serviceHintHttp", BoolText(httpCandidate)});
     extra.push_back({"serviceHintTls", BoolText(tlsCandidate)});
     extra.push_back({"processId", currentProcessIdText});
+    extra.push_back({"ownerPid", currentProcessIdText});
+    extra.push_back({"owningProcessId", currentProcessIdText});
+    extra.push_back({"ownerPidPresent", "true"});
+    extra.push_back({"ownerPidSource", "synthetic"});
     extra.push_back({"flowHandlePresent", "false"});
     extra.push_back({"endpointHandlePresent", "false"});
     extra.push_back({"inspectionOnly", "true"});

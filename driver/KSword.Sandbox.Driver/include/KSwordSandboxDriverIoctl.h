@@ -1144,7 +1144,9 @@ typedef struct _KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD {
  * Inputs : output-only payload following KSWORD_SANDBOX_EVENT_HEADER.
  * Logic  : carries a normalized ALE authorization event from the WFP callout
  *          producer.  AddressFamily selects how LocalAddress and RemoteAddress
- *          are interpreted; layer, callout, and filter identifiers are
+ *          are interpreted; LocalPort and RemotePort are host-order values
+ *          because FWP_UINT16 incoming fields use host order; layer, callout,
+ *          and filter identifiers are
  *          diagnostic hints for WFP registration correlation.  Version must equal KSWORD_SANDBOX_NETWORK_EVENT_VERSION and Size must equal
  *          sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD) for this v1 layout.
  * Return : not applicable; Size describes this payload and remains bounded by

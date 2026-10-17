@@ -256,21 +256,22 @@ KswNetworkSetInspectionAction(
 }
 
 /*
- * Converts a network-order transport port to host order.
+ * Normalizes a WFP transport port for the public payload.
  *
- * Inputs : PortNetwork is the 16-bit ALE fixed-field value.
- * Logic  : WFP supplies transport ports in network byte order for these fields;
- *          swapping before enqueue keeps the user-mode ABI parser-friendly.
+ * Inputs : PortValue is the 16-bit ALE fixed-field value.
+ * Logic  : FWP_UINT16 values in FWPS incoming fields are already host-order
+ *          (the WFP ABI explicitly uses host order for IP addresses and
+ *          ports).  Preserve the value as-is so the user-mode ABI and PCAP
+ *          join fields describe the actual socket endpoint.
  * Return : host-order port value.
  */
 static
 USHORT
-KswNetworkPortFromNetworkOrder(
-    _In_ USHORT PortNetwork
+KswNetworkPortFromWfpField(
+    _In_ USHORT PortValue
     )
 {
-    return (USHORT)(((PortNetwork & 0x00ffU) << 8) |
-        ((PortNetwork & 0xff00U) >> 8));
+    return PortValue;
 }
 
 /*
@@ -346,7 +347,7 @@ KswNetworkReadIntegerField(
  * Inputs : Values is the WFP fixed-value array, Index is a local or remote port
  *          field enum, and PortOut receives a host-order public ABI value.
  * Logic  : normalizes the source field as an integer, verifies it fits in 16
- *          bits, then swaps from network byte order.
+ *          bits, then preserves WFP's host-order representation.
  * Return : TRUE when a valid port was copied; otherwise FALSE.
  */
 static
@@ -365,7 +366,7 @@ KswNetworkReadPortField(
         return FALSE;
     }
 
-    *PortOut = KswNetworkPortFromNetworkOrder((USHORT)value);
+    *PortOut = KswNetworkPortFromWfpField((USHORT)value);
     return TRUE;
 }
 

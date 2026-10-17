@@ -2438,7 +2438,15 @@ std::string NetworkEndpoint(const std::string& address, const USHORT port) {
         return {};
     }
 
-    return address + ":" + std::to_string(port);
+    // Keep the endpoint text compatible with NetworkTelemetrySchema.Endpoint:
+    // IPv6 literals must be bracketed before appending a decimal port, or the
+    // final colon is ambiguous and the R0/PCAP flow keys cannot join.
+    const bool ipv6Literal = address.find(':') != std::string::npos &&
+        address.front() != '[' && address.back() != ']';
+    const std::string endpointAddress = ipv6Literal
+        ? "[" + address + "]"
+        : address;
+    return endpointAddress + ":" + std::to_string(port);
 }
 
 // Input: transport, endpoints, and direction.
@@ -4011,6 +4019,17 @@ bool AddNetworkPayloadData(
     data->AddBool(
         "inspectionOnly",
         (networkPayload->Flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_INSPECTION_ONLY) != 0);
+    // WFP metadata owns the process identity for ALE rows.  Keep an explicit
+    // owner alias beside the historical processId field so report/import
+    // consumers can distinguish a real WFP owner from an event-header
+    // fallback when metadata is absent.
+    const bool ownerPidPresent = processIdPresent && networkPayload->ProcessId != 0;
+    data->AddBool("ownerPidPresent", ownerPidPresent);
+    data->AddUnsigned("ownerPid", networkPayload->ProcessId);
+    data->AddUnsigned("owningProcessId", networkPayload->ProcessId);
+    data->AddUtf8(
+        "ownerPidSource",
+        ownerPidPresent ? "wfp.metadata.processId" : "unavailable");
     data->AddUnsigned("processId", networkPayload->ProcessId);
     data->AddUtf8(
         "localAddressHex",
@@ -5246,7 +5265,8 @@ bool ShouldEmitCompactDriverField(
             "downloadExecuteCandidate", "pcapCorrelationRequired", "pcapCorrelationStatus",
             "pcapFlowKeyCandidate", "pcapCorrelationKey", "networkCorrelationRole", "pcapCorrelationRole",
             "networkProtocolBoundaryFields", "wfpEventName", "wfpLayerSemanticName", "rawPacketPayloadAvailable",
-            "kernelPayloadParserEnabled", "protocolPayloadParsed", "protocolParserSource", "processId"});
+            "kernelPayloadParserEnabled", "protocolPayloadParsed", "protocolParserSource", "processId",
+            "processIdPresent", "ownerPid", "ownerPidPresent", "ownerPidSource", "owningProcessId"});
     default:
         // Unknown future event types retain the complete data object so a new
         // producer cannot be made opaque merely by this compact-row policy.

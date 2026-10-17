@@ -192,6 +192,9 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
         RequireContains(networkProducerHeader, "PayloadVersion", "Network runtime must store payload version state.");
         RequireContains(networkProducerHeader, "LastRegisteredCalloutMask", "Network runtime must track partial callout registration diagnostics.");
         RequireContains(networkProducer, "KswNetworkPayloadVersion", "Network producer must stamp v1 payload version through a guarded helper.");
+        RequireContains(networkProducer, "KswNetworkPortFromWfpField", "Network producer must preserve WFP host-order ports when building endpoint evidence.");
+        RequireContains(networkProducer, "FWP_UINT16 values in FWPS incoming fields are already host-order", "Network producer must document the WFP host-order port contract.");
+        RequireContains(networkProducer, "*PortOut = KswNetworkPortFromWfpField", "Network producer must not byte-swap host-order WFP ports before enqueue.");
         RequireContains(networkProducer, "KswQueryNetworkStatus", "Network producer must expose read-only WFP/ALE diagnostics.");
         RequireContains(networkProducer, "ClassifyPayloadFailureCount", "Network producer must count classify payload build failures.");
         RequireContains(networkProducer, "QueueFailureCount", "Network producer must count queue push failures.");

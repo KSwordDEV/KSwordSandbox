@@ -217,6 +217,12 @@ authorization payload。
 - `transportEndpointHandleHex`
 - `filterIdHex`
 
+The port values above are normalized host-order socket ports.  WFP's
+`FWP_UINT16` incoming fields are already host order; the kernel producer must
+preserve them when writing the public payload.  This keeps R0 endpoint strings
+and PCAP join keys aligned (for example, an observed `:443` must remain
+`:443`, rather than becoming the byte-swapped `:47873`).
+
 `serviceHint` 是轻量 port/protocol semantic label（`dns`、`http`、`tls`、
 `web` 或 `unknown`）。It does not parse packet payloads；DNS query names、
 HTTP methods/hosts/URIs 和 TLS SNI 继续来自 imported PCAP events。The shared
@@ -238,8 +244,9 @@ R0Collector emits endpoint fields deterministically from the decoded payload:
   controlled outbound TCP/443 smoke this is
   `tcp|192.0.2.10:51515|203.0.113.10:443`.
 - IPv4 addresses use dotted decimal. IPv6 addresses are emitted in the
-  collector's deterministic eight-hextet form before the port is appended. If an
-  address is absent or cannot be decoded, the corresponding endpoint is empty
+  collector's deterministic eight-hextet form and bracketed before the port is
+  appended (`[2001:db8::1]:443`) so the flow key matches PCAP/import endpoint
+  formatting. If an address is absent or cannot be decoded, the corresponding endpoint is empty
   and low-level `localAddressHex` / `remoteAddressHex` remain available.
 
 These fields are correlation keys only. They do not imply packet payload parsing

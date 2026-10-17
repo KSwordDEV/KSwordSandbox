@@ -674,6 +674,9 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         var boundedDynamicMarker = RequireEvent(boundedDynamic.Events, "report.events.sampled");
         RequireData(boundedDynamicMarker, "dynamicActionSelectedCount", "5");
         RequireData(boundedDynamicMarker, "dynamicActionOmittedCount", "7");
+        RequireData(boundedDynamicMarker, "rawDynamicActionCount", "12");
+        RequireData(boundedDynamicMarker, "selectedDynamicActionCount", "5");
+        RequireData(boundedDynamicMarker, "dynamicActionPolicyExcludedCount", "0");
         RequireData(boundedDynamicMarker, "quotaOmittedEventCount", "7");
         RequireData(boundedDynamicMarker, "policyExcludedEventCount", "0");
         RequireData(boundedDynamicMarker, "markerOverheadEventCount", "1");
