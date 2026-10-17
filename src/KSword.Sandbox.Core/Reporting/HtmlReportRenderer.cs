@@ -1173,35 +1173,6 @@ html[lang="en"] .localized-evidence-field{display:none}
             events.Count(IsStaticOnlyEvidenceEvent));
     }
 
-    private static object BuildBehaviorRoutingStatsPayload(BehaviorRoutingStats stats) => new
-    {
-        schema = "ksword.report.behavior-routing-stats.v1",
-        policy = "retained_not_promoted",
-        stats.TotalEvents,
-        stats.SampleBehaviorEvents,
-        stats.ExcludedFromBehaviorStory,
-        stats.BehaviorCountedFalse,
-        stats.NonBehavior,
-        stats.NotSampleBehavior,
-        stats.CollectorSelfNoise,
-        stats.CollectorNoise,
-        stats.CollectionHealthRows,
-        stats.VtQuietStates,
-        stats.R0HealthRows,
-        stats.RetainedNotPromoted,
-        stats.NormalInteractiveGuiBaseline,
-        stats.EvidenceDispositionRetainedNotPromoted,
-        stats.StaticOnlyEvidenceRows,
-        correlation = new
-        {
-            confirmed = stats.CorrelationConfirmed,
-            probable = stats.CorrelationProbable,
-            environment = stats.CorrelationEnvironment,
-            unknown = stats.CorrelationUnknown
-        },
-        conclusionBoundary = "environment/unknown/nonbehavior/readiness evidence is retained in raw evidence but not promoted to primary sample conclusions"
-    };
-
     /// <summary>
     /// Appends an early, compact evidence-quality policy card. Inputs are all
     /// normalized events; processing counts rows intentionally excluded from
@@ -1218,8 +1189,6 @@ html[lang="en"] .localized-evidence-field{display:none}
         var r0Health = stats.R0HealthRows;
         var excludedUnion = stats.ExcludedFromBehaviorStory;
         var sampleBehavior = stats.SampleBehaviorEvents;
-        var machineStats = BuildBehaviorRoutingStatsPayload(stats);
-        var statsJson = JsonSerializer.Serialize(machineStats, ArtifactJsonOptions);
         var copy = string.Join(
             Environment.NewLine,
             [
@@ -1241,9 +1210,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 $"correlationUnknown={stats.CorrelationUnknown}",
                 $"retainedNotPromoted={stats.RetainedNotPromoted}",
                 $"normalInteractiveGuiBaseline={stats.NormalInteractiveGuiBaseline}",
-                "policy=Excluded rows are collection/reputation/health evidence, not sample behavior. Raw normalized events and source artifacts remain complete when indexed; report.json is a sampled normalized report view.",
-                "machineReadableJson:",
-                statsJson
+                "Excluded rows are collection/reputation/health evidence, not sample behavior. Raw normalized events and source artifacts remain complete when indexed; report.json is a sampled normalized report view."
             ]);
 
         html.AppendLine("<h3>Collection/self-noise policy</h3>");
@@ -3481,7 +3448,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 $"downloadableArtifacts={downloadable}",
                 $"duplicateArtifactMembers={duplicateMembers}",
                 $"rejectedArtifactReferences={rejectedReferences}",
-                "policy=R0/VT/artifact health affects evidence confidence and is not counted as primary sample behavior"
+                "R0/VT/artifact health affects evidence confidence and is not counted as primary sample behavior"
             ]);
 
         html.AppendLine("<h3>Evidence health narrative</h3>");
@@ -4788,7 +4755,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 $"sampleAttributedRows={attributed}",
                 $"environmentRows={environment}",
                 $"unknownOrUnattributedRows={unknown}",
-                "policy=environment/unknown network rows remain evidence and are not sample behavior"
+                "Environment/unknown network rows remain evidence and are not sample behavior"
             ]);
 
         html.AppendLine("<div class=\"section-note network-coverage-status\"><strong>Network collection coverage.</strong> Environment network can be present without sample attribution; this is separate from a network channel that was not collected.</div>");
@@ -5331,7 +5298,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 $"sampleBehaviorRows={sampleBehaviorCount}",
                 $"excludedBehaviorStoryRows={excludedBehaviorCount}",
                 $"excludedReasonSummary={excludedReasonSummary}",
-                "policy=HTML keeps bounded representative rows; report.json and source artifacts remain complete evidence."
+                "HTML keeps bounded representative rows; report.json and source artifacts remain complete evidence."
             ]);
 
         html.AppendLine("<h3>Raw event slimming story</h3>");
@@ -10310,7 +10277,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         // Localized classifier text is an implementation detail. Keep the
         // stable event/finding title and real evidence values instead of
         // exposing duplicate guidance in every event row.
-        if (normalized.StartsWith("zh", StringComparison.Ordinal))
+        if (normalized.StartsWith("zh", StringComparison.Ordinal) ||
+            normalized.EndsWith("zh", StringComparison.Ordinal))
         {
             return true;
         }
@@ -13967,7 +13935,9 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Where(pair => IsPublicArtifactMetadataKey(pair.Key))
             .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
         {
-            builder.AppendLine($"metadata.{pair.Key}={pair.Value}");
+            // Keep the public status key/value available for copying, but do
+            // not label it as an internal metadata namespace in the report.
+            builder.AppendLine($"{pair.Key}={pair.Value}");
         }
 
         return builder.ToString();
