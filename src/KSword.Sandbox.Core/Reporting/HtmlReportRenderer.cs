@@ -725,6 +725,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     private static void AppendRiskSummary(StringBuilder html, AnalysisReport report)
     {
         var primaryFindings = PrimaryBehaviorFindings(report).ToList();
+        var supportingFindings = SupportingBehaviorFindings(report).ToList();
         var staticFindings = StaticTriageFindings(report).ToList();
         html.AppendLine("<section id=\"risk\" class=\"card\"><h2>Risk summary</h2>");
         html.AppendLine("<div class=\"grid\">");
@@ -736,6 +737,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         // not imply that an import, URL, YARA match, or PE trait was observed at run
         // time.
         Metric(html, "Static triage", staticFindings.Count.ToString(), "risk-info");
+        // Generic R0/process-tree rows are useful corroborating telemetry, but
+        // they are not independent behavior conclusions. Keep their count
+        // visible without allowing it to inflate the primary risk buckets.
+        Metric(html, "Supporting telemetry", supportingFindings.Count.ToString(), "risk-info");
         Metric(html, "MITRE techniques", primaryFindings.Where(f => !string.IsNullOrWhiteSpace(f.MitreTechniqueId)).Select(f => f.MitreTechniqueId).Distinct().Count().ToString(), "risk-low");
         Metric(html, "Events", report.Events.Count.ToString(), "risk-info");
         Metric(html, "Rule hits", report.Findings.Count.ToString(), "risk-info");
@@ -1246,6 +1251,10 @@ html[lang="en"] .localized-evidence-field{display:none}
             .OrderBy(f => SeverityRank(f.Severity))
             .ThenBy(f => f.Title)
             .ToList();
+        var supportingFindings = SupportingBehaviorFindings(report)
+            .OrderBy(f => SeverityRank(f.Severity))
+            .ThenBy(f => f.Title)
+            .ToList();
         var staticFindings = StaticTriageFindings(report).OrderBy(f => SeverityRank(f.Severity)).ThenBy(f => f.Title).ToList();
         if (findings.Count == 0)
         {
@@ -1261,6 +1270,12 @@ html[lang="en"] .localized-evidence-field{display:none}
 
             html.AppendLine("</tbody></table>");
         }
+
+        AppendSecondaryFindingGroup(
+            html,
+            "R0 / collection support findings",
+            "Generic R0, image-load metadata, and process-tree rows corroborate collection and lineage. They remain reviewable evidence but do not independently raise the sample verdict; semantic behavior rules above carry the conclusion.",
+            supportingFindings);
 
         AppendSecondaryFindingGroup(
             html,
@@ -9628,8 +9643,28 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         return report.Findings.Where(finding =>
             !IsDiagnosticFinding(finding) &&
+            !IsSupportingBehaviorFinding(finding) &&
             !IsStaticTriageFinding(finding) &&
             !IsVirusTotalFinding(finding));
+    }
+
+    /// <summary>
+    /// Selects generic telemetry rule hits that support a behavior story but
+    /// are too broad to be independent verdict evidence. Inputs are rule-hit
+    /// records; processing keeps these rows in a collapsed evidence lane while
+    /// excluding them from the primary risk buckets and verdict.
+    /// </summary>
+    private static IEnumerable<BehaviorFinding> SupportingBehaviorFindings(AnalysisReport report)
+    {
+        return report.Findings.Where(IsSupportingBehaviorFinding);
+    }
+
+    private static bool IsSupportingBehaviorFinding(BehaviorFinding finding)
+    {
+        var ruleId = finding.RuleId ?? string.Empty;
+        return ruleId.StartsWith("r0-driver-", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(ruleId, "image-load-metadata-observed", StringComparison.OrdinalIgnoreCase) ||
+            ruleId.StartsWith("process-tree-", StringComparison.OrdinalIgnoreCase);
     }
 
     private static IEnumerable<BehaviorFinding> StaticTriageFindings(AnalysisReport report)
@@ -10743,6 +10778,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("R0 driver rows (report)", "R0 驱动行（报告）"),
         ("R0 driver rows omitted", "R0 驱动省略行"),
         ("R0 collection warnings", "R0 采集警告"),
+        ("Supporting telemetry", "辅助遥测"),
+        ("R0 / collection support findings", "R0 / 采集支持命中"),
+        ("Generic R0, image-load metadata, and process-tree rows corroborate collection and lineage. They remain reviewable evidence but do not independently raise the sample verdict; semantic behavior rules above carry the conclusion.", "通用 R0、镜像加载元数据和进程树行用于佐证采集与进程血缘。它们仍可复核，但不会单独抬高样本判定；上方语义行为规则才构成结论。"),
+        ("R0 / collection support findings (", "R0 / 采集支持命中（"),
         ("R0 driver coverage.", "R0 驱动覆盖。"),
         ("Raw/report rows by class (raw/report): ", "各类别原始/报告行数："),
         ("Collector loss markers: ", "采集器丢失标记："),
@@ -11673,6 +11712,24 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("What happened:", "发生了什么："),
         ("Why review:", "为什么需要复核："),
         ("Execution and parent/child activity", "执行与父子进程活动"),
+        ("Observed ", "观察到 "),
+        (" process/process-access rows across ", " 条进程/进程访问行，涉及 "),
+        (" visible actor identity/identities: ", " 个可见主体："),
+        ("Observed startup inventory changes on ", "观察到启动项清单在 "),
+        (" surface(s): ", " 个面发生变化："),
+        ("Created/modified rows=", "新建/修改行="),
+        ("; deleted rows=", "；删除行="),
+        ("Observed ", "观察到 "),
+        (" network rows. Top normalized targets: ", " 条网络行。主要规范化目标："),
+        ("Observed ", "观察到 "),
+        (" file rows and ", " 条文件行以及 "),
+        (" dropped-file artifact(s). Top paths: ", " 个落地文件证据。主要路径："),
+        ("Observed ", "观察到 "),
+        (" registry rows. Top keys/values: ", " 条注册表行。主要键/值："),
+        ("Observed ", "观察到 "),
+        (" R0/driver rows and ", " 条 R0/驱动行以及 "),
+        (" security/privilege rows. Health/readiness rows remain outside this fact count.", " 条安全/权限行。健康/就绪行不计入此事实数量。"),
+        ("Raw driver-events.jsonl remains the complete source artifact.", "原始 driver-events.jsonl 仍是完整来源证据。"),
         ("No sample-attributed process or process-access rows were embedded in this report view.", "此报告视图未内联归属于样本的进程或进程访问行。"),
         ("New or modified autostart entries are high signal because they can survive reboot. User-writable targets, WMI subscriptions, drivers, services, IFEO, Winlogon, LSA, AppInit, Winsock, and shell-extension surfaces deserve priority review.", "新增或修改的自启动项可在重启后持续存在，属于高信号证据。用户可写目标、WMI 订阅、驱动、服务、IFEO、Winlogon、LSA、AppInit、Winsock 和 Shell 扩展面应优先复核。"),
         ("Network communication scope", "网络通信范围"),
