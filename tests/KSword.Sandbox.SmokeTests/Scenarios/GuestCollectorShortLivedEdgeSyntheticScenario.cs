@@ -33,6 +33,10 @@ internal sealed class GuestCollectorShortLivedEdgeSyntheticScenario : ISmokeTest
             result.Events.Any(evt => evt.EventType == "network.tcp.edge_poll.summary" &&
                                      evt.Data.GetValueOrDefault("lossMetricState") == "possible-unmeasured"),
             "TCP edge summary must disclose an unmeasured between-poll loss boundary.");
+        SmokeAssert.True(
+            result.Events.Any(evt => evt.EventType == "system.change.edge_poll.summary" &&
+                                     evt.Data.GetValueOrDefault("shortLivedServiceRegistryLossPossible") == "true"),
+            "Service and registry inventory summary must disclose the between-snapshot loss boundary.");
 
         return new SmokeTestResult
         {

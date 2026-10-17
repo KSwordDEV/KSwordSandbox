@@ -251,6 +251,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 var currentSystemState = await systemChangeSnapshotProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
                 events.AddRange(CreateSystemSnapshotEvents(currentSystemState, phase));
                 events.AddRange(CreateSystemDiffEvents(baselineSystemState, currentSystemState, phase));
+                events.Add(CreateSystemChangeEdgePollSummaryEvent(phase));
                 events.AddRange(WithPhase(currentSystemState.Diagnostics, phase));
                 // A callback can arrive while the final schtasks query is in
                 // flight; drain once more after it completes and then stop
@@ -1778,6 +1779,38 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         yield return CreateInventorySnapshotEvent("startup_item.snapshot", "startup_item", snapshot.StartupItems.Count, phase);
         yield return CreateInventorySnapshotEvent("registry.run.snapshot", "registry.run", snapshot.RegistryRunValues.Count, phase);
         yield return CreateInventorySnapshotEvent("startup.snapshot", "startup", snapshot.Services.Count + snapshot.ScheduledTasks.Count + snapshot.StartupItems.Count, phase);
+    }
+
+    /// <summary>
+    /// Records the visibility boundary for service and registry inventories.
+    /// These sources are compared before/after the run and are supplemented by
+    /// Service Control Manager, Task Scheduler, and R0 rows when available; a
+    /// service or Run-key value that is created and removed between inventory
+    /// snapshots cannot be reconstructed from snapshots alone.
+    /// </summary>
+    private static SandboxEvent CreateSystemChangeEdgePollSummaryEvent(ProbePhase phase)
+    {
+        return new SandboxEvent
+        {
+            EventType = "system.change.edge_poll.summary",
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["captureSource"] = "before-after-system-inventory",
+                ["inventoryKinds"] = "service,registry.run,scheduled_task,startup_item",
+                ["shortLivedServiceRegistryCoverage"] = "inventory-diff-plus-event-log-or-r0",
+                ["shortLivedServiceRegistryLossPossible"] = "true",
+                ["lossReason"] = "service-or-registry-created-and-removed-between-inventory-snapshots",
+                ["lossMetricState"] = "possible-unmeasured",
+                ["lossCountKnown"] = "false",
+                ["collectionHealth"] = "true",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["zhMessage"] = "服务和注册表清单已完成前后对比；清单间隔内的瞬时创建后删除需要结合事件日志或 R0 证据复核。",
+                ["zhHint"] = "请结合 service.*、registry.run.*、eventlog.service.* 和 driver.registry 行判断短时持久化边沿。"
+            }
+        };
     }
 
     /// <summary>
