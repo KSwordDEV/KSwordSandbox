@@ -68,7 +68,11 @@ public sealed class RuleEngine
     /// </summary>
     public List<BehaviorFinding> Classify(IEnumerable<SandboxEvent> events)
     {
-        var eventList = events.ToList();
+        // Most callers already provide a List/SandboxEvent array. Reusing that
+        // read-only view avoids another large reference list during
+        // post-processing of driver JSONL while retaining the materialization
+        // fallback for one-shot enumerables.
+        var eventList = events as IReadOnlyList<SandboxEvent> ?? events.ToList();
         var findings = new List<BehaviorFinding>();
 
         foreach (var rule in ruleSet.Rules)

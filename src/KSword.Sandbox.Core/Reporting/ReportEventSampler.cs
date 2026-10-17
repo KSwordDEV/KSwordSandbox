@@ -333,15 +333,71 @@ public static class ReportEventSampler
         "collectorSkippedEvents"
     ];
 
+    // ETW rows carry the decoded provider/event identity and a trace-artifact
+    // pointer.  Correlation metadata is intentionally emitted before these
+    // fields by the normal report key list, so keep the ETW identity first or
+    // a bounded row would lose the event name/payload that explains what the
+    // trace actually observed.  These keys also cover process-oriented ETW
+    // decoders that expose parent/image/command/exit fields when available.
+    private static readonly string[] EtwKernelEventPriorityDataKeys =
+    [
+        "eventName",
+        "opcode",
+        "eventId",
+        "providerName",
+        "payload",
+        "traceArtifactRelativePath",
+        "semanticEventClass",
+        "semanticEventTags",
+        "threadId",
+        "parentProcessId",
+        "imageFileName",
+        "commandLine",
+        "exitStatus"
+    ];
+
     private static readonly string[] R0DriverEventPriorityDataKeys =
     [
         "producer",
         "schema",
+        "eventOrigin",
+        "producerCategory",
         "sequence",
         "stress",
-        "collectorAbiVersion",
-        "syntheticSampleProcessId",
-        "selfNoiseFilterMatched"
+        "driverEventTypeName",
+        "operationName",
+        "processOperationName",
+        "fileOperationName",
+        "registryOperationName",
+        "imageOperationName",
+        "activityKind",
+        "behaviorLane",
+        "semanticFamily",
+        "path",
+        "filePath",
+        "imagePath",
+        "keyPath",
+        "valueName",
+        "parentProcessId",
+        "processExitCode",
+        "exitCode",
+        "processId",
+        "driverProcessId",
+        "status",
+        "statusHex",
+        "persistenceCandidate",
+        "dropLocationFamily",
+        "sampleBehaviorCandidate",
+        "behaviorCounted",
+        "nonbehavior",
+        "sampleCorrelation",
+        "sampleCorrelationStatus",
+        "sampleCorrelationStrength",
+        "r0CoverageCategory",
+        "r0CoverageState",
+        "lostCount",
+        "lossObserved",
+        "backpressureObserved"
     ];
 
     private static readonly string[] PriorityDataKeys =
@@ -976,7 +1032,15 @@ public static class ReportEventSampler
         IEnumerable<BehaviorFinding>? findings = null)
     {
         var resolvedOptions = options ?? DefaultOptions;
-        var orderedEvents = rawEvents.OrderBy(evt => evt.Timestamp).ToList();
+        // PostProcess and the live pipeline sort their input before sampling.
+        // Reusing an already ordered list avoids allocating a second
+        // 250k-row reference list and the associated LINQ iterator state. For
+        // arbitrary callers, retain the existing deterministic sort.
+        var orderedEvents = rawEvents as IReadOnlyList<SandboxEvent>;
+        if (orderedEvents is null || !IsTimestampOrdered(orderedEvents))
+        {
+            orderedEvents = rawEvents.OrderBy(evt => evt.Timestamp).ToList();
+        }
         var findingEvidenceKeys = BuildFindingEvidenceKeys(findings);
         var selection = SelectEvents(orderedEvents, resolvedOptions, findingEvidenceKeys);
         var selected = selection.Events
@@ -997,6 +1061,28 @@ public static class ReportEventSampler
         }
 
         return result;
+    }
+
+    private static bool IsTimestampOrdered(IReadOnlyList<SandboxEvent> events)
+    {
+        if (events.Count < 2)
+        {
+            return true;
+        }
+
+        var previous = events[0].Timestamp;
+        for (var index = 1; index < events.Count; index++)
+        {
+            var current = events[index].Timestamp;
+            if (current < previous)
+            {
+                return false;
+            }
+
+            previous = current;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1792,6 +1878,9 @@ public static class ReportEventSampler
         }
 
         var prioritySeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var maxPairs = IsR0ReportEvent(evt)
+            ? Math.Max(options.MaxEventDataPairs, 40)
+            : options.MaxEventDataPairs;
         foreach (var key in BuildPriorityDataKeys(evt))
         {
             if (!prioritySeen.Add(key))
@@ -1799,7 +1888,7 @@ public static class ReportEventSampler
                 continue;
             }
 
-            if (sanitized.Count >= options.MaxEventDataPairs)
+            if (sanitized.Count >= maxPairs)
             {
                 break;
             }
@@ -1812,7 +1901,7 @@ public static class ReportEventSampler
 
         foreach (var pair in data)
         {
-            if (sanitized.Count >= options.MaxEventDataPairs)
+            if (sanitized.Count >= maxPairs)
             {
                 break;
             }
@@ -1832,6 +1921,12 @@ public static class ReportEventSampler
 
         return sanitized;
     }
+
+    private static bool IsR0ReportEvent(SandboxEvent evt) =>
+        (evt.EventType ?? string.Empty).StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+        (evt.EventType ?? string.Empty).StartsWith("image.", StringComparison.OrdinalIgnoreCase) ||
+        (evt.EventType ?? string.Empty).StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase);
 
     private static IEnumerable<string> BuildPriorityDataKeys(SandboxEvent evt)
     {
@@ -1883,6 +1978,18 @@ public static class ReportEventSampler
         if (evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase))
         {
             foreach (var key in FilePriorityDataKeys)
+            {
+                yield return key;
+            }
+        }
+
+        // ETW live events are dynamic evidence.  Keep the decoded event
+        // identity and trace lineage ahead of the generic correlation envelope
+        // so process/thread rows remain useful when report data is bounded.
+        if (string.Equals(evt.EventType, "etw.kernel.event", StringComparison.OrdinalIgnoreCase) ||
+            EventDataEqualsAny(evt, "captureSource", "etw-live-tracerpt"))
+        {
+            foreach (var key in EtwKernelEventPriorityDataKeys)
             {
                 yield return key;
             }

@@ -145,9 +145,14 @@ public static class SampleCorrelationClassifier
     /// </summary>
     public static List<SandboxEvent> Apply(IEnumerable<SandboxEvent> events, string? samplePath)
     {
-        var eventList = events
-            .Select(CloneEvent)
-            .ToList();
+        // Classification only reads the incoming event and creates a new
+        // Data dictionary when it adds correlation fields.  Cloning every
+        // input dictionary here before that second copy doubled the peak
+        // memory footprint for large R0 JSONL imports (hundreds of thousands
+        // of rows) without changing the caller-visible result.  Keep the
+        // source events immutable by contract and retain the one copy made by
+        // ClassifyEvent for enriched rows.
+        var eventList = events as IReadOnlyList<SandboxEvent> ?? events.ToList();
         var context = BuildContext(eventList, samplePath);
         var classified = new List<SandboxEvent>(eventList.Count);
 

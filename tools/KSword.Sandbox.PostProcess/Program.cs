@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Core.Configuration;
 using KSword.Sandbox.Core.Correlation;
@@ -107,15 +109,17 @@ internal static class PostProcessProgram
             var renderer = new HtmlReportRenderer();
             File.WriteAllText(jsonReportPath, JsonSerializer.Serialize(report, JsonOptions));
             LogMemory("report-json-written", report.Events.Count);
-            File.WriteAllText(htmlReportPath, renderer.RenderChinese(report, artifactIndex.Artifacts, artifactIndex.Collections));
-            foreach (var document in renderer.RenderBilingualReports(report, artifactIndex.Artifacts, artifactIndex.Collections))
+            var bilingualDocuments = renderer.RenderBilingualReports(report, artifactIndex.Artifacts, artifactIndex.Collections);
+            LogMemory("after-bilingual-html", bilingualDocuments.Sum(document => document.Html.Length));
+            foreach (var document in bilingualDocuments)
             {
-                var html = document.FileName.EndsWith(".zh.html", StringComparison.OrdinalIgnoreCase)
-                        ? renderer.RenderChinese(report, artifactIndex.Artifacts, artifactIndex.Collections)
-                    : document.FileName.EndsWith(".en.html", StringComparison.OrdinalIgnoreCase)
-                        ? renderer.RenderEnglish(report, artifactIndex.Artifacts, artifactIndex.Collections)
-                        : document.Html;
-                File.WriteAllText(Path.Combine(jobRoot, document.FileName), html);
+                File.WriteAllText(Path.Combine(jobRoot, document.FileName), document.Html);
+                if (document.FileName.EndsWith(".zh.html", StringComparison.OrdinalIgnoreCase))
+                {
+                    // report.html remains the documented Chinese compatibility
+                    // file while report.zh.html is the explicit localized link.
+                    File.WriteAllText(htmlReportPath, document.Html);
+                }
             }
 
             var resultPath = Path.Combine(jobRoot, "postprocess-result.json");
@@ -651,7 +655,7 @@ internal static class PostProcessProgram
             }
         }
 
-        return events.Select(NormalizeEvent).ToList();
+        return events;
     }
 
     private static IReadOnlyList<string> EnumerateCanonicalDriverJsonlPaths(string eventsPath, string? searchRoot)
@@ -693,7 +697,7 @@ internal static class PostProcessProgram
             evt.Data
                 .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
                 .Select(pair => $"{pair.Key}={pair.Value}"));
-        return string.Join(
+        var identity = string.Join(
             "|",
             evt.EventType,
             evt.Source,
@@ -702,6 +706,13 @@ internal static class PostProcessProgram
             evt.Path ?? string.Empty,
             evt.CommandLine ?? string.Empty,
             data);
+
+        // Preserve exact-content deduplication while retaining a fixed-size
+        // identity in the HashSet. Keeping the complete canonical Data string
+        // for every row made a 550 MB driver stream consume multiple extra
+        // gigabytes during PostProcess. The digest is only retained for the
+        // idempotency set; raw event payloads remain unchanged.
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
 
     private static SandboxEvent CreateNetworkImportFailureEvent(string guestRoot, Exception ex)
@@ -785,12 +796,12 @@ internal static class PostProcessProgram
                 var evt = JsonSerializer.Deserialize<SandboxEvent>(line, JsonOptions);
                 if (evt is not null)
                 {
-                    events.Add(evt);
+                    events.Add(NormalizeEvent(evt));
                 }
             }
             catch (JsonException)
             {
-                events.Add(new SandboxEvent
+                events.Add(NormalizeEvent(new SandboxEvent
                 {
                     EventType = "driver.parse_error",
                     Source = "host",
@@ -805,7 +816,7 @@ internal static class PostProcessProgram
                             ["jsonlPath"] = path,
                             ["jsonlLineSelector"] = $"{path}#L{lineNumber}"
                         })
-                });
+                }));
             }
         }
 
@@ -814,11 +825,34 @@ internal static class PostProcessProgram
 
     private static SandboxEvent NormalizeEvent(SandboxEvent evt)
     {
+        var sourceData = evt.Data;
+        Dictionary<string, string> data;
+        if (sourceData is null)
+        {
+            data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+        else if (sourceData.Keys.All(key => ReferenceEquals(key, string.Intern(key))))
+        {
+            data = sourceData;
+        }
+        else
+        {
+            data = new Dictionary<string, string>(sourceData.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in sourceData)
+            {
+                // JSON property names are bounded schema identifiers. Intern
+                // only keys (never arbitrary values) to collapse one managed
+                // string per repeated driver-row field without retaining
+                // unbounded sample content in the intern pool.
+                data[string.Intern(pair.Key)] = pair.Value;
+            }
+        }
+
         return evt with
         {
             EventType = string.IsNullOrWhiteSpace(evt.EventType) ? "unknown" : evt.EventType,
             Source = string.IsNullOrWhiteSpace(evt.Source) ? "guest" : evt.Source,
-            Data = evt.Data ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            Data = data
         };
     }
 
