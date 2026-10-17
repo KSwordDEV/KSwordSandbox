@@ -926,7 +926,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("<label>Sample behavior <select data-event-sample><option value=\"all\">All</option><option value=\"true\">Yes</option><option value=\"false\">No</option></select></label>");
         html.AppendLine("<button type=\"button\" class=\"focus-action secondary\" data-event-reset>Reset filters</button>");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"event-explorer-status\" data-event-count>{E(inlineRows.ToString(CultureInfo.InvariantCulture))} visible evidence rows; {E(hidden.ToString(CultureInfo.InvariantCulture))} more evidence rows are available in the report and can be revealed by filtering. Overflow rows use compact representatives; raw JSON/JSONL retains every event.</div>");
+        html.AppendLine($"<div class=\"event-explorer-status\" data-event-count>{E(inlineRowsSelected.Count.ToString(CultureInfo.InvariantCulture))} visible evidence rows; {E(hidden.ToString(CultureInfo.InvariantCulture))} more evidence rows are available in the report and can be revealed by filtering. Overflow rows use compact representatives; raw JSON/JSONL retains every event.</div>");
         if (rows.Count == 0)
         {
             Empty(html, "No dynamic evidence rows were retained for the event explorer.");
