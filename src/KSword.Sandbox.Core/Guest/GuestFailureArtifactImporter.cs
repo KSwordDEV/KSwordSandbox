@@ -33,6 +33,12 @@ public static class GuestFailureArtifactImporter
         var eventsPath = FindNewest(root, "events.json");
         var summaryPath = FindNewest(root, "agent-summary.json");
         var preflightPath = FindNewest(root, "guest-output-preflight.json");
+        // The CLR preflight is written to the host job root and copied into
+        // guest output when the remoting session is available.  Check the
+        // guest root first and its job-root parent as a fallback so a failed
+        // session still leaves a reportable host-side diagnostic.
+        var sampleRuntimePreflightPath = FindNewest(root, "sample-runtime-preflight.json") ??
+            FindNewestParent(root, "sample-runtime-preflight.json");
         var r0FailurePath = FindNewest(root, "driver-events.jsonl.failure.json");
         var rows = new List<SandboxEvent>();
 
@@ -46,12 +52,43 @@ public static class GuestFailureArtifactImporter
         var preflight = preflightPath is null ? null : ReadOutputPreflight(preflightPath);
         var preflightFailed = preflight is not null &&
             !string.Equals(preflight.State, "ready", StringComparison.OrdinalIgnoreCase);
+        var sampleRuntime = sampleRuntimePreflightPath is null ? null : ReadSampleRuntimePreflight(sampleRuntimePreflightPath);
+        var sampleRuntimeFailed = sampleRuntime is not null &&
+            (string.Equals(sampleRuntime.State, "sample-runtime-blocked", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(sampleRuntime.State, "preflight-error", StringComparison.OrdinalIgnoreCase) ||
+             !string.IsNullOrWhiteSpace(sampleRuntime.FailureCode));
         // Offline fixtures and older externally-produced events.json files do
         // not necessarily carry the Agent marker set. Do not invent a missing
         // summary failure for those already-complete event streams.
-        if (!hasAgentMarker && !hasR0Failure && !preflightFailed)
+        if (!hasAgentMarker && !hasR0Failure && !preflightFailed && !sampleRuntimeFailed)
         {
             return rows;
+        }
+
+        if (sampleRuntimeFailed && sampleRuntime is not null && sampleRuntimePreflightPath is not null)
+        {
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["collectionHealth"] = "true",
+                ["captureState"] = "failed",
+                ["status"] = "failed",
+                ["failureType"] = "sampleRuntimePreflight",
+                ["sampleRuntimePreflight"] = "true",
+                ["sampleRuntimeState"] = sampleRuntime.State ?? "preflight-error",
+                ["sampleRuntimeFailureCode"] = sampleRuntime.FailureCode ?? string.Empty,
+                ["preflightPath"] = sampleRuntimePreflightPath,
+                ["sampleExecuted"] = "false",
+                ["sampleFileName"] = sampleRuntime.SampleFileName ?? string.Empty,
+                ["managedClrDetected"] = sampleRuntime.ManagedClrDetected.ToString().ToLowerInvariant(),
+                ["legacyClrDetected"] = sampleRuntime.LegacyClrDetected.ToString().ToLowerInvariant(),
+                ["guestNetFx3State"] = sampleRuntime.GuestNetFx3State ?? "query-failed",
+                ["guestSamplePresent"] = sampleRuntime.GuestSamplePresent.ToString().ToLowerInvariant(),
+                ["stderrPreview"] = sampleRuntime.Error ?? string.Empty
+            };
+            rows.Add(CreateSampleRuntimeFailureRow(
+                sampleRuntimePreflightPath,
+                values,
+                "样本运行环境预检失败，样本未执行；动态结果只能按失败/部分处理，不能判定为未检出。"));
         }
 
         if (preflightFailed && preflight is not null && preflightPath is not null)
