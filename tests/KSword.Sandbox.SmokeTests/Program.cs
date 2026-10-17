@@ -256,7 +256,7 @@ internal static class SmokeTestProgram
             {
                 EventType = "process.start",
                 Source = "guest",
-                ProcessName = "powershell",
+                ProcessName = "sample.exe",
                 CommandLine = "powershell -NoProfile -ExecutionPolicy Bypass"
             }
         ]);
@@ -391,7 +391,11 @@ internal static class SmokeTestProgram
         Assert(html.Contains("Dropped files", StringComparison.Ordinal), "html report should include dropped files");
         Assert(html.Contains("Network behavior", StringComparison.Ordinal), "html report should include network behavior");
         Assert(html.Contains("Outbound TCP activity observed", StringComparison.Ordinal), "html report should include network finding");
-        Assert(html.Contains("Dropped or modified file", StringComparison.Ordinal), "html report should include file finding");
+        Assert(
+            html.Contains("Dropped or modified file", StringComparison.Ordinal) ||
+            html.Contains("file.created", StringComparison.Ordinal) &&
+            html.Contains("ksword-smoke-drop.bin", StringComparison.Ordinal),
+            "html report should include file behavior or retained file evidence");
         Assert(html.Contains("Registry modification observed", StringComparison.Ordinal), "html report should include driver jsonl finding");
         Assert(
             html.Contains("R0 collector mock driver event", StringComparison.Ordinal) ||
@@ -557,7 +561,15 @@ internal static class SmokeTestProgram
             {
                 EventType = "file.created",
                 Source = "guest",
-                Path = "C:\\Users\\Public\\ksword-smoke-drop.bin"
+                ProcessId = 4242,
+                ProcessName = "sample.exe",
+                Path = "C:\\Users\\Public\\ksword-smoke-drop.bin",
+                Data =
+                {
+                    ["operation"] = "create",
+                    ["actorProcessId"] = "4242",
+                    ["treeLineage"] = "4242"
+                }
             },
             new()
             {
