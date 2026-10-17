@@ -2392,9 +2392,17 @@ public sealed partial class SandboxJobService
     {
         var rawDriverRows = rawEvents.Where(IsR0DriverTelemetryRow).ToList();
         var reportDriverRows = reportEvents.Where(IsR0DriverTelemetryRow).ToList();
+        var rawAttributedDriverRows = rawDriverRows.Count(CollectionHealthSummaryBuilder.IsSampleAttributedR0DriverTelemetryRow);
+        var reportAttributedDriverRows = reportDriverRows.Count(CollectionHealthSummaryBuilder.IsSampleAttributedR0DriverTelemetryRow);
         metrics["events.r0.driver.raw"] = rawDriverRows.Count;
         metrics["events.r0.driver.report"] = reportDriverRows.Count;
         metrics["events.r0.driver.omitted"] = Math.Max(0, rawDriverRows.Count - reportDriverRows.Count);
+        metrics["events.r0.driver.rawUnknown"] = rawDriverRows.Count - rawAttributedDriverRows;
+        metrics["events.r0.driver.reportUnknown"] = reportDriverRows.Count - reportAttributedDriverRows;
+        metrics["events.r0.driver.attributedRaw"] = rawAttributedDriverRows;
+        metrics["events.r0.driver.attributedReport"] = reportAttributedDriverRows;
+        metrics["events.r0.driver.attributedOmitted"] = Math.Max(0, rawAttributedDriverRows - reportAttributedDriverRows);
+        metrics["events.r0.driver.unknownOmitted"] = Math.Max(0, (rawDriverRows.Count - rawAttributedDriverRows) - (reportDriverRows.Count - reportAttributedDriverRows));
         metrics["events.r0.driver.lossObserved"] = rawEvents.Count(IsR0LossEvidenceEvent);
         metrics["events.r0.driver.backpressureObserved"] = rawEvents.Count(IsR0BackpressureEvidenceEvent);
         metrics["events.r0.driver.drainStoppedAtDeadline"] = rawEvents.Count(evt => EventDataBoolTrue(evt, "drainStoppedAtDeadline"));
@@ -2474,22 +2482,7 @@ public sealed partial class SandboxJobService
     private static int ToMetricInt(ulong value) => value > int.MaxValue ? int.MaxValue : (int)value;
 
     private static string R0DriverCategory(SandboxEvent evt)
-    {
-        var type = evt.EventType;
-        var suffix = type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ? type["driver.".Length..] : type;
-        var dot = suffix.IndexOf('.', StringComparison.Ordinal);
-        var category = (dot >= 0 ? suffix[..dot] : suffix).ToLowerInvariant();
-        return category switch
-        {
-            "process" => "process",
-            "image" => "image",
-            "file" => "file",
-            "registry" => "registry",
-            "network" => "network",
-            "load" => "load",
-            _ => "other"
-        };
-    }
+        => CollectionHealthSummaryBuilder.GetR0DriverCategory(evt);
 
     private static void AddDynamicCoverageMetrics(
         Dictionary<string, int> metrics,
@@ -2627,10 +2620,8 @@ public sealed partial class SandboxJobService
         }
 
         if (EventDataTruthy(evt, "stress") ||
-            !(type.StartsWith("driver.process", StringComparison.OrdinalIgnoreCase) ||
-              type.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase) ||
-              type.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase) ||
-              type.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase)))
+            !CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow(evt) ||
+            R0DriverCategory(evt) is "other")
         {
             return false;
         }

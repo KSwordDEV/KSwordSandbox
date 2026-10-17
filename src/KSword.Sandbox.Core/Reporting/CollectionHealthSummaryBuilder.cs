@@ -318,7 +318,8 @@ public static class CollectionHealthSummaryBuilder
     {
         var type = evt.EventType ?? string.Empty;
         if ((!type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) &&
-             !type.StartsWith("image.", StringComparison.OrdinalIgnoreCase)) ||
+             !type.StartsWith("image.", StringComparison.OrdinalIgnoreCase) &&
+             !type.StartsWith("load.", StringComparison.OrdinalIgnoreCase)) ||
             string.Equals(type, "driver.events.deferred", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -331,7 +332,47 @@ public static class CollectionHealthSummaryBuilder
 
         return string.Equals(Value(evt, "schema"), "ksword.sandbox.r0.event", StringComparison.OrdinalIgnoreCase) &&
             Value(evt, "eventOrigin").Contains("kernel-driver", StringComparison.OrdinalIgnoreCase) &&
-            TextEqualsAny(Value(evt, "producerCategory"), "driver", "process", "image", "file", "registry", "network");
+            TextEqualsAny(Value(evt, "producerCategory"), "driver", "process", "image", "file", "registry", "network", "load");
+    }
+
+    /// <summary>
+    /// Returns whether a typed R0 row is attributed to the submitted sample.
+    /// Keep this beside the producer-row predicate so raw/report coverage and
+    /// attribution metrics cannot drift into different event sets.
+    /// </summary>
+    public static bool IsSampleAttributedR0DriverTelemetryRow(SandboxEvent evt)
+    {
+        if (!IsR0DriverTelemetryRow(evt))
+        {
+            return false;
+        }
+
+        return BoolTrue(evt, "behaviorCounted", "sampleBehaviorCandidate", "strongSampleCorrelation") ||
+            AnyValueEqualsAny(evt, ["sampleCorrelation", "sampleCorrelationStatus", "evidenceDisposition"], "confirmed", "probable", "candidate", "correlated", "behavior-candidate", "sample-attributed");
+    }
+
+    /// <summary>
+    /// Returns the stable coverage category for a typed driver row. The event
+    /// type is preferred; producerCategory covers schema rows whose normalized
+    /// type is generic. This is shared by raw and report metric builders.
+    /// </summary>
+    public static string GetR0DriverCategory(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        var suffix = type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase)
+            ? type["driver.".Length..]
+            : type;
+        var dot = suffix.IndexOf('.', StringComparison.Ordinal);
+        var category = (dot >= 0 ? suffix[..dot] : suffix).ToLowerInvariant();
+        if (category is not ("process" or "image" or "file" or "registry" or "network" or "load"))
+        {
+            var producerCategory = Value(evt, "producerCategory").ToLowerInvariant();
+            category = producerCategory is "process" or "image" or "file" or "registry" or "network" or "load"
+                ? producerCategory
+                : "other";
+        }
+
+        return category;
     }
 
     private static bool IsDriverHealthRow(SandboxEvent evt)
@@ -486,7 +527,7 @@ public static class CollectionHealthSummaryBuilder
             source.Contains("agent", StringComparison.OrdinalIgnoreCase);
         if (!agentTagged)
         {
-            return false;
+            return IsGuestSampleProcessExitFailure(evt);
         }
 
         if (TextContainsAny(type, "failed", "failure", "error", "unavailable"))
@@ -500,7 +541,46 @@ public static class CollectionHealthSummaryBuilder
         }
 
         var exitCode = Value(evt, "exitCode", "commandExitCode", "processExitCode");
-        return TryParseUnsigned(exitCode, out var code) && code != 0;
+        return TryParseNonZeroExitCode(exitCode);
+    }
+
+    /// <summary>
+    /// Guest Agent emits the submitted sample's terminal process row as
+    /// process.exit, Source=guest. A CLR startup failure is represented as a
+    /// signed HRESULT (for example -2146232576), so unsigned-only parsing
+    /// would incorrectly leave the job in Completed/clean state.
+    /// </summary>
+    private static bool IsGuestSampleProcessExitFailure(SandboxEvent evt)
+    {
+        if (!string.Equals(evt.EventType, "process.exit", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var source = evt.Source ?? string.Empty;
+        if (!string.Equals(source, "guest", StringComparison.OrdinalIgnoreCase) &&
+            !source.Contains("guest-agent", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return TryParseNonZeroExitCode(Value(evt, "exitCode", "commandExitCode", "processExitCode"));
+    }
+
+    private static bool TryParseNonZeroExitCode(string value)
+    {
+        if (long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var signed))
+        {
+            return signed != 0;
+        }
+
+        if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            ulong.TryParse(value[2..], System.Globalization.NumberStyles.AllowHexSpecifier, System.Globalization.CultureInfo.InvariantCulture, out var hex))
+        {
+            return hex != 0;
+        }
+
+        return false;
     }
 
     private static bool IsEtwTagged(SandboxEvent evt)
@@ -700,6 +780,9 @@ public static class CollectionHealthSummaryBuilder
 
     private static bool TextEqualsAny(string value, params string[] values) =>
         values.Any(candidate => string.Equals(value, candidate, StringComparison.OrdinalIgnoreCase));
+
+    private static bool AnyValueEqualsAny(SandboxEvent evt, IReadOnlyCollection<string> keys, params string[] values) =>
+        keys.Any(key => evt.Data.TryGetValue(key, out var value) && TextEqualsAny(value, values));
 
     private static bool TextContainsAny(string value, params string[] values) =>
         values.Any(candidate => value.Contains(candidate, StringComparison.OrdinalIgnoreCase));
