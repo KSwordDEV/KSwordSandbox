@@ -558,7 +558,6 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
                 continue;
             }
 
-            var eventType = MapEventType(eventName, provider);
             var processId = ParseProcessId(GetField(fields, columns, "processid", "processpid", "pid"));
             var parentProcessId = ParseProcessId(GetField(fields, columns, "parentprocessid", "parentprocesspid", "parentpid", "parentid"));
             var threadId = GetField(fields, columns, "threadid", "tid");
@@ -566,6 +565,8 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             var image = GetField(fields, columns, "imagename", "image", "processname", "process");
             var path = GetField(fields, columns, "filename", "file", "path", "imagepath", "keyname", "keypath", "objectname");
             var opcode = GetField(fields, columns, "opcode", "operation");
+            var task = GetField(fields, columns, "task", "eventtask");
+            var eventType = MapEventType(eventName + " " + opcode + " " + task + " " + eventId, provider);
             var payload = BuildPayload(fields, columns, "payload", "data", "userdata");
             var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
