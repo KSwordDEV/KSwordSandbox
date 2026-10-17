@@ -683,9 +683,16 @@ bool EmitDriverSetProducerEnableMask(
     const Options& options,
     const ULONG automaticProducerMask,
     EventWriter& writer) {
+    // Older drivers may not implement GET_CAPABILITIES. Preserve their boot
+    // default when no negotiated mask is available; an explicit operator mask
+    // still exercises the optional SET_PRODUCER_ENABLE_MASK path.
+    if (!options.enableMaskSpecified && automaticProducerMask == 0) {
+        return true;
+    }
+
     const ULONG requestedEnableMask = options.enableMaskSpecified
         ? options.enableMask
-        : (automaticProducerMask != 0 ? automaticProducerMask : kAutomaticProducerEnableMask);
+        : automaticProducerMask;
 
     std::vector<unsigned char> buffer(sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY));
     auto* request = reinterpret_cast<PKSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST>(buffer.data());
