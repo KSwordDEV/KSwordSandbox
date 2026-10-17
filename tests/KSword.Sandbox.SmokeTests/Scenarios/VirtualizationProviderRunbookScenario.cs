@@ -73,6 +73,15 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         // the real failure.  This is a synthetic runbook contract; it never
         // starts VMware or executes a sample.
         RequireStepContains(vmware, "run-agent", "continuing to collect guest diagnostics");
+        RequireStepContains(vmware, "check-sample-runtime", "mscoree\\.dll");
+        RequireStepContains(vmware, "check-sample-runtime", "_CorExeMain");
+        RequireStepContains(vmware, "check-sample-runtime", "v2\\.0\\.50727");
+        RequireStepContains(vmware, "check-sample-runtime", "Get-WindowsOptionalFeature");
+        RequireStepContains(vmware, "check-sample-runtime", "NetFx3");
+        RequireStepContains(vmware, "check-sample-runtime", "SAMPLE_RUNTIME_BLOCKED");
+        SmokeAssert.True(
+            !RequireStep(vmware, "check-sample-runtime").PowerShell.Contains("& $hostSamplePath", StringComparison.Ordinal),
+            "CLR preflight must inspect sample bytes without executing the submitted sample.");
         var encodedAgentLaunch = DecodeEncodedAgentLaunch(RequireStep(vmware, "run-agent").PowerShell);
         SmokeAssert.True(encodedAgentLaunch.Contains("WriteAllText($pidMarkerTemp", StringComparison.Ordinal), "Guest launch must atomically publish the PID marker.");
         SmokeAssert.True(encodedAgentLaunch.Contains("WriteAllText($exitTemp", StringComparison.Ordinal), "Guest launch must atomically publish the exit marker.");
