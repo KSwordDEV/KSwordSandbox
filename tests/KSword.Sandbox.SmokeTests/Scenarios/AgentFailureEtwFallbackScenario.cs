@@ -38,6 +38,21 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
             reserveSource = "driver.r0CollectorMinFreeOutputBytes",
             checkedAtUtc = DateTimeOffset.UtcNow.ToString("O")
         }));
+        // The CLR preflight is also written to the host job root. Verify that
+        // recovery from the guest folder finds the sibling host diagnostic and
+        // keeps a blocked sample out of a reassuring clean result.
+        File.WriteAllText(Path.Combine(context.RuntimeRoot, "agent-failure-etw", "sample-runtime-preflight.json"), JsonSerializer.Serialize(new
+        {
+            schema = "ksword.sample-runtime-preflight.v1",
+            state = "sample-runtime-blocked",
+            failureCode = "sample-runtime-blocked-netfx3-disabled",
+            sampleFileName = "legacy-sample.exe",
+            managedClrDetected = true,
+            legacyClrDetected = true,
+            guestSamplePresent = true,
+            guestNetFx3State = "Disabled",
+            sampleExecuted = false
+        }));
         File.WriteAllText(Path.Combine(etw, "sample.xml"), """
             <Events><Event><System><Provider Name="Microsoft-Windows-Kernel-Process"/><EventID>1</EventID><TimeCreated SystemTime="2026-01-01T00:00:00Z"/><Execution ProcessID="4242" ThreadID="11"/></System><RenderingInfo><Task>Process</Task><Opcode>Start</Opcode><EventName>ProcessStart</EventName></RenderingInfo><EventData><Data Name="ProcessId">4242</Data><Data Name="ParentProcessId">4</Data><Data Name="ImageFileName">sample.exe</Data></EventData></Event><Event><System><Provider Name="Microsoft-Windows-Kernel-Image"/><EventID>5</EventID><TimeCreated SystemTime="2026-01-01T00:00:01Z"/><Execution ProcessID="4242" ThreadID="11"/></System><RenderingInfo><Task>Image</Task><Opcode>Load</Opcode></RenderingInfo><EventData><Data Name="ProcessId">4242</Data><Data Name="ImageFileName">payload.dll</Data></EventData></Event><Event><System><Provider Name="Microsoft-Windows-Kernel-Process"/><EventID>2</EventID><TimeCreated SystemTime="2026-01-01T00:00:02Z"/><Execution ProcessID="4242" ThreadID="11"/></System><RenderingInfo><Task>Process</Task><Opcode>Stop</Opcode><EventName>ProcessExit</EventName></RenderingInfo><EventData><Data Name="ProcessId">4242</Data><Data Name="ExitStatus">1</Data></EventData></Event></Events>
             """);
@@ -53,6 +68,9 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
         var preflightFailure = failures.Single(evt => evt.EventType == "guest.output.preflight.failed");
         SmokeAssert.True(preflightFailure.Data["outputSpacePreflightFailure"] == "true", "Low guest output space must remain a distinct collection-health failure.");
         SmokeAssert.True(preflightFailure.Data["availableFreeBytes"] == "0" && preflightFailure.Data["requiredFreeBytes"] == "134217728", "Output preflight must preserve measured and required free-space diagnostics.");
+        var sampleRuntimeFailure = failures.Single(evt => evt.EventType == "sample.runtime.preflight.failed");
+        SmokeAssert.True(sampleRuntimeFailure.Data["sampleRuntimePreflight"] == "true" && sampleRuntimeFailure.Data["sampleRuntimeFailureCode"] == "sample-runtime-blocked-netfx3-disabled", "CLR preflight failure must remain a collection-health diagnostic.");
+        SmokeAssert.True(sampleRuntimeFailure.Data["sampleExecuted"] == "false" && sampleRuntimeFailure.Data["guestNetFx3State"] == "Disabled", "CLR preflight diagnostic must preserve non-execution and guest framework state.");
         var runbookPath = Path.Combine(context.RuntimeRoot, "agent-failure-etw", "runbook-execution.json");
         File.WriteAllText(runbookPath, JsonSerializer.Serialize(new SandboxRunbookExecutionResult
         {
