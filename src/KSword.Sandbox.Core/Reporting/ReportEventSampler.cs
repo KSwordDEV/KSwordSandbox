@@ -120,7 +120,14 @@ public static class ReportEventSampler
         "guestImportMessage",
         "terminalStatus",
         "importMode",
-        "resultPath"
+        "resultPath",
+        "primaryEventsPath",
+        "primaryEventCount",
+        "driverEventsPathCount",
+        "driverEventCount",
+        "driverEventCountMerged",
+        "sourceFileCount",
+        "driverEventsPaths"
     ];
 
     private static readonly string[] CollectionHealthPriorityDataKeys =
@@ -1396,6 +1403,9 @@ public static class ReportEventSampler
         var eventType = NormalizeEventType(evt.EventType);
         if (eventType.Contains("failure_skeleton", StringComparison.OrdinalIgnoreCase) ||
             eventType.Contains("analysis.failed", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("decode_failed", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Equals("process.tree_unavailable", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".capture_failed", StringComparison.OrdinalIgnoreCase) ||
             eventType.EndsWith(".import_failed", StringComparison.OrdinalIgnoreCase) ||
             eventType.EndsWith(".runbook.execution_result_error", StringComparison.OrdinalIgnoreCase))
         {

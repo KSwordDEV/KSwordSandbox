@@ -305,13 +305,18 @@ internal static partial class ProgramMain
         if (!string.IsNullOrWhiteSpace(explicitEvents))
         {
             var explicitPath = RequireExistingFile(explicitEvents, "events");
+            var mergedDrivers = FindMergedDriverPaths(explicitPath);
             return new EventInputResolution
             {
                 Path = explicitPath,
+                PrimaryPath = explicitPath,
                 Source = "explicit",
                 CandidateCount = 1,
                 CandidatePaths = [explicitPath],
-                Message = "使用显式 --events 输入。/ Using explicit --events input."
+                MergedDriverPaths = mergedDrivers,
+                MergedDriverCount = CountJsonlRows(mergedDrivers),
+                SourceCount = 1 + mergedDrivers.Count,
+                Message = BuildEventInputMessage(explicitPath, "explicit", mergedDrivers)
             };
         }
 
@@ -319,6 +324,7 @@ internal static partial class ProgramMain
         if (candidates.Count > 0)
         {
             var selected = candidates[0];
+            var mergedDrivers = FindMergedDriverPaths(selected);
             var hints = new List<string>();
             if (candidates.Count > 1)
             {
@@ -328,12 +334,14 @@ internal static partial class ProgramMain
             return new EventInputResolution
             {
                 Path = selected,
+                PrimaryPath = selected,
                 Source = "discovered",
                 CandidateCount = candidates.Count,
                 CandidatePaths = candidates,
-                Message = candidates.Count > 1
-                    ? $"选择最新/最明确的事件候选文件：{selected}。/ Selected event candidate: {selected}."
-                    : $"发现事件文件：{selected}。/ Found event file: {selected}.",
+                MergedDriverPaths = mergedDrivers,
+                MergedDriverCount = CountJsonlRows(mergedDrivers),
+                SourceCount = 1 + mergedDrivers.Count,
+                Message = BuildEventInputMessage(selected, candidates.Count > 1 ? "discovered-multiple" : "discovered", mergedDrivers),
                 RemediationHints = hints
             };
         }
@@ -347,10 +355,12 @@ internal static partial class ProgramMain
                 return new EventInputResolution
                 {
                     Path = skeletonPath,
+                    PrimaryPath = skeletonPath,
                     Source = "generated-failure-skeleton",
                     CreatedFailureSkeleton = true,
                     CandidateCount = 1,
                     CandidatePaths = [skeletonPath],
+                    SourceCount = 1,
                     Message = "未找到 events.json；已根据 runbook-execution.json 生成可导入 failure skeleton。/ events.json was missing; generated an importable failure skeleton from runbook-execution.json.",
                     RemediationHints =
                     [
@@ -391,20 +401,33 @@ internal static partial class ProgramMain
         }
 
         foreach (var path in Directory.EnumerateFiles(jobRoot, "events.json", SearchOption.AllDirectories)
-            .OrderByDescending(File.GetLastWriteTimeUtc))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             AddCandidatePath(candidates, path);
+        }
+
+        // A canonical events.json is the primary source. Its sibling
+        // driver-events.jsonl is merged by SandboxJobService and must not be
+        // selected as a competing primary input merely because it is newer.
+        if (candidates.Count > 0)
+        {
+            return candidates;
         }
 
         foreach (var path in Directory.EnumerateFiles(jobRoot, "*.jsonl", SearchOption.AllDirectories)
             .Where(path => !Path.GetFileName(path).Equals("driver-events.jsonl", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(File.GetLastWriteTimeUtc))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             AddCandidatePath(candidates, path);
         }
 
+        if (candidates.Count > 0)
+        {
+            return candidates;
+        }
+
         foreach (var path in Directory.EnumerateFiles(jobRoot, "driver-events.jsonl", SearchOption.AllDirectories)
-            .OrderByDescending(File.GetLastWriteTimeUtc))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             AddCandidatePath(candidates, path);
         }
@@ -422,6 +445,61 @@ internal static partial class ProgramMain
                 candidates.Add(fullPath);
             }
         }
+    }
+
+    private static List<string> FindMergedDriverPaths(string primaryPath)
+    {
+        var fullPrimary = Path.GetFullPath(primaryPath);
+        var directory = Path.GetDirectoryName(fullPrimary);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return [];
+        }
+
+        var sibling = Path.Combine(directory, "driver-events.jsonl");
+        if (File.Exists(sibling) && !SamePath(sibling, fullPrimary))
+        {
+            return [Path.GetFullPath(sibling)];
+        }
+
+        // Keep recovery imports tolerant of nested output layouts while making
+        // selection stable. The service applies the same sibling-first rule.
+        return Directory.EnumerateFiles(directory, "driver-events.jsonl", SearchOption.AllDirectories)
+            .Where(path => !SamePath(path, fullPrimary))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .Select(Path.GetFullPath)
+            .ToList();
+    }
+
+    private static int CountJsonlRows(IEnumerable<string> paths)
+    {
+        var count = 0;
+        foreach (var path in paths)
+        {
+            try
+            {
+                count = checked(count + File.ReadLines(path).Count(line => !string.IsNullOrWhiteSpace(line)));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                // The service will emit a parse/read diagnostic if the source
+                // becomes unreadable during import; diagnostics remain useful
+                // with the deterministic path even when row counting fails.
+            }
+        }
+
+        return count;
+    }
+
+    private static string BuildEventInputMessage(string selected, string source, IReadOnlyList<string> mergedDrivers)
+    {
+        var selectedText = source.Equals("explicit", StringComparison.OrdinalIgnoreCase)
+            ? $"使用显式 --events 主来源：{selected}"
+            : $"确定性选择 events 主来源：{selected}";
+        var driverText = mergedDrivers.Count == 0
+            ? "未发现同目录 driver-events.jsonl / no sibling driver-events.jsonl"
+            : $"自动合并 {mergedDrivers.Count} 个 driver-events.jsonl 来源 / merged {mergedDrivers.Count} driver-events.jsonl source(s): {string.Join(", ", mergedDrivers)}";
+        return $"{selectedText}；{driverText}。/ {selectedText}; {driverText}.";
     }
 
     private static string WriteFailureEventSkeletonFromRunbook(string jobRoot, Guid jobId, string runbookExecutionPath)

@@ -586,10 +586,15 @@ internal sealed class SyntheticEndToEndSmokeScenario : ISmokeTestScenario
             importedEventCount >= 9 &&
             importedEventCount <= report.Events.Count,
             "Guest import marker should count at least events.json plus driver-events.jsonl rows and stay bounded by the refreshed report event count.");
+        SmokeAssert.True(importEvent.Data.TryGetValue("sourceFileCount", out var sourceFileCountText) && sourceFileCountText == "2", "Guest import marker should count events.json and its sibling driver-events.jsonl as two deterministic sources.");
+        SmokeAssert.True(importEvent.Data.TryGetValue("driverEventsPathCount", out var driverPathCountText) && driverPathCountText == "1", "Guest import marker should identify the merged sibling driver-events.jsonl path.");
+        SmokeAssert.True(importEvent.Data.TryGetValue("driverEventCountMerged", out var driverMergedCountText) && driverMergedCountText == "3", "Guest import marker should count all three synthetic driver rows merged into the report.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "script-interpreter"), "Synthetic process event should trigger script-interpreter rule.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "registry-change"), "Synthetic registry event should trigger registry-change rule.");
         SmokeAssert.True(!report.Findings.Any(finding => finding.RuleId == "r0collector-mock-driver-event"), "Synthetic R0 mock plumbing should stay in R0/raw evidence and not trigger a behavior-rule finding.");
         SmokeAssert.True(report.Metrics.TryGetValue("events.total", out var totalEvents) && totalEvents >= 14, "Imported report metrics should count planning, runbook, guest, driver, and import events.");
+        SmokeAssert.True(report.Metrics.TryGetValue("events.sources.total", out var sourceCount) && sourceCount == 2, "Imported report metrics should count both guest event source files.");
+        SmokeAssert.True(report.Metrics.TryGetValue("events.sources.driverEventsMerged", out var mergedDriverCount) && mergedDriverCount == 3, "Imported report metrics should count merged driver rows.");
 
         return report;
     }

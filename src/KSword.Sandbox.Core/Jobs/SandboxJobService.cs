@@ -326,7 +326,7 @@ public sealed partial class SandboxJobService
         }
 
         var resolvedEventsPath = ResolveGuestEventsPath(jobId, eventsPath);
-        var guestEvents = LoadGuestEventsWithDriverJsonl(resolvedEventsPath);
+        var guestEvents = LoadGuestEventsWithDriverJsonl(resolvedEventsPath, out var importSummary);
         var sampleLaunchBlocked = HasTerminalSampleStartFailure(guestEvents);
         var status = guestEvents.Count == 0 || sampleLaunchBlocked
             ? AnalysisStatus.Failed
@@ -363,7 +363,7 @@ public sealed partial class SandboxJobService
             Submission = persistedSubmission,
             GuestEventsPath = resolvedEventsPath,
             Messages = AppendMessage(job.Messages, message)
-        }, status, guestEvents, resolvedEventsPath);
+        }, status, guestEvents, resolvedEventsPath, importSummary);
 
         PersistGuestImportState(updated, resolvedEventsPath, guestEvents.Count, status, message);
         StoreJob(updated);
@@ -556,7 +556,7 @@ public sealed partial class SandboxJobService
         };
 
         StoreJob(job);
-        var guestEvents = LoadGuestEventsWithDriverJsonl(eventsPath);
+        var guestEvents = LoadGuestEventsWithDriverJsonl(eventsPath, out var importSummary);
         var failureSkeleton = guestEvents.Any(evt =>
             string.Equals(evt.EventType, "hyperv.e2e.failure_skeleton", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "vmware.e2e.failure_skeleton", StringComparison.OrdinalIgnoreCase));
@@ -577,7 +577,7 @@ public sealed partial class SandboxJobService
             Status = status,
             GuestEventsPath = Path.GetFullPath(eventsPath),
             Messages = AppendMessage(job.Messages, message)
-        }, status, guestEvents, eventsPath);
+        }, status, guestEvents, eventsPath, importSummary);
 
         PersistGuestImportState(updated, Path.GetFullPath(eventsPath), guestEvents.Count, status, message);
         StoreJob(updated);
@@ -856,7 +856,12 @@ public sealed partial class SandboxJobService
     /// processing rebuilds deterministic host seed events, appends execution
     /// and import markers, classifies all events, and returns updated metadata.
     /// </summary>
-    private AnalysisJob RegenerateReport(AnalysisJob job, AnalysisStatus status, IReadOnlyCollection<SandboxEvent> guestEvents, string? guestEventsPath)
+    private AnalysisJob RegenerateReport(
+        AnalysisJob job,
+        AnalysisStatus status,
+        IReadOnlyCollection<SandboxEvent> guestEvents,
+        string? guestEventsPath,
+        GuestEventImportSummary? importSummary = null)
     {
         var sample = job.Sample ?? throw new InvalidOperationException("Job does not have sample metadata.");
         var runbook = job.Runbook ?? throw new InvalidOperationException("Job does not have a runbook.");
@@ -869,16 +874,17 @@ public sealed partial class SandboxJobService
         AppendRunbookExecutionEvent(events, job.RunbookExecutionResultPath, runbook.Provider);
         events.AddRange(LoadEnrichmentEvents(job.JobId));
         events.AddRange(guestEvents.Select(NormalizeEvent));
-        AppendGuestImportEvent(events, guestEventsPath, guestEvents.Count);
+        AppendGuestImportEvent(events, guestEventsPath, guestEvents.Count, importSummary);
         var artifactIndex = artifactIndexBuilder.Build(job.JobId, jobRoot);
         events.AddRange(BuildHostArtifactImportEvents(jobConfig.ArtifactCollection, jobRoot, guestEventsPath, artifactIndex, events));
 
         var fullEvents = SampleCorrelationClassifier.Apply(events.OrderBy(evt => evt.Timestamp), sample.FullPath);
         var rawFindings = ruleEngine.Classify(fullEvents);
         var findings = ReportEventSampler.SanitizeFindings(rawFindings);
-        var driverEventsPath = string.IsNullOrWhiteSpace(guestEventsPath)
-            ? null
-            : Path.Combine(Path.GetDirectoryName(guestEventsPath) ?? string.Empty, "driver-events.jsonl");
+        var driverEventsPath = importSummary?.DriverPaths.FirstOrDefault() ??
+            (string.IsNullOrWhiteSpace(guestEventsPath)
+                ? null
+                : Path.Combine(Path.GetDirectoryName(guestEventsPath) ?? string.Empty, "driver-events.jsonl"));
         var sampling = ReportEventSampler.SampleForReport(fullEvents, jobRoot: jobRoot, eventsPath: guestEventsPath, driverEventsPath: driverEventsPath, findings: rawFindings);
         var report = new AnalysisReport
         {
@@ -893,7 +899,8 @@ public sealed partial class SandboxJobService
             StaticAnalysis = staticAnalysis,
             Events = sampling.Events,
             Findings = findings,
-            Metrics = BuildMetrics(sampling.Events, findings, staticAnalysis, fullEvents.Count, sampling.OmittedEventCount, fullEvents)
+            Metrics = BuildMetrics(sampling.Events, findings, staticAnalysis, fullEvents.Count, sampling.OmittedEventCount, fullEvents, importSummary),
+            CollectionHealth = CollectionHealthSummaryBuilder.Build(fullEvents, sampling.Events)
         };
 
         var jsonPath = Path.Combine(jobRoot, "report.json");
@@ -1147,6 +1154,16 @@ public sealed partial class SandboxJobService
         }
     }
 
+    private sealed record GuestEventImportSummary(
+        string PrimaryPath,
+        int PrimaryEventCount,
+        IReadOnlyList<string> DriverPaths,
+        int DriverEventCount,
+        int DriverEventCountMerged)
+    {
+        public int SourceCount => 1 + DriverPaths.Count;
+    }
+
     /// <summary>
     /// Loads guest events and nearby driver JSONL events without duplicates.
     /// The input is a primary event file, processing reads JSON array or JSONL
@@ -1155,25 +1172,36 @@ public sealed partial class SandboxJobService
     /// </summary>
     private static List<SandboxEvent> LoadGuestEventsWithDriverJsonl(string eventsPath)
     {
+        return LoadGuestEventsWithDriverJsonl(eventsPath, out _);
+    }
+
+    private static List<SandboxEvent> LoadGuestEventsWithDriverJsonl(string eventsPath, out GuestEventImportSummary importSummary)
+    {
         var events = LoadEventsFromFile(eventsPath).Select(NormalizeEvent).ToList();
         var eventKeys = events.Select(EventKey).ToHashSet(StringComparer.Ordinal);
         var searchRoot = Path.GetDirectoryName(eventsPath);
         if (string.IsNullOrWhiteSpace(searchRoot))
         {
+            importSummary = new GuestEventImportSummary(Path.GetFullPath(eventsPath), events.Count, [], 0, 0);
             return events.Select(NormalizeEvent).ToList();
         }
 
         // Safe equivalent of Directory.EnumerateFiles(searchRoot, "driver-events.jsonl", SearchOption.AllDirectories)
         // for the static import contract: only canonical driver-events.jsonl
         // files are imported, while inaccessible/reparse paths are skipped.
-        foreach (var jsonlPath in SafeEnumerateFiles(searchRoot, path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase)))
+        var driverPaths = EnumerateCanonicalDriverJsonlPaths(eventsPath, searchRoot);
+        var driverRowsRead = 0;
+        var driverRowsMerged = 0;
+        foreach (var jsonlPath in driverPaths)
         {
             foreach (var driverEvent in LoadEventsFromJsonLines(jsonlPath))
             {
+                driverRowsRead++;
                 var normalized = NormalizeEvent(driverEvent);
                 if (eventKeys.Add(EventKey(normalized)))
                 {
                     events.Add(normalized);
+                    driverRowsMerged++;
                 }
             }
         }
@@ -1201,7 +1229,36 @@ public sealed partial class SandboxJobService
             }
         }
 
+        importSummary = new GuestEventImportSummary(
+            Path.GetFullPath(eventsPath),
+            events.Count - driverRowsMerged,
+            driverPaths,
+            driverRowsRead,
+            driverRowsMerged);
         return NormalizeHostParsedProtocolSummary(events.Select(NormalizeEvent).ToList());
+    }
+
+    private static IReadOnlyList<string> EnumerateCanonicalDriverJsonlPaths(string eventsPath, string searchRoot)
+    {
+        var primaryPath = Path.GetFullPath(eventsPath);
+        var sibling = Path.Combine(searchRoot, "driver-events.jsonl");
+        if (File.Exists(sibling) && !string.Equals(Path.GetFullPath(sibling), primaryPath, StringComparison.OrdinalIgnoreCase))
+        {
+            // The guest output contract places events.json and driver-events.jsonl
+            // beside one another. Prefer that sibling so stale nested outputs
+            // cannot be merged into a report by filesystem enumeration order.
+            return [Path.GetFullPath(sibling)];
+        }
+
+        // Keep the legacy recovery behavior for imported layouts that put the
+        // canonical stream below the selected events directory, but make the
+        // fallback deterministic and never re-read the primary file.
+        return SafeEnumerateFiles(searchRoot, path =>
+                string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase))
+            .Where(path => !string.Equals(Path.GetFullPath(path), primaryPath, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .Select(Path.GetFullPath)
+            .ToList();
     }
 
     private static SandboxEvent MergeMissingEventData(SandboxEvent existing, SandboxEvent imported)
@@ -1647,7 +1704,11 @@ public sealed partial class SandboxJobService
     /// Inputs are event output, imported path, and imported count; processing
     /// writes one status event when a path is known; the method returns no value.
     /// </summary>
-    private static void AppendGuestImportEvent(List<SandboxEvent> events, string? guestEventsPath, int guestEventCount)
+    private static void AppendGuestImportEvent(
+        List<SandboxEvent> events,
+        string? guestEventsPath,
+        int guestEventCount,
+        GuestEventImportSummary? importSummary = null)
     {
         if (string.IsNullOrWhiteSpace(guestEventsPath))
         {
@@ -1670,6 +1731,22 @@ public sealed partial class SandboxJobService
                 ["terminalStatus"] = (guestEventCount == 0 ? AnalysisStatus.Failed : AnalysisStatus.Completed).ToString()
             })
         });
+
+        if (importSummary is not null)
+        {
+            var marker = events[^1];
+            var data = new Dictionary<string, string>(marker.Data, StringComparer.OrdinalIgnoreCase)
+            {
+                ["primaryEventsPath"] = importSummary.PrimaryPath,
+                ["primaryEventCount"] = importSummary.PrimaryEventCount.ToString(),
+                ["driverEventsPathCount"] = importSummary.DriverPaths.Count.ToString(),
+                ["driverEventCount"] = importSummary.DriverEventCount.ToString(),
+                ["driverEventCountMerged"] = importSummary.DriverEventCountMerged.ToString(),
+                ["sourceFileCount"] = importSummary.SourceCount.ToString(),
+                ["driverEventsPaths"] = string.Join(";", importSummary.DriverPaths)
+            };
+            events[^1] = marker with { Data = data };
+        }
     }
 
     /// <summary>
@@ -2055,7 +2132,8 @@ public sealed partial class SandboxJobService
         StaticAnalysisResult staticAnalysis,
         int? rawEventCount = null,
         int omittedReportEvents = 0,
-        IReadOnlyCollection<SandboxEvent>? rawEvents = null)
+        IReadOnlyCollection<SandboxEvent>? rawEvents = null,
+        GuestEventImportSummary? importSummary = null)
     {
         var totalEvents = rawEventCount ?? events.Count;
         var metrics = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)

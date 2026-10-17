@@ -90,6 +90,8 @@ internal sealed class EventInputResolution
 {
     public string Path { get; init; } = string.Empty;
 
+    public string PrimaryPath { get; init; } = string.Empty;
+
     public string Source { get; init; } = string.Empty;
 
     public bool CreatedFailureSkeleton { get; init; }
@@ -97,6 +99,12 @@ internal sealed class EventInputResolution
     public int CandidateCount { get; init; }
 
     public List<string> CandidatePaths { get; init; } = [];
+
+    public List<string> MergedDriverPaths { get; init; } = [];
+
+    public int MergedDriverCount { get; init; }
+
+    public int SourceCount { get; init; }
 
     public string Message { get; init; } = string.Empty;
 

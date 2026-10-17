@@ -417,6 +417,31 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         SmokeAssert.True(!lifecycleOnly.WasSampled && lifecycleOnly.Events.Count == 0 && lifecycleOnly.ExcludedEventCount == 2,
             "Lifecycle-only input should not create a misleading sampling marker.");
 
+        var failurePriorityInput = Enumerable.Range(0, 80)
+            .Select(index => new SandboxEvent
+            {
+                EventType = "collector.background_diagnostic",
+                Timestamp = timestamp.AddSeconds(10).AddMilliseconds(index),
+                Source = "host",
+                Data = { ["diagnosticEvent"] = "true", ["message"] = $"noise-{index}" }
+            })
+            .Concat(new[]
+            {
+                new SandboxEvent { EventType = "etw_live.decode_failed", Timestamp = timestamp.AddSeconds(11), Source = "etw", Data = { ["status"] = "failed" } },
+                new SandboxEvent { EventType = "packet_capture.failed", Timestamp = timestamp.AddSeconds(12), Source = "guest", Data = { ["status"] = "failed" } },
+                new SandboxEvent { EventType = "scheduled_task.capture_failed", Timestamp = timestamp.AddSeconds(13), Source = "guest", Data = { ["status"] = "failed" } },
+                new SandboxEvent { EventType = "process.tree_unavailable", Timestamp = timestamp.AddSeconds(14), Source = "guest", Data = { ["status"] = "missing" } }
+            })
+            .ToList();
+        var failurePriority = ReportEventSampler.SampleForReport(
+            failurePriorityInput,
+            new ReportEventSamplingOptions { MaxInlineEvents = 12, MaxDiagnosticEvents = 2, MaxEventsPerType = 2 });
+        foreach (var failureType in new[] { "etw_live.decode_failed", "packet_capture.failed", "scheduled_task.capture_failed", "process.tree_unavailable" })
+        {
+            SmokeAssert.True(failurePriority.Events.Any(evt => string.Equals(evt.EventType, failureType, StringComparison.OrdinalIgnoreCase)),
+                $"Collection failure {failureType} should remain visible ahead of the diagnostics quota.");
+        }
+
         var staticEvent = RequireEvent(result.Events, "static.pe.import.module");
         RequireData(staticEvent, "moduleName", "wininet.dll");
         RequireData(staticEvent, "apiCount", "7");
