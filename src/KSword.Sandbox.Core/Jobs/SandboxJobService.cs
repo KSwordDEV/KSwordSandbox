@@ -351,7 +351,8 @@ public sealed partial class SandboxJobService
         var guestEvents = LoadGuestEventsWithDriverJsonl(resolvedEventsPath, out var importSummary);
         var importedEventCount = guestEvents.Count;
         var sampleLaunchBlocked = HasTerminalSampleStartFailure(guestEvents);
-        var agentFailed = guestEvents.Any(IsImportedAgentFailure);
+        var agentFailed = guestEvents.Any(IsImportedAgentFailure) ||
+            GuestFailureArtifactImporter.ImportRunbookFailure(job.RunbookExecutionResultPath).Count > 0;
         var status = importedEventCount == 0 || sampleLaunchBlocked || agentFailed
             ? AnalysisStatus.Failed
             : AnalysisStatus.Completed;
@@ -590,7 +591,8 @@ public sealed partial class SandboxJobService
             string.Equals(evt.EventType, "vmware.e2e.failure_skeleton", StringComparison.OrdinalIgnoreCase));
         var failedRunbook = IsFailedRunbookExecution(resultPath);
         var sampleLaunchBlocked = HasTerminalSampleStartFailure(guestEvents);
-        var agentFailed = guestEvents.Any(IsImportedAgentFailure);
+        var agentFailed = guestEvents.Any(IsImportedAgentFailure) ||
+            GuestFailureArtifactImporter.ImportRunbookFailure(resultPath).Count > 0;
         var status = failureSkeleton || failedRunbook || sampleLaunchBlocked || agentFailed || importedEventCount == 0
             ? AnalysisStatus.Failed
             : AnalysisStatus.Completed;
