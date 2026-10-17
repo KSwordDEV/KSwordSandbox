@@ -100,6 +100,7 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         var jobService = ReadRepositoryText(context, "src", "KSword.Sandbox.Core", "Jobs", "SandboxJobService.cs");
         var agentProgram = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Program.cs");
         var driverReader = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Output", "DriverJsonLinesReader.cs");
+        var postProcess = ReadRepositoryText(context, "tools", "KSword.Sandbox.PostProcess", "Program.cs");
         var reportDoc = ReadRepositoryText(context, "docs", "report-schema.md");
         var jsonlDoc = ReadRepositoryText(context, "docs", "r0-jsonl-schema.md");
 
@@ -113,6 +114,7 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         RequireContains(jobService, "guest.events.imported", "Report regeneration must include an import marker event.");
         RequireContains(jobService, "RegenerateReport", "Guest import must regenerate report.json/report.html after import.");
         RequireContains(jobService, "EnumerateLiveEventFiles", "Live endpoint must read events.json and JSONL artifacts without importing.");
+        RequireContains(postProcess, "driver.events.deferred", "PostProcess must treat the deferred control marker as non-payload so the sibling driver JSONL is still merged.");
 
         RequireContains(agentProgram, "--driver-events", "Guest Agent must accept the driver JSONL path.");
         RequireContains(agentProgram, "DriverJsonLinesReader", "Guest Agent must keep a dedicated driver JSONL read path.");

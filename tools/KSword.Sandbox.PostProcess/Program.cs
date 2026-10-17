@@ -686,6 +686,14 @@ internal static class PostProcessProgram
 
     private static bool IsDriverPayloadEvent(SandboxEvent evt)
     {
+        // driver.events.deferred is a compact control-plane marker emitted in
+        // events.json when the large sibling stream is intentionally deferred
+        // to Host. It must not suppress loading driver-events.jsonl.
+        if (string.Equals(evt.EventType, "driver.events.deferred", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         return evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase);
     }
