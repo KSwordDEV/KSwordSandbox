@@ -1199,11 +1199,15 @@ public sealed partial class SandboxJobService
     private static List<SandboxEvent> LoadGuestEventsWithDriverJsonl(string eventsPath, out GuestEventImportSummary importSummary)
     {
         var events = LoadEventsFromFile(eventsPath).Select(NormalizeEvent).ToList();
+        // Keep this count anchored to the selected events.json source. Network
+        // artifact import can append normalized PCAP/sidecar rows later, but
+        // those rows are not primary events and must not inflate source metrics.
+        var primaryEventCount = events.Count;
         var eventKeys = events.Select(EventKey).ToHashSet(StringComparer.Ordinal);
         var searchRoot = Path.GetDirectoryName(eventsPath);
         if (string.IsNullOrWhiteSpace(searchRoot))
         {
-            importSummary = new GuestEventImportSummary(Path.GetFullPath(eventsPath), events.Count, [], 0, 0);
+            importSummary = new GuestEventImportSummary(Path.GetFullPath(eventsPath), primaryEventCount, [], 0, 0);
             return events.Select(NormalizeEvent).ToList();
         }
 
@@ -1252,7 +1256,7 @@ public sealed partial class SandboxJobService
 
         importSummary = new GuestEventImportSummary(
             Path.GetFullPath(eventsPath),
-            events.Count - driverRowsMerged,
+            primaryEventCount,
             driverPaths,
             driverRowsRead,
             driverRowsMerged);

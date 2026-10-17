@@ -431,6 +431,10 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         var report = JsonSerializer.Deserialize<AnalysisReport>(await File.ReadAllTextAsync(importedReportPath, cancellationToken), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
             ?? throw new InvalidOperationException("report should deserialize");
 
+        SmokeAssert.True(
+            report.Metrics.TryGetValue("events.sources.primaryEvents", out var primaryEventCount) && primaryEventCount == 1,
+            "Primary source metrics should count only the events.json rows, excluding normalized PCAP and sidecar rows appended during import.");
+
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase)), "Imported report should include pcap.summary.");
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "network.import.summary", StringComparison.OrdinalIgnoreCase)), "Imported report should include network.import.summary.");
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "pcap.flow", StringComparison.OrdinalIgnoreCase)), "Imported report should include pcap.flow.");
