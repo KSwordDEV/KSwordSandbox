@@ -105,6 +105,24 @@ public sealed class GuestOutputLocator
                 });
         }
 
+        if (fileName.EndsWith(".failure.json", StringComparison.OrdinalIgnoreCase) &&
+            (fileName.Contains("events", StringComparison.OrdinalIgnoreCase) ||
+             fileName.Contains("summary", StringComparison.OrdinalIgnoreCase) ||
+             fileName.Contains("driver", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new ArtifactClassification(
+                ArtifactKind.Log,
+                EvidenceRole: "collection-diagnostic",
+                CollectionName: "collection-diagnostics",
+                CaptureState: "failed",
+                Metadata: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["diagnosticKind"] = "output-failure",
+                    ["captureState"] = "failed",
+                    ["telemetrySource"] = "guest-agent"
+                });
+        }
+
         if (string.Equals(fileName, "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ||
             (string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) &&
                 fileName.Contains("driver", StringComparison.OrdinalIgnoreCase)))
