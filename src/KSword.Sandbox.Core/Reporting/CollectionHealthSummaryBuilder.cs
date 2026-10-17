@@ -253,6 +253,7 @@ public static class CollectionHealthSummaryBuilder
     private static bool IsDriverQualityWarning(SandboxEvent evt)
     {
         return IsDrainStoppedAtDeadline(evt) ||
+            PositiveData(evt, DriverQueueDepthKeys) ||
             PositiveData(evt, DriverRemainingUnreadKeys) ||
             PositiveData(evt, DriverSuppressedKeys) ||
             BoolTrue(evt, "backpressure", "backpressureObserved") ||
