@@ -280,6 +280,13 @@ public static class CollectionHealthSummaryBuilder
 
     private static bool IsHealthRow(SandboxEvent evt)
     {
+        if (IsRoutineR0ControlRow(evt))
+        {
+            // Empty per-batch control rows remain in driver-events.jsonl, but
+            // do not consume report health rows or omission quota.
+            return false;
+        }
+
         if (BoolTrue(evt, "collectionHealth", "collection_health", "collectionDiagnostic", "collectorDiagnostic", "collectorHealthEvidence"))
         {
             return true;
@@ -304,6 +311,23 @@ public static class CollectionHealthSummaryBuilder
             IsPcapFailure(evt) ||
             IsAgentFailureCore(evt) ||
             TextContainsAny(evt.EventType, "capture_failed", "capture-failed", "capture_error", "capture-error");
+    }
+
+    private static bool IsRoutineR0ControlRow(SandboxEvent evt)
+    {
+        if (!string.Equals(evt.EventType, "r0collector.driverPoll", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(evt.EventType, "r0collector.driverReadEvents", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !IsDrainStoppedAtDeadline(evt) &&
+            !PositiveData(evt, DriverRemainingUnreadKeys) &&
+            !PositiveData(evt, DriverLostKeys) &&
+            !BoolTrue(evt, "backpressure", "backpressureObserved") &&
+            !HasUnexpectedProducerSuppression(evt) &&
+            !IsMalformedDriverRow(evt) &&
+            !IsOutputWriteFailureRow(evt);
     }
 
     private static bool IsFailureRow(SandboxEvent evt, IReadOnlyCollection<SandboxEvent> raw)
