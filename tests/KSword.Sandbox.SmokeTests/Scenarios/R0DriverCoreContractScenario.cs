@@ -38,6 +38,12 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
             "src",
             "Eventing",
             "EventQueue.c");
+        var driverHeader = ReadRepositoryText(
+            context,
+            "driver",
+            "KSword.Sandbox.Driver",
+            "src",
+            "Driver.h");
         var abiGuards = ReadRepositoryText(
             context,
             "driver",
@@ -165,6 +171,9 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
         RequireContains(queue, "ProducerDroppedMask", "Queue must record producer families that dropped events.");
         RequireContains(queue, "ProducerSuppressedMask", "Queue must record producer families suppressed by the enable mask.");
         RequireContains(queue, "ProducerBackpressureMask", "Queue must record producer families seen under backpressure.");
+        RequireContains(queue, "ProducerMaskConfigured", "Queue must distinguish startup baseline from the explicit capture window.");
+        RequireContains(queue, "if (DeviceExtension->ProducerMaskConfigured != 0)", "Disabled-producer suppression must be counted only after the capture boundary.");
+        RequireContains(driverHeader, "ProducerMaskConfigured", "Driver state must retain the producer-mask capture boundary.");
 
         RequireContains(processProducer, "KSWORD_SANDBOX_PROCESS_MONITOR_RUNTIME", "Process producer must keep structured runtime state.");
         RequireContains(processProducer, "KswProcessPayloadVersion", "Process producer must stamp v1 payload version through a guarded helper.");

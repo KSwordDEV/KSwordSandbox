@@ -467,6 +467,11 @@ KswSetProducerEnableMask(
 
     *PreviousEnableMask = DeviceExtension->ProducerEnableMask;
     DeviceExtension->ProducerEnableMask = EnableMask;
+    // The first explicit mask selection defines the capture boundary. The
+    // driver starts before the collector and may see disabled-producer boot
+    // activity; keep that startup baseline out of session health while still
+    // counting suppression after the boundary.
+    DeviceExtension->ProducerMaskConfigured = 1;
     *EffectiveEnableMask = DeviceExtension->ProducerEnableMask;
     if (NT_SUCCESS(DeviceExtension->LastStatus)) {
         DeviceExtension->LastStatus = STATUS_SUCCESS;
@@ -547,10 +552,12 @@ KswPushEvent(
     KeAcquireSpinLock(&DeviceExtension->StateLock, &oldIrql);
 
     if ((DeviceExtension->ProducerEnableMask & producerMask) == 0) {
-        DeviceExtension->EventsSuppressed++;
-        DeviceExtension->ProducerSuppressedMask |= producerMask;
-        DeviceExtension->LastStatus = STATUS_CANCELLED;
-        DeviceExtension->LastFailureStatus = STATUS_CANCELLED;
+        if (DeviceExtension->ProducerMaskConfigured != 0) {
+            DeviceExtension->EventsSuppressed++;
+            DeviceExtension->ProducerSuppressedMask |= producerMask;
+            DeviceExtension->LastStatus = STATUS_CANCELLED;
+            DeviceExtension->LastFailureStatus = STATUS_CANCELLED;
+        }
         KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
         return STATUS_CANCELLED;
     }
@@ -671,6 +678,7 @@ KswInitializeDeviceExtension(
     DeviceExtension->ProducerDroppedMask = 0;
     DeviceExtension->ProducerSuppressedMask = 0;
     DeviceExtension->ProducerBackpressureMask = 0;
+    DeviceExtension->ProducerMaskConfigured = 0;
     DeviceExtension->QueueHighWatermark = 0;
 
     KeInitializeSpinLock(&DeviceExtension->StateLock);
@@ -712,6 +720,7 @@ KswSnapshotState(
     Snapshot->ProducerDroppedMask = DeviceExtension->ProducerDroppedMask;
     Snapshot->ProducerSuppressedMask = DeviceExtension->ProducerSuppressedMask;
     Snapshot->ProducerBackpressureMask = DeviceExtension->ProducerBackpressureMask;
+    Snapshot->ProducerMaskConfigured = DeviceExtension->ProducerMaskConfigured;
     Snapshot->QueueCapacity = KSWORD_SANDBOX_EVENT_RING_CAPACITY;
     Snapshot->EventCount = DeviceExtension->EventCount;
     Snapshot->QueueHighWatermark = DeviceExtension->QueueHighWatermark;

@@ -159,7 +159,9 @@ typedef struct _KSWORD_SANDBOX_DEVICE_EXTENSION {
     ULONG ProducerDroppedMask;
     ULONG ProducerSuppressedMask;
     ULONG ProducerBackpressureMask;
-    ULONG Reserved0;
+    // Set after the collector explicitly selects a producer mask. Events
+    // observed before that boundary are startup baseline, not session loss.
+    ULONG ProducerMaskConfigured;
     ULONG EventReadIndex;
     ULONG EventWriteIndex;
     ULONG EventCount;
@@ -193,6 +195,7 @@ typedef struct _KSWORD_SANDBOX_STATE_SNAPSHOT {
     ULONG ProducerDroppedMask;
     ULONG ProducerSuppressedMask;
     ULONG ProducerBackpressureMask;
+    ULONG ProducerMaskConfigured;
     ULONG QueueCapacity;
     ULONG EventCount;
     ULONG QueueHighWatermark;
