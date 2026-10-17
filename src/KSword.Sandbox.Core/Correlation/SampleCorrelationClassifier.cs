@@ -1477,8 +1477,13 @@ public static class SampleCorrelationClassifier
             return;
         }
 
+        // Correlation owns this metadata. Producers may emit an early,
+        // conservative value (for example `uncorrelated` before the host
+        // joins an Event Log PID to the sample tree). Keeping that value with
+        // AddIfMissing creates contradictory rows such as confirmed/strong
+        // attribution with an uncorrelated status.
         data["sampleCorrelation"] = disposition.Label;
-        AddIfMissing(data, "sampleCorrelationStatus", disposition.Status);
+        data["sampleCorrelationStatus"] = disposition.Status;
         data["sampleCorrelationReason"] = disposition.Reason;
         data["sampleCorrelationField"] = disposition.Field;
         data["sampleCorrelationStrength"] = disposition.Strength;
@@ -1525,43 +1530,22 @@ public static class SampleCorrelationClassifier
                 return;
             }
 
-            AddIfMissing(data, "evidenceDisposition", "behavior-candidate");
-            AddIfMissing(data, "sampleConclusionPromoted", disposition.Kind == CorrelationKind.Confirmed ? "true" : "candidate");
-            AddIfMissing(data, "sampleConclusionPolicy", disposition.Kind == CorrelationKind.Confirmed ? "strong-sample-correlation" : "probable-sample-correlation-review-required");
-            if (disposition.OverrideExistingNonBehavior)
-            {
-                data["evidenceDisposition"] = "behavior-candidate";
-                data["sampleConclusionPromoted"] = "true";
-                data["sampleConclusionPolicy"] = "strong-sample-correlation";
-                data["sampleBehaviorCandidate"] = "true";
-                data["behaviorCounted"] = "true";
-                data["nonbehavior"] = "false";
-                data["notSampleBehavior"] = "false";
-                data.Remove("nonbehaviorReason");
-                data["sampleBehaviorCandidateReason"] = disposition.Reason;
-                data["behaviorCountingPolicy"] = "strong-sample-correlation-is-counted-as-sample-behavior";
-                data["zhBehaviorHint"] = "该事件的进程 PID 已通过主机进程树关联到样本，升级为样本行为证据。";
-                data["zhHint"] = "该事件的进程 PID 已通过主机进程树关联到样本，升级为样本行为证据。";
-            }
-            else
-            {
-                if (disposition.OverrideExistingNonBehavior)
-                {
-                    data["sampleBehaviorCandidate"] = "true";
-                    data["behaviorCounted"] = "true";
-                    data["nonbehavior"] = "false";
-                    data["notSampleBehavior"] = "false";
-                    data.Remove("nonbehaviorReason");
-                    data["behaviorCountingPolicy"] = "probable-pcap-correlation-is-counted-as-sample-candidate";
-                }
-                else
-                {
-                    AddIfMissing(data, "sampleBehaviorCandidate", "true");
-                    AddIfMissing(data, "behaviorCounted", "true");
-                }
-            }
-            AddIfMissing(data, "sampleBehaviorCandidateReason", disposition.Reason);
-            AddIfMissing(data, "normalBehaviorBoundary", disposition.Boundary);
+            // A confirmed/probable disposition is authoritative for the
+            // behavior lane. Do not retain stale producer flags here: label,
+            // status, strongness, and counting must describe one disposition.
+            data["evidenceDisposition"] = "behavior-candidate";
+            data["sampleConclusionPromoted"] = disposition.Kind == CorrelationKind.Confirmed ? "true" : "candidate";
+            data["sampleConclusionPolicy"] = disposition.Kind == CorrelationKind.Confirmed ? "strong-sample-correlation" : "probable-sample-correlation-review-required";
+            data["sampleBehaviorCandidate"] = "true";
+            data["behaviorCounted"] = "true";
+            data["nonbehavior"] = "false";
+            data["notSampleBehavior"] = "false";
+            data.Remove("nonbehaviorReason");
+            data["sampleBehaviorCandidateReason"] = disposition.Reason;
+            data["behaviorCountingPolicy"] = disposition.Kind == CorrelationKind.Confirmed
+                ? "strong-sample-correlation-is-counted-as-sample-behavior"
+                : "probable-correlation-is-counted-as-sample-candidate";
+            data["normalBehaviorBoundary"] = disposition.Boundary;
             AddIfMissing(data, "zhBehaviorHint", disposition.Kind == CorrelationKind.Confirmed
                 ? (disposition.Boundary == "normal-interactive-gui-baseline"
                     ? "该事件属于 Notepad 等受信 benign preset 的交互式 GUI 基线活动：保留为样本相关证据，但需要额外文件、注册表、网络、持久化、注入或权限证据才升级为可疑结论。"
