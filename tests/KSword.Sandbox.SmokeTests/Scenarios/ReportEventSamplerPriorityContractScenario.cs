@@ -960,6 +960,70 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
             etwKernelRows.Events.Count(evt => evt.EventType.StartsWith("thread.", StringComparison.OrdinalIgnoreCase)) == 1,
             "ETW process/thread evidence should survive report sampling before the dynamic budget spills.");
 
+        // Persistence probes emit several namespaces for the same high-value
+        // operation.  Every create/delete edge must use the dynamic evidence
+        // lane; otherwise it can be mistaken for diagnostic noise and vanish
+        // when MaxInlineEvents is exhausted.  A bounded run must still expose
+        // the omitted type counts so raw = selected + quota omitted + policy
+        // excluded remains auditable.
+        var persistenceRows = new[]
+        {
+            "scheduled_task.created",
+            "scheduled_task.deleted",
+            "startup_item.created",
+            "startup_item.deleted",
+            "registry.run.created",
+            "registry.run.deleted",
+            "startup.created",
+            "startup.deleted",
+            "service.created",
+            "wmi.event_consumer",
+            "persistence.autorun"
+        }.Select((eventType, index) => new SandboxEvent
+        {
+            EventType = eventType,
+            Timestamp = timestamp.AddSeconds(60).AddMilliseconds(index),
+            Source = "guest",
+            Data =
+            {
+                ["behaviorCounted"] = "true",
+                ["sampleBehaviorCandidate"] = "true",
+                ["sampleCorrelation"] = "confirmed",
+                ["change"] = eventType.EndsWith("deleted", StringComparison.OrdinalIgnoreCase) ? "deleted" : "created"
+            }
+        }).ToList();
+        var persistenceComplete = ReportEventSampler.SampleForReport(
+            persistenceRows,
+            new ReportEventSamplingOptions
+            {
+                MaxInlineEvents = 0,
+                MaxDynamicActionEvents = persistenceRows.Count,
+                MaxDiagnosticEvents = 0
+            });
+        SmokeAssert.True(persistenceComplete.DynamicActionSelectedCount == persistenceRows.Count &&
+            persistenceComplete.DynamicActionOmittedCount == 0 &&
+            persistenceComplete.Events.Count == persistenceRows.Count,
+            "Scheduled task, startup, Run-key, service, WMI, and persistence create/delete rows must remain in the dynamic lane.");
+
+        var persistenceBounded = ReportEventSampler.SampleForReport(
+            persistenceRows,
+            new ReportEventSamplingOptions
+            {
+                MaxInlineEvents = 0,
+                MaxDynamicActionEvents = 2,
+                MaxDiagnosticEvents = 0
+            });
+        SmokeAssert.True(persistenceBounded.RawEventCount ==
+            persistenceBounded.SelectedRawEventCount +
+            persistenceBounded.QuotaOmittedEventCount +
+            persistenceBounded.PolicyExcludedEventCount,
+            "Persistence sampling must reconcile raw, selected, quota omitted, and policy excluded rows.");
+        var persistenceMarker = RequireEvent(persistenceBounded.Events, "report.events.sampled");
+        SmokeAssert.True(persistenceMarker.Data.TryGetValue("omittedEventTypeCounts", out var persistenceOmittedTypes) &&
+            persistenceOmittedTypes.Contains("startup_item.deleted=", StringComparison.OrdinalIgnoreCase) &&
+            persistenceOmittedTypes.Contains("registry.run.deleted=", StringComparison.OrdinalIgnoreCase),
+            $"Persistence omission marker must identify omitted create/delete event types; got '{(persistenceMarker.Data.TryGetValue("omittedEventTypeCounts", out var omitted) ? omitted : "<missing>")}'.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,

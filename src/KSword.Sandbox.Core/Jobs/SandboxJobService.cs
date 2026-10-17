@@ -2804,8 +2804,12 @@ public sealed partial class SandboxJobService
         IsDynamicActionEvent(evt) &&
         (evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
          evt.EventType.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("registry.run.", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("startup_item.", StringComparison.OrdinalIgnoreCase) ||
          evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
          evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("wmi.", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("persistence.", StringComparison.OrdinalIgnoreCase) ||
          evt.EventType.StartsWith("service.", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsFileEvent(SandboxEvent evt) =>

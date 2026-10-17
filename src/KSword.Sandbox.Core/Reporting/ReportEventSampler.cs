@@ -1750,8 +1750,20 @@ public static class ReportEventSampler
             type.StartsWith("etw.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+            // Persistence diff probes use more specific event namespaces for
+            // the Run key and startup inventory.  Keep these rows in the
+            // dynamic lane alongside registry.*; otherwise high-value create
+            // and delete edges can fall into the tiny diagnostic quota and
+            // disappear from report.json even though raw events contain them.
+            type.StartsWith("registry.run.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("startup_item.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
+            // WMI subscription and process-create rows are persistence or
+            // execution edges, not collection snapshots.  The snapshot guard
+            // above keeps inventory summaries out of this bounded lane.
+            type.StartsWith("wmi.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("persistence.", StringComparison.OrdinalIgnoreCase) ||
             (type.StartsWith("service.", StringComparison.OrdinalIgnoreCase) &&
                 !type.Contains("snapshot", StringComparison.OrdinalIgnoreCase));
     }
