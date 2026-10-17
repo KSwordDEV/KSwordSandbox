@@ -428,6 +428,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseVisibleText, "未归因观察会保留在原始证据中，选择该归因状态后即可显示。", "Chinese event explorer should explain how to reveal unattributed rows.");
         RequireContains(chineseVisibleText, "证据覆盖警告。", "Chinese report should visibly explain incomplete evidence coverage.");
         RequireNotContains(chineseVisibleText, "type, path, process, target", "Chinese event explorer must not leak the English search placeholder.");
+        RequireContains(chineseHtml, "placeholder=\"事件类型、路径、进程或目标\"", "Chinese event explorer search placeholder should be localized in the control attribute.");
         RequireContains(chineseVisibleText, "命令/stdout/stderr/PowerShell 字段默认隐藏", "Chinese technical-field fold summary should be localized.");
         RequireContains(chineseVisibleText, "此通道没有归属于样本的证据。", "Chinese story-lane empty state should be localized.");
         RequireContains(chineseHtml, "class=\"chip chip-high\">高</span>", "Chinese report should localize high-severity UI badges.");
