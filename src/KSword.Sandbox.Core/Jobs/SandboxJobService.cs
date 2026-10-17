@@ -1414,7 +1414,7 @@ public sealed partial class SandboxJobService
         return SafeEnumerateFiles(searchRoot, path =>
                 IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
             .Where(path => !string.Equals(Path.GetFullPath(path), primaryPath, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
             .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(Path.GetFullPath)
             .ToList();

@@ -21,6 +21,8 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         var collectorDoc = ReadText(Path.Combine(context.RepositoryRoot, "docs", "r0-collector.md"));
         var collectorReadme = ReadText(Path.Combine(collectorRoot, "README.md"));
         var schemaDoc = ReadText(Path.Combine(context.RepositoryRoot, "docs", "r0-jsonl-schema.md"));
+        var streamLocator = ReadText(Path.Combine(context.RepositoryRoot, "src", "KSword.Sandbox.Core", "Guest", "DriverEventStreamLocator.cs"));
+        var jobToolHelpers = ReadText(Path.Combine(context.RepositoryRoot, "tools", "KSword.Sandbox.JobTool", "JobToolHelpers.cs"));
 
         foreach (var module in new[]
         {
@@ -66,6 +68,8 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--suppress-self-noise", "self-noise suppression option should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--emit-self-noise", "self-noise emit option should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--no-suppress-self-noise", "self-noise emit alias should be parsed.");
+        RequireContains(streamLocator, "CanonicalFileName, StringComparison.OrdinalIgnoreCase) ? 1 : 0", "stream artifacts should order closed rotated parts before the active canonical stream.");
+        RequireContains(jobToolHelpers, "driver-events.jsonl\", StringComparison.OrdinalIgnoreCase) ? 1 : 0", "host JSONL merge should order closed rotated parts before the active canonical stream.");
         var ioctlClient = ReadText(Path.Combine(sourceRoot, "IoctlClient.cpp"));
         var eventParser = ReadText(Path.Combine(sourceRoot, "EventParser.cpp"));
         var runtimeLoop = ReadText(Path.Combine(sourceRoot, "RuntimeLoop.cpp"));

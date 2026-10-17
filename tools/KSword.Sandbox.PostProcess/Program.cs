@@ -711,7 +711,9 @@ internal static class PostProcessProgram
                 .Where(path => !string.Equals(path, primaryPath, StringComparison.OrdinalIgnoreCase))
                 .Where(path => IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                // Rotated parts contain earlier rows; canonical remains the
+                // active stream after rotation and must be merged last.
+                .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
                 .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }

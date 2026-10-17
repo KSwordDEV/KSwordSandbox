@@ -456,12 +456,12 @@ internal static partial class ProgramMain
             return [];
         }
 
-        // R0Collector rotates high-volume output into numbered siblings. Keep
-        // the canonical stream first, then merge every validated part.
+        // R0Collector rotates high-volume output into numbered siblings. Merge
+        // closed numbered parts first, then the active canonical stream.
         return Directory.EnumerateFiles(directory, "driver-events*.jsonl", SearchOption.AllDirectories)
             .Where(path => !SamePath(path, fullPrimary))
             .Where(path => IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
-            .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
             .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(Path.GetFullPath)
             .ToList();

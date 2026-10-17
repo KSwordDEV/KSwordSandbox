@@ -436,7 +436,7 @@ internal static class AgentProgram
         {
             return Directory.EnumerateFiles(root, "driver-events*.jsonl", SearchOption.TopDirectoryOnly)
                 .Where(path => IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
-                .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
                 .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .Select(Path.GetFullPath)
                 .ToArray();

@@ -27,8 +27,9 @@ public sealed class DriverEventStreamLocator
     /// <summary>
     /// Enumerates likely driver event JSONL files as artifact descriptors.
     /// Inputs are a collected guest output root; processing prefers canonical
-    /// driver-events.jsonl and falls back to driver-named JSONL streams; returned
-    /// descriptors carry safe relative links and JSONL telemetry metadata.
+    /// driver-named JSONL streams, ordering closed parts before the active
+    /// canonical stream; returned descriptors carry safe relative links and
+    /// JSONL telemetry metadata.
     /// </summary>
     public IReadOnlyList<ArtifactDescriptor> EnumerateDriverStreamArtifacts(string guestOutputRoot)
     {
@@ -41,7 +42,9 @@ public sealed class DriverEventStreamLocator
         return EnumerateFilesSafely(fullRoot)
             .Where(path => string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) &&
                 Path.GetFileName(path).Contains("driver", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(path => string.Equals(Path.GetFileName(path), CanonicalFileName, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            // Rotated parts contain earlier rows; canonical remains active
+            // after rotation and is therefore ordered after the parts.
+            .OrderBy(path => string.Equals(Path.GetFileName(path), CanonicalFileName, StringComparison.OrdinalIgnoreCase) ? 1 : 0)
             .ThenBy(GetLastWriteTimeUtcSafe)
             .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(path => CreateDescriptor(path, fullRoot))
