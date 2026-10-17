@@ -80,11 +80,12 @@ internal sealed class DriverJsonLinesReader
                             rowContract ??= contract;
                         }
 
+                        var rowHasLoss = false;
                         var loss = GetLongProperty(data, "lostCount") ?? GetLongProperty(data, "lossCount") ??
                             GetLongProperty(data, "droppedCount");
                         if (loss is > 0)
                         {
-                            lossRowCount++;
+                            rowHasLoss = true;
                             lostEventCount = Math.Max(lostEventCount, loss.Value);
                         }
 
@@ -92,6 +93,11 @@ internal sealed class DriverJsonLinesReader
                         if (!string.IsNullOrWhiteSpace(lossText) &&
                             !string.Equals(lossText, "none", StringComparison.OrdinalIgnoreCase) &&
                             !string.Equals(lossText, "0", StringComparison.OrdinalIgnoreCase))
+                        {
+                            rowHasLoss = true;
+                        }
+
+                        if (rowHasLoss)
                         {
                             lossRowCount++;
                         }
