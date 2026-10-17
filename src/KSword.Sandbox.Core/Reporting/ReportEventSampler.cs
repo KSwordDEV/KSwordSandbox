@@ -1583,6 +1583,13 @@ public static class ReportEventSampler
     private static bool IsDriverSampleActivityEvent(SandboxEvent evt)
     {
         var type = NormalizeEventType(evt.EventType);
+        // Importers may preserve whitespace around a producer type. Use the
+        // normalized value for both category checks and the shared R0 source
+        // predicate so a real row is not downgraded merely because of that
+        // envelope formatting.
+        var normalizedEvent = string.Equals(evt.EventType, type, StringComparison.Ordinal)
+            ? evt
+            : evt with { EventType = type };
         if (type.Contains(".summary", StringComparison.OrdinalIgnoreCase))
         {
             // R0 summary/status rows are coverage diagnostics, not individual
@@ -1630,7 +1637,7 @@ public static class ReportEventSampler
         // schema plus a kernel-driver origin and a producer category. This
         // rejects fabricated host/image rows while retaining real imported
         // driver telemetry.
-        if (!CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow(evt))
+        if (!CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow(normalizedEvent))
         {
             return false;
         }

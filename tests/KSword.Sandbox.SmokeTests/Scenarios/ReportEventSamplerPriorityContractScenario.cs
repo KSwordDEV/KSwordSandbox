@@ -723,7 +723,7 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         [
             new SandboxEvent
             {
-                EventType = "load.module",
+                EventType = "  load.module  ",
                 Timestamp = timestamp.AddSeconds(51),
                 Source = "driver",
                 Data = { ["behaviorCounted"] = "true", ["producerCategory"] = "load" }
