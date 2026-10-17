@@ -307,6 +307,42 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
             }
         ]);
         RequireEqual(0, busyPoll.DriverQualityWarningRows, "A non-zero in-flight queue depth must not be reported as a quality warning when the final queue is drained.");
+
+        var exitedRoot = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "process.tree",
+                Source = "guest",
+                ProcessId = 4343,
+                Path = @"C:\samples\finished.exe",
+                Timestamp = timestamp
+            },
+            new SandboxEvent
+            {
+                EventType = "process.tree_unavailable",
+                Source = "guest",
+                ProcessId = 4343,
+                Path = @"C:\samples\finished.exe",
+                Timestamp = timestamp.AddSeconds(30),
+                Data = { ["capturePhase"] = "after-run" }
+            }
+        ]);
+        RequireEqual(0, exitedRoot.ProcessTreeUnavailable, "An after-run root miss after a successful tree capture is an expected exit transition, not a collection failure.");
+
+        var neverObservedRoot = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "process.tree_unavailable",
+                Source = "guest",
+                ProcessId = 4344,
+                Path = @"C:\samples\missing.exe",
+                Timestamp = timestamp,
+                Data = { ["capturePhase"] = "after-run" }
+            }
+        ]);
+        RequireEqual(1, neverObservedRoot.ProcessTreeUnavailable, "A root with no successful process observation remains a collection failure.");
     }
 
     private static void AssertR0OutputFailureSidecarFinalStatus()
