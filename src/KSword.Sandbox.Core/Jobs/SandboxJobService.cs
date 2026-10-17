@@ -3,6 +3,7 @@ using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Core.Artifacts;
 using KSword.Sandbox.Core.Correlation;
+using KSword.Sandbox.Core.Guest;
 using KSword.Sandbox.Core.Network;
 using KSword.Sandbox.Core.Orchestration;
 using KSword.Sandbox.Core.Reporting;
@@ -350,11 +351,14 @@ public sealed partial class SandboxJobService
         var guestEvents = LoadGuestEventsWithDriverJsonl(resolvedEventsPath, out var importSummary);
         var importedEventCount = guestEvents.Count;
         var sampleLaunchBlocked = HasTerminalSampleStartFailure(guestEvents);
-        var status = importedEventCount == 0 || sampleLaunchBlocked
+        var agentFailed = guestEvents.Any(IsImportedAgentFailure);
+        var status = importedEventCount == 0 || sampleLaunchBlocked || agentFailed
             ? AnalysisStatus.Failed
             : AnalysisStatus.Completed;
         var message = importedEventCount == 0
             ? $"来宾事件导入未发现事件，报告状态已标记为 Failed：{resolvedEventsPath} / Guest event import found no events in {resolvedEventsPath}."
+            : agentFailed
+                ? $"Guest Agent 运行失败或输出不完整，已导入 {guestEvents.Count} 个诊断/来宾事件；报告状态已标记为 Failed：{resolvedEventsPath} / Guest Agent failed or produced incomplete output; report status is Failed: {resolvedEventsPath}."
             : sampleLaunchBlocked
                 ? $"样本启动被来宾拦截且未观察到成功启动，报告状态已标记为 Failed：{resolvedEventsPath} / The guest blocked sample launch and no successful sample start was observed; report status is Failed: {resolvedEventsPath}."
             : $"已导入 {guestEvents.Count} 个来宾事件：{resolvedEventsPath} / Imported {guestEvents.Count} guest event(s) from {resolvedEventsPath}.";
@@ -586,11 +590,14 @@ public sealed partial class SandboxJobService
             string.Equals(evt.EventType, "vmware.e2e.failure_skeleton", StringComparison.OrdinalIgnoreCase));
         var failedRunbook = IsFailedRunbookExecution(resultPath);
         var sampleLaunchBlocked = HasTerminalSampleStartFailure(guestEvents);
-        var status = failureSkeleton || failedRunbook || sampleLaunchBlocked || importedEventCount == 0
+        var agentFailed = guestEvents.Any(IsImportedAgentFailure);
+        var status = failureSkeleton || failedRunbook || sampleLaunchBlocked || agentFailed || importedEventCount == 0
             ? AnalysisStatus.Failed
             : AnalysisStatus.Completed;
         var message = importedEventCount == 0
             ? $"External guest event import found no events in {eventsPath}."
+            : agentFailed
+                ? $"Imported {importedEventCount} diagnostic guest event(s) from {eventsPath}; Guest Agent failure keeps report status Failed."
             : sampleLaunchBlocked
                 ? $"Imported {importedEventCount} diagnostic guest event(s) from {eventsPath}; no successful sample start was observed, so report status is Failed."
             : failedRunbook || failureSkeleton
@@ -625,6 +632,24 @@ public sealed partial class SandboxJobService
         return !guestEvents.Any(evt =>
             string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) &&
             IsIncomingSampleProcessEvent(evt));
+    }
+
+    private static bool IsImportedAgentFailure(SandboxEvent evt)
+    {
+        if (!evt.EventType.StartsWith("agent.", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (evt.EventType.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Contains("failure", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Contains("error", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return evt.Data.TryGetValue("exitCode", out var exit) &&
+            int.TryParse(exit, out var code) && code != 0;
     }
 
     private static bool IsIncomingSampleProcessEvent(SandboxEvent evt)
@@ -1171,6 +1196,21 @@ public sealed partial class SandboxJobService
             return jsonLines;
         }
 
+        // Preserve a deterministic import anchor when the Agent crashed before
+        // creating events.json. The importer will still load guest-agent-run-
+        // status/stderr and ETW XML diagnostics from this sibling folder.
+        var failureMarker = SafeEnumerateFiles(guestRoot, path =>
+                string.Equals(Path.GetFileName(path), "guest-agent-run-status.json", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetFileName(path), "agent.stderr.log", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetFileName(path), "agent.exit", StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(Path.GetExtension(path), ".xml", StringComparison.OrdinalIgnoreCase) && path.Contains("etw-traces", StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(SafeGetLastWriteTimeUtc)
+            .FirstOrDefault();
+        if (failureMarker is not null)
+        {
+            return Path.Combine(Path.GetDirectoryName(failureMarker) ?? guestRoot, "events.json");
+        }
+
         throw new FileNotFoundException($"No events.json or .jsonl artifact was found under {guestRoot}.");
     }
 
@@ -1248,13 +1288,15 @@ public sealed partial class SandboxJobService
 
     private static List<SandboxEvent> LoadGuestEventsWithDriverJsonl(string eventsPath, out GuestEventImportSummary importSummary)
     {
-        var events = LoadEventsFromFile(eventsPath).Select(NormalizeEvent).ToList();
+        var searchRoot = Path.GetDirectoryName(eventsPath);
+        var events = File.Exists(eventsPath)
+            ? LoadEventsFromFile(eventsPath).Select(NormalizeEvent).ToList()
+            : [];
         // Keep this count anchored to the selected events.json source. Network
         // artifact import can append normalized PCAP/sidecar rows later, but
         // those rows are not primary events and must not inflate source metrics.
         var primaryEventCount = events.Count;
         var eventKeys = events.Select(EventKey).ToHashSet(StringComparer.Ordinal);
-        var searchRoot = Path.GetDirectoryName(eventsPath);
         if (string.IsNullOrWhiteSpace(searchRoot))
         {
             importSummary = new GuestEventImportSummary(Path.GetFullPath(eventsPath), primaryEventCount, [], 0, 0);
@@ -1302,6 +1344,20 @@ public sealed partial class SandboxJobService
                 {
                     events[existingIndex] = MergeMissingEventData(events[existingIndex], normalized);
                 }
+            }
+        }
+
+        // A crashed Agent can leave the status/stderr markers and tracerpt XML
+        // while never reaching events.json serialization. Preserve those
+        // diagnostics and any decoded ETW lifecycle rows instead of turning
+        // the import into a clean zero-event run.
+        foreach (var diagnostic in GuestFailureArtifactImporter.Import(searchRoot)
+            .Concat(EtwTraceXmlEventImporter.Import(searchRoot)))
+        {
+            var normalized = NormalizeEvent(diagnostic);
+            if (eventKeys.Add(EventKey(normalized)))
+            {
+                events.Add(normalized);
             }
         }
 

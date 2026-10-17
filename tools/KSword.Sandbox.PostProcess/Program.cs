@@ -5,6 +5,7 @@ using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Core.Configuration;
 using KSword.Sandbox.Core.Correlation;
 using KSword.Sandbox.Core.Artifacts;
+using KSword.Sandbox.Core.Guest;
 using KSword.Sandbox.Core.Network;
 using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.Core.Rules;
@@ -74,7 +75,8 @@ internal static class PostProcessProgram
             // unavailable dynamic lane with a report-generation failure; the
             // report renderer separately states that runtime evidence was not
             // collected.
-            var status = guestEvents.Count > 0 || staticEvents.Count > 0
+            var agentFailed = guestEvents.Any(IsAgentFailureEvent);
+            var status = !agentFailed && (guestEvents.Count > 0 || staticEvents.Count > 0)
                 ? AnalysisStatus.Completed
                 : AnalysisStatus.Failed;
             var report = new AnalysisReport
@@ -569,6 +571,18 @@ internal static class PostProcessProgram
             return found;
         }
 
+        var marker = Directory.EnumerateFiles(jobRoot, "*", SearchOption.AllDirectories)
+            .Where(path => string.Equals(Path.GetFileName(path), "guest-agent-run-status.json", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(Path.GetFileName(path), "agent.stderr.log", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(Path.GetFileName(path), "agent.exit", StringComparison.OrdinalIgnoreCase) ||
+                           (string.Equals(Path.GetExtension(path), ".xml", StringComparison.OrdinalIgnoreCase) && path.Contains("etw-traces", StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+        if (marker is not null)
+        {
+            return Path.Combine(Path.GetDirectoryName(marker) ?? jobRoot, "events.json");
+        }
+
         throw new FileNotFoundException($"events.json was not found under {jobRoot}.", expected);
     }
 
@@ -626,7 +640,9 @@ internal static class PostProcessProgram
 
     private static List<SandboxEvent> LoadEventsWithSiblingDriverJsonl(string eventsPath)
     {
-        var events = LoadEvents(eventsPath).Select(NormalizeEvent).ToList();
+        var events = File.Exists(eventsPath)
+            ? LoadEvents(eventsPath).Select(NormalizeEvent).ToList()
+            : [];
         var eventKeys = events.Select(EventKey).ToHashSet(StringComparer.Ordinal);
         var searchRoot = Path.GetDirectoryName(eventsPath);
         foreach (var driverJsonl in EnumerateCanonicalDriverJsonlPaths(eventsPath, searchRoot))
@@ -660,9 +676,24 @@ internal static class PostProcessProgram
             {
                 events.Add(CreateNetworkImportFailureEvent(guestRoot, ex));
             }
+
+            foreach (var diagnostic in GuestFailureArtifactImporter.Import(guestRoot)
+                .Concat(EtwTraceXmlEventImporter.Import(guestRoot)))
+            {
+                AddEventIfNew(events, eventKeys, diagnostic);
+            }
         }
 
         return events;
+    }
+
+    private static bool IsAgentFailureEvent(SandboxEvent evt)
+    {
+        if (!evt.EventType.StartsWith("agent.", StringComparison.OrdinalIgnoreCase)) return false;
+        if (evt.EventType.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Contains("failure", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Contains("error", StringComparison.OrdinalIgnoreCase)) return true;
+        return evt.Data.TryGetValue("exitCode", out var value) && int.TryParse(value, out var code) && code != 0;
     }
 
     private static IReadOnlyList<string> EnumerateCanonicalDriverJsonlPaths(string eventsPath, string? searchRoot)

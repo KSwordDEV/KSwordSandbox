@@ -76,8 +76,7 @@ internal static class AgentProgram
             var options = AgentOptions.Parse(args);
             Directory.CreateDirectory(options.OutputDirectory);
             var events = await CollectAsync(options);
-            WriteArtifacts(options, events);
-            return 0;
+            return WriteArtifacts(options, events) ? 0 : 1;
         }
         catch (Exception ex)
         {
@@ -2025,8 +2024,9 @@ internal static class AgentProgram
     /// dropped files before serializing final event and summary JSON files; the
     /// method returns no value.
     /// </summary>
-    private static void WriteArtifacts(AgentOptions options, List<SandboxEvent> events)
+    private static bool WriteArtifacts(AgentOptions options, List<SandboxEvent> events)
     {
+        var succeeded = true;
         var artifactWriter = new GuestArtifactWriter();
         var droppedFileMetadataByRelativePath = options.CollectDroppedFiles
             ? CopyDroppedFileArtifacts(options, events)
@@ -2042,10 +2042,18 @@ internal static class AgentProgram
 
         try
         {
+            var freeBytes = TryGetAvailableFreeBytes(options.OutputDirectory);
+            var requiredBytes = EstimateEventOutputBytes(events.Count);
+            if (freeBytes is long available && available < requiredBytes)
+            {
+                WriteGuestOutputCapacityDiagnostic(options.OutputDirectory, "events.json", available, requiredBytes, events.Count);
+                return false;
+            }
             artifactWriter.WriteEvents(options.OutputDirectory, events);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
+            succeeded = false;
             WriteGuestOutputFailureDiagnostic(options.OutputDirectory, "events.json", ex);
         }
 
@@ -2055,7 +2063,44 @@ internal static class AgentProgram
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
+            succeeded = false;
             WriteGuestOutputFailureDiagnostic(options.OutputDirectory, "agent-summary.json", ex);
+        }
+
+        return succeeded;
+    }
+
+    private static long EstimateEventOutputBytes(int eventCount)
+    {
+        // Keep the guard cheap and conservative. High-volume R0 rows are
+        // deferred to the sibling JSONL stream, but normal Agent rows still
+        // need roughly one kilobyte each plus filesystem headroom.
+        var estimated = Math.Max(8L * 1024 * 1024, (long)Math.Max(0, eventCount) * 1024L);
+        return estimated + 8L * 1024 * 1024;
+    }
+
+    private static void WriteGuestOutputCapacityDiagnostic(string outputDirectory, string artifactName, long availableBytes, long requiredBytes, int eventCount)
+    {
+        var path = Path.Combine(outputDirectory, artifactName + ".failure.json");
+        try
+        {
+            var payload = new
+            {
+                schema = "ksword.sandbox.guest.output-failure",
+                artifact = artifactName,
+                captureState = "failed",
+                failureType = "outputSpaceInsufficient",
+                availableFreeBytes = availableBytes,
+                requiredFreeBytesEstimate = requiredBytes,
+                eventCount,
+                zhMessage = $"来宾输出盘空间不足，已停止写入 {artifactName}，报告必须按部分采集处理。",
+                zhHint = "保留原始 R0 JSONL 与该诊断；请清理来宾输出盘后重试。"
+            };
+            File.WriteAllText(path, JsonSerializer.Serialize(payload, JsonOptions));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            Console.Error.WriteLine($"guest-output-space-failure artifact={artifactName} available={availableBytes} required={requiredBytes} message={ex.Message}");
         }
     }
 
