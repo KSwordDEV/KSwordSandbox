@@ -97,6 +97,11 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
         Require(webApiE2E, "sampleSizeBytes      = [long]$sampleFile.Length", "Web API E2E evidence should retain sample size for cross-provider comparison.");
         Require(webApiE2E, "requestedDurationSeconds = $DurationSeconds", "Web API E2E evidence should retain the requested analysis duration.");
         Require(webApiE2E, "[string]$ExecutionTransport = 'Background'", "Web API E2E should exercise the same background runner used by the product UI by default.");
+        Require(webApiE2E, "Resolve-E2EStartUrl", "Web API E2E must resolve a free local URL before starting a child WebUI.");
+        Require(webApiE2E, "'-StrictUrl'", "Web API E2E must bind the child WebUI to the exact URL it will poll.");
+        Require(webApiE2E, "$BaseUrl = [string]$startedHost.Url", "Web API E2E must poll the effective child URL after port selection.");
+        Require(webApiE2E, "$script:StartedJobId", "Web API E2E must retain the active background job while tearing down its child WebUI.");
+        Require(webApiE2E, "leaving WebUI PID", "Web API E2E must leave the child WebUI alive when a runbook is still active during cleanup.");
         Require(webApiE2E, "/runbook/start", "Web API E2E should cover the preferred background runbook start endpoint.");
         Require(webApiE2E, "/runbook/background", "Web API E2E should wait for the background terminal state before reading reports.");
         Require(webApiE2E, "executionTransport   = $ExecutionTransport", "Web API E2E evidence should record whether it used the background or compatibility blocking path.");

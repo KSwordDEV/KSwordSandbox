@@ -89,6 +89,8 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $script:StartedWebUIProcess = $null
+$script:StartedJobId = $null
+$script:StartedWebUIUrl = $null
 
 function Write-E2EStep {
     param([Parameter(Mandatory)][string]$Message)
@@ -317,6 +319,13 @@ function Start-E2EWebUI {
     $stderr = Join-Path $logRoot 'webui.stderr.log'
     Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
 
+    # When the requested port is already owned, run.ps1 historically fell
+    # back to another port while this harness continued polling the original
+    # URL.  That could attach to an unrelated/stale WebUI and appear to
+    # disconnect during the final collect-output steps.  Resolve the URL once
+    # here and require run.ps1 to bind exactly to it.
+    $effectiveUrl = Resolve-E2EStartUrl -Url $Url
+
     $arguments = @(
         '-NoProfile',
         '-ExecutionPolicy',
@@ -326,7 +335,8 @@ function Start-E2EWebUI {
         '-Mode',
         'WebUI',
         '-Url',
-        $Url
+        $effectiveUrl,
+        '-StrictUrl'
     )
 
     if (-not [string]::IsNullOrWhiteSpace($SandboxConfigPath)) {
@@ -351,7 +361,73 @@ function Start-E2EWebUI {
         Process = $script:StartedWebUIProcess
         Stdout  = $stdout
         Stderr  = $stderr
+        Url     = $effectiveUrl
     }
+}
+
+function Test-E2EUrlAvailable {
+    param([Parameter(Mandatory)][Uri]$Uri)
+
+    if ($Uri.Scheme -notin @('http', 'https') -or
+        $Uri.Host -notin @('127.0.0.1', 'localhost', '::1') -or
+        $Uri.Port -le 0 -or $Uri.Port -gt 65535) {
+        return $false
+    }
+
+    $address = if ($Uri.Host -eq '::1') {
+        [System.Net.IPAddress]::IPv6Loopback
+    }
+    elseif ($Uri.Host -eq 'localhost') {
+        [System.Net.IPAddress]::Loopback
+    }
+    else {
+        [System.Net.IPAddress]::Parse($Uri.Host)
+    }
+
+    $listener = $null
+    try {
+        $listener = [System.Net.Sockets.TcpListener]::new($address, $Uri.Port)
+        $listener.Start()
+        return $true
+    }
+    catch [System.Net.Sockets.SocketException] {
+        return $false
+    }
+    finally {
+        if ($null -ne $listener) {
+            $listener.Stop()
+        }
+    }
+}
+
+function Resolve-E2EStartUrl {
+    param([Parameter(Mandatory)][string]$Url)
+
+    $parsed = $null
+    if (-not [Uri]::TryCreate($Url.TrimEnd('/') + '/', [UriKind]::Absolute, [ref]$parsed)) {
+        throw "Invalid WebUI URL '$Url'."
+    }
+
+    # Non-loopback endpoints are intentionally left to the operator; this
+    # helper must not probe or bind addresses outside the local harness.
+    if ($parsed.Host -notin @('127.0.0.1', 'localhost', '::1')) {
+        return $Url.TrimEnd('/')
+    }
+
+    $candidatePort = [int]$parsed.Port
+    foreach ($port in $candidatePort..([Math]::Min(65535, $candidatePort + 100))) {
+        $candidate = [UriBuilder]::new($parsed)
+        $candidate.Port = $port
+        $candidateUri = $candidate.Uri
+        if (Test-E2EUrlAvailable -Uri $candidateUri) {
+            if ($port -ne $candidatePort) {
+                Write-E2EStep "Requested WebUI port $candidatePort is busy; using free port $port."
+            }
+            return $candidateUri.AbsoluteUri.TrimEnd('/')
+        }
+    }
+
+    throw "No free local WebUI port was found near '$Url'."
 }
 
 function Wait-E2EWebUI {
@@ -491,6 +567,39 @@ function Test-E2EReportEndpoint {
 }
 
 function Stop-E2EStartedWebUI {
+    if ($script:StartedWebUIProcess -and -not $script:StartedWebUIProcess.HasExited -and
+        -not [string]::IsNullOrWhiteSpace($script:StartedJobId)) {
+        # A transient API/browser disconnect must not tear down the host while
+        # the provider runbook is still in sync-live-output or collect-output.
+        # Give the background runner a short recovery window; on timeout leave
+        # the child alive so its VM cleanup and durable artifacts can finish.
+        $deadline = [DateTimeOffset]::UtcNow.AddSeconds(120)
+        do {
+            try {
+                $snapshot = Invoke-RestMethod `
+                    -Method Get `
+                    -Uri "$($script:StartedWebUIUrl)/api/jobs/$($script:StartedJobId)/runbook/background" `
+                    -TimeoutSec 10
+                $state = ([string]$snapshot.state).Trim().ToLowerInvariant()
+                if ($state -in @('completed', 'failed', 'canceled')) {
+                    break
+                }
+            }
+            catch {
+                # The original request may have failed because of a transient
+                # socket reset. Keep the process alive and retry the status URL.
+            }
+            Start-Sleep -Seconds 1
+        } while ([DateTimeOffset]::UtcNow -lt $deadline -and
+                 $script:StartedWebUIProcess -and -not $script:StartedWebUIProcess.HasExited)
+
+        if ([DateTimeOffset]::UtcNow -ge $deadline -and
+            $script:StartedWebUIProcess -and -not $script:StartedWebUIProcess.HasExited) {
+            Write-Warning "Background runbook $($script:StartedJobId) is still active; leaving WebUI PID $($script:StartedWebUIProcess.Id) alive so VM cleanup and durable evidence can complete."
+            return
+        }
+    }
+
     if ($script:StartedWebUIProcess -and -not $script:StartedWebUIProcess.HasExited) {
         Write-E2EStep "Stopping WebUI PID $($script:StartedWebUIProcess.Id)"
         Stop-Process -Id $script:StartedWebUIProcess.Id -Force -ErrorAction SilentlyContinue
@@ -522,6 +631,12 @@ try {
     $startedHost = $null
     if ($StartWebUI) {
         $startedHost = Start-E2EWebUI -Url $BaseUrl -SandboxConfigPath $ConfigPath -SkipPayload:$SkipPayloadPreparation
+        # All subsequent readiness, runbook, polling, and report requests must
+        # use the exact URL selected for the process we just started.  Keeping
+        # the requested URL here would reconnect to a stale process whenever
+        # the requested port was already occupied.
+        $BaseUrl = [string]$startedHost.Url
+        $script:StartedWebUIUrl = $BaseUrl
     }
 
     $health = Wait-E2EWebUI -Url $BaseUrl -TimeoutSeconds $StartupTimeoutSeconds -StartedHost $startedHost
@@ -585,6 +700,7 @@ try {
     $job = Invoke-E2EJsonPost -Uri "$BaseUrl/api/jobs/plan" -Body $planBody -TimeoutSeconds 120
     $jobId = [string]$job.jobId
     Assert-E2ECondition -Condition (-not [string]::IsNullOrWhiteSpace($jobId)) -Message 'Plan response did not include jobId.'
+    $script:StartedJobId = $jobId
     Assert-E2ECondition -Condition ($null -ne $job.runbook) -Message 'Plan response did not include the effective provider runbook.'
     $effectiveProvider = [string]$job.runbook.provider
     $effectiveLogicalVmName = [string]$job.submission.goldenVmName
