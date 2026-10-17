@@ -921,6 +921,45 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         SmokeAssert.True(!sharedR0Categories.Events.Any(evt => evt.EventType == "driver.file.summary"),
             "R0 summary rows must not enter the dynamic action lane.");
 
+        // ETW fallback can normalize unmapped kernel rows as process.event
+        // and thread.* without a captureSource marker. They are still runtime
+        // evidence and must not be stranded in the diagnostic quota.
+        var etwKernelRows = ReportEventSampler.SampleForReport(
+        [
+            new SandboxEvent
+            {
+                EventType = "process.event",
+                Timestamp = timestamp.AddSeconds(55),
+                Source = "etwLive",
+                ProcessId = 4242
+            },
+            new SandboxEvent
+            {
+                EventType = "thread.start",
+                Timestamp = timestamp.AddSeconds(56),
+                Source = "etwLive",
+                ProcessId = 4242
+            },
+            new SandboxEvent
+            {
+                EventType = "thread.event",
+                Timestamp = timestamp.AddSeconds(57),
+                Source = "etwLive",
+                ProcessId = 4242
+            }
+        ],
+        new ReportEventSamplingOptions
+        {
+            MaxInlineEvents = 0,
+            MaxDynamicActionEvents = 2,
+            MaxDiagnosticEvents = 0
+        });
+        SmokeAssert.True(etwKernelRows.DynamicActionSelectedCount == 2,
+            "Unmapped ETW process/thread rows should use the bounded dynamic lane.");
+        SmokeAssert.True(etwKernelRows.Events.Any(evt => evt.EventType == "process.event") &&
+            etwKernelRows.Events.Count(evt => evt.EventType.StartsWith("thread.", StringComparison.OrdinalIgnoreCase)) == 1,
+            "ETW process/thread evidence should survive report sampling before the dynamic budget spills.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,

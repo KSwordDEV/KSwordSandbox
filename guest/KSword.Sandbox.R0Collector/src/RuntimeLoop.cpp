@@ -588,7 +588,8 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     }
 
     unsigned long long finalQueueDepth = 0;
-    if (!EmitDriverStatus(device, options, writer, &finalQueueDepth, nullptr, true)) {
+    KSWORD_SANDBOX_STATUS_REPLY finalStatusReply{};
+    if (!EmitDriverStatus(device, options, writer, &finalQueueDepth, nullptr, true, &finalStatusReply)) {
         return RuntimeFailureAfterOutputWrite(device, options, writer);
     }
     drainQueueDepthAtStop = finalQueueDepth;
@@ -645,12 +646,44 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     data.AddUtf8("selfNoiseReason", "none");
     data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
-    data.AddBool("lost", false);
-    data.AddUnsigned("lostCount", 0);
-    data.AddBool("lossObserved", false);
-    data.AddBool("backpressure", drainStoppedAtBatchLimit);
-    data.AddBool("backpressureObserved", drainStoppedAtBatchLimit);
-    data.AddUnsigned("highWatermark", 0);
+    const bool finalLossObserved =
+        finalStatusReply.TotalEventsDropped != 0 ||
+        finalStatusReply.ProducerDroppedMask != 0;
+    const bool finalQueueAtCapacity =
+        finalStatusReply.QueueCapacity != 0 &&
+        (finalStatusReply.QueueDepth >= finalStatusReply.QueueCapacity ||
+         finalStatusReply.QueueHighWatermark >= finalStatusReply.QueueCapacity);
+    const bool finalBackpressureObserved =
+        finalLossObserved ||
+        finalQueueAtCapacity ||
+        finalStatusReply.TotalEventsBackpressured != 0 ||
+        finalStatusReply.ProducerBackpressureMask != 0 ||
+        drainStoppedAtBatchLimit ||
+        drainStoppedAtDeadline;
+    data.AddBool("lost", finalLossObserved);
+    data.AddUnsigned("lostCount", finalStatusReply.TotalEventsDropped);
+    data.AddBool("lossObserved", finalLossObserved);
+    data.AddUtf8("loss", finalLossObserved ? "driver-events-dropped" : "none");
+    data.AddBool("backpressure", finalBackpressureObserved);
+    data.AddBool("backpressureObserved", finalBackpressureObserved);
+    data.AddUtf8(
+        "backpressureReason",
+        finalLossObserved
+            ? "events-dropped"
+            : (drainStoppedAtBatchLimit
+                ? "requested-max-batches-reached"
+                : (drainStoppedAtDeadline
+                    ? "drain-deadline-reached"
+                    : (finalQueueAtCapacity ? "queue-at-capacity" : "none"))));
+    data.AddUnsigned("highWatermark", finalStatusReply.QueueHighWatermark);
+    data.AddUnsigned("queueDepthAtFinalStatus", finalStatusReply.QueueDepth);
+    data.AddUnsigned("totalEventsEnqueued", finalStatusReply.TotalEventsEnqueued);
+    data.AddUnsigned("totalEventsDropped", finalStatusReply.TotalEventsDropped);
+    data.AddUnsigned("totalEventsRead", finalStatusReply.TotalEventsRead);
+    data.AddUnsigned("totalEventsBackpressured", finalStatusReply.TotalEventsBackpressured);
+    data.AddUnsigned("producerDroppedMask", finalStatusReply.ProducerDroppedMask);
+    data.AddUnsigned("producerBackpressureMask", finalStatusReply.ProducerBackpressureMask);
+    data.AddUnsigned("nextSequence", finalStatusReply.NextSequence);
 
     SandboxEventFields stoppedEvent;
     stoppedEvent.eventType = "r0collector.stopped";

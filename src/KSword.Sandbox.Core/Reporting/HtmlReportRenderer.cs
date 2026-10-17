@@ -786,6 +786,15 @@ html[lang="en"] .localized-evidence-field{display:none}
         Metric(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString(), "risk-medium");
         Metric(html, "Registry events", report.Events.Count(IsSampleBehaviorRegistryEvent).ToString(), "risk-medium");
         Metric(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString(), "risk-info");
+        var processRaw = ReportMetric(report, "events.process.raw");
+        var processReport = ReportMetric(report, "events.process.report");
+        var threadRaw = ReportMetric(report, "events.thread.raw");
+        var threadReport = ReportMetric(report, "events.thread.report");
+        var moduleRaw = ReportMetric(report, "events.module.raw");
+        var moduleReport = ReportMetric(report, "events.module.report");
+        Metric(html, "Process events (raw/report)", $"{processRaw}/{processReport}", processRaw > processReport ? "risk-medium" : "risk-info");
+        Metric(html, "Thread events (raw/report)", $"{threadRaw}/{threadReport}", threadRaw > threadReport ? "risk-medium" : "risk-info");
+        Metric(html, "Module events (raw/report)", $"{moduleRaw}/{moduleReport}", moduleRaw > moduleReport ? "risk-medium" : "risk-info");
         var r0DriverRaw = ReportMetric(report, "events.r0.driver.raw");
         var r0DriverReport = ReportMetric(report, "events.r0.driver.report");
         var r0DriverOmitted = ReportMetric(report, "events.r0.driver.omitted");
@@ -5438,7 +5447,9 @@ html[lang="en"] .localized-evidence-field{display:none}
             reportCount = ReportMetric(report, "events.report", report.Events.Count);
         }
         var omittedCount = ReportMetric(report, "events.omittedFromReport", Math.Max(0, rawCount - reportCount));
-        var policyExcluded = ParseEventMetric(marker, "policyExcludedEventCount");
+        var policyExcluded = Math.Max(
+            ParseEventMetric(marker, "policyExcludedEventCount"),
+            ReportMetric(report, "events.policyExcludedFromReport"));
         var highSignalOmitted = ParseEventMetric(marker, "omittedHighSignalCount");
         var unknownOmitted = ParseEventMetric(marker, "unknownEventOmittedCount");
         var dynamicOmitted = ParseEventMetric(marker, "dynamicActionOmittedCount") +
@@ -11384,6 +11395,9 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("R0 health/readiness", "R0 健康/就绪"),
         ("R0 sample/health", "R0 样本/健康"),
         ("R0 sample telemetry", "R0 样本遥测"),
+        ("Process events (raw/report)", "进程事件（原始/报告）"),
+        ("Thread events (raw/report)", "线程事件（原始/报告）"),
+        ("Module events (raw/report)", "模块事件（原始/报告）"),
         ("Critical / high risk", "严重/高风险"),
         ("VT lookups", "VT 查询"),
         ("Risk summary", "风险摘要"),

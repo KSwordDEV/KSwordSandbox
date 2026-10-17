@@ -226,11 +226,16 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         var session = activeSession;
         activeSession = null;
         var events = new List<SandboxEvent>();
+        // Once pktmon has started, shutdown must be attempted even when the
+        // probe budget or caller cancellation has fired.  Passing the linked
+        // token here can abandon the stop command and leave the system-wide
+        // pktmon session active for the next sample.  The command itself is
+        // bounded by CommandTimeout, so an uncancelable cleanup is safe.
         var stopResult = await BoundedProcessRunner.RunAsync(
             PktmonExecutable,
             ["stop"],
             CommandTimeout,
-            cancellationToken).ConfigureAwait(false);
+            CancellationToken.None).ConfigureAwait(false);
 
         if (!stopResult.Succeeded)
         {
@@ -307,7 +312,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 session.PcapngPath
             ],
             CommandTimeout,
-            cancellationToken).ConfigureAwait(false);
+            CancellationToken.None).ConfigureAwait(false);
 
         // Windows 10 20H2 images in the lab can expose the older pcapng
         // command even when pktmon start accepts the newer ETW switches. Try
@@ -324,7 +329,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                     session.PcapngPath
                 ],
                 CommandTimeout,
-                cancellationToken).ConfigureAwait(false);
+                CancellationToken.None).ConfigureAwait(false);
             if (legacyConversionResult.Succeeded && File.Exists(session.PcapngPath))
             {
                 convertResult = legacyConversionResult;
@@ -339,6 +344,22 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         }
 
         var pcapInfo = new FileInfo(session.PcapngPath);
+        // A successful pktmon command can still leave an empty/truncated
+        // conversion artifact (for example after an interrupted ETL write).
+        // Do not publish an empty file as captured evidence; keep the failure
+        // row explicit so artifact indexing cannot turn it into a false
+        // positive capture.
+        if (pcapInfo.Length <= 0)
+        {
+            events.Add(CreateCommandFailureEvent(
+                "packet_capture.failed",
+                "after-run",
+                context,
+                "pktmonConvertProducedEmptyArtifact",
+                convertResult,
+                session));
+            return events;
+        }
         var captured = new SandboxEvent
         {
             EventType = "packet_capture.captured",
@@ -463,7 +484,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["captureTool"] = PktmonExecutable,
                 ["captureToolMode"] = "windows-pktmon-etw",
                 ["conversionTool"] = PktmonExecutable,
-                ["conversionStatus"] = reason == "pktmonConvertFailed" ? "failed" : "not-attempted",
+                ["conversionStatus"] = reason is "pktmonConvertFailed" or "pktmonConvertProducedEmptyArtifact" ? "failed" : "not-attempted",
                 ["conversionSourceFormat"] = "etl",
                 ["conversionTargetFormat"] = "pcapng",
                 ["evidenceRole"] = "packet-capture",
@@ -679,7 +700,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["captureTool"] = PktmonExecutable,
                 ["captureToolMode"] = "windows-pktmon-etw",
                 ["conversionTool"] = PktmonExecutable,
-                ["conversionStatus"] = reason == "pktmonConvertFailed" ? "failed" : "not-attempted",
+                ["conversionStatus"] = reason is "pktmonConvertFailed" or "pktmonConvertProducedEmptyArtifact" ? "failed" : "not-attempted",
                 ["conversionSourceFormat"] = "etl",
                 ["conversionTargetFormat"] = "pcapng",
                 ["evidenceRole"] = "packet-capture",
@@ -731,6 +752,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             "pktmonStartFailed" => "pktmon start 失败；请检查管理员权限、pktmon 是否存在，以及系统是否已有冲突抓包。",
             "pktmonStopFailed" => "pktmon stop 失败；请检查命令输出和 ETL 诊断文件，确认是否有活动 pktmon 会话。",
             "pktmonConvertFailed" => "pktmon etl2pcap 转换失败；请查看 commandExitCode/commandMessage 和 ETL 诊断路径。",
+            "pktmonConvertProducedEmptyArtifact" => "pktmon 转换命令成功但生成的 PCAPNG 为空；请检查 ETL 是否被截断以及抓包权限。",
             "packetCaptureNotRequested" => "未请求网络抓包；如需 PCAPNG，请显式传入 --packet-capture、--pcap 或 --network-capture。",
             "protocolParserNotImplemented" => "协议摘要尚未实现；原始 PCAPNG 仍可作为证据下载分析。",
             _ => "请结合 reason、commandExitCode、commandTimedOut、commandMessage 和 diagnosticRelativePath 判断 pktmon 失败原因。"
@@ -745,7 +767,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             "notWindows" => "platform",
             "captureAlreadyActive" => "state",
             "captureWasNotStarted" => "state",
-            "pktmonStartFailed" or "pktmonStopFailed" or "pktmonConvertFailed" => "tool",
+            "pktmonStartFailed" or "pktmonStopFailed" or "pktmonConvertFailed" or "pktmonConvertProducedEmptyArtifact" => "tool",
             "protocolParserNotImplemented" => "protocol-summary",
             _ => "unknown"
         };
@@ -1013,7 +1035,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         Span<byte> header = stackalloc byte[12];
-        if (stream.Read(header) != header.Length)
+        if (!TryReadExactly(stream, header))
         {
             return new PcapngPacketSummary(null, null, null, null, null, null, "unknown", "too-small");
         }
@@ -1044,11 +1066,18 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         var enhancedPacketBlocks = 0L;
         var simplePacketBlocks = 0L;
         Span<byte> blockHeader = stackalloc byte[8];
-        while (stream.Position + blockHeader.Length <= stream.Length && stream.Read(blockHeader) == blockHeader.Length)
+        Span<byte> blockTrailer = stackalloc byte[4];
+        while (stream.Position < stream.Length)
         {
+            if (stream.Length - stream.Position < blockHeader.Length || !TryReadExactly(stream, blockHeader))
+            {
+                return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, sectionHeaderBlocks, interfaceDescriptionBlocks, enhancedPacketBlocks, simplePacketBlocks, byteOrder, "partial-or-invalid");
+            }
+
             var blockType = ReadUInt32(blockHeader[..4], littleEndian);
             var blockLength = ReadUInt32(blockHeader[4..8], littleEndian);
-            if (blockLength < 12 || blockLength > int.MaxValue || stream.Position - 8 + blockLength > stream.Length)
+            var blockStart = stream.Position - blockHeader.Length;
+            if (blockLength < 12 || blockLength > int.MaxValue || (blockLength & 3U) != 0 || blockStart + blockLength > stream.Length)
             {
                 return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, sectionHeaderBlocks, interfaceDescriptionBlocks, enhancedPacketBlocks, simplePacketBlocks, byteOrder, "partial-or-invalid");
             }
@@ -1071,10 +1100,35 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 simplePacketBlocks++;
             }
 
-            stream.Position += blockLength - 8;
+            // Every PCAPNG block ends with the same total length as its
+            // header. Validate it so a truncated last block cannot be
+            // reported as a clean capture merely because its prefix parsed.
+            stream.Position = blockStart + blockLength - blockTrailer.Length;
+            if (!TryReadExactly(stream, blockTrailer) ||
+                ReadUInt32(blockTrailer, littleEndian) != blockLength)
+            {
+                return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, sectionHeaderBlocks, interfaceDescriptionBlocks, enhancedPacketBlocks, simplePacketBlocks, byteOrder, "partial-or-invalid");
+            }
         }
 
         return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, sectionHeaderBlocks, interfaceDescriptionBlocks, enhancedPacketBlocks, simplePacketBlocks, byteOrder, "computed");
+    }
+
+    private static bool TryReadExactly(Stream stream, Span<byte> buffer)
+    {
+        var offset = 0;
+        while (offset < buffer.Length)
+        {
+            var read = stream.Read(buffer[offset..]);
+            if (read <= 0)
+            {
+                return false;
+            }
+
+            offset += read;
+        }
+
+        return true;
     }
 
     private static uint ReadUInt32(ReadOnlySpan<byte> value, bool littleEndian)

@@ -1055,6 +1055,12 @@ internal static class PostProcessProgram
             ["networkEvents"] = rawEvents.Count(IsNetworkEvent),
             ["staticTags"] = staticAnalysis?.Tags.Count ?? 0
         };
+        var reportInlineRows = reportEvents.Count(evt =>
+            !string.Equals(evt.EventType, "report.events.sampled", StringComparison.OrdinalIgnoreCase));
+        metrics["events.reportRaw"] = reportInlineRows;
+        metrics["events.policyExcludedFromReport"] = Math.Max(
+            0,
+            rawEvents.Count - reportInlineRows - Math.Max(0, omittedReportEvents));
         var rawDynamicActionCount = rawEvents.Count(IsDynamicActionEvent);
         var reportDynamicActionCount = reportEvents.Count(IsDynamicActionEvent);
         metrics["dynamicActionRawEvents"] = rawDynamicActionCount;
@@ -1062,6 +1068,10 @@ internal static class PostProcessProgram
         metrics["dynamicActionOmitted"] = Math.Max(0, rawDynamicActionCount - reportDynamicActionCount);
         metrics["dynamicActionEvents"] = reportDynamicActionCount;
         AddDynamicCategoryMetrics(metrics, "events.network", rawEvents, reportEvents, IsNetworkEvent);
+        AddDynamicCategoryMetrics(metrics, "events.process", rawEvents, reportEvents, IsProcessEvent);
+        AddDynamicCategoryMetrics(metrics, "events.thread", rawEvents, reportEvents, IsThreadEvent);
+        AddDynamicCategoryMetrics(metrics, "events.module", rawEvents, reportEvents, IsModuleEvent);
+        AddDynamicCategoryMetrics(metrics, "events.security", rawEvents, reportEvents, IsSecurityEvent);
         metrics["networkTcpRawEvents"] = rawEvents.Count(IsTcpEvent);
         metrics["networkTcpEvents"] = reportEvents.Count(IsTcpEvent);
         metrics["persistenceRawEvents"] = rawEvents.Count(IsPersistenceEvent);
@@ -1234,6 +1244,22 @@ internal static class PostProcessProgram
     private static bool IsTcpEvent(SandboxEvent evt) =>
         evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
         evt.EventType.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsProcessEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsThreadEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("thread.", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsModuleEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("image.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("module.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("load.", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSecurityEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("security.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("security_eventlog.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("etw_security.", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsPersistenceEvent(SandboxEvent evt) =>
         IsDynamicActionEvent(evt) &&

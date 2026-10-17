@@ -616,7 +616,8 @@ bool EmitDriverStatus(
     EventWriter& writer,
     unsigned long long* queueDepth,
     bool* statusAvailable,
-    const bool finalStatus) {
+    const bool finalStatus,
+    KSWORD_SANDBOX_STATUS_REPLY* statusReply) {
     if (queueDepth != nullptr) {
         *queueDepth = 0;
     }
@@ -675,6 +676,9 @@ bool EmitDriverStatus(
         // JSONL sink.  A later EmitEvent can fail after this point and the
         // runtime failure sidecar still needs to distinguish those cases.
         *statusAvailable = true;
+    }
+    if (statusReply != nullptr) {
+        *statusReply = reply;
     }
 
     SandboxEventFields event;
