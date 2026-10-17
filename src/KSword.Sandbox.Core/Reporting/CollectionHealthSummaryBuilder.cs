@@ -341,6 +341,15 @@ public static class CollectionHealthSummaryBuilder
             return false;
         }
 
+        // The dedicated process-tree predicate already distinguishes an
+        // expected visibility transition from a root that was never seen.
+        // Do not let the generic "unavailable" text fallback undo that
+        // decision for short-lived native processes.
+        if (IsProcessTreeUnavailable(evt))
+        {
+            return IsProcessTreeUnavailableFailure(evt, raw);
+        }
+
         if (IsLossRow(evt) || IsProcessTreeUnavailableFailure(evt, raw) || IsScheduledTaskCaptureFailed(evt) ||
             IsPktmonStopFailed(evt) || IsEtwDecodeFailure(evt) ||
             IsEtwFailure(evt) || IsPcapFailure(evt) || IsAgentFailure(evt, raw) ||

@@ -500,6 +500,7 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
             }
         ]);
         RequireEqual(0, exitedRoot.ProcessTreeUnavailable, "An after-run root miss after a successful tree capture is an expected exit transition, not a collection failure.");
+        RequireEqual(0, exitedRoot.FailureRows, "An expected process-tree visibility transition must not inflate collection failures.");
 
         var neverObservedRoot = CollectionHealthSummaryBuilder.Build(
         [
