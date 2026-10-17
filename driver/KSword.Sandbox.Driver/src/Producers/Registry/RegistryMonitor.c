@@ -66,7 +66,7 @@ KswRegistryPayloadVersion(
  *          clamped view whose Length never exceeds MaximumLength.
  * Logic  : registry names are copied only at IRQL <= APC_LEVEL, odd byte counts
  *          are rounded down to full WCHARs, and no allocation is performed.
- * Return : TRUE when SafeSource can be passed to KswCopyUnicodePrefix.
+ * Return : TRUE when SafeSource can be passed to the bounded suffix helper.
  */
 static
 BOOLEAN
@@ -111,7 +111,8 @@ KswPrepareRegistryCallbackString(
  *          Source may be NULL, PresentFlag and TruncatedFlag are payload bits,
  *          Flags and LengthBytes belong to the target payload.
  * Logic  : validates IRQL and UNICODE_STRING bounds before delegating to the
- *          shared kernel string helper.
+ *          shared kernel string helper; long key/value strings retain their
+ *          suffix so persistence names remain visible in the compact payload.
  * Return : TRUE when text was copied; FALSE when the field is absent. Flags and
  *          LengthBytes are updated in place.
  */
@@ -146,7 +147,7 @@ KswCopyRegistryPayloadString(
     bytesCopied = 0;
 
     if (KswPrepareRegistryCallbackString(Source, &safeSource) &&
-        KswCopyUnicodePrefix(
+        KswCopyUnicodeSuffix(
             Destination,
             DestinationChars,
             &safeSource,

@@ -85,7 +85,8 @@ Registry fields:
 
 - `ProcessId`: current process ID in the registry callback context.
 - `Status`: final post-operation NTSTATUS.
-- `KeyPath`: bounded UTF-16 key path.  Create/open first use the pre-operation
+- `KeyPath`: bounded UTF-16 key path; long paths retain a suffix so persistence
+  key names remain visible. Create/open first use the pre-operation
   `CompleteName`, then fall back to `CmCallbackGetKeyObjectIDEx` on the post
   object when available.  Set/delete/rename resolve the object path with
   `CmCallbackGetKeyObjectIDEx` and release it with
