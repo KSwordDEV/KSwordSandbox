@@ -640,12 +640,19 @@ internal static class PostProcessProgram
 
     private static List<SandboxEvent> LoadEventsWithSiblingDriverJsonl(string eventsPath)
     {
-        var events = File.Exists(eventsPath)
+        var primaryIsCanonicalDriverStream = string.Equals(
+            Path.GetFileName(eventsPath),
+            "driver-events.jsonl",
+            StringComparison.OrdinalIgnoreCase);
+        var events = File.Exists(eventsPath) && !primaryIsCanonicalDriverStream
             ? LoadEvents(eventsPath).Select(NormalizeEvent).ToList()
             : [];
         var eventKeys = events.Select(EventKey).ToHashSet(StringComparer.Ordinal);
         var searchRoot = Path.GetDirectoryName(eventsPath);
-        foreach (var driverJsonl in EnumerateCanonicalDriverJsonlPaths(eventsPath, searchRoot))
+        foreach (var driverJsonl in EnumerateCanonicalDriverJsonlPaths(
+            eventsPath,
+            searchRoot,
+            includePrimary: primaryIsCanonicalDriverStream))
         {
             // The primary events.json may contain a small compatibility driver
             // row or the deferred control marker.  Either case must not stop
@@ -696,7 +703,10 @@ internal static class PostProcessProgram
         return evt.Data.TryGetValue("exitCode", out var value) && int.TryParse(value, out var code) && code != 0;
     }
 
-    private static IReadOnlyList<string> EnumerateCanonicalDriverJsonlPaths(string eventsPath, string? searchRoot)
+    private static IReadOnlyList<string> EnumerateCanonicalDriverJsonlPaths(
+        string eventsPath,
+        string? searchRoot,
+        bool includePrimary = false)
     {
         if (string.IsNullOrWhiteSpace(searchRoot) || !Directory.Exists(searchRoot))
         {
@@ -708,7 +718,7 @@ internal static class PostProcessProgram
         {
             return Directory.EnumerateFiles(searchRoot, "driver-events*.jsonl", SearchOption.AllDirectories)
                 .Select(Path.GetFullPath)
-                .Where(path => !string.Equals(path, primaryPath, StringComparison.OrdinalIgnoreCase))
+                .Where(path => includePrimary || !string.Equals(path, primaryPath, StringComparison.OrdinalIgnoreCase))
                 .Where(path => IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 // Rotated parts contain earlier rows; canonical remains the

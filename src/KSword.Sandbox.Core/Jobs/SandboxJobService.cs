@@ -1293,7 +1293,11 @@ public sealed partial class SandboxJobService
     private static List<SandboxEvent> LoadGuestEventsWithDriverJsonl(string eventsPath, out GuestEventImportSummary importSummary)
     {
         var searchRoot = Path.GetDirectoryName(eventsPath);
-        var events = File.Exists(eventsPath)
+        var primaryIsCanonicalDriverStream = string.Equals(
+            Path.GetFileName(eventsPath),
+            "driver-events.jsonl",
+            StringComparison.OrdinalIgnoreCase);
+        var events = File.Exists(eventsPath) && !primaryIsCanonicalDriverStream
             ? LoadEventsFromFile(eventsPath).Select(NormalizeEvent).ToList()
             : [];
         // Keep this count anchored to the selected events.json source. Network
@@ -1311,7 +1315,10 @@ public sealed partial class SandboxJobService
         // for the static import contract: only the canonical stream and its
         // collector-created numbered rotation parts are imported. Arbitrary
         // scratch JSONL remains excluded.
-        var driverPaths = EnumerateCanonicalDriverJsonlPaths(eventsPath, searchRoot);
+        var driverPaths = EnumerateCanonicalDriverJsonlPaths(
+            eventsPath,
+            searchRoot,
+            includePrimary: primaryIsCanonicalDriverStream);
         var driverRowsRead = 0;
         var driverRowsMerged = 0;
         foreach (var jsonlPath in driverPaths)
@@ -1405,7 +1412,10 @@ public sealed partial class SandboxJobService
             count > 0;
     }
 
-    private static IReadOnlyList<string> EnumerateCanonicalDriverJsonlPaths(string eventsPath, string searchRoot)
+    private static IReadOnlyList<string> EnumerateCanonicalDriverJsonlPaths(
+        string eventsPath,
+        string searchRoot,
+        bool includePrimary = false)
     {
         var primaryPath = Path.GetFullPath(eventsPath);
         // The guest output contract places events.json and the stream parts
@@ -1413,7 +1423,7 @@ public sealed partial class SandboxJobService
         // high-volume run cannot silently lose rows after JSONL rotation.
         return SafeEnumerateFiles(searchRoot, path =>
                 IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
-            .Where(path => !string.Equals(Path.GetFullPath(path), primaryPath, StringComparison.OrdinalIgnoreCase))
+            .Where(path => includePrimary || !string.Equals(Path.GetFullPath(path), primaryPath, StringComparison.OrdinalIgnoreCase))
             .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
             .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(Path.GetFullPath)
