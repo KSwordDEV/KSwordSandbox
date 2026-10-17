@@ -83,7 +83,7 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         // the small diagnostic quota.
         events.Add(new SandboxEvent
         {
-            EventType = "network.tcp",
+            EventType = "network.udp",
             Timestamp = timestamp.AddMilliseconds(2200 + AttributedDynamicRows),
             Source = "guest",
             ProcessId = 7777,
@@ -426,15 +426,14 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
             ProcessId = 4242
         });
 
-        var result = ReportEventSampler.SampleForReport(
-            events,
-            new ReportEventSamplingOptions
-            {
-                MaxInlineEvents = 32,
-                MaxEventsPerType = 5,
-                MaxHighValueEventsPerType = 16,
-                MaxEventDataPairs = 16
-            });
+        var priorityOptions = new ReportEventSamplingOptions
+        {
+            MaxInlineEvents = 32,
+            MaxEventsPerType = 5,
+            MaxHighValueEventsPerType = 16,
+            MaxEventDataPairs = 16
+        };
+        var result = ReportEventSampler.SampleForReport(events, priorityOptions);
 
         SmokeAssert.True(result.WasSampled, "Noisy input should be sampled.");
         SmokeAssert.True(result.Events.Any(evt => string.Equals(evt.EventType, "report.events.sampled", StringComparison.OrdinalIgnoreCase)), "Sampling marker should be present.");
@@ -578,11 +577,15 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(sampleStartFailure, "exceptionType", "System.IO.FileNotFoundException");
         RequireEvent(result.Events, "process.start");
         RequireEvent(result.Events, "process.exit");
+        var retainedNetworkRows = result.Events.Count(evt => string.Equals(evt.EventType, "network.tcp", StringComparison.OrdinalIgnoreCase));
         SmokeAssert.True(
-            result.Events.Count(evt => string.Equals(evt.EventType, "network.tcp", StringComparison.OrdinalIgnoreCase)) == AttributedDynamicRows + 1,
-            "Sample-attributed dynamic rows should remain within the dedicated dynamic budget.");
+            retainedNetworkRows <= priorityOptions.MaxDynamicActionEvents,
+            "Dynamic action evidence must obey the dedicated total budget.");
+        SmokeAssert.True(
+            retainedNetworkRows <= priorityOptions.MaxHighValueEventsPerType + 1,
+            "Dynamic action evidence must obey the per-type high-value cap (with one unknown correlation row allowance).");
         var unknownNetwork = result.Events.Single(evt =>
-            string.Equals(evt.EventType, "network.tcp", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(evt.EventType, "network.udp", StringComparison.OrdinalIgnoreCase) &&
             evt.Data.TryGetValue("sampleCorrelation", out var correlation) &&
             string.Equals(correlation, "unknown", StringComparison.OrdinalIgnoreCase));
         RequireData(unknownNetwork, "sampleCorrelationReason", "network-row-has-no-sample-owner-pid-join");

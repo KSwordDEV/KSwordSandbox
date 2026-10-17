@@ -1510,11 +1510,11 @@ public static class ReportEventSampler
     {
         if (bucket == ReportSamplingBucket.DynamicActionEvidence)
         {
-            // Dynamic action evidence has one explicit finite total budget.
-            // Do not apply the ordinary per-type cap here: a burst of real
-            // process/network/file actions is still meaningful evidence, and
-            // the dedicated total budget is the traceable spill boundary.
-            return int.MaxValue;
+            // Dynamic action evidence has its own finite total budget, but a
+            // single event type must not consume the entire lane. The same
+            // high-value per-type ceiling used by the bounded report lane
+            // keeps the spill deterministic and visible in the marker.
+            return Math.Max(1, options.MaxHighValueEventsPerType);
         }
 
         if (bucket == ReportSamplingBucket.Diagnostics)
