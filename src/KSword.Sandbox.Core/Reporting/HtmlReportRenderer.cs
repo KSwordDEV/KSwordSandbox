@@ -1011,7 +1011,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     };
 
     private static bool IsEventExplorerPriority(SandboxEvent evt) =>
-        TextEqualsAny(evt.EventType, "process.exit") ||
+        (TextEqualsAny(evt.EventType, "process.exit") && !string.Equals(EventExplorerDisposition(evt), "unattributed", StringComparison.OrdinalIgnoreCase)) ||
         IsCollectionDiagnosticFailure(evt) ||
         IsOperationalFailureEvent(evt) ||
         IsNonZeroSampleExitEvent(evt);
