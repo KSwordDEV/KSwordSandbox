@@ -804,7 +804,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             var qualityWarnings = ReportMetric(report, "events.r0.driver.qualityWarningRows");
             var lossRate = $"{lossRateBasisPoints / 100}.{lossRateBasisPoints % 100:00}%";
             var completeness = qualityWarnings == 0 && remainingUnread == 0 && lostCount == 0
-                ? "No loss or bounded-drain warning was reported."
+                ? "Collection loss or bounded-drain warning: none."
                 : "Collection completeness requires review; a zero lostCount alone does not prove that every record was drained.";
             html.AppendLine($"<div class=\"section-note\"><strong>R0 driver coverage.</strong> Raw/report rows by class (raw/report): {E(driverClassSummary)}. Collector loss markers: {E(loss.ToString(CultureInfo.InvariantCulture))}; lost count: {E(lostCount.ToString(CultureInfo.InvariantCulture))}/{E(processed.ToString(CultureInfo.InvariantCulture))} processed ({E(lossRate)}); backpressure markers: {E(backpressure.ToString(CultureInfo.InvariantCulture))}; queue depth/remaining unread: {E(queueDepth.ToString(CultureInfo.InvariantCulture))}/{E(remainingUnread.ToString(CultureInfo.InvariantCulture))}; suppressed events: {E(eventsSuppressed.ToString(CultureInfo.InvariantCulture))} (expected-disabled={E(expectedSuppressed.ToString(CultureInfo.InvariantCulture))}, unexpected={E(unexpectedSuppressed.ToString(CultureInfo.InvariantCulture))}, unsupported={E(unsupportedProducer.ToString(CultureInfo.InvariantCulture))}); drain deadline/batch-limit stops: {E(deadlineStop.ToString(CultureInfo.InvariantCulture))}/{E(batchLimitStop.ToString(CultureInfo.InvariantCulture))}; quality warnings: {E(qualityWarnings.ToString(CultureInfo.InvariantCulture))}. {E(completeness)} Raw driver-events.jsonl remains the complete source artifact.</div>");
         }
@@ -10888,6 +10888,9 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("ETW EventsLost=", "ETW 丢失事件数="),
         ("queue depth/remaining unread=", "队列深度/剩余未读="),
         ("; suppressed=", "；被抑制="),
+        ("expected-disabled=", "预期关闭="),
+        ("unexpected=", "意外="),
+        ("unsupported=", "未实现="),
         ("; deadline stops=", "；截止停止="),
         ("; quality warnings=", "；质量警告="),
         ("Evidence import", "证据导入"),
@@ -10930,7 +10933,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("; suppressed events: ", "；被抑制事件："),
         ("; drain deadline/batch-limit stops: ", "；截止时间/批量上限停止："),
         ("; quality warnings: ", "；质量警告："),
-        ("No loss or bounded-drain warning was reported.", "未报告丢失或有界排空警告。"),
+        ("Collection loss or bounded-drain warning: none.", "采集丢失或有界排空警告：无。"),
         ("Collection completeness requires review; a zero lostCount alone does not prove that every record was drained.", "采集完整性需要复核；lostCount 为 0 不能单独证明所有记录都已排空。"),
         (". Raw driver-events.jsonl remains the complete source artifact.", "。原始 driver-events.jsonl 仍是完整来源证据。"),
         ("Unified startup.* facts retained from before/after inventory diffs.", "保留启动项在启动前后清单差异中的统一事实。"),
