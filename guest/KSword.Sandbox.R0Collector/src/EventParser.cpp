@@ -5158,12 +5158,10 @@ bool ShouldEmitCompactDriverField(
     if (contains({
         "producer", "eventOrigin", "producerCategory", "sequence", "sequenceMeaning", "sequenceConcrete",
         "sampleBehaviorCandidate",
-        "sampleBehaviorCandidateReason", "behaviorCounted", "nonbehavior", "noise", "collectorNoise",
-        "collectorSelfNoise", "selfProcess", "selfNoise", "collectorSuppressed", "lost", "lossObserved",
+        "sampleBehaviorCandidateReason", "behaviorCounted", "nonbehavior", "lost", "lossObserved",
         "loss", "lostCount", "backpressure", "backpressureObserved", "backpressureReason",
-        "recordSize", "driverEventType", "driverEventTypeName", "flags", "driverProcessId",
-        "payloadSize", "payloadHexBytes", "payloadTruncated", "payloadHex", "typedPayloadParsed",
-        "payloadSchema", "typedPayloadKind", "typedPayloadStatus", "r0CoverageCategory", "r0CoverageState",
+        "driverEventType", "driverEventTypeName", "driverProcessId", "typedPayloadParsed",
+        "typedPayloadKind", "typedPayloadStatus", "r0CoverageCategory", "r0CoverageState",
         "operationName", "status", "pathTruncated",
         "semanticFamily", "behaviorLane", "activityKind", "evidenceReady", "operation", "operationFailed",
         "statusHex", "processId", "path"})) {
