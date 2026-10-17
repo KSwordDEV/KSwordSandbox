@@ -27,7 +27,12 @@ internal sealed class R0OutputFailureDiagnosticsScenario : ISmokeTestScenario
         SmokeAssert.True(jsonWriterImpl.Contains("outputWriteFailure", StringComparison.Ordinal), "Native writer must name output-write failures.");
         SmokeAssert.True(jsonWriterImpl.Contains("outputSpaceInsufficient", StringComparison.Ordinal), "Native writer must classify disk reserve failures separately from generic writes.");
         SmokeAssert.True(jsonWriterImpl.Contains("minFreeOutputBytes", StringComparison.Ordinal) && jsonWriterImpl.Contains("std::filesystem::space", StringComparison.Ordinal), "Native writer must preflight output free space with an explicit reserve.");
-        SmokeAssert.True(jsonWriterImpl.Contains("captureState\\\":\\\"partial", StringComparison.Ordinal), "Disk reserve failures must be reported as partial capture, not hidden as success.");
+        // The native writer assembles the JSON value from a conditional
+        // expression; assert the emitted field/value tokens independently
+        // instead of depending on one source-level concatenation layout.
+        SmokeAssert.True(jsonWriterImpl.Contains("captureState", StringComparison.Ordinal) &&
+                         jsonWriterImpl.Contains("spaceFailure ? \"partial\" : \"failed\"", StringComparison.Ordinal),
+            "Disk reserve failures must be reported as partial capture, not hidden as success.");
         SmokeAssert.True(jsonWriter.Contains("AnnotateFailureStatus", StringComparison.Ordinal), "Native writer must support post-failure status annotation.");
         SmokeAssert.True(jsonWriterImpl.Contains(".failure.json", StringComparison.Ordinal), "Native writer must persist an independent failure sidecar.");
         SmokeAssert.True(jsonWriterImpl.Contains("GetLastError", StringComparison.Ordinal) && jsonWriterImpl.Contains("errno", StringComparison.Ordinal), "Native failure evidence must retain OS and CRT error context.");
