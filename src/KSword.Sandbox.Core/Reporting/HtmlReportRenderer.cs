@@ -10934,6 +10934,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("; drain deadline/batch-limit stops: ", "；截止时间/批量上限停止："),
         ("; quality warnings: ", "；质量警告："),
         ("Collection loss or bounded-drain warning: none.", "采集丢失或有界排空警告：无。"),
+        ("采集丢失 or bounded-drain warning: none.", "采集丢失或有界排空警告：无。"),
         ("Collection completeness requires review; a zero lostCount alone does not prove that every record was drained.", "采集完整性需要复核；lostCount 为 0 不能单独证明所有记录都已排空。"),
         (". Raw driver-events.jsonl remains the complete source artifact.", "。原始 driver-events.jsonl 仍是完整来源证据。"),
         ("Unified startup.* facts retained from before/after inventory diffs.", "保留启动项在启动前后清单差异中的统一事实。"),
