@@ -506,7 +506,9 @@ driver-category rows.
   `drainStoppedAtDrainDeadline` so a non-empty queue is never mistaken for a
   complete capture.
 - `--max-output-bytes` (alias `--output-max-bytes`) bounds each JSONL segment;
-  the collector rotates to `driver-events.part-000001.jsonl` and records
+  the collector renames the closed canonical file to
+  `driver-events.part-000001.jsonl`, reopens canonical
+  `driver-events.jsonl` as the active stream, and records
   `maxOutputBytes`/`rotatedSegmentCount` in lifecycle and output-failure rows.
 - `--min-free-output-bytes` (alias `--output-free-reserve-bytes`) keeps a
   guest-disk reserve. When the preflight fails, the sidecar uses

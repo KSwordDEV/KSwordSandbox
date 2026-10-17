@@ -27,6 +27,8 @@ internal sealed class R0OutputFailureDiagnosticsScenario : ISmokeTestScenario
         SmokeAssert.True(jsonWriterImpl.Contains("outputWriteFailure", StringComparison.Ordinal), "Native writer must name output-write failures.");
         SmokeAssert.True(jsonWriterImpl.Contains("outputSpaceInsufficient", StringComparison.Ordinal), "Native writer must classify disk reserve failures separately from generic writes.");
         SmokeAssert.True(jsonWriterImpl.Contains("minFreeOutputBytes", StringComparison.Ordinal) && jsonWriterImpl.Contains("std::filesystem::space", StringComparison.Ordinal), "Native writer must preflight output free space with an explicit reserve.");
+        SmokeAssert.True(jsonWriterImpl.Contains("std::filesystem::rename", StringComparison.Ordinal), "Native rotation must close and rename the completed canonical segment before reopening output.");
+        SmokeAssert.True(jsonWriterImpl.Contains("currentOutputPath_ = outputPath_", StringComparison.Ordinal), "Native rotation must keep canonical driver-events.jsonl as the active writer path.");
         // The native writer assembles the JSON value from a conditional
         // expression; assert the emitted field/value tokens independently
         // instead of depending on one source-level concatenation layout.

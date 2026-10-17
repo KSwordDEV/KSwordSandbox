@@ -97,13 +97,34 @@ bool EventWriter::Rotate(std::wstring* error) {
         return false;
     }
     ++outputSegmentIndex_;
-    ++rotatedSegmentCount_;
     const auto suffix = std::wstring(L".part-") +
         (outputSegmentIndex_ < 10 ? L"00000" : outputSegmentIndex_ < 100 ? L"0000" : outputSegmentIndex_ < 1000 ? L"000" : outputSegmentIndex_ < 10000 ? L"00" : outputSegmentIndex_ < 100000 ? L"0" : L"") +
         std::to_wstring(outputSegmentIndex_) + L".jsonl";
     const std::filesystem::path basePath(outputPath_);
     const auto segmentName = basePath.stem().wstring() + suffix;
-    currentOutputPath_ = (basePath.parent_path() / segmentName).wstring();
+    const auto closedSegmentPath = basePath.parent_path() / segmentName;
+    std::error_code renameError;
+    std::filesystem::rename(
+        std::filesystem::path(currentOutputPath_),
+        closedSegmentPath,
+        renameError);
+    if (renameError) {
+        if (error != nullptr) {
+            *error = L"Unable to rotate output JSONL file: " + currentOutputPath_ +
+                L" -> " + closedSegmentPath.wstring() +
+                L" / 无法轮转输出 JSONL 文件：" +
+                currentOutputPath_ + L" -> " + closedSegmentPath.wstring();
+        }
+        RecordFailure("rotate", "Unable to rename the closed JSONL segment.");
+        return false;
+    }
+
+    ++rotatedSegmentCount_;
+    // Keep the canonical path active after every rotation.  Numbered parts
+    // are therefore closed and safe for the host live-sync to reclaim after
+    // an exact-length copy, while currentOutputPath remains unambiguous in
+    // failure sidecars and lifecycle diagnostics.
+    currentOutputPath_ = outputPath_;
     return OpenSegment(error);
 }
 

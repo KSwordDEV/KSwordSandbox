@@ -54,8 +54,11 @@ Options:
   中文：有界采集结束后继续读取内核队列；超时不会隐藏剩余队列。
 - `--max-output-bytes <n>` (alias `--output-max-bytes`): rotate each JSONL
   segment at this byte limit. Default `268435456`; `0` disables rotation.
-  Parts are named `driver-events.part-000001.jsonl` and are merged by host
-  import in order. 中文：高容量 JSONL 自动分片，避免单文件写满导致丢失。
+  The canonical `driver-events.jsonl` is reopened as the active file after
+  every rotation; numbered parts are closed and can be reclaimed only after
+  the host verifies an exact-length copy. Parts are named
+  `driver-events.part-000001.jsonl` and are merged by host import in order.
+  中文：高容量 JSONL 自动分片；轮转后 canonical 文件始终是当前写入文件，分片在宿主精确校验后才可回收。
 - `--min-free-output-bytes <n>` (alias `--output-free-reserve-bytes`): stop
   before the output volume falls below this reserve. Default `536870912`;
   `0` disables the check. 中文：保留来宾磁盘空间，失败会标记 partial。
