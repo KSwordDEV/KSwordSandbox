@@ -109,6 +109,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "EventExplorerQuickLinkCount", "Report renderer should label event explorer quick links with inline and total counts.");
         RequireContains(rendererSource, "data-event-overflow", "Report renderer should retain overflow explorer rows for filter reveal.");
         RequireContains(rendererSource, "artifactevidencematrix", "Report renderer should keep internal artifact matrix fields out of event detail cards.");
+        RequireContains(rendererSource, "collectionFailureRows", "Report focus should include collection-health failure rows in the runtime boundary.");
+        RequireContains(rendererSource, "collectionLossRows", "Report focus should include collection-health loss rows in the runtime boundary.");
+        RequireContains(rendererSource, ".modern-sandbox-report .section-note{display:block}", "Modern report styling should keep collection and evidence section notes visible.");
+        RequireContains(rendererSource, "collection-health-note", "Failure reasons should surface collection-health loss/failure counters.");
         RequireContains(rendererSource, "localized-evidence-field", "Report renderer should hide localized evidence fields from English report chrome.");
         RequireContains(rendererSource, "No sample-attributed events of this type were found; see collection coverage for capture state.", "Report renderer should explain empty lanes without implying capture failure.");
         RequireContains(rendererSource, "observed-empty", "Report renderer should distinguish observed-empty artifact lanes.");
@@ -382,6 +386,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(defaultHtml, "href=\"report.zh.html\"", "Default rendered HTML should link to report.zh.html.");
         RequireContains(defaultHtml, "href=\"report.en.html\"", "Default rendered HTML should link to report.en.html.");
         RequireContains(englishHtml, "Virtualization provider", "Rendered report covers should identify the selected provider.");
+        RequireContains(englishHtml, "Collection failures", "Rendered report focus should expose collection-health failure rows.");
+        RequireContains(englishHtml, "Collection loss", "Rendered report focus should expose collection-health loss rows.");
+        RequireContains(englishHtml, "Collection health:", "Rendered failure reasons should expose collection-health counters.");
         RequireContains(englishHtml, "href=\"#event-explorer\"", "Rendered report should expose the event explorer quick link.");
         RequireContains(englishHtml, "<option value=\"network.late.dynamic.129\">network.late.dynamic.129</option>", "Event explorer filter options should include event types beyond the initial inline row cap.");
         RequireContains(englishHtml, "data-event-overflow=\"true\"", "Event explorer should retain overflow rows in the DOM for filter reveal.");
@@ -399,6 +406,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "干净基线", "Chinese report covers should localize the provider baseline label.");
         RequireContains(chineseHtml, "QEMU 基础磁盘", "Chinese report covers should localize the QEMU base-disk label.");
         RequireContains(chineseHtml, "可见证据行；", "Chinese event explorer status should localize the visible evidence-row label.");
+        RequireContains(chineseHtml, "采集丢失", "Chinese focus cards should expose collection-loss status.");
+        RequireContains(chineseHtml, "采集健康：", "Chinese failure reasons should expose collection-health counters.");
         RequireContains(chineseHtml, "报告中还有更多证据行。", "Chinese event explorer status should explain additional evidence rows in Chinese.");
         RequireContains(chineseHtml, "样本归因：", "Chinese network coverage should localize sample attribution labels.");
         RequireContains(chineseHtml, "data-copy=\"Failed\"><span class=\"ui-status-value\">失败</span></td>", "Chinese report should localize the cover analysis status while preserving the original machine-readable value.");
@@ -999,6 +1008,13 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
             QemuDiskFormat = "qcow2",
             GeneratedAt = timestamp,
             Status = AnalysisStatus.Failed,
+            CollectionHealth = new CollectionHealthSummary
+            {
+                FailureRows = 2,
+                LossRows = 3,
+                DriverLostCount = 4,
+                EtwEventsLost = 5
+            },
             Sample = new SampleIdentity
             {
                 FileName = "contract-sample.exe",

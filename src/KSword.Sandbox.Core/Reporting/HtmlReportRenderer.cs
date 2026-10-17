@@ -508,10 +508,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .ui-field-label{font-weight:800;color:#24516b}
 .modern-sandbox-report .event-explorer-detail .event-evidence-fields{max-height:44vh;overflow:auto}
 .modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:460px;width:42%}
-.modern-sandbox-report .copy-hint,.modern-sandbox-report #event-explorer>.section-note{display:none}
+.modern-sandbox-report .copy-hint{display:none}
 .modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn{background:#e6f4fb;border:0;border-radius:0;color:#1e6385;padding:7px 11px}
 .modern-sandbox-report .badge,.modern-sandbox-report .chip{border:0;border-radius:0}
-.modern-sandbox-report .section-note{display:none}
+.modern-sandbox-report .section-note{display:block}
 .modern-sandbox-report .section-note.failure-note{background:#fff5e5;border-left:0;display:block;margin:10px 0;padding:10px 12px}
 .modern-sandbox-report .focus-coverage-warning{background:#fff5e5;border-left:4px solid #d97706;color:#7c2d12;display:block;margin-top:12px;padding:10px 12px}
 .modern-sandbox-report .focus-coverage-warning strong{display:block;color:#9a3412;margin-bottom:3px}
@@ -794,6 +794,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         var sampleEvents = report.Events.Count(IsSampleBehaviorEvent);
         var failures = report.Events.Count(IsOperationalFailureEvent);
         var sampleExitOutcomes = report.Events.Count(IsNonZeroSampleExitEvent);
+        var collectionFailureRows = Math.Max(0, report.CollectionHealth.FailureRows);
+        var collectionLossRows = Math.Max(0, report.CollectionHealth.LossRows);
         var artifactCount = artifacts.Count;
         var topFinding = primaryFindings.FirstOrDefault();
         var verdict = DetermineVerdict(report);
@@ -806,6 +808,10 @@ html[lang="en"] .localized-evidence-field{display:none}
                 $"sampleBehaviorEvents={sampleEvents}",
                 $"failureEvents={failures}",
                 $"sampleExitOutcomes={sampleExitOutcomes}",
+            $"collectionFailureRows={collectionFailureRows}",
+            $"collectionLossRows={collectionLossRows}",
+            $"driverLostCount={report.CollectionHealth.DriverLostCount}",
+            $"etwEventsLost={report.CollectionHealth.EtwEventsLost}",
                 $"artifacts={artifactCount}",
                 $"next={topFinding?.Title ?? "Review static evidence and runtime events"}"
             ]);
@@ -816,8 +822,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("<div class=\"focus-grid\">");
         FocusMetric(html, "Primary findings", primaryFindings.Count.ToString(CultureInfo.InvariantCulture), primaryFindings.Count > 0 ? "risk-medium" : "risk-low", "Rules that contribute to the sample verdict.");
         FocusMetric(html, "Sample behavior", sampleEvents.ToString(CultureInfo.InvariantCulture), sampleEvents > 0 ? "risk-medium" : "risk-info", "Events eligible for the behavior story.");
-        var runtimeFailureCount = failures + sampleExitOutcomes;
+        var runtimeFailureCount = failures + sampleExitOutcomes + collectionFailureRows + collectionLossRows;
         FocusMetric(html, "Runtime / collection failures", runtimeFailureCount.ToString(CultureInfo.InvariantCulture), runtimeFailureCount > 0 || report.Status == AnalysisStatus.Failed ? "risk-high" : "risk-low", "Sample execution, environment, and evidence failures.");
+        FocusMetric(html, "Collection failures", collectionFailureRows.ToString(CultureInfo.InvariantCulture), collectionFailureRows > 0 ? "risk-high" : "risk-low", "Probe and collector failure rows from collection health.");
+        FocusMetric(html, "Collection loss", collectionLossRows.ToString(CultureInfo.InvariantCulture), collectionLossRows > 0 ? "risk-high" : "risk-low", "Rows or counters that show telemetry loss or backpressure.");
         FocusMetric(html, "Sample exit outcomes", sampleExitOutcomes.ToString(CultureInfo.InvariantCulture), sampleExitOutcomes > 0 ? "risk-info" : "risk-low", "Non-zero sample exits are execution outcomes, not maliciousness verdicts.");
         FocusMetric(html, "Artifacts", artifactCount.ToString(CultureInfo.InvariantCulture), artifactCount > 0 ? "risk-low" : "risk-info", "Indexed files, screenshots, dumps, and packet captures.");
         html.AppendLine("</div>");
@@ -4941,8 +4949,14 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         var failures = report.Events.Where(IsOperationalFailureEvent).ToList();
         var sampleExitOutcomes = report.Events.Where(IsNonZeroSampleExitEvent).ToList();
+        var collectionFailureRows = Math.Max(0, report.CollectionHealth.FailureRows);
+        var collectionLossRows = Math.Max(0, report.CollectionHealth.LossRows);
+        var collectionHealthAlert = collectionFailureRows > 0 ||
+            collectionLossRows > 0 ||
+            report.CollectionHealth.DriverLostCount > 0 ||
+            report.CollectionHealth.EtwEventsLost > 0;
         html.AppendLine("<section id=\"failure\" class=\"card\"><h2>Failure reasons</h2>");
-        if (report.Status != AnalysisStatus.Failed && failures.Count == 0 && sampleExitOutcomes.Count == 0)
+        if (report.Status != AnalysisStatus.Failed && failures.Count == 0 && sampleExitOutcomes.Count == 0 && !collectionHealthAlert)
         {
             Empty(html, "No operational failure markers were collected for this job.");
         }
@@ -4968,6 +4982,11 @@ html[lang="en"] .localized-evidence-field{display:none}
         {
             html.AppendLine("<div class=\"section-note failure-note\"><strong>Sample execution outcome:</strong> the sample process ended with a non-zero exit code. This indicates an incomplete or failed execution attempt; it is not a maliciousness verdict.</div>");
             AppendEventRows(html, sampleExitOutcomes, artifactLookup, artifacts);
+        }
+
+        if (collectionHealthAlert)
+        {
+            html.AppendLine($"<div class=\"section-note failure-note collection-health-note\"><strong>Collection health:</strong> failure rows={E(collectionFailureRows.ToString(CultureInfo.InvariantCulture))}; loss rows={E(collectionLossRows.ToString(CultureInfo.InvariantCulture))}; driver lost={E(report.CollectionHealth.DriverLostCount.ToString(CultureInfo.InvariantCulture))}; ETW EventsLost={E(report.CollectionHealth.EtwEventsLost.ToString(CultureInfo.InvariantCulture))}.</div>");
         }
 
         html.AppendLine("</section>");
@@ -10470,6 +10489,11 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Event type", "事件类型"),
         ("Behavior family", "行为族"),
         ("Failure attribution", "失败归因"),
+        ("Collection health:", "采集健康："),
+        ("failure rows=", "失败行数="),
+        ("loss rows=", "丢失行数="),
+        ("driver lost=", "驱动丢失="),
+        ("ETW EventsLost=", "ETW 丢失事件数="),
         ("Evidence import", "证据导入"),
         ("Collection quality", "采集质量"),
         ("Analysis environment", "分析环境"),
@@ -10558,6 +10582,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Environment and evidence failures; sample exit outcomes are shown separately.", "环境与证据失败；样本退出结果单独显示。"),
         ("Operational failures", "运行失败"),
         ("Runtime / collection failures", "运行期/采集失败"),
+        ("Collection failures", "采集失败"),
+        ("Collection loss", "采集丢失"),
+        ("Probe and collector failure rows from collection health.", "采集健康摘要中的探针和采集器失败行。"),
+        ("Rows or counters that show telemetry loss or backpressure.", "显示遥测丢失或背压的行数/计数。"),
         ("Sample execution, environment, and evidence failures.", "样本执行、环境和证据失败。"),
         ("Environment and evidence failures.", "环境与证据失败。"),
         ("Sample exit outcomes", "样本退出结果"),
