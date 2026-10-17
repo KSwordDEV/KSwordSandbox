@@ -75,6 +75,14 @@ function Get-ExitValue([object]$Event) {
     if ($null -ne $value) { return $value }
     return Get-Value $Event @('ExitCode','Status','ExitStatus')
 }
+function Test-ArtifactPath([string]$Path, [string]$ReportRoot) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $candidate = $Path
+    if (-not [IO.Path]::IsPathRooted($candidate)) {
+        $candidate = Join-Path $ReportRoot $candidate
+    }
+    return Test-Path -LiteralPath $candidate -PathType Leaf
+}
 function Test-SampleProcessExit([object]$Event, [object]$Sample) {
     if ($null -eq $Event -or [string]$Event.EventType -ine 'process.exit') { return $false }
     $data = Get-Value $Event @('Data')
@@ -143,8 +151,8 @@ foreach ($root in $jobRoots) {
         if (-not $driverPath) { $driverPath = [string](Get-Value $data @('driverEventsPath')) }
         if ($rawPath -and $driverPath) { break }
     }
-    $rawPathOk = (-not [string]::IsNullOrWhiteSpace($rawPath)) -and (Test-Path -LiteralPath $rawPath -PathType Leaf)
-    $driverPathOk = (-not [string]::IsNullOrWhiteSpace($driverPath)) -and (Test-Path -LiteralPath $driverPath -PathType Leaf)
+    $rawPathOk = Test-ArtifactPath $rawPath $resolved
+    $driverPathOk = Test-ArtifactPath $driverPath $resolved
     $driverSourceMetric = Get-Count $metrics @('events.sources.driver','events.sources.driverEvents','events.r0.driver.raw')
     $driverSourceRows = @($events | Where-Object { [string]$_.Source -ieq 'driver' }).Count
     $driverSourceOk = (($null -ne $driverSourceMetric -and $driverSourceMetric -gt 0) -or $driverSourceRows -gt 0)
