@@ -42,6 +42,21 @@ public sealed partial class SandboxJobService
         "importRoot",
         "jsonlImportStatus",
         "jsonlPath",
+        // Guest Agent annotates rows while importing the sidecar stream into
+        // events.json. These fields are provenance metadata, not event
+        // identity; ignoring them lets the sibling raw row deduplicate with
+        // its already-imported counterpart.
+        "jsonlLineNumber",
+        "jsonlLineSelector",
+        "jsonlLineCategory",
+        "importAction",
+        "eventOrigin",
+        "producerCategory",
+        "subjectKind",
+        "actorRole",
+        "subjectRole",
+        "processIdSource",
+        "attributionSummary",
         "sourceArtifactKind",
         "sourceArtifactPath"
     };

@@ -56,6 +56,8 @@ internal sealed class R0CollectorJsonlSchemaContractScenario : ISmokeTestScenari
         RequireContains(reportSampler, "type.StartsWith(\"driver.\"", "Report sampling should retain every driver event class.");
         RequireContains(jobService, "events.r0.driver.omitted", "Report metrics should expose R0 driver-row omission accounting.");
         RequireContains(jobService, "events.r0.driver.lossRateBasisPoints", "Report metrics should expose an explicit R0 loss-rate boundary.");
+        RequireContains(jobService, "jsonlLineSelector", "Guest/driver merge keys should ignore import-only JSONL provenance metadata.");
+        RequireContains(jobService, "attributionSummary", "Guest/driver merge keys should ignore import-only attribution metadata.");
     }
 
     private static void AssertDocumentedSchemaFields(string schemaDoc, string collectorDoc)
