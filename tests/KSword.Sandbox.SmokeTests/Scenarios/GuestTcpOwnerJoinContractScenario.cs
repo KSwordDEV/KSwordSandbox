@@ -89,7 +89,7 @@ internal sealed class GuestTcpOwnerJoinContractScenario : ISmokeTestScenario
             }
         };
         var conflictClassified = SampleCorrelationClassifier.Apply(
-            [events[0], events[1], conflictingOwner, events[2]],
+            [events[0], events[1], conflictingOwner, events[1], events[2]],
             samplePath);
         var conflictPcap = conflictClassified.Single(evt => evt.EventType == "network.flow");
         SmokeAssert.True(

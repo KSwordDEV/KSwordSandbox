@@ -1374,11 +1374,12 @@ public static class SampleCorrelationClassifier
     {
         if (map.TryGetValue(key, out var existing))
         {
-            if (existing != pid)
+            if (existing == 0 || existing != pid)
             {
                 // The same endpoint/flow was observed under more than one
-                // owner. Remove it so later joins remain explicitly unknown.
-                map.Remove(key);
+                // owner. Keep a zero sentinel so a later repeated row cannot
+                // resurrect one of the conflicting owners.
+                map[key] = 0;
             }
 
             return;
@@ -1394,7 +1395,7 @@ public static class SampleCorrelationClassifier
     {
         foreach (var key in CandidateEndpointKeys(data))
         {
-            if (context.NetworkEndpointOwners.TryGetValue(key, out ownerPid))
+            if (context.NetworkEndpointOwners.TryGetValue(key, out ownerPid) && ownerPid > 0)
             {
                 return true;
             }
