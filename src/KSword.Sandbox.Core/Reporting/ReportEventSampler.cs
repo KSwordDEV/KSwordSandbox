@@ -12,6 +12,14 @@ public sealed record ReportEventSamplingOptions
 {
     public int MaxInlineEvents { get; init; } = 220;
 
+    /// <summary>
+    /// Hard upper bound for dynamic action rows embedded in a report. Dynamic
+    /// rows are higher value than lifecycle/diagnostic noise, but they must
+    /// still have a finite spill boundary so one burst cannot turn report
+    /// generation into an unbounded memory/HTML operation.
+    /// </summary>
+    public int MaxDynamicActionEvents { get; init; } = 4096;
+
     public int MaxEventsPerType { get; init; } = 30;
 
     public int MaxHighValueEventsPerType { get; init; } = 80;
@@ -46,7 +54,45 @@ public sealed record ReportEventSamplingResult
     /// guest/driver event files and do not make the report claim that volume
     /// sampling occurred.
     /// </summary>
-    public int ExcludedEventCount { get; init; }
+    /// <summary>
+    /// Number of rows excluded by an explicit report policy (for example
+    /// routine agent lifecycle rows). This is deliberately separate from
+    /// quota omission; policy exclusion is expected noise while quota
+    /// omission is a coverage boundary.
+    /// </summary>
+    public int PolicyExcludedEventCount { get; init; }
+
+    /// <summary>
+    /// Backward-compatible name for policy exclusion. New consumers should
+    /// use <see cref="PolicyExcludedEventCount"/> so the distinction from
+    /// quota omission remains explicit.
+    /// </summary>
+    public int ExcludedEventCount => PolicyExcludedEventCount;
+
+    /// <summary>
+    /// Number of candidate rows omitted because a report quota was reached.
+    /// </summary>
+    public int QuotaOmittedEventCount { get; init; }
+
+    /// <summary>
+    /// Number of synthetic rows added to the report payload to explain quota
+    /// omission. A sampling marker currently contributes one row and is not a
+    /// raw event.
+    /// </summary>
+    public int MarkerOverheadEventCount => QuotaOmittedEventCount > 0 ? 1 : 0;
+
+    /// <summary>
+    /// Number of dynamic action rows selected within the dedicated hard
+    /// budget. This is exposed in the marker so an operator can distinguish a
+    /// complete dynamic lane from a bounded spill.
+    /// </summary>
+    public int DynamicActionSelectedCount { get; init; }
+
+    /// <summary>
+    /// Number of dynamic action rows that spilled past the dedicated hard
+    /// budget.
+    /// </summary>
+    public int DynamicActionOmittedCount { get; init; }
 
     /// <summary>
     /// Counts rows intentionally left out of the inline report by event type.
@@ -77,7 +123,7 @@ public sealed record ReportEventSamplingResult
     /// Number of behavior or diagnostic rows omitted by the bounded inline
     /// quota. Policy-excluded lifecycle rows are not counted as sampled rows.
     /// </summary>
-    public int OmittedEventCount => Math.Max(0, RawEventCount - SelectedRawEventCount - ExcludedEventCount);
+    public int OmittedEventCount => QuotaOmittedEventCount;
 
     public bool WasSampled => OmittedEventCount > 0;
 }
@@ -1087,10 +1133,13 @@ public static class ReportEventSampler
             Events = selected,
             RawEventCount = orderedEvents.Count,
             SelectedRawEventCount = selected.Count,
-            ExcludedEventCount = selection.ExcludedEventCount,
+            PolicyExcludedEventCount = selection.PolicyExcludedEventCount,
+            QuotaOmittedEventCount = selection.QuotaOmittedEventCount,
             OmittedEventTypeCounts = selection.OmittedEventTypeCounts,
             OmittedBehaviorCandidateCount = selection.OmittedBehaviorCandidateCount,
-            OmittedHighSignalCount = selection.OmittedHighSignalCount
+            OmittedHighSignalCount = selection.OmittedHighSignalCount,
+            DynamicActionSelectedCount = selection.DynamicActionSelectedCount,
+            DynamicActionOmittedCount = selection.DynamicActionOmittedCount
         };
 
         if (result.WasSampled)
@@ -1160,10 +1209,13 @@ public static class ReportEventSampler
 
     private sealed record ReportSamplingSelection(
         IReadOnlyList<SandboxEvent> Events,
-        int ExcludedEventCount,
+        int PolicyExcludedEventCount,
+        int QuotaOmittedEventCount,
         IReadOnlyDictionary<string, int> OmittedEventTypeCounts,
         int OmittedBehaviorCandidateCount,
-        int OmittedHighSignalCount);
+        int OmittedHighSignalCount,
+        int DynamicActionSelectedCount,
+        int DynamicActionOmittedCount);
 
     private static ReportSamplingSelection SelectEvents(
         IReadOnlyList<SandboxEvent> orderedEvents,
@@ -1181,36 +1233,41 @@ public static class ReportEventSampler
             return new ReportSamplingSelection(
                 [],
                 excludedEventCount,
+                0,
                 new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+                0,
+                0,
                 0,
                 0);
         }
 
         var diagnosticQuota = Math.Max(0, Math.Min(options.MaxDiagnosticEvents, options.MaxInlineEvents));
+        var dynamicActionQuota = Math.Max(0, options.MaxDynamicActionEvents);
         var selectedIndexes = new HashSet<int>();
         var perType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var boundedSelectedCount = 0;
+        var dynamicActionSelectedCount = 0;
 
         foreach (var bucket in ReportSamplingBucketPriority)
         {
-            var bucketQuota = bucket == ReportSamplingBucket.Diagnostics
+            var isDynamicActionBucket = bucket == ReportSamplingBucket.DynamicActionEvidence;
+            var bucketQuota = isDynamicActionBucket
+                ? dynamicActionQuota
+                : bucket == ReportSamplingBucket.Diagnostics
                 ? diagnosticQuota
                 : options.MaxInlineEvents;
             var selectedForBucket = 0;
 
             foreach (var candidate in inlineCandidates.Where(candidate => candidate.Bucket == bucket))
             {
-                var completeDynamicEvidence = bucket == ReportSamplingBucket.DynamicActionEvidence;
-                if ((!completeDynamicEvidence && boundedSelectedCount >= options.MaxInlineEvents) ||
-                    (!completeDynamicEvidence && selectedForBucket >= bucketQuota))
+                if ((!isDynamicActionBucket && boundedSelectedCount >= options.MaxInlineEvents) ||
+                    selectedForBucket >= bucketQuota)
                 {
                     break;
                 }
 
                 var eventType = NormalizeEventType(candidate.Event.EventType);
-                var typeLimit = completeDynamicEvidence
-                    ? int.MaxValue
-                    : TypeLimitForBucket(candidate.Event, bucket, options);
+                var typeLimit = TypeLimitForBucket(candidate.Event, bucket, options);
 
                 perType.TryGetValue(eventType, out var currentForType);
                 if (currentForType >= typeLimit)
@@ -1220,7 +1277,11 @@ public static class ReportEventSampler
 
                 selectedIndexes.Add(candidate.Index);
                 selectedForBucket++;
-                if (!completeDynamicEvidence)
+                if (isDynamicActionBucket)
+                {
+                    dynamicActionSelectedCount++;
+                }
+                else
                 {
                     boundedSelectedCount++;
                 }
@@ -1235,16 +1296,18 @@ public static class ReportEventSampler
         var omittedCandidates = inlineCandidates
             .Where(candidate => !selectedIndexes.Contains(candidate.Index))
             .ToList();
+        var quotaOmittedEventCount = omittedCandidates.Count;
         var omittedTypeCounts = omittedCandidates
             .GroupBy(candidate => NormalizeEventType(candidate.Event.EventType), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
-        var omittedBehaviorCandidateCount = omittedCandidates.Count(candidate =>
-            EventDataBoolTrue(candidate.Event, "behaviorCounted", "countsAsBehavior", "countedAsBehavior", "sampleBehaviorCandidate", "sample_behavior_candidate"));
+        var omittedBehaviorCandidateCount = omittedCandidates.Count(candidate => IsBehaviorCandidateMarker(candidate.Event));
         var omittedHighSignalCount = omittedCandidates.Count(candidate =>
             candidate.Bucket is ReportSamplingBucket.StrongSampleBehavior or
                 ReportSamplingBucket.FindingEvidence or
                 ReportSamplingBucket.DynamicActionEvidence or
                 ReportSamplingBucket.ProbableSampleEvidence);
+        var dynamicActionOmittedCount = omittedCandidates.Count(candidate =>
+            candidate.Bucket == ReportSamplingBucket.DynamicActionEvidence);
 
         return new ReportSamplingSelection(
             inlineCandidates
@@ -1253,9 +1316,12 @@ public static class ReportEventSampler
                 .Select(static candidate => candidate.Event)
                 .ToList(),
             excludedEventCount,
+            quotaOmittedEventCount,
             omittedTypeCounts,
             omittedBehaviorCandidateCount,
-            omittedHighSignalCount);
+            omittedHighSignalCount,
+            dynamicActionSelectedCount,
+            dynamicActionOmittedCount);
     }
 
     private static HashSet<string> BuildFindingEvidenceKeys(IEnumerable<BehaviorFinding>? findings)
@@ -1301,20 +1367,21 @@ public static class ReportEventSampler
             return ReportSamplingBucket.FindingEvidence;
         }
 
+        // A failed Agent run is collection-health evidence, not routine
+        // lifecycle noise. Evaluate this before the routine lifecycle filter:
+        // agent.exit/agent.stop can carry a nonzero code or failure state and
+        // must never disappear as ordinary teardown.
+        if (IsAgentFailureEvent(evt))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
         // Agent lifecycle is collection plumbing, not a sample event. Keep it
         // out of the inline report entirely; the original guest/driver files
         // remain the audit source for startup/stop timing.
         if (IsAgentLifecycleEvent(evt))
         {
             return ReportSamplingBucket.Excluded;
-        }
-
-        // A failed Agent run is collection-health evidence, not routine
-        // lifecycle noise. Keep the structured failure ahead of the bounded
-        // diagnostic quota so a report cannot show a false clean completion.
-        if (IsAgentFailureEvent(evt))
-        {
-            return ReportSamplingBucket.FindingEvidence;
         }
 
         if (evt.EventType.StartsWith("guest.events.", StringComparison.OrdinalIgnoreCase))
@@ -1396,11 +1463,12 @@ public static class ReportEventSampler
 
         // Every normalized dynamic action is evidence, including rows that
         // remain environment/unknown after correlation. Route all of them
-        // through the complete dynamic-evidence bucket so the report cannot
-        // lose TCP edges, rename/delete rows, registry writes, startup/task
-        // changes, or PowerShell children merely because attribution is weak.
-        // Correlation fields still decide whether a row contributes to a
-        // sample verdict; retention and attribution are separate concerns.
+        // through the dedicated dynamic-evidence bucket so TCP edges,
+        // rename/delete rows, registry writes, startup/task changes, and
+        // PowerShell children compete for an explicit hard budget instead of
+        // disappearing into the small diagnostic quota. Correlation fields
+        // still decide whether a row contributes to a sample verdict;
+        // retention and attribution are separate concerns.
         if (IsDynamicActionEvidenceEvent(evt))
         {
             return ReportSamplingBucket.DynamicActionEvidence;
@@ -1440,6 +1508,15 @@ public static class ReportEventSampler
         ReportSamplingBucket bucket,
         ReportEventSamplingOptions options)
     {
+        if (bucket == ReportSamplingBucket.DynamicActionEvidence)
+        {
+            // Dynamic action evidence has its own finite total budget, but a
+            // single event type must not consume the entire lane. The same
+            // high-value per-type ceiling used by the bounded report lane
+            // keeps the spill deterministic and visible in the marker.
+            return Math.Max(1, options.MaxHighValueEventsPerType);
+        }
+
         if (bucket == ReportSamplingBucket.Diagnostics)
         {
             return Math.Max(1, Math.Min(2, options.MaxEventsPerType));
@@ -1465,11 +1542,11 @@ public static class ReportEventSampler
             return true;
         }
 
-        // R0 rows retain every driver-originated class in the Guest Agent;
-        // keep all typed driver activity in the dynamic evidence lane while
-        // dropping explicit collector or synthetic stress noise.  This keeps
-        // image/load and future driver producers visible instead of silently
-        // reducing the report to process/file/registry/network rows.
+        // R0 rows retain every real driver-originated class in the Guest
+        // Agent. Require the same source/schema contract used by collection
+        // health accounting; a host-generated row that merely uses a
+        // driver.* or image.* event type must not masquerade as kernel
+        // telemetry and bypass the dynamic budget.
         if (IsDriverSampleActivityEvent(evt))
         {
             return true;
@@ -1513,10 +1590,10 @@ public static class ReportEventSampler
         }
 
         // Keep the typed producer classes whose payloads are understood by
-        // the report/rule pipeline.  A generic driver.* prefix also covers
+        // the report/rule pipeline. A generic driver.* prefix also covers
         // collector telemetry and synthetic stress rows; treating those as
-        // complete dynamic behavior made a 60k-row diagnostic stream bypass
-        // the report quota and hide the actual coverage boundary.
+        // dynamic behavior made a large diagnostic stream bypass the report
+        // quota and hide the actual coverage boundary.
         if (EventDataBoolTrue(evt, "stress") ||
             !(type.StartsWith("driver.process", StringComparison.OrdinalIgnoreCase) ||
               type.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase) ||
@@ -1524,6 +1601,16 @@ public static class ReportEventSampler
               type.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase) ||
               type.StartsWith("driver.load", StringComparison.OrdinalIgnoreCase) ||
               type.StartsWith("image.", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        // Source=driver is the canonical guest R0 lane. For normalized rows
+        // whose source was rewritten during import, require the stable R0
+        // schema plus a kernel-driver origin and a producer category. This
+        // rejects fabricated host/image rows while retaining real imported
+        // driver telemetry.
+        if (!CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow(evt))
         {
             return false;
         }
@@ -1547,6 +1634,53 @@ public static class ReportEventSampler
              EventDataEqualsAny(evt, "sampleCorrelation", "confirmed") ||
              EventDataEqualsAny(evt, "sampleCorrelationStatus", "correlated", "confirmed") ||
              EventDataEqualsAny(evt, "sampleCorrelationStrength", "strong"));
+    }
+
+    /// <summary>
+    /// Returns whether an omitted row carries an explicit sample-behavior
+    /// disposition. Correlation producers use both boolean markers and the
+    /// normalized evidenceDisposition field; checking only behaviorCounted
+    /// used to under-report confirmed/probable rows that were spilled by the
+    /// report quota.
+    /// </summary>
+    private static bool IsBehaviorCandidateMarker(SandboxEvent evt)
+    {
+        return EventDataBoolTrue(
+                evt,
+                "behaviorCounted",
+                "countsAsBehavior",
+                "countedAsBehavior",
+                "sampleBehaviorCandidate",
+                "sample_behavior_candidate",
+                "behaviorCandidate",
+                "behavior_candidate",
+                "confirmed",
+                "probable") ||
+            EventDataEqualsAny(
+                evt,
+                "evidenceDisposition",
+                "behavior-candidate",
+                "behavior_candidate",
+                "confirmed",
+                "probable") ||
+            EventDataEqualsAny(
+                evt,
+                "sampleCorrelation",
+                "confirmed",
+                "probable",
+                "candidate") ||
+            EventDataEqualsAny(
+                evt,
+                "sampleCorrelationStatus",
+                "confirmed",
+                "probable",
+                "candidate") ||
+            EventDataEqualsAny(
+                evt,
+                "sampleCorrelationStrength",
+                "strong",
+                "medium",
+                "probable");
     }
 
     private static bool IsSampleExecutionFailureEvent(SandboxEvent evt)
@@ -1917,15 +2051,24 @@ public static class ReportEventSampler
             ["behaviorCountingPolicy"] = "report-sampling-markers-are-not-sample-behavior",
             ["rawEventCount"] = result.RawEventCount.ToString(),
             ["selectedRawEventCount"] = result.SelectedRawEventCount.ToString(),
-            ["excludedEventCount"] = result.ExcludedEventCount.ToString(),
-            ["reportEventCount"] = (result.SelectedRawEventCount + 1).ToString(),
+            ["policyExcludedEventCount"] = result.PolicyExcludedEventCount.ToString(),
+            // Keep the old key as an alias for older report readers; it now
+            // explicitly means policy exclusion rather than quota omission.
+            ["excludedEventCount"] = result.PolicyExcludedEventCount.ToString(),
+            ["quotaOmittedEventCount"] = result.QuotaOmittedEventCount.ToString(),
+            ["markerOverheadEventCount"] = result.MarkerOverheadEventCount.ToString(),
+            ["reportEventCount"] = (result.SelectedRawEventCount + result.MarkerOverheadEventCount).ToString(),
             ["omittedEventCount"] = result.OmittedEventCount.ToString(),
             ["maxInlineEvents"] = options.MaxInlineEvents.ToString(),
+            ["maxDynamicActionEvents"] = options.MaxDynamicActionEvents.ToString(),
             ["maxEventsPerType"] = options.MaxEventsPerType.ToString(),
             ["maxHighValueEventsPerType"] = options.MaxHighValueEventsPerType.ToString(),
             ["maxDiagnosticEvents"] = options.MaxDiagnosticEvents.ToString(),
-            ["dynamicActionEventsAlwaysRetained"] = "true",
-            ["maxInlineEventsExcludesDynamicActions"] = "true",
+            ["dynamicActionEventsAlwaysRetained"] = "false",
+            ["maxInlineEventsExcludesDynamicActions"] = "false",
+            ["dynamicActionSelectedCount"] = result.DynamicActionSelectedCount.ToString(),
+            ["dynamicActionOmittedCount"] = result.DynamicActionOmittedCount.ToString(),
+            ["dynamicActionSpillPolicy"] = "hard-budget",
             ["omittedBehaviorCandidateCount"] = result.OmittedBehaviorCandidateCount.ToString(),
             ["omittedHighSignalCount"] = result.OmittedHighSignalCount.ToString(),
             ["omittedEventTypeCounts"] = FormatOmittedEventTypeCounts(result.OmittedEventTypeCounts)
@@ -2050,10 +2193,13 @@ public static class ReportEventSampler
             foreach (var key in new[]
             {
                 "rawEventCount", "selectedRawEventCount", "excludedEventCount",
+                "policyExcludedEventCount", "quotaOmittedEventCount", "markerOverheadEventCount",
                 "reportEventCount", "omittedEventCount", "omittedBehaviorCandidateCount",
                 "omittedHighSignalCount", "omittedEventTypeCounts", "maxInlineEvents",
                 "maxEventsPerType", "maxHighValueEventsPerType", "maxDiagnosticEvents",
-                "dynamicActionEventsAlwaysRetained", "maxInlineEventsExcludesDynamicActions",
+                "maxDynamicActionEvents", "dynamicActionEventsAlwaysRetained",
+                "maxInlineEventsExcludesDynamicActions", "dynamicActionSelectedCount",
+                "dynamicActionOmittedCount", "dynamicActionSpillPolicy",
                 "rawEventsPath", "driverEventsPath"
             })
             {

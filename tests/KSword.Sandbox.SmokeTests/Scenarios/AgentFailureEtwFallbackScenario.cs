@@ -94,6 +94,31 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
         var sampled = ReportEventSampler.SampleForReport(failures);
         SmokeAssert.True(sampled.Events.Any(evt => evt.EventType == "agent.run.failed"), "Agent failure must survive report sampling ahead of the diagnostic quota.");
 
+        // agent.exit is normally lifecycle noise, but a nonzero exit code is
+        // a terminal collection failure and must be classified before the
+        // routine lifecycle filter.
+        var failedExit = ReportEventSampler.SampleForReport(
+        [
+            new SandboxEvent
+            {
+                EventType = "agent.exit",
+                Timestamp = DateTimeOffset.UtcNow,
+                Source = "guest",
+                Data = { ["exitCode"] = "1" }
+            },
+            new SandboxEvent
+            {
+                EventType = "agent.stop",
+                Timestamp = DateTimeOffset.UtcNow.AddMilliseconds(1),
+                Source = "guest"
+            }
+        ],
+        new ReportEventSamplingOptions { MaxInlineEvents = 1, MaxDiagnosticEvents = 0 });
+        SmokeAssert.True(failedExit.Events.Any(evt => evt.EventType == "agent.exit"),
+            "Nonzero agent.exit must remain visible as failure evidence.");
+        SmokeAssert.True(!failedExit.Events.Any(evt => evt.EventType == "agent.stop"),
+            "Routine agent.stop should remain policy-excluded.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,

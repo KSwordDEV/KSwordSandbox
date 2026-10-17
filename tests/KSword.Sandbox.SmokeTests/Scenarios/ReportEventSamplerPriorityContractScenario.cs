@@ -528,8 +528,9 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         var samplingMarker = RequireEvent(result.Events, "report.events.sampled");
         RequireData(samplingMarker, "wmiCaptureFailedCount", "2");
         RequireData(samplingMarker, "wmiCaptureFailedPhases", "before-start, after-run");
-        RequireData(samplingMarker, "dynamicActionEventsAlwaysRetained", "true");
-        RequireData(samplingMarker, "maxInlineEventsExcludesDynamicActions", "true");
+        RequireData(samplingMarker, "dynamicActionEventsAlwaysRetained", "false");
+        RequireData(samplingMarker, "maxInlineEventsExcludesDynamicActions", "false");
+        RequireData(samplingMarker, "dynamicActionSpillPolicy", "hard-budget");
 
         var artifactEvent = RequireEvent(result.Events, "artifact.host_imported");
         RequireData(artifactEvent, "downloadSelector", "artifacts/drop.bin");
@@ -579,7 +580,7 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireEvent(result.Events, "process.exit");
         SmokeAssert.True(
             result.Events.Count(evt => string.Equals(evt.EventType, "network.tcp", StringComparison.OrdinalIgnoreCase)) == AttributedDynamicRows + 1,
-            "Every sample-attributed dynamic row must remain in report sampling even when it exceeds MaxInlineEvents.");
+            "Sample-attributed dynamic rows should remain within the dedicated dynamic budget.");
         var unknownNetwork = result.Events.Single(evt =>
             string.Equals(evt.EventType, "network.tcp", StringComparison.OrdinalIgnoreCase) &&
             evt.Data.TryGetValue("sampleCorrelation", out var correlation) &&
@@ -643,6 +644,77 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
             omittedTypes.Contains("collector.background_diagnostic=64", StringComparison.Ordinal) &&
             omittedTypes.Contains("driver.telemetry=1", StringComparison.Ordinal),
             "Sampling marker should identify the omitted event family and count.");
+
+        // Dynamic evidence has a hard total budget. A burst cannot bypass the
+        // report cap merely because each row is a process/network action; the
+        // marker must expose both the selected and spilled dynamic counts.
+        var dynamicBurst = Enumerable.Range(0, 12)
+            .Select(index => new SandboxEvent
+            {
+                EventType = "network.tcp",
+                Timestamp = timestamp.AddSeconds(30).AddMilliseconds(index),
+                Source = "guest",
+                Data =
+                {
+                    ["sampleCorrelation"] = "confirmed",
+                    ["behaviorCounted"] = "true",
+                    ["sampleBehaviorCandidate"] = "true"
+                }
+            })
+            .ToList();
+        var boundedDynamic = ReportEventSampler.SampleForReport(
+            dynamicBurst,
+            new ReportEventSamplingOptions
+            {
+                MaxInlineEvents = 1,
+                MaxDynamicActionEvents = 5,
+                MaxHighValueEventsPerType = 50,
+                MaxDiagnosticEvents = 0
+            });
+        var boundedDynamicMarker = RequireEvent(boundedDynamic.Events, "report.events.sampled");
+        RequireData(boundedDynamicMarker, "dynamicActionSelectedCount", "5");
+        RequireData(boundedDynamicMarker, "dynamicActionOmittedCount", "7");
+        RequireData(boundedDynamicMarker, "quotaOmittedEventCount", "7");
+        RequireData(boundedDynamicMarker, "policyExcludedEventCount", "0");
+        RequireData(boundedDynamicMarker, "markerOverheadEventCount", "1");
+        SmokeAssert.True(boundedDynamic.SelectedRawEventCount == 5,
+            "Dynamic evidence selection must obey MaxDynamicActionEvents.");
+
+        // Confirmed/probable dispositions remain visible in omission coverage
+        // even when producers do not set behaviorCounted/sampleBehaviorCandidate.
+        var dispositionRows = Enumerable.Range(0, 4)
+            .Select(index => new SandboxEvent
+            {
+                EventType = "network.tcp",
+                Timestamp = timestamp.AddSeconds(40).AddMilliseconds(index),
+                Source = "guest",
+                Data =
+                {
+                    ["evidenceDisposition"] = index % 2 == 0 ? "confirmed" : "probable"
+                }
+            })
+            .ToList();
+        var dispositionResult = ReportEventSampler.SampleForReport(
+            dispositionRows,
+            new ReportEventSamplingOptions { MaxDynamicActionEvents = 1 });
+        var dispositionMarker = RequireEvent(dispositionResult.Events, "report.events.sampled");
+        RequireData(dispositionMarker, "omittedBehaviorCandidateCount", "3");
+
+        // A host row that merely adopts a driver/image event type must not be
+        // treated as real R0 dynamic telemetry without source/schema proof.
+        var fabricatedDriver = ReportEventSampler.SampleForReport(
+        [
+            new SandboxEvent
+            {
+                EventType = "image.load",
+                Timestamp = timestamp.AddSeconds(50),
+                Source = "host",
+                Data = { ["producerCategory"] = "image", ["behaviorCounted"] = "true" }
+            }
+        ],
+        new ReportEventSamplingOptions { MaxInlineEvents = 0, MaxDiagnosticEvents = 0 });
+        SmokeAssert.True(fabricatedDriver.DynamicActionSelectedCount == 0,
+            "Host image rows without R0 source/schema evidence must not enter the dynamic lane.");
 
         return Task.FromResult(new SmokeTestResult
         {
