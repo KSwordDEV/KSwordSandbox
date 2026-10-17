@@ -57,6 +57,11 @@ public sealed partial class SandboxJobService
         "subjectRole",
         "processIdSource",
         "attributionSummary",
+        "noise",
+        "selfNoise",
+        "selfNoiseReason",
+        "selfNoiseAction",
+        "collectionNoise",
         "sourceArtifactKind",
         "sourceArtifactPath"
     };
