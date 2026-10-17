@@ -47,6 +47,7 @@ public static class CollectionHealthSummaryBuilder
     private static readonly string[] DriverSuppressedKeys =
     [
         "eventsSuppressed",
+        "totalEventsSuppressed",
         "collectorSuppressedEvents",
         "selfNoiseSuppressedEvents",
         "suppressed"
