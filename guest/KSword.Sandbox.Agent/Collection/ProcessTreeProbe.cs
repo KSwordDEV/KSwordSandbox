@@ -1991,6 +1991,29 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         return events;
     }
 
+    /// <summary>
+    /// Injects a deterministic task-store create/rename/delete sequence for
+    /// repository smoke diagnostics. The method never touches the Windows task
+    /// store; it exercises the same bounded queue and drain path used by the
+    /// live watcher so transient task edges cannot be silently discarded in a
+    /// synthetic run.
+    /// </summary>
+    internal IReadOnlyList<SandboxEvent> CollectSyntheticScheduledTaskEdgeDiagnostics(GuestProbeContext context)
+    {
+        var root = Path.Combine(context.WorkingDirectory, "SyntheticTaskStore");
+        var created = Path.Combine(root, "TransientTask");
+        var renamed = Path.Combine(root, "TransientTaskRenamed");
+        lock (scheduledTaskWatcherGate)
+        {
+            scheduledTaskWatchRoots.Add(root);
+        }
+
+        EnqueueScheduledTaskWatcherChange(ScheduledTaskWatcherChangeKind.Created, created, null);
+        EnqueueScheduledTaskWatcherChange(ScheduledTaskWatcherChangeKind.Renamed, renamed, created);
+        EnqueueScheduledTaskWatcherChange(ScheduledTaskWatcherChangeKind.Deleted, renamed, null);
+        return DrainScheduledTaskWatcherEvents(ProbePhase.AfterRun, context, DateTimeOffset.UtcNow);
+    }
+
     private void EnqueueScheduledTaskWatcherChange(
         ScheduledTaskWatcherChangeKind kind,
         string? path,

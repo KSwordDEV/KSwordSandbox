@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\KSword.Sandbox.Abstractions\KSword.Sandbox.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\KSword.Sandbox.Core\KSword.Sandbox.Core.csproj" />
+    <ProjectReference Include="..\..\guest\KSword.Sandbox.Agent\KSword.Sandbox.Agent.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
