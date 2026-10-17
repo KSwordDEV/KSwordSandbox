@@ -104,7 +104,8 @@ KswPrepareImageCallbackString(
  * Inputs : Destination is fixed payload storage; Source may be NULL; PresentFlag
  *          and TruncatedFlag identify the payload bits to update.
  * Logic  : validates IRQL and UNICODE_STRING bounds before delegating to the
- *          shared bounded UTF-16 helper; no allocation or blocking occurs.
+ *          shared bounded UTF-16 suffix helper; no allocation or blocking
+ *          occurs, and truncated paths retain the module basename.
  * Return : TRUE when text was copied; FALSE when the field is intentionally
  *          absent. Flags and length are updated in place.
  */
@@ -139,7 +140,7 @@ KswCopyImagePayloadString(
     bytesCopied = 0;
 
     if (KswPrepareImageCallbackString(Source, &safeSource) &&
-        KswCopyUnicodePrefix(
+        KswCopyUnicodeSuffix(
             Destination,
             DestinationChars,
             &safeSource,

@@ -19,3 +19,18 @@ KswCopyUnicodePrefix(
     _Out_opt_ PULONG BytesCopied,
     _Out_opt_ PBOOLEAN Truncated
     );
+
+/*
+ * Copies a bounded UTF-16 suffix, retaining the final path component when a
+ * kernel callback path exceeds the compact payload capacity. This keeps image
+ * and module names usable for behavior classification while preserving the
+ * explicit truncation flag.
+ */
+BOOLEAN
+KswCopyUnicodeSuffix(
+    _Out_writes_(DestinationChars) PWCHAR Destination,
+    _In_ ULONG DestinationChars,
+    _In_opt_ PCUNICODE_STRING Source,
+    _Out_opt_ PULONG BytesCopied,
+    _Out_opt_ PBOOLEAN Truncated
+    );
