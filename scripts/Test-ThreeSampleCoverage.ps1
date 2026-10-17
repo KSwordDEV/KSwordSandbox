@@ -96,7 +96,11 @@ function StatusName([object]$Report) {
 }
 
 $rows = @()
-foreach ($root in $JobRoot) {
+# A script invoked through `pwsh -File` receives a comma-separated list as
+# one argument. Expand that form here while still accepting a native string[]
+# when the script is called from another PowerShell script.
+$jobRoots = @($JobRoot | ForEach-Object { ([string]$_).Split(',', [StringSplitOptions]::RemoveEmptyEntries) } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+foreach ($root in $jobRoots) {
     $resolved = (Resolve-Path -LiteralPath $root -ErrorAction Stop).ProviderPath
     $reportPath = Join-Path $resolved 'report.json'
     if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw "report.json not found: $resolved" }
