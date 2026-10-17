@@ -41,6 +41,7 @@ public static class CollectionHealthSummaryBuilder
     [
         "remainingUnread",
         "remainingUnreadEvents",
+        "remainingQueueDepth",
         "unread",
         "remaining",
         "remainingEvents"
@@ -265,7 +266,7 @@ public static class CollectionHealthSummaryBuilder
         string.Equals(evt.EventType, "driver.events.deferred", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsDrainStoppedAtDeadline(SandboxEvent evt) =>
-        BoolTrue(evt, "drainStoppedAtDeadline", "drainDeadlineReached", "deadlineReached");
+        BoolTrue(evt, "drainStoppedAtDeadline", "drainStoppedAtDrainDeadline", "drainDeadlineReached", "deadlineReached");
 
     private static bool IsDriverQualityWarning(SandboxEvent evt)
     {
