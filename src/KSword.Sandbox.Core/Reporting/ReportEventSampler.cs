@@ -1256,6 +1256,14 @@ public static class ReportEventSampler
             return ReportSamplingBucket.Excluded;
         }
 
+        // A failed Agent run is collection-health evidence, not routine
+        // lifecycle noise. Keep the structured failure ahead of the bounded
+        // diagnostic quota so a report cannot show a false clean completion.
+        if (IsAgentFailureEvent(evt))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
         if (evt.EventType.StartsWith("guest.events.", StringComparison.OrdinalIgnoreCase))
         {
             return ReportSamplingBucket.GeneralBehaviorEvidence;
@@ -1789,6 +1797,38 @@ public static class ReportEventSampler
             "agent.status",
             "agent.initialized",
             "agent.shutdown");
+    }
+
+    private static bool IsAgentFailureEvent(SandboxEvent evt)
+    {
+        var eventType = NormalizeEventType(evt.EventType);
+        if (!eventType.StartsWith("agent.", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return eventType.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("failure", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+            EventDataEqualsAny(evt, "status", "failed", "failure", "error", "unavailable") ||
+            EventDataEqualsAny(evt, "captureState", "failed", "failure", "error", "unavailable") ||
+            EventDataEqualsAny(evt, "readinessState", "failed", "failure", "error", "unavailable") ||
+            EventDataBoolTrue(evt, "agentFailure") ||
+            !string.IsNullOrWhiteSpace(EventDataValue(evt, "failureType", "failureReason")) ||
+            (int.TryParse(EventDataValue(evt, "exitCode", "commandExitCode", "processExitCode"), out var exitCode) && exitCode != 0);
+    }
+
+    private static string EventDataValue(SandboxEvent evt, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (evt.Data.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
     }
 
     private static SandboxEvent BuildSamplingMarker(
