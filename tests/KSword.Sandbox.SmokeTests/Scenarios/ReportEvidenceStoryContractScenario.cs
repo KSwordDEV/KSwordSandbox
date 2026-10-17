@@ -112,12 +112,12 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(html, "Network relation path", "Network cards should expose readable process-to-endpoint relation paths.");
         RequireContains(html, "raw-page-nav", "Raw event expansion should expose native page shortcuts.");
         RequireContains(html, "Story evidence expansion summary", "Evidence expansions should show a visible summary before dense rows.");
-        RequireContains(html, "artifactEvidenceMatrix overview", "Process story lane should surface artifactEvidenceMatrix overview evidence.");
-        RequireContains(html, "Dropped-file artifactEvidenceMatrix", "Dropped-file story lane should surface artifactEvidenceMatrix state.");
-        RequireContains(html, "Screenshot artifactEvidenceMatrix", "Screenshot story lane should surface artifactEvidenceMatrix state.");
-        RequireContains(html, "Memory dump artifactEvidenceMatrix", "Memory dump story lane should surface artifactEvidenceMatrix state.");
-        RequireContains(html, "PCAP artifactEvidenceMatrix", "PCAP story lane should surface artifactEvidenceMatrix state.");
-        RequireContains(html, "artifactEvidenceMatrix lane", "Behavior graph artifact lane should include matrix-backed evidence.");
+        RequireContains(html, "Artifact evidence matrix overview", "Process story lane should surface evidence-matrix overview evidence.");
+        RequireContains(html, "Dropped-file evidence matrix", "Dropped-file story lane should surface evidence-matrix state.");
+        RequireContains(html, "Screenshot evidence matrix", "Screenshot story lane should surface evidence-matrix state.");
+        RequireContains(html, "Memory dump evidence matrix", "Memory dump story lane should surface evidence-matrix state.");
+        RequireContains(html, "PCAP evidence matrix", "PCAP story lane should surface evidence-matrix state.");
+        RequireContains(html, "Artifact evidence matrix lane", "Behavior graph artifact lane should include matrix-backed evidence.");
         RequireContains(html, "Network evidence expansion summary", "Network relationship expansions should summarize shown/hidden evidence.");
         RequireContains(html, "Raw event slimming story", "Raw event section should explain visible/folded/report-only evidence before row expansion.");
         RequireContains(html, "Artifact / network / R0 anchors", "Raw event slimming cards should preserve artifact/network/R0 evidence anchors.");

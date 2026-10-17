@@ -107,6 +107,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Raw normalized events", "Report renderer should include raw event evidence.");
         RequireContains(rendererSource, "RawEventInlineLimit = 30", "Report renderer should cap inline raw event rendering to a slim release-ready sample.");
         RequireContains(rendererSource, "EventExplorerQuickLinkCount", "Report renderer should label event explorer quick links with inline and total counts.");
+        RequireContains(rendererSource, "data-event-overflow", "Report renderer should retain overflow explorer rows for filter reveal.");
+        RequireContains(rendererSource, "artifactevidencematrix", "Report renderer should keep internal artifact matrix fields out of event detail cards.");
         RequireContains(rendererSource, "localized-evidence-field", "Report renderer should hide localized evidence fields from English report chrome.");
         RequireContains(rendererSource, "No sample-attributed events of this type were found; see collection coverage for capture state.", "Report renderer should explain empty lanes without implying capture failure.");
         RequireContains(rendererSource, "observed-empty", "Report renderer should distinguish observed-empty artifact lanes.");
@@ -351,6 +353,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(defaultHtml, "href=\"report.en.html\"", "Default rendered HTML should link to report.en.html.");
         RequireContains(englishHtml, "Virtualization provider", "Rendered report covers should identify the selected provider.");
         RequireContains(englishHtml, "href=\"#event-explorer\"", "Rendered report should expose the event explorer quick link.");
+        RequireContains(englishHtml, "<option value=\"network.late.dynamic.129\">network.late.dynamic.129</option>", "Event explorer filter options should include event types beyond the initial inline row cap.");
+        RequireContains(englishHtml, "data-event-overflow=\"true\"", "Event explorer should retain overflow rows in the DOM for filter reveal.");
+        RequireContains(englishHtml, "hasFilter = !!query", "Event explorer should reveal retained overflow rows when a filter is active.");
         RequireContains(englishHtml, "Qemu", "Rendered report covers should show the persisted provider value.");
         RequireContains(englishHtml, "Target VM", "Rendered report covers should identify the effective VM target.");
         RequireContains(englishHtml, "contract-qemu", "Rendered report covers should show the effective VM target value.");
@@ -434,9 +439,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(englishHtml, "file://", "Rendered HTML must not expose file:// artifact hrefs.");
         RequireContains(englishHtml, "Command line hidden by default", "Rendered event rows should fold command lines by default.");
         RequireContains(englishHtml, "Command/stdout/stderr/PowerShell fields hidden by default", "Rendered raw event details should fold long technical fields.");
-        RequireContains(englishHtml, "Hidden technical field: stdout", "Rendered raw event details should hide stdout fields.");
-        RequireContains(englishHtml, "Hidden technical field: powershellCommand", "Rendered raw event details should hide PowerShell fields.");
-        RequireContains(englishHtml, "<details class=\"raw-technical-field\"><summary>Hidden technical field: stderr", "Rendered raw event details should keep stderr in copyable details.");
+        RequireContains(englishHtml, "Hidden technical field: Standard output", "Rendered raw event details should hide stdout fields behind an analyst label.");
+        RequireContains(englishHtml, "Hidden technical field: PowerShell / script content", "Rendered raw event details should hide PowerShell fields behind an analyst label.");
+        RequireContains(englishHtml, "<details class=\"raw-technical-field\"><summary>Hidden technical field: Standard error", "Rendered raw event details should keep stderr in copyable details without leaking its raw key in the summary.");
         RequireNotContains(englishHtml, "<br><span class=\"muted\">cmd.exe /c whoami</span>", "Rendered event tables should not inline command lines directly.");
         RequireContains(englishHtml, "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>", "Rendered HTML should include the behavior graph section.");
         RequireContains(englishHtml, "Evidence graph edges", "Rendered HTML should include graph edge evidence.");
@@ -920,6 +925,26 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                 {
                     ["index"] = index.ToString(),
                     ["rawSource"] = "events.json"
+                }
+            });
+        }
+
+        // Keep one complete late dynamic family in the explorer contract. The
+        // first 100 inline rows must not determine which event-type options are
+        // available or make a late event impossible to reveal by filtering.
+        for (var index = 0; index < 130; index++)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = $"network.late.dynamic.{index:D3}",
+                Timestamp = timestamp.AddSeconds(300 + index),
+                Source = "guest",
+                ProcessName = "contract-sample.exe",
+                ProcessId = 4242,
+                Data =
+                {
+                    ["remoteAddress"] = $"203.0.113.{(index % 200) + 1}",
+                    ["remotePort"] = "443"
                 }
             });
         }
