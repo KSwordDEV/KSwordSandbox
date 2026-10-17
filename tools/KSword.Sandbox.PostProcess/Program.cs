@@ -109,6 +109,14 @@ internal static class PostProcessProgram
             var renderer = new HtmlReportRenderer();
             File.WriteAllText(jsonReportPath, JsonSerializer.Serialize(report, JsonOptions));
             LogMemory("report-json-written", report.Events.Count);
+            // Large guest imports keep several temporary lists alive through
+            // report construction. Force a collection at this phase boundary
+            // before allocating the bilingual HTML payloads, otherwise a
+            // 250k-event rebuild can retain multiple gigabytes unnecessarily.
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            LogMemory("after-report-gc", report.Events.Count);
             // Render the expensive evidence graph once.  Chinese localization
             // is a protected text pass over the English document, matching
             // SandboxJobService and avoiding a second full graph traversal.
