@@ -334,7 +334,7 @@ public static class CollectionHealthSummaryBuilder
 
         var finalMarker = string.Equals(evt.EventType, "r0collector.stopped", StringComparison.OrdinalIgnoreCase) ||
             TextEqualsAny(Value(evt, "statusPhase", "statusState"), "final", "stopped", "completed") ||
-            BoolTrue(evt, "finalStatusAvailable", "drainQueueDrained", "queueDrained");
+            BoolTrue(evt, "finalStatusAvailable", "drainQueueDrained");
         return finalMarker &&
             DriverRemainingUnreadKeys.Any(key => evt.Data.ContainsKey(key) && TryParseUnsigned(evt.Data[key], out _));
     }
