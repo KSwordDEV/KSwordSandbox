@@ -309,5 +309,11 @@ public sealed record DriverConfig
     /// </summary>
     public int R0CollectorMaxOutputBytes { get; init; } = 64 * 1024 * 1024;
 
+    /// <summary>
+    /// Keeps live guest artifacts and telemetry below the remaining-volume
+    /// reserve while preserving the native collector's standalone default.
+    /// </summary>
+    public int R0CollectorMinFreeOutputBytes { get; init; } = 256 * 1024 * 1024;
+
     public bool UseMockCollector { get; init; }
 }

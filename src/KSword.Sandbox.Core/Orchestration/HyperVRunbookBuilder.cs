@@ -1773,7 +1773,9 @@ public sealed class HyperVRunbookBuilder
             "--r0-drain-grace-ms",
             config.Driver.R0CollectorDrainGraceMs.ToString(CultureInfo.InvariantCulture),
             "--max-output-bytes",
-            config.Driver.R0CollectorMaxOutputBytes.ToString(CultureInfo.InvariantCulture)
+            config.Driver.R0CollectorMaxOutputBytes.ToString(CultureInfo.InvariantCulture),
+            "--min-free-output-bytes",
+            config.Driver.R0CollectorMinFreeOutputBytes.ToString(CultureInfo.InvariantCulture)
         };
 
         if (config.Driver.UseMockCollector)
