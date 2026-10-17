@@ -426,7 +426,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseVisibleText, "可见行", "Chinese event explorer status should localize the compact visible-row label.");
         RequireContains(chineseHtml, "采集丢失", "Chinese focus cards should expose collection-loss status.");
         RequireContains(chineseHtml, "采集健康：", "Chinese failure reasons should expose collection-health counters.");
-        RequireContains(chineseHtml, "报告中还有更多证据行。", "Chinese event explorer status should explain additional evidence rows in Chinese.");
+        RequireNotContains(chineseVisibleText, "报告中还有更多证据行。", "Chinese event explorer status should avoid the verbose additional-row hint.");
         RequireContains(chineseHtml, "样本归因：", "Chinese network coverage should localize sample attribution labels.");
         RequireContains(chineseHtml, "data-copy=\"Failed\"><span class=\"ui-status-value\">失败</span></td>", "Chinese report should localize the cover analysis status while preserving the original machine-readable value.");
         RequireContains(chineseVisibleText, "可按事件类型、来源、阶段、严重性和样本行为状态搜索或筛选。", "Chinese event explorer note should be fully localized.");
