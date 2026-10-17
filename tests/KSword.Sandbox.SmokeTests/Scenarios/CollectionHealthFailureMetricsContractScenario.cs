@@ -185,6 +185,37 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireTrue(agentFailed.State == "degraded", "An optional Agent failure must degrade a complete primary R0 capture.");
         RequireTrue(agentFailed.StateReasons.Contains("agent-failure"), "Agent failure must retain a stable state reason.");
 
+        var sampleClrFailed = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "r0collector.stopped",
+                Source = "r0collector",
+                Timestamp = timestamp,
+                Data =
+                {
+                    ["statusPhase"] = "final",
+                    ["finalStatusAvailable"] = "true",
+                    ["queueDrained"] = "true",
+                    ["remainingQueueDepth"] = "0"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.exit",
+                Source = "guest",
+                ProcessName = "sample.exe",
+                Timestamp = timestamp.AddSeconds(1),
+                Data =
+                {
+                    ["exitCode"] = "-2146232576"
+                }
+            }
+        ]);
+        RequireEqual(1, sampleClrFailed.AgentFailureRows, "A non-zero guest sample exit, including a signed CLR HRESULT, must enter collection health.");
+        RequireTrue(sampleClrFailed.State == "degraded", "A non-zero guest sample exit must prevent a clean completion claim.");
+        RequireTrue(sampleClrFailed.StateReasons.Contains("agent-failure"), "A non-zero guest sample exit must retain the agent-failure reason.");
+
         var unknownFinal = CollectionHealthSummaryBuilder.Build(
         [
             new SandboxEvent
