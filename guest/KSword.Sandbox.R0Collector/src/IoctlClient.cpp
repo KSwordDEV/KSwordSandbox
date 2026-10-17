@@ -573,7 +573,14 @@ bool EmitDriverCapabilities(
 // Processing: Issues IOCTL_KSWORD_SANDBOX_GET_STATUS and writes queue,
 // producer-mask, and counter metadata before/after capture operations.
 // Return: true if the IOCTL/reply/sink are valid.
-bool EmitDriverStatus(const UniqueHandle& device, const Options& options, EventWriter& writer) {
+bool EmitDriverStatus(
+    const UniqueHandle& device,
+    const Options& options,
+    EventWriter& writer,
+    unsigned long long* queueDepth) {
+    if (queueDepth != nullptr) {
+        *queueDepth = 0;
+    }
     KSWORD_SANDBOX_STATUS_REPLY reply {};
     DWORD bytesReturned = 0;
     DWORD errorCode = ERROR_SUCCESS;
@@ -616,6 +623,10 @@ bool EmitDriverStatus(const UniqueHandle& device, const Options& options, EventW
             "IOCTL_KSWORD_SANDBOX_GET_STATUS",
             L"GET_STATUS returned an incompatible KSWORD_SANDBOX_STATUS_REPLY.",
             bytesReturned);
+    }
+
+    if (queueDepth != nullptr) {
+        *queueDepth = reply.QueueDepth;
     }
 
     SandboxEventFields event;
@@ -772,7 +783,14 @@ bool EmitDriverSetProducerEnableMask(
 // r0collector.driverPoll row with the queue snapshot.
 // Return: true if the IOCTL succeeded, the reply was structurally valid, and the
 // event sink accepted the poll row.
-bool EmitDriverPoll(const UniqueHandle& device, const Options& options, EventWriter& writer) {
+bool EmitDriverPoll(
+    const UniqueHandle& device,
+    const Options& options,
+    EventWriter& writer,
+    unsigned long long* eventsQueued) {
+    if (eventsQueued != nullptr) {
+        *eventsQueued = 0;
+    }
     KSWORD_SANDBOX_POLL_REPLY reply {};
     DWORD bytesReturned = 0;
     DWORD errorCode = ERROR_SUCCESS;
@@ -805,6 +823,10 @@ bool EmitDriverPoll(const UniqueHandle& device, const Options& options, EventWri
             "IOCTL_KSWORD_SANDBOX_POLL",
             L"POLL returned an incompatible KSWORD_SANDBOX_POLL_REPLY.",
             bytesReturned);
+    }
+
+    if (eventsQueued != nullptr) {
+        *eventsQueued = reply.EventsQueued;
     }
 
     SandboxEventFields event;

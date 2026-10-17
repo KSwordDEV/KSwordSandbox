@@ -397,6 +397,11 @@ KSword.Sandbox.R0Collector.exe `
 - `--output`, `--out`, `-o`：JSON Lines 输出路径；`-` 表示 stdout。
 - `--duration`, `-t`：polling duration（秒）。`0` 表示 one-shot open、health、poll、
   read-events。
+- `--drain-grace-ms <ms>` / `--drain-max-ms <ms>`：有界 duration 到期后继续读取已经进入
+  kernel ring 的记录，直到 POLL 看到 `eventsQueued=0`，或达到该宽限上限（默认
+  `120000`，最大 `600000`）。停止行会记录 `drainQueueDepthAtStart`、
+  `drainQueueDepthAtStop`、`drainQueueDrained` 和 `drainStoppedAtDrainDeadline`；剩余队列
+  不会被隐藏。
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`：poll interval（毫秒）。
 - `--diagnose`, `--readiness`, `--readiness-check`：运行 live 但 non-mutating 的 readiness
   diagnostic pass。Collector 会查询 `--service-name` 的 SCM state、打开 device、检查
@@ -972,8 +977,10 @@ live VM 路径的预期脚本行 / Expected script rows for the live VM path：
   `r0collector.driverReadEvents`: preserve batch accounting and sequence
   bounds in both raw JSONL and sampled reports.
 - `drainStoppedAtBatchLimit` on `r0collector.stopped`: indicates the runtime
-  loop exited because `--max-read-batches` was reached instead of waiting for
-  the duration deadline.
+  loop exited because `--max-read-batches` was reached. A timed run first ends
+  its capture window, then uses `--drain-grace-ms` to drain the already queued
+  ring; `drainStoppedAtDrainDeadline=true` and a non-zero `remainingQueueDepth`
+  explicitly mark an incomplete bounded drain.
 
 ## JSON Lines 格式 / JSON Lines format
 

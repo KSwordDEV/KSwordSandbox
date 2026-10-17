@@ -35,6 +35,7 @@ std::string BuildConfigData(const Options& options) {
     data.AddWide("serviceName", options.serviceName);
     data.AddWide("outputPath", options.outputPath);
     data.AddSigned("durationSeconds", options.durationSeconds);
+    data.AddSigned("drainGraceMs", options.drainGraceMs);
     data.AddSigned("pollIntervalMs", options.pollIntervalMs);
     data.AddSigned("diagnoseReadTimeoutMs", options.diagnoseReadTimeoutMs);
     data.AddSigned("maxReadBatches", options.maxReadBatches);
@@ -338,7 +339,9 @@ int RunDriverHealthOnly(const UniqueHandle& device, const Options& options, Even
 // Input: Open driver handle, collector options, and event sink.
 // Processing: Calls the public driver skeleton IOCTLs. Health is read once;
 // POLL is called once per loop and READ_EVENTS is drained in batches until the
-// batch is smaller than the request cap. Duration 0 performs one poll/drain pass.
+// batch is smaller than the request cap. A timed run enters a separate bounded
+// post-window drain so records already queued at the capture deadline are not
+// abandoned; the final status row records any queue that remains.
 // Return: Process exit code describing write or IOCTL failure versus success.
 int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, EventWriter& writer) {
     if (!device.IsValid()) {
@@ -372,12 +375,24 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     unsigned long long driverRecordsProcessed = 0;
     unsigned long long collectorSuppressedEvents = 0;
     unsigned long long collectorSkippedEvents = 0;
+    unsigned long long drainPolls = 0;
+    unsigned long long drainReadBatches = 0;
     bool drainStoppedAtDeadline = false;
     bool drainStoppedAtBatchLimit = false;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(options.durationSeconds);
+    bool captureWindowElapsed = options.durationSeconds <= 0;
+    bool drainStartedAfterCapture = false;
+    bool drainQueueDrained = false;
+    unsigned long long drainQueueDepthAtStart = 0;
+    unsigned long long drainQueueDepthAtStop = 0;
+    const auto captureDeadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(options.durationSeconds);
 
+    // Phase 1: collect for the requested sample window.  Reaching this
+    // deadline only ends the capture phase; it must not abandon a full
+    // READ_EVENTS batch already sitting in the kernel ring.
     do {
-        if (!EmitDriverPoll(device, options, writer)) {
+        unsigned long long queueDepthSnapshot = 0;
+        if (!EmitDriverPoll(device, options, writer, &queueDepthSnapshot)) {
             return kExitRuntimeFailure;
         }
         ++polls;
@@ -415,8 +430,9 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
                 break;
             }
 
-            if (options.durationSeconds > 0 && std::chrono::steady_clock::now() >= deadline) {
-                drainStoppedAtDeadline = true;
+            if (options.durationSeconds > 0 &&
+                std::chrono::steady_clock::now() >= captureDeadline) {
+                captureWindowElapsed = true;
                 break;
             }
         }
@@ -434,7 +450,9 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
             return kExitRuntimeFailure;
         }
 
-        if (options.durationSeconds <= 0 || std::chrono::steady_clock::now() >= deadline) {
+        if (options.durationSeconds <= 0 ||
+            std::chrono::steady_clock::now() >= captureDeadline) {
+            captureWindowElapsed = options.durationSeconds > 0;
             break;
         }
 
@@ -443,7 +461,105 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(options.pollIntervalMs));
-    } while (std::chrono::steady_clock::now() < deadline);
+    } while (std::chrono::steady_clock::now() < captureDeadline);
+
+    // Phase 2: after a timed capture window, drain the queue that was already
+    // produced.  This phase is explicitly bounded and reports a non-zero
+    // remaining queue when the grace deadline or batch limit is reached.
+    if (options.durationSeconds > 0 && !drainStoppedAtBatchLimit) {
+        drainStartedAfterCapture = true;
+        const auto drainDeadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(options.drainGraceMs);
+        while (std::chrono::steady_clock::now() < drainDeadline) {
+            unsigned long long queueDepthSnapshot = 0;
+            if (!EmitDriverPoll(device, options, writer, &queueDepthSnapshot)) {
+                return kExitRuntimeFailure;
+            }
+            ++polls;
+            ++drainPolls;
+            if (drainPolls == 1) {
+                drainQueueDepthAtStart = queueDepthSnapshot;
+            }
+
+            // A poll snapshot of zero is the strongest cheap proof that the
+            // ring is empty.  The final GET_STATUS below independently records
+            // the authoritative queue depth at stop.
+            if (queueDepthSnapshot == 0) {
+                drainQueueDrained = true;
+                drainQueueDepthAtStop = 0;
+                break;
+            }
+
+            for (;;) {
+                if (options.maxReadBatches > 0 &&
+                    readBatches >= static_cast<unsigned long long>(options.maxReadBatches)) {
+                    drainStoppedAtBatchLimit = true;
+                    break;
+                }
+                if (std::chrono::steady_clock::now() >= drainDeadline) {
+                    drainStoppedAtDeadline = true;
+                    break;
+                }
+
+                unsigned long long eventsEmitted = 0;
+                unsigned long long recordsProcessed = 0;
+                unsigned long long suppressedEvents = 0;
+                if (!EmitDriverReadEvents(
+                        device,
+                        options,
+                        readBatches + 1,
+                        writer,
+                        &eventsEmitted,
+                        &recordsProcessed,
+                        &suppressedEvents)) {
+                    return kExitRuntimeFailure;
+                }
+                ++readBatches;
+                ++drainReadBatches;
+                driverEvents += eventsEmitted;
+                driverRecordsProcessed += recordsProcessed;
+                collectorSuppressedEvents += suppressedEvents;
+                const unsigned long long accountedEvents = eventsEmitted + suppressedEvents;
+                if (recordsProcessed > accountedEvents) {
+                    collectorSkippedEvents += recordsProcessed - accountedEvents;
+                }
+
+                if (recordsProcessed < options.readEventsMaxEvents) {
+                    break;
+                }
+            }
+
+            if (!EmitCollectorHeartbeat(
+                    writer,
+                    options,
+                    "drainPollComplete",
+                    polls,
+                    readBatches,
+                    driverEvents,
+                    driverRecordsProcessed,
+                    collectorSuppressedEvents,
+                    collectorSkippedEvents)) {
+                return kExitRuntimeFailure;
+            }
+
+            if (drainStoppedAtBatchLimit || drainStoppedAtDeadline) {
+                break;
+            }
+        }
+
+        if (!drainQueueDrained && !drainStoppedAtBatchLimit) {
+            drainStoppedAtDeadline = true;
+        }
+    }
+
+    unsigned long long finalQueueDepth = 0;
+    if (!EmitDriverStatus(device, options, writer, &finalQueueDepth)) {
+        return kExitRuntimeFailure;
+    }
+    drainQueueDepthAtStop = finalQueueDepth;
+    if (options.durationSeconds > 0 && finalQueueDepth == 0) {
+        drainQueueDrained = true;
+    }
 
     JsonDataObjectBuilder data;
     data.AddUtf8("reason", options.durationSeconds > 0 ? "durationElapsed" : "oneShotComplete");
@@ -457,7 +573,18 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     data.AddBool("healthOnly", false);
     data.AddUtf8("drainMode", "batchUntilEmpty");
     data.AddBool("drainStoppedAtDeadline", drainStoppedAtDeadline);
+    data.AddBool("drainStoppedAtDrainDeadline", drainStoppedAtDeadline);
     data.AddBool("drainStoppedAtBatchLimit", drainStoppedAtBatchLimit);
+    data.AddBool("captureWindowElapsed", captureWindowElapsed);
+    data.AddBool("drainStartedAfterCapture", drainStartedAfterCapture);
+    data.AddSigned("drainGraceMs", options.drainGraceMs);
+    data.AddUnsigned("drainPolls", drainPolls);
+    data.AddUnsigned("drainReadBatches", drainReadBatches);
+    data.AddUnsigned("drainQueueDepthAtStart", drainQueueDepthAtStart);
+    data.AddUnsigned("drainQueueDepthAtStop", drainQueueDepthAtStop);
+    data.AddUnsigned("remainingQueueDepth", drainQueueDepthAtStop);
+    data.AddBool("drainQueueDrained", drainQueueDrained);
+    data.AddBool("queueDrained", drainQueueDrained);
     data.AddSigned("maxReadBatches", options.maxReadBatches);
     data.AddUnsigned("readEventsMaxEvents", options.readEventsMaxEvents);
     data.AddUnsigned("driverEventSampleStride", options.driverEventSampleStride);
@@ -494,10 +621,6 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     stoppedEvent.eventType = "r0collector.stopped";
     stoppedEvent.path = options.devicePath;
     stoppedEvent.dataJson = data.Build();
-
-    if (!EmitDriverStatus(device, options, writer)) {
-        return kExitRuntimeFailure;
-    }
 
     return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
 }

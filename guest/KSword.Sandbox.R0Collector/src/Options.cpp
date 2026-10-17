@@ -184,6 +184,13 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             if (!ParseBoundedInt(value, 0, 86400, arg, &options->durationSeconds, error)) {
                 return false;
             }
+        } else if (arg == L"--drain-grace-ms" || arg == L"--drain-max-ms") {
+            if (!readValue(arg, &value)) {
+                return false;
+            }
+            if (!ParseBoundedInt(value, 0, 600000, arg, &options->drainGraceMs, error)) {
+                return false;
+            }
         } else if (arg == L"--poll-interval" || arg == L"--poll-interval-ms" || arg == L"--poll-ms" || arg == L"-p") {
             if (!readValue(arg, &value)) {
                 return false;
@@ -280,6 +287,7 @@ void PrintUsage(const wchar_t* programName) {
         << L"      --service-name <name>    Driver service name for --diagnose (default: KSwordSandboxDriver) / --diagnose \u4f7f\u7528\u7684\u9a71\u52a8\u670d\u52a1\u540d\n"
         << L"  -o, --output, --out <path>   JSON Lines output path, or '-' for stdout (default: -) / JSONL \u8f93\u51fa\u8def\u5f84\uff0c'-' \u8868\u793a\u6807\u51c6\u8f93\u51fa\n"
         << L"  -t, --duration <seconds>     Poll duration; 0 opens once and exits (default: 0) / \u8f6e\u8be2\u6301\u7eed\u65f6\u95f4\uff1b0 \u8868\u793a\u4e00\u6b21\u6027\u6253\u5f00\u540e\u9000\u51fa\n"
+        << L"      --drain-grace-ms <ms>   After a timed window, drain queued events for at most this grace period (default: 120000) / \u6709\u754c\u91c7\u96c6\u7ed3\u675f\u540e\u7ee7\u7eed drain \u7684\u6700\u5927\u5bbd\u9650\n"
         << L"  -p, --poll-ms <ms>           Poll interval in milliseconds (default: 10) / \u8f6e\u95f4\u9694\uff08\u6beb\u79d2\uff09\n"
         << L"      --poll-interval-ms <ms>  Alias for --poll-ms / --poll-ms \u522b\u540d\n"
         << L"      --diagnose               Emit service/device/ABI/READ_EVENTS readiness diagnostics / \u53d1\u51fa\u670d\u52a1/\u8bbe\u5907/ABI/READ_EVENTS \u5c31\u7eea\u8bca\u65ad\n"

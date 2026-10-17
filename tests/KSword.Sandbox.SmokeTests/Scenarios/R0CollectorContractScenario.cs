@@ -49,6 +49,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--enable-mask", "enable-mask should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--max-events", "max-events should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--max-read-batches", "max-read-batches should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--drain-grace-ms", "drain-grace-ms should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--heartbeat", "heartbeat should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--abi-self-check", "ABI self-check mode should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--contract-self-check", "contract self-check alias should be parsed.");
@@ -180,6 +181,8 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(runtimeLoop, "EmitDriverCapabilities", "Runtime loop should call capabilities before drain.");
         RequireContains(runtimeLoop, "EmitDriverSetProducerEnableMask", "Runtime loop should apply requested producer mask before drain.");
         RequireContains(runtimeLoop, "EmitDriverStatus", "Runtime loop should capture status before/after drain.");
+        RequireContains(runtimeLoop, "drainQueueDepthAtStop", "Runtime loop should retain final queue depth after bounded drain.");
+        RequireContains(runtimeLoop, "drainStoppedAtDrainDeadline", "Runtime loop should distinguish a bounded post-window drain deadline.");
         RequireContains(runtimeLoop, "EmitDriverNetworkStatus", "Runtime loop should capture WFP/ALE status before drain.");
         RequireContains(readinessDiagnostics, "EmitDriverNetworkStatus", "Readiness diagnostics should include WFP/ALE network status when the device opens.");
         RequireContains(runtimeLoop, "r0collector.heartbeat", "heartbeat rows should be emitted by the runtime loop.");

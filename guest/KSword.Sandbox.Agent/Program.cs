@@ -29,8 +29,6 @@ internal static class AgentProgram
         WriteIndented = true
     };
 
-    private static readonly TimeSpan R0CollectorGracefulStopTimeout = TimeSpan.FromSeconds(5);
-
     private static readonly TimeSpan R0CollectorDiagnosticDrainTimeout = TimeSpan.FromSeconds(2);
 
     private static readonly TimeSpan R0CollectorJsonLinesDrainTimeout = TimeSpan.FromSeconds(2);
@@ -50,6 +48,10 @@ internal static class AgentProgram
     internal const int DefaultR0CollectorMaxEventsPerRead = 8192;
 
     internal const int DefaultR0CollectorMaxReadBatches = 0;
+
+    // Timed collection continues draining already queued kernel records after
+    // the sample window; this bounded grace period is operator-configurable.
+    internal const int DefaultR0CollectorDrainGraceMs = 120_000;
 
     // A large R0 JSONL stream is already retained as a sibling artifact and
     // will be merged by the host.  Re-serializing every row into events.json
@@ -610,6 +612,8 @@ internal static class AgentProgram
             startInfo.ArgumentList.Add(options.DriverEventsPath);
             startInfo.ArgumentList.Add("--duration");
             startInfo.ArgumentList.Add(options.DurationSeconds.ToString(CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("--drain-grace-ms");
+            startInfo.ArgumentList.Add(options.R0CollectorDrainGraceMs.ToString(CultureInfo.InvariantCulture));
             startInfo.ArgumentList.Add("--max-events");
             startInfo.ArgumentList.Add(options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture));
             startInfo.ArgumentList.Add("--max-read-batches");
@@ -633,6 +637,8 @@ internal static class AgentProgram
             standardErrorFile = null;
             var commandLine = BuildR0CollectorCommandLine(options);
             events.Add(CreateR0CollectorStartedEvent(options, startedProcess.Id, standardOutputPath, standardErrorPath, commandLine));
+            var gracefulStopTimeout = TimeSpan.FromMilliseconds(
+                Math.Clamp(options.R0CollectorDrainGraceMs + 5_000, 5_000, 605_000));
             return new R0CollectorProcess(
                 startedProcess,
                 options.R0CollectorPath,
@@ -641,7 +647,8 @@ internal static class AgentProgram
                 standardErrorPath,
                 standardOutputTask,
                 standardErrorTask,
-                commandLine);
+                commandLine,
+                gracefulStopTimeout);
         }
         catch (Exception ex)
         {
@@ -715,7 +722,7 @@ internal static class AgentProgram
         var processId = SafeProcessId(collector.Process);
         try
         {
-            if (!await WaitForExitAsync(collector.Process, R0CollectorGracefulStopTimeout))
+            if (!await WaitForExitAsync(collector.Process, collector.GracefulStopTimeout))
             {
                 forcedStop = true;
                 var forcedStopEvent = new SandboxEvent
@@ -732,7 +739,7 @@ internal static class AgentProgram
                         ["processId"] = processId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
                         ["stdoutPath"] = collector.StandardOutputPath,
                         ["stderrPath"] = collector.StandardErrorPath,
-                        ["gracefulStopTimeoutSeconds"] = R0CollectorGracefulStopTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture),
+                        ["gracefulStopTimeoutSeconds"] = collector.GracefulStopTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture),
                         ["capturePolicy"] = "explicit-opt-in-r0collector-sidecar",
                         ["zhMessage"] = "R0Collector 未在宽限期内退出，Guest Agent 将强制终止 sidecar 进程树。",
                         ["zhHint"] = "该事件说明采集 sidecar 的关闭路径异常；请结合后续 r0collector.failed/exited、stdout/stderr 和 driver-events JSONL 判断证据完整性。"
@@ -997,6 +1004,7 @@ internal static class AgentProgram
                 ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
                 ["r0MaxEventsPerRead"] = options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture),
                 ["r0MaxReadBatches"] = options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture),
+                ["r0DrainGraceMs"] = options.R0CollectorDrainGraceMs.ToString(CultureInfo.InvariantCulture),
                 ["r0DriverEventSampleStride"] = options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture),
                 ["r0EnableMask"] = options.R0CollectorEnableMask is uint enableMask ? $"0x{enableMask:X8}" : string.Empty,
                 ["r0BackpressureMitigation"] = "unlimited-read-batches-with-stride-sampling",
@@ -1444,6 +1452,8 @@ internal static class AgentProgram
             QuoteCommandLineArgument(options.DriverEventsPath ?? string.Empty),
             "--duration",
             options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+            "--drain-grace-ms",
+            options.R0CollectorDrainGraceMs.ToString(CultureInfo.InvariantCulture),
             "--max-events",
             options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture),
             "--max-read-batches",
@@ -3473,7 +3483,8 @@ internal static class AgentProgram
         string StandardErrorPath,
         Task StandardOutputTask,
         Task StandardErrorTask,
-        string CommandLine);
+        string CommandLine,
+        TimeSpan GracefulStopTimeout);
 
     private sealed record DroppedFileDestination(string FullPath, string ArtifactRelativePath);
 
@@ -3585,6 +3596,8 @@ internal sealed record AgentOptions
 
     public int R0CollectorMaxReadBatches { get; init; } = AgentProgram.DefaultR0CollectorMaxReadBatches;
 
+    public int R0CollectorDrainGraceMs { get; init; } = AgentProgram.DefaultR0CollectorDrainGraceMs;
+
     public int R0CollectorDriverEventSampleStride { get; init; } = AgentProgram.DefaultR0CollectorDriverEventSampleStride;
 
     /// <summary>
@@ -3688,6 +3701,7 @@ internal sealed record AgentOptions
         var captureScreenshots = flags.Contains("screenshot") || flags.Contains("screenshots");
         var r0MaxEventsPerRead = ParseBoundedOption(values, 1, 8192, AgentProgram.DefaultR0CollectorMaxEventsPerRead, "r0-max-events", "r0-read-events-max-events", "driver-max-events");
         var r0MaxReadBatches = ParseBoundedOption(values, 0, 1_000_000, AgentProgram.DefaultR0CollectorMaxReadBatches, "r0-max-read-batches", "driver-max-read-batches");
+        var r0DrainGraceMs = ParseBoundedOption(values, 0, 600_000, AgentProgram.DefaultR0CollectorDrainGraceMs, "r0-drain-grace-ms", "driver-drain-grace-ms");
         var r0DriverEventSampleStride = ParseBoundedOption(values, 1, 1_000_000, AgentProgram.DefaultR0CollectorDriverEventSampleStride, "r0-driver-event-sample-stride", "driver-event-sample-stride", "r0-event-sample-stride");
         uint? r0EnableMask = null;
         if (values.TryGetValue("r0-enable-mask", out var rawR0EnableMask) && !string.IsNullOrWhiteSpace(rawR0EnableMask))
@@ -3715,6 +3729,7 @@ internal sealed record AgentOptions
             R0Mock = flags.Contains("r0-mock"),
             R0CollectorMaxEventsPerRead = r0MaxEventsPerRead,
             R0CollectorMaxReadBatches = r0MaxReadBatches,
+            R0CollectorDrainGraceMs = r0DrainGraceMs,
             R0CollectorDriverEventSampleStride = r0DriverEventSampleStride,
             R0CollectorEnableMask = r0EnableMask,
             CaptureScreenshots = captureScreenshots,

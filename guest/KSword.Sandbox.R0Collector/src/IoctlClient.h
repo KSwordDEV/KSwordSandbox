@@ -64,14 +64,22 @@ bool EmitDriverCapabilities(
     const Options& options,
     EventWriter& writer,
     ULONG* supportedProducerMask);
-bool EmitDriverStatus(const UniqueHandle& device, const Options& options, EventWriter& writer);
+bool EmitDriverStatus(
+    const UniqueHandle& device,
+    const Options& options,
+    EventWriter& writer,
+    unsigned long long* queueDepth = nullptr);
 bool EmitDriverNetworkStatus(const UniqueHandle& device, const Options& options, EventWriter& writer);
 bool EmitDriverSetProducerEnableMask(
     const UniqueHandle& device,
     const Options& options,
     ULONG automaticProducerMask,
     EventWriter& writer);
-bool EmitDriverPoll(const UniqueHandle& device, const Options& options, EventWriter& writer);
+bool EmitDriverPoll(
+    const UniqueHandle& device,
+    const Options& options,
+    EventWriter& writer,
+    unsigned long long* eventsQueued = nullptr);
 bool EmitDriverReadEvents(
     const UniqueHandle& device,
     const Options& options,

@@ -1,3 +1,4 @@
+using System.Globalization;
 using KSword.Sandbox.Abstractions;
 
 namespace KSword.Sandbox.Core.Orchestration;
@@ -1759,7 +1760,9 @@ public sealed class HyperVRunbookBuilder
             // still drains in bounded batches; stride sampling is reserved
             // for an explicit operator override.
             "--r0-driver-event-sample-stride",
-            "1"
+            "1",
+            "--r0-drain-grace-ms",
+            config.Driver.R0CollectorDrainGraceMs.ToString(CultureInfo.InvariantCulture)
         };
 
         if (config.Driver.UseMockCollector)

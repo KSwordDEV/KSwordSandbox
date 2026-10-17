@@ -46,6 +46,12 @@ Options:
   中文：JSONL 输出路径；`-` 表示标准输出。
 - `--duration`, `-t`: Poll duration in seconds. `0` performs one health/poll/read-events pass.
   中文：轮询持续秒数；`0` 表示只执行一次 health/poll/read-events。
+- `--drain-grace-ms <ms>` (alias `--drain-max-ms`): after a timed collection
+  window, continue draining queued kernel records until `eventsQueued=0` or
+  this bounded grace period expires. Default `120000`, maximum `600000`. The
+  final `r0collector.stopped` row keeps start/stop queue depth and explicit
+  `drainQueueDrained`/`drainStoppedAtDrainDeadline` evidence.
+  中文：有界采集结束后继续读取内核队列；超时不会隐藏剩余队列。
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in milliseconds.
   中文：轮询间隔，单位毫秒。
 - `--diagnose`, `--readiness`, `--readiness-check`: emit live non-mutating

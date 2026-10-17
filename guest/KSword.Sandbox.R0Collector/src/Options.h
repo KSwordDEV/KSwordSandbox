@@ -11,6 +11,14 @@ struct Options {
     std::wstring serviceName = L"KSwordSandboxDriver";
     std::wstring outputPath = L"-";
     int durationSeconds = 0;
+    // Once a timed collection window ends, keep draining the kernel ring for
+    // this bounded grace period. A finite grace period makes the end-of-run
+    // loss observable instead of silently abandoning records already queued.
+    // High-volume samples can leave hundreds of thousands of records queued
+    // at the capture deadline. The default is intentionally long enough to
+    // drain that backlog on the normal collector path; operators can lower it
+    // explicitly when a hard run-time cap is preferred.
+    int drainGraceMs = 120000;
     // Keep the live ring drain responsive during guest boot and sample launch.
     // The producer queue is finite; a 500 ms default lets file/registry
     // startup bursts overwrite records before the first drain. Operators can

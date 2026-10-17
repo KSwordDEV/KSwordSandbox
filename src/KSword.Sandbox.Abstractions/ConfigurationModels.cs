@@ -296,5 +296,12 @@ public sealed record DriverConfig
 
     public string DevicePath { get; init; } = "\\\\.\\KSwordSandboxDriver";
 
+    /// <summary>
+    /// Bounded post-window R0 ring drain grace period in milliseconds. The
+    /// Guest Agent forwards this value to R0Collector so a timed run does not
+    /// stop consuming records exactly at the sample deadline.
+    /// </summary>
+    public int R0CollectorDrainGraceMs { get; init; } = 120_000;
+
     public bool UseMockCollector { get; init; }
 }

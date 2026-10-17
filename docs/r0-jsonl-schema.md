@@ -105,8 +105,12 @@ Example:
   `serviceDiagnosticCode`, `openDeviceDiagnosticCode`, `abiDiagnosticCode`, and
   `readEventsDiagnosticCode`.
 - `r0collector.stopped`: final row on successful synthetic, one-shot, or timed
-  completion. Live drain rows include `drainMode`, `drainStoppedAtDeadline`,
-  and `readEventsMaxEvents`.
+  completion. Timed live rows include a separate post-window drain contract:
+  `captureWindowElapsed`, `drainGraceMs`, `drainStartedAfterCapture`,
+  `drainQueueDepthAtStart`, `drainQueueDepthAtStop`, `remainingQueueDepth`,
+  `drainQueueDrained`, `drainStoppedAtDrainDeadline`, and
+  `drainStoppedAtBatchLimit`. A non-zero `remainingQueueDepth` is explicit
+  evidence that the bounded drain ended before the kernel queue emptied.
 
 Error rows:
 
