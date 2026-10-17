@@ -26,16 +26,19 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         var reportStagePath = Path.Combine(context.RepositoryRoot, "src", "KSword.Sandbox.Core", "Pipeline", "Stages", "ReportArtifactStage.cs");
         var analysisModelsPath = Path.Combine(context.RepositoryRoot, "src", "KSword.Sandbox.Abstractions", "AnalysisModels.cs");
         var docPath = Path.Combine(context.RepositoryRoot, "docs", "report-ux.md");
+        var rulesPath = Path.Combine(context.RepositoryRoot, "rules", "behavior-rules.json");
 
         SmokeAssert.True(File.Exists(rendererPath), "HTML report renderer is missing.");
         SmokeAssert.True(File.Exists(reportStagePath), "Report artifact stage is missing.");
         SmokeAssert.True(File.Exists(analysisModelsPath), "Analysis job model is missing.");
         SmokeAssert.True(File.Exists(docPath), "Report UX documentation is missing.");
+        SmokeAssert.True(File.Exists(rulesPath), "Behavior rule set is missing.");
 
         var rendererSource = File.ReadAllText(rendererPath);
         var reportStage = File.ReadAllText(reportStagePath);
         var analysisModels = File.ReadAllText(analysisModelsPath);
         var doc = File.ReadAllText(docPath);
+        var rules = File.ReadAllText(rulesPath);
 
         RequireContains(rendererSource, "AppendTimeline", "Report renderer should include a timeline section.");
         RequireContains(rendererSource, "BuildTimelineGroups", "Report renderer should group timeline events for stable visual scanning.");
@@ -121,6 +124,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "collectionLossRows", "Report focus should include collection-health loss rows in the runtime boundary.");
         RequireContains(rendererSource, ".modern-sandbox-report .section-note{display:block}", "Modern report styling should keep collection and evidence section notes visible.");
         RequireContains(rendererSource, "collection-health-note", "Failure reasons should surface collection-health loss/failure counters.");
+        RequireNotContains(rules, "behaviorCounted=true", "Operator-facing rule summaries must not expose internal behaviorCounted policy keys.");
         RequireContains(rendererSource, "localized-evidence-field", "Report renderer should hide localized evidence fields from English report chrome.");
         RequireContains(rendererSource, "No sample-attributed events of this type were found; see collection coverage for capture state.", "Report renderer should explain empty lanes without implying capture failure.");
         RequireContains(rendererSource, "observed-empty", "Report renderer should distinguish observed-empty artifact lanes.");

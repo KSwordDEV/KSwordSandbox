@@ -2765,8 +2765,8 @@
       "title": "R0 driver registry mutation signal",
       "titleZh": "R0 驱动注册表变更信号",
       "severity": "medium",
-      "summary": "Driver registry mutation rows are promoted only when sample correlation marked behaviorCounted=true; empty-process CTL/certificate maintenance rows stay telemetry diagnostics.",
-      "summaryZh": "仅当样本关联已标记 behaviorCounted=true 时才提升 R0 注册表变更行；空进程 CTL/证书维护行保留为遥测诊断。",
+      "summary": "Driver registry mutation rows are promoted only when sample correlation confirms sample behavior; empty-process CTL/certificate maintenance rows stay telemetry diagnostics.",
+      "summaryZh": "仅在样本关联确认样本行为时才提升 R0 注册表变更行；空进程 CTL/证书维护行保留为遥测诊断。",
       "mitreTechniqueId": "T1112",
       "mitreTechniqueName": "Modify Registry",
       "eventTypes": [
