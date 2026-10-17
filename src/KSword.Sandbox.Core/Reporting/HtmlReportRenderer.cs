@@ -9851,7 +9851,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     /// </summary>
     private static string CopyButton(string label, string copyText)
     {
-        return $"<button type=\"button\" class=\"copy-btn\" data-copy-button=\"true\" data-copy=\"{A(copyText)}\">{E(label)}</button>";
+        return $"<button type=\"button\" class=\"copy-btn\" data-copy=\"{A(copyText)}\" data-copy-button=\"true\">{E(label)}</button>";
     }
 
     /// <summary>

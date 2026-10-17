@@ -423,7 +423,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "目标虚拟机", "Chinese report covers should localize the provider VM label.");
         RequireContains(chineseHtml, "干净基线", "Chinese report covers should localize the provider baseline label.");
         RequireContains(chineseHtml, "QEMU 基础磁盘", "Chinese report covers should localize the QEMU base-disk label.");
-        RequireContains(chineseHtml, "可见证据行；", "Chinese event explorer status should localize the visible evidence-row label.");
+        RequireContains(chineseVisibleText, "可见行", "Chinese event explorer status should localize the compact visible-row label.");
         RequireContains(chineseHtml, "采集丢失", "Chinese focus cards should expose collection-loss status.");
         RequireContains(chineseHtml, "采集健康：", "Chinese failure reasons should expose collection-health counters.");
         RequireContains(chineseHtml, "报告中还有更多证据行。", "Chinese event explorer status should explain additional evidence rows in Chinese.");
