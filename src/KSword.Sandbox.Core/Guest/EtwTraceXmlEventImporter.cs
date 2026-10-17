@@ -144,6 +144,8 @@ public static class EtwTraceXmlEventImporter
         if (value.Contains("image", StringComparison.Ordinal) || value.Contains("load", StringComparison.Ordinal)) return "image.load";
         if (value.Contains("thread", StringComparison.Ordinal) && value.Contains("start", StringComparison.Ordinal)) return "thread.start";
         if (value.Contains("thread", StringComparison.Ordinal) && (value.Contains("stop", StringComparison.Ordinal) || value.Contains("end", StringComparison.Ordinal))) return "thread.exit";
+        if (value.Contains("file", StringComparison.Ordinal) || value.Contains("fileio", StringComparison.Ordinal)) return "file.etw";
+        if (value.Contains("network", StringComparison.Ordinal) || value.Contains("tcp", StringComparison.Ordinal)) return "network.etw";
         return value.Contains("registry", StringComparison.Ordinal) ? "registry.etw" : "etw.event";
     }
 
