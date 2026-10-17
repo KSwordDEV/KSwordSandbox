@@ -86,6 +86,7 @@ public static class CollectionHealthSummaryBuilder
         var etwFailureRows = raw.Count(IsEtwFailure);
         var pcapFailureRows = raw.Count(IsPcapFailure);
         var agentFailureRows = raw.Count(evt => IsAgentFailure(evt, raw));
+        var processTreeUnavailableRows = raw.Count(evt => IsProcessTreeUnavailableFailure(evt, raw));
         var stateReasons = BuildStateReasons(
             raw,
             driverHealthRows.Count,
@@ -135,7 +136,7 @@ public static class CollectionHealthSummaryBuilder
             DriverDrainStoppedAtDeadlineRows = driverHealthRows.Count(IsDrainStoppedAtDeadline),
             DriverEventsSuppressed = ToMetricInt(MaxDataUnsigned(driverHealthRows, DriverSuppressedKeys)),
             DriverQualityWarningRows = driverHealthRows.Count(IsDriverQualityWarning),
-            ProcessTreeUnavailable = raw.Count(IsProcessTreeUnavailable),
+            ProcessTreeUnavailable = processTreeUnavailableRows,
             ScheduledTaskCaptureFailed = raw.Count(IsScheduledTaskCaptureFailed),
             PktmonStopFailed = raw.Count(IsPktmonStopFailed),
             EtwDecodeFailed = raw.Count(IsEtwDecodeFailure),
@@ -257,7 +258,7 @@ public static class CollectionHealthSummaryBuilder
 
     private static bool IsFailureRow(SandboxEvent evt, IReadOnlyCollection<SandboxEvent> raw)
     {
-        if (IsLossRow(evt) || IsProcessTreeUnavailable(evt) || IsScheduledTaskCaptureFailed(evt) ||
+        if (IsLossRow(evt) || IsProcessTreeUnavailableFailure(evt, raw) || IsScheduledTaskCaptureFailed(evt) ||
             IsPktmonStopFailed(evt) || IsEtwDecodeFailure(evt) ||
             IsEtwFailure(evt) || IsPcapFailure(evt) || IsAgentFailure(evt, raw) ||
             IsMalformedDriverRow(evt) || IsOutputWriteFailureRow(evt))
@@ -468,6 +469,30 @@ public static class CollectionHealthSummaryBuilder
 
     private static bool IsProcessTreeUnavailable(SandboxEvent evt) =>
         string.Equals(evt.EventType, "process.tree_unavailable", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsProcessTreeUnavailableFailure(
+        SandboxEvent evt,
+        IReadOnlyCollection<SandboxEvent> raw)
+    {
+        if (!IsProcessTreeUnavailable(evt))
+        {
+            return false;
+        }
+
+        // After-run probes naturally observe a root after the executor has
+        // terminated it. If the same PID already produced a process.tree or
+        // process.snapshot row, the lineage was captured and this is an
+        // expected terminal visibility transition rather than a collection
+        // failure. Keep the unavailable row in raw evidence.
+        return !raw.Any(other =>
+            other.ProcessId == evt.ProcessId &&
+            (string.Equals(other.EventType, "process.tree", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(other.EventType, "process.snapshot", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(other.EventType, "process.start", StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrWhiteSpace(evt.Path) || string.IsNullOrWhiteSpace(other.Path) ||
+             string.Equals(evt.Path, other.Path, StringComparison.OrdinalIgnoreCase)) &&
+            other.Timestamp <= evt.Timestamp);
+    }
 
     private static bool IsScheduledTaskCaptureFailed(SandboxEvent evt) =>
         string.Equals(evt.EventType, "scheduled_task.capture_failed", StringComparison.OrdinalIgnoreCase) ||
