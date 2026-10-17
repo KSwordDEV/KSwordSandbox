@@ -639,6 +639,12 @@ public sealed partial class SandboxJobService
 
     private static bool IsImportedAgentFailure(SandboxEvent evt)
     {
+        if (string.Equals(evt.EventType, "sample.runtime.preflight.failed", StringComparison.OrdinalIgnoreCase) &&
+            EventDataTruthy(evt, "collectionHealth", "sampleRuntimePreflight"))
+        {
+            return true;
+        }
+
         if (!evt.EventType.StartsWith("agent.", StringComparison.OrdinalIgnoreCase))
         {
             return false;
