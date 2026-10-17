@@ -332,6 +332,15 @@ public static class CollectionHealthSummaryBuilder
 
     private static bool IsFailureRow(SandboxEvent evt, IReadOnlyCollection<SandboxEvent> raw)
     {
+        // A process snapshot can legitimately miss a short-lived or already
+        // exited process. Guest Agent marks this exact boundary with a stable
+        // reason; keep it as diagnostics without inflating collection failure
+        // counts. A process.tree_unavailable row remains a real gap.
+        if (IsExpectedProcessSnapshotMiss(evt))
+        {
+            return false;
+        }
+
         if (IsLossRow(evt) || IsProcessTreeUnavailableFailure(evt, raw) || IsScheduledTaskCaptureFailed(evt) ||
             IsPktmonStopFailed(evt) || IsEtwDecodeFailure(evt) ||
             IsEtwFailure(evt) || IsPcapFailure(evt) || IsAgentFailure(evt, raw) ||
@@ -343,6 +352,15 @@ public static class CollectionHealthSummaryBuilder
         var type = evt.EventType ?? string.Empty;
         return TextContainsAny(type, "failed", "failure", "error", "unavailable", "missing") ||
             TextEqualsAny(Value(evt, "status", "captureState", "readinessState"), "failed", "failure", "error", "unavailable", "missing");
+    }
+
+    private static bool IsExpectedProcessSnapshotMiss(SandboxEvent evt)
+    {
+        return string.Equals(evt.EventType, "process.snapshot", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(
+                Value(evt, "reason", "snapshotReason"),
+                "processNotVisibleInCurrentSnapshot",
+                StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsLossRow(SandboxEvent evt) => IsEtwLossRow(evt) || IsDriverLossRow(evt);

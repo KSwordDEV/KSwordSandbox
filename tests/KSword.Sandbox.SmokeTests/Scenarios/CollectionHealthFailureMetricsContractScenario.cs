@@ -104,6 +104,7 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(6, model.CollectionHealth.FailureRows, "AnalysisReport should carry the collection-health model.");
 
         AssertStateBoundaries();
+        AssertExpectedProcessSnapshotMiss();
         AssertRequestedMaxEventsBatchCap();
         AssertExpectedDisabledProducerSuppression();
         AssertExpectedTimeoutTermination();
@@ -236,6 +237,41 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         ]);
         RequireTrue(unknownFinal.State == "partial", "Zero loss without a final queue state must remain partial.");
         RequireTrue(!unknownFinal.DriverQueueDepthAtStopKnown, "A startup/status snapshot must not prove a final queue state.");
+    }
+
+    private static void AssertExpectedProcessSnapshotMiss()
+    {
+        var summary = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "process.snapshot",
+                Source = "guest",
+                Timestamp = DateTimeOffset.UtcNow,
+                Data =
+                {
+                    ["collectionHealth"] = "true",
+                    ["status"] = "missing",
+                    ["reason"] = "processNotVisibleInCurrentSnapshot"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "r0collector.stopped",
+                Source = "r0collector",
+                Timestamp = DateTimeOffset.UtcNow.AddMilliseconds(1),
+                Data =
+                {
+                    ["statusPhase"] = "final",
+                    ["finalStatusAvailable"] = "true",
+                    ["queueDrained"] = "true",
+                    ["remainingQueueDepth"] = "0"
+                }
+            }
+        ]);
+        RequireEqual(0, summary.FailureRows, "An explicitly explained process snapshot miss must remain a diagnostic, not a collection failure.");
+        RequireEqual(0, summary.ProcessTreeUnavailable, "A process snapshot miss must not become a process-tree-unavailable count.");
+        RequireTrue(summary.State == "complete", "An explained process snapshot miss alone should not degrade collection health.");
     }
 
     private static void AssertRequestedMaxEventsBatchCap()
