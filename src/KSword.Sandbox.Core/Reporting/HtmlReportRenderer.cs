@@ -303,6 +303,14 @@ public sealed class HtmlReportRenderer
         Render(report, artifacts, collections, HtmlReportLanguage.ChineseSimplified);
 
     /// <summary>
+    /// Localizes an already-rendered English report without rebuilding all
+    /// evidence sections. Inputs are the English HTML and its report model;
+    /// processing applies the protected Chinese translation pass once.
+    /// </summary>
+    public string LocalizeChineseFromEnglish(string englishHtml, AnalysisReport report) =>
+        LocalizeChineseHtml(englishHtml, report);
+
+    /// <summary>
     /// Renders the pair of localized report documents expected by operators.
     /// Inputs are a completed report; processing returns in-memory HTML payloads
     /// for report.en.html and report.zh.html; callers decide whether and where
