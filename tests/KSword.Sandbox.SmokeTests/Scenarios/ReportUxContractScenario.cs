@@ -505,7 +505,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(englishHtml, "href=\"D:\\", "Rendered HTML must not expose local absolute Windows paths as href values.");
         RequireNotContains(englishHtml, "href=\"C:\\", "Rendered HTML must not expose guest/local absolute Windows paths as href values.");
         RequireNotContains(englishHtml, "file://", "Rendered HTML must not expose file:// artifact hrefs.");
-        RequireContains(englishHtml, "Command line hidden by default", "Rendered event rows should fold command lines by default.");
+        RequireContains(englishHtml, "Command line", "Rendered event rows should retain a compact command-line field label.");
         RequireContains(englishHtml, "raw-technical-fields", "Rendered raw event details should retain a compact technical-field disclosure.");
         RequireContains(englishHtml, "raw-technical-field", "Rendered raw event details should retain expandable technical-field rows.");
         RequireContains(englishHtml, "Standard output", "Rendered raw event details should retain the stdout field label.");
