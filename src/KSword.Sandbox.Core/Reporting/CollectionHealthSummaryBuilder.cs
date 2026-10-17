@@ -306,7 +306,9 @@ public static class CollectionHealthSummaryBuilder
         var category = Value(evt, "jsonlLineCategory", "jsonlImportStatus");
         return string.Equals(type, "driver.parse_error", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(type, "driver.read_error", StringComparison.OrdinalIgnoreCase) ||
-            TextContainsAny(category, "malformed", "unreadable", "read-error");
+            TextContainsAny(category, "malformed", "unreadable", "read-error") ||
+            AnyPositiveData(evt, "rawJsonlMalformedLineCount") ||
+            TextEqualsAny(Value(evt, "rawJsonlReadStatus"), "stream-summary-partial", "read-error");
     }
 
     private static bool IsOutputWriteFailureRow(SandboxEvent evt)
