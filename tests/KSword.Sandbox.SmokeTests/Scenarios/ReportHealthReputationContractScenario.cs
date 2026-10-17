@@ -315,6 +315,31 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         RequireContains(blockedClrHtml, "Sample-attributed behavior is indeterminate", "Non-zero process exits must keep sample behavior indeterminate rather than implying maliciousness.");
         RequireNotContains(blockedClrHtml, "No high-risk behavior", "A non-zero CLR early exit must not render a reassuring no-risk verdict.");
 
+        // A failed sample launch can carry a weak/false classifier marker when
+        // the guest could not establish normal lineage. The submitted sample
+        // path/name remains authoritative for this execution boundary, so the
+        // report must still surface the failure at the cover and failure lane.
+        var weaklyCorrelatedClrExit = blockedClrExit with
+        {
+            Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["runtime"] = "CLR",
+                ["exitCode"] = "-2146232576",
+                ["sampleBehaviorCandidate"] = "false",
+                ["sampleCorrelation"] = "unknown"
+            }
+        };
+        var weaklyCorrelatedClrReport = baseline with
+        {
+            Events = [staticEvent, weaklyCorrelatedClrExit],
+            Findings = [staticFinding]
+        };
+        var weaklyCorrelatedClrHtml = renderer.RenderEnglish(weaklyCorrelatedClrReport);
+        RequireContains(weaklyCorrelatedClrHtml, "Sample execution failed / runtime indeterminate", "The report cover must surface a failed sample exit even when correlation is weak.");
+        RequireContains(weaklyCorrelatedClrHtml, "Sample execution outcome", "Weakly correlated sample exit must remain in the failure lane.");
+        RequireNotContains(weaklyCorrelatedClrHtml, "No high-risk behavior", "A weakly correlated non-zero sample exit must not render a reassuring no-risk verdict.");
+        RequireContains(renderer.RenderChinese(weaklyCorrelatedClrReport), "样本执行失败/运行期不可判定", "Chinese reports must surface failed sample execution at the cover.");
+
         var completeBehavior = new SandboxEvent
         {
             EventType = "network.http",

@@ -551,6 +551,13 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("<h1>KSword Sandbox Report</h1>");
         html.AppendLine($"<p class=\"muted\">Job {E(report.JobId.ToString())} generated at {E(report.GeneratedAt.ToString("u"))}</p>");
         html.AppendLine($"<p><span class=\"badge badge-{E(verdict.Css)} triage-verdict\">{E(triageVerdict)}</span> <span class=\"badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</span></p>");
+        if (HasExecutionBlockedVerdict(report))
+        {
+            // Keep the execution outcome visible in the cover. A failed or
+            // early sample process must never look like a quiet, clean run
+            // after the operator has scrolled past the verdict badge.
+            html.AppendLine("<div class=\"failure-note execution-failure-banner\" role=\"alert\"><strong>Sample execution failed / runtime indeterminate</strong><span>Sample execution failed or ended before complete runtime behavior. This is an execution outcome, not a maliciousness verdict.</span></div>");
+        }
         html.AppendLine("<table><tbody>");
         Row(html, "Sample", report.Sample.FileName);
         Row(html, "SHA-256", report.Sample.Sha256);
@@ -819,7 +826,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             .ToList();
         var sampleEvents = report.Events.Count(IsSampleBehaviorEvent);
         var failures = report.Events.Count(IsOperationalFailureEvent);
-        var sampleExitOutcomes = report.Events.Count(IsNonZeroSampleExitEvent);
+        var sampleExitOutcomes = report.Events.Count(evt => IsNonZeroSampleExitEvent(report, evt));
         var collectionFailureRows = Math.Max(0, report.CollectionHealth.FailureRows);
         var collectionLossRows = Math.Max(0, report.CollectionHealth.LossRows);
         var artifactCount = artifacts.Count;
@@ -887,7 +894,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         // rendering cap. Filters therefore describe the complete dynamic
         // evidence population, while the table may still show compact rows.
         var explorerEvents = report.Events
-            .Where(IsEventExplorerEvent)
+            .Where(evt => IsEventExplorerEvent(report, evt))
             .ToList();
         var rows = explorerEvents
             .OrderByDescending(IsKeyOperationalEvent)
@@ -905,7 +912,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         // driver/file telemetry must not push the execution outcome out of
         // the first screen where operators look for it.
         var priorityRows = rows
-            .Where(row => IsEventExplorerPriority(row.Event))
+            .Where(row => IsEventExplorerPriority(report, row.Event))
             .Take(Math.Min(40, inlineRows))
             .ToList();
         var priorityKeys = priorityRows.Select(row => EventIdentityKey(row.Event)).ToHashSet(StringComparer.Ordinal);
@@ -1041,6 +1048,9 @@ html[lang="en"] .localized-evidence-field{display:none}
             IsNonZeroSampleExitEvent(evt);
     }
 
+    private static bool IsEventExplorerPriority(AnalysisReport report, SandboxEvent evt) =>
+        IsNonZeroSampleExitEvent(report, evt) || IsEventExplorerPriority(evt);
+
     private static void AppendCollectionCoverageBanner(
         StringBuilder html,
         AnalysisReport report,
@@ -1108,7 +1118,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             .FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(matching)) return matching;
         if (IsReportCollectionDiagnosticEvent(evt)) return "info";
-        if (IsNonZeroSampleExitEvent(evt)) return "info";
+        if (IsNonZeroSampleExitEvent(report, evt)) return "info";
         if (IsOperationalFailureEvent(evt)) return "high";
         if (IsSampleBehaviorEvent(evt)) return "medium";
         return "info";
@@ -5092,7 +5102,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var failures = report.Events.Where(IsOperationalFailureEvent).ToList();
-        var sampleExitOutcomes = report.Events.Where(IsNonZeroSampleExitEvent).ToList();
+        var sampleExitOutcomes = report.Events.Where(evt => IsNonZeroSampleExitEvent(report, evt)).ToList();
         var collectionFailureRows = Math.Max(0, report.CollectionHealth.FailureRows);
         var collectionLossRows = Math.Max(0, report.CollectionHealth.LossRows);
         var collectionHealthAlert = collectionFailureRows > 0 ||
@@ -8181,6 +8191,9 @@ html[lang="en"] .localized-evidence-field{display:none}
             type.StartsWith("etw_security.", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsEventExplorerEvent(AnalysisReport report, SandboxEvent evt) =>
+        IsNonZeroSampleExitEvent(report, evt) || IsEventExplorerEvent(evt);
+
     private static bool IsReportCollectionDiagnosticEvent(SandboxEvent evt) =>
         IsCollectionDiagnosticFailure(evt) ||
         IsWmiInventoryProbeFailureEvent(evt);
@@ -9104,8 +9117,75 @@ html[lang="en"] .localized-evidence-field{display:none}
             return false;
         }
 
+        return IsNonZeroProcessExit(evt);
+    }
+
+    /// <summary>
+    /// Identifies a non-zero exit from the submitted sample even when the
+    /// correlation classifier marked the row weak or false. Inputs are the
+    /// normalized report and one exit row; processing uses the submitted
+    /// sample identity as a stable execution boundary, and the method returns
+    /// true only for a non-zero process exit belonging to that sample.
+    /// </summary>
+    private static bool IsNonZeroSampleExitEvent(AnalysisReport report, SandboxEvent evt)
+    {
+        if (!IsNonZeroProcessExit(evt))
+        {
+            return false;
+        }
+
+        if (IsSampleBehaviorEvent(evt))
+        {
+            return true;
+        }
+
+        return IsSubmittedSampleProcessExit(report, evt);
+    }
+
+    private static bool IsNonZeroProcessExit(SandboxEvent evt)
+    {
+        if (!string.Equals(evt.EventType, "process.exit", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         var exitCode = ProcessExitCodeRaw(evt);
         return TryParseExitCode(exitCode, out var parsed) && parsed != 0;
+    }
+
+    private static bool IsSubmittedSampleProcessExit(AnalysisReport report, SandboxEvent evt)
+    {
+        // Explicit collector/health/reputation markers override an incidental
+        // matching process name. A path/name match still wins over a weak
+        // correlation marker because the process exit is direct evidence about
+        // the submitted executable's execution attempt.
+        if (IsCollectorSelfNoiseEvent(evt) || IsCollectionHealthEvent(evt) || IsVirusTotalEvent(evt))
+        {
+            return false;
+        }
+
+        var sampleName = report.Sample.FileName;
+        var samplePath = report.Sample.FullPath;
+        var processName = evt.ProcessName ?? string.Empty;
+        var processPath = evt.Path ?? string.Empty;
+        if (string.Equals(processName, sampleName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(processPath, samplePath, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileName(processPath), sampleName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var identityValues = new[]
+        {
+            FirstEventDataValue(evt, "samplePath", "sampleFullPath", "submittedSamplePath", "sampleFilePath"),
+            FirstEventDataValue(evt, "sampleName", "sampleFileName", "submittedSampleName", "sampleProcessName"),
+            FirstEventDataValue(evt, "processPath", "processImagePath", "imagePath", "image"),
+            FirstEventDataValue(evt, "processName", "imageName", "processImageName")
+        };
+        return identityValues.Any(value =>
+            string.Equals(value, samplePath, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, sampleName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileName(value), sampleName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? BuildProcessExitCodeContext(SandboxEvent evt)
@@ -9580,7 +9660,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         return report.Events.Any(IsSampleStartBlockedEvent) ||
-            report.Events.Any(IsNonZeroSampleExitEvent);
+            report.Events.Any(evt => IsNonZeroSampleExitEvent(report, evt));
     }
 
     /// <summary>
@@ -10598,6 +10678,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         (" generated at ", " 生成于 "),
         ("Analysis failed", "分析失败"),
         ("Execution blocked / runtime indeterminate", "执行被阻断/运行期不可判定"),
+        ("Sample execution failed / runtime indeterminate", "样本执行失败/运行期不可判定"),
+        ("Sample execution failed or ended before complete runtime behavior. This is an execution outcome, not a maliciousness verdict.", "样本执行失败或在产生完整运行期行为前结束。这是执行结果，不是恶意性判定。"),
         ("Execution complete / runtime evidence incomplete", "执行完成/运行期证据不完整"),
         ("Exit code context:", "退出码上下文："),
         ("Exit code ", "退出码 "),
