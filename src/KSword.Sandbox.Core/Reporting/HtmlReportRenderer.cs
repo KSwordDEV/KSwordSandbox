@@ -374,7 +374,7 @@ public sealed class HtmlReportRenderer
         AppendStaticAnalysis(html, report);
         AppendDynamicAnalysis(html, report);
         AppendVirusTotalSummary(html, report, artifactLookup, artifactLinks);
-        var largeReport = report.Events.Count > 1000;
+        var largeReport = report.Events.Count > 500;
         if (largeReport)
         {
             AppendLargeReportRenderingNotice(html, report);
