@@ -993,6 +993,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.Append($"<label>{E(label)} <select {attribute}><option value=\"all\">All</option>");
         foreach (var value in values)
         {
+            // Keep the machine value and visible label identical in the
+            // English source. The Chinese pass replaces only these option
+            // labels after restoring protected tags, so filtering continues to
+            // compare the stable data value.
             html.Append($"<option value=\"{A(value)}\">{E(value)}</option>");
         }
 
@@ -10303,13 +10307,22 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Replace("-", string.Empty, StringComparison.Ordinal)
             .Replace(".", string.Empty, StringComparison.Ordinal)
             .ToLowerInvariant();
-        // These collector fields are retained as folded technical evidence so
-        // an analyst can expand them when needed, but they must not appear in
-        // compact event cards or their summaries.
+        // Localized classifier text is an implementation detail. Keep the
+        // stable event/finding title and real evidence values instead of
+        // exposing duplicate guidance in every event row.
+        if (normalized.StartsWith("zh", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Collector policy/metadata keys explain routing and sampling rather
+        // than an observed action. Keep them in report.json/raw source only;
+        // exposing them as technical evidence turns the card into a debug dump.
         if (normalized.StartsWith("metadata", StringComparison.Ordinal) ||
+            normalized.Contains("policy", StringComparison.Ordinal) ||
             normalized is "actorprocessid" or "collectorabiversion" or "producer" or "schema" or "sequence" or "stress")
         {
-            return false;
+            return true;
         }
 
         if (normalized is "omitteddatapairs" or "omittedfields" ||
@@ -10536,6 +10549,49 @@ html[lang="en"] .localized-evidence-field{display:none}
         foreach (var (english, chinese) in replacements)
         {
             html = html.Replace(english, chinese, StringComparison.Ordinal);
+        }
+
+        // Event explorer filter options retain their stable English data value
+        // for the JavaScript matcher, while the Chinese report shows compact
+        // user-facing aliases. Restrict replacements to option elements so
+        // evidence payloads and data attributes remain byte-for-byte intact.
+        foreach (var (value, chinese) in new (string Value, string Chinese)[]
+        {
+            ("guest", "来宾"),
+            ("host", "主机"),
+            ("driver", "驱动"),
+            ("r0", "驱动"),
+            ("r0collector", "驱动"),
+            ("etw", "ETW"),
+            ("pcap", "抓包"),
+            ("packet_capture", "抓包"),
+            ("unknown", "未知"),
+            ("execution", "执行"),
+            ("storage", "存储"),
+            ("network", "网络"),
+            ("persistence", "持久化"),
+            ("collection", "采集"),
+            ("failure", "失败"),
+            ("static", "静态"),
+            ("reputation", "信誉"),
+            ("other", "其他"),
+            ("critical", "严重"),
+            ("high", "高"),
+            ("medium", "中"),
+            ("low", "低"),
+            ("info", "信息"),
+            ("confirmed", "已确认"),
+            ("probable", "可能关联"),
+            ("observed", "已观察"),
+            ("unattributed", "未归因"),
+            ("diagnostic", "采集诊断")
+        })
+        {
+            html = Regex.Replace(
+                html,
+                $"(<option\\b[^>]*\\bvalue=\\\"{Regex.Escape(value)}\\\"[^>]*>){Regex.Escape(value)}(</option>)",
+                $"$1{chinese}$2",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
         return html;
@@ -12962,13 +13018,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Take(maxPairs)
             .Select(pair => $"{pair.Key}={FormatBoundedEvidenceFieldValue(pair.Key, pair.Value, maxValueLength)}")
             .ToList();
-        var hidden = Math.Max(0, evt.Data.Count - pairs.Count);
-        if (hidden > 0)
-        {
-            pairs.Add($"Additional internal or technical fields hidden: {hidden}.");
-        }
-
-        return string.Join(Environment.NewLine, pairs);
+        return pairs.Count == 0 ? "-" : string.Join(Environment.NewLine, pairs);
     }
 
     /// <summary>

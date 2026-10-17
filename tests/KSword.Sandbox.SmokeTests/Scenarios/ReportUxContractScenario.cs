@@ -439,6 +439,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(chineseVisibleText, "隐藏技术字段", "Chinese event evidence must use compact field labels instead of the technical-field prompt.");
         RequireNotContains(chineseVisibleText, "复制行为证据", "Chinese event evidence copy buttons should use the compact 复制 label.");
         RequireNotContains(chineseVisibleText, "证据字段", "Chinese event evidence must not expose an evidence-field count or heading.");
+        RequireNotContains(chineseVisibleText, "Additional internal or technical fields hidden", "Chinese event evidence must not expose internal-field counts.");
+        RequireContains(chineseHtml, "<option value=\"guest\">来宾</option>", "Chinese source filter should show a compact guest alias while retaining the machine value.");
+        RequireContains(chineseHtml, "<option value=\"medium\">中</option>", "Chinese severity filter should show a compact medium alias while retaining the machine value.");
+        RequireContains(chineseHtml, "<option value=\"info\">信息</option>", "Chinese severity filter should show a compact info alias while retaining the machine value.");
         RequireContains(chineseHtml, "class=\"copy-btn copy-icon\"", "Chinese event evidence should expose an icon copy button.");
         RequireContains(chineseHtml, "<span class=\"sr-only\">复制</span>", "Chinese icon copy button should keep an accessible localized label.");
         RequireNotContains(chineseVisibleText, "行为规则命中“命令和脚本解释器”", "Chinese behavior cards must not repeat verbose rule-hit guidance.");
@@ -512,9 +516,15 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Standard output", "Rendered raw event details should retain the stdout field label.");
         RequireContains(englishHtml, "PowerShell / script content", "Rendered raw event details should retain the script field label.");
         RequireNotContains(englishHtml, "Hidden technical field:", "Rendered raw event details should use compact field labels instead of technical-field prompts.");
+        RequireNotContains(englishHtml, "Additional internal or technical fields hidden", "Rendered event evidence must not expose internal-field counts.");
         RequireNotContains(englishHtml, "Copy behavior evidence", "Rendered event evidence copy buttons should use a compact label.");
         RequireNotContains(englishHtml, "<summary>Evidence fields (", "Rendered event evidence must not expose a field-count summary.");
         RequireNotContains(englishHtml, "evidenceFields", "Rendered behavior cards must not leak the internal evidenceFields key.");
+        foreach (var internalField in new[] { "zhBehaviorHint", "zhHint", "zhMessage", "zhEvidenceBoundary", "zhNextEvidenceHint", "behaviorCountingPolicy", "metadataOnly", "policyExcludedEventCount" })
+        {
+            RequireNotContains(englishHtml, internalField, $"Rendered English evidence must not expose internal field {internalField}.");
+            RequireNotContains(chineseHtml, internalField, $"Rendered Chinese evidence must not expose internal field {internalField}.");
+        }
         RequireContains(englishHtml, "class=\"copy-btn copy-icon\"", "English event evidence should expose an icon copy button.");
         RequireContains(englishHtml, "<span class=\"sr-only\">Copy</span>", "English icon copy button should keep an accessible label.");
         RequireNotContains(englishHtml, "<br><span class=\"muted\">cmd.exe /c whoami</span>", "Rendered event tables should not inline command lines directly.");
@@ -864,6 +874,16 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         };
         processEvent.Data["sampleCorrelation"] = "confirmed";
         processEvent.Data["sampleCorrelationStatus"] = "confirmed";
+        // Classifier and sampler fields are retained in report.json but must
+        // never become user-facing technical evidence in either HTML variant.
+        processEvent.Data["zhBehaviorHint"] = "internal correlation guidance";
+        processEvent.Data["zhHint"] = "internal hint";
+        processEvent.Data["zhMessage"] = "internal message";
+        processEvent.Data["zhEvidenceBoundary"] = "internal evidence boundary";
+        processEvent.Data["zhNextEvidenceHint"] = "internal next-evidence hint";
+        processEvent.Data["behaviorCountingPolicy"] = "internal policy";
+        processEvent.Data["metadataOnly"] = "false";
+        processEvent.Data["policyExcludedEventCount"] = "9";
         var processExitEvent = new SandboxEvent
         {
             EventType = "process.exit",
