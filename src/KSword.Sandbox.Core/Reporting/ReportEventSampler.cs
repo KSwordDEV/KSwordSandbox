@@ -1583,24 +1583,44 @@ public static class ReportEventSampler
     private static bool IsDriverSampleActivityEvent(SandboxEvent evt)
     {
         var type = NormalizeEventType(evt.EventType);
+        if (type.Contains(".summary", StringComparison.OrdinalIgnoreCase))
+        {
+            // R0 summary/status rows are coverage diagnostics, not individual
+            // dynamic actions. Keep them in the diagnostic lane so they do
+            // not consume the typed-action budget.
+            return false;
+        }
+
         if ((evt.ProcessName?.Contains("r0collector", StringComparison.OrdinalIgnoreCase) ?? false) ||
             EventDataBoolTrue(evt, "selfProcess", "collectorSelfNoise", "collectorNoise", "selfNoise"))
         {
             return false;
         }
 
-        // Keep the typed producer classes whose payloads are understood by
-        // the report/rule pipeline. A generic driver.* prefix also covers
-        // collector telemetry and synthetic stress rows; treating those as
-        // dynamic behavior made a large diagnostic stream bypass the report
-        // quota and hide the actual coverage boundary.
-        if (EventDataBoolTrue(evt, "stress") ||
-            !(type.StartsWith("driver.process", StringComparison.OrdinalIgnoreCase) ||
-              type.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase) ||
-              type.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase) ||
-              type.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase) ||
-              type.StartsWith("driver.load", StringComparison.OrdinalIgnoreCase) ||
-              type.StartsWith("image.", StringComparison.OrdinalIgnoreCase)))
+        // Keep the shared R0 producer categories: process/file/registry/
+        // network/load plus image and load event families. Generic driver.*
+        // rows are accepted only when the stable R0 schema and kernel-driver
+        // origin identify their producer category; event type alone is not
+        // enough to make a host or synthetic row look like kernel telemetry.
+        var isDriverFamily = type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("image.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("load.", StringComparison.OrdinalIgnoreCase);
+        if (EventDataBoolTrue(evt, "stress") || !isDriverFamily)
+        {
+            return false;
+        }
+
+        var isKnownTypedFamily = type.StartsWith("driver.process", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("driver.load", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("image.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("load.", StringComparison.OrdinalIgnoreCase);
+        var hasKernelSchema = string.Equals(DataValue(evt.Data, "schema"), "ksword.sandbox.r0.event", StringComparison.OrdinalIgnoreCase) &&
+            DataValue(evt.Data, "eventOrigin").Contains("kernel-driver", StringComparison.OrdinalIgnoreCase) &&
+            TextEqualsAny(DataValue(evt.Data, "producerCategory"), "driver", "process", "image", "file", "registry", "network", "load");
+        if (!isKnownTypedFamily && !hasKernelSchema)
         {
             return false;
         }

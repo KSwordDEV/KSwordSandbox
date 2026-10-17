@@ -719,6 +719,49 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         SmokeAssert.True(fabricatedDriver.DynamicActionSelectedCount == 0,
             "Host image rows without R0 source/schema evidence must not enter the dynamic lane.");
 
+        var sharedR0Categories = ReportEventSampler.SampleForReport(
+        [
+            new SandboxEvent
+            {
+                EventType = "load.module",
+                Timestamp = timestamp.AddSeconds(51),
+                Source = "driver",
+                Data = { ["behaviorCounted"] = "true", ["producerCategory"] = "load" }
+            },
+            new SandboxEvent
+            {
+                EventType = "driver.telemetry",
+                Timestamp = timestamp.AddSeconds(52),
+                Source = "guest",
+                Data =
+                {
+                    ["behaviorCounted"] = "true",
+                    ["schema"] = "ksword.sandbox.r0.event",
+                    ["eventOrigin"] = "kernel-driver",
+                    ["producerCategory"] = "load"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "driver.telemetry",
+                Timestamp = timestamp.AddSeconds(53),
+                Source = "driver",
+                Data = { ["behaviorCounted"] = "true", ["producerCategory"] = "file" }
+            },
+            new SandboxEvent
+            {
+                EventType = "driver.file.summary",
+                Timestamp = timestamp.AddSeconds(54),
+                Source = "driver",
+                Data = { ["behaviorCounted"] = "true", ["producerCategory"] = "file" }
+            }
+        ],
+        new ReportEventSamplingOptions { MaxInlineEvents = 0, MaxDiagnosticEvents = 0, MaxDynamicActionEvents = 8 });
+        SmokeAssert.True(sharedR0Categories.DynamicActionSelectedCount == 2,
+            "load.* and schema-backed generic driver rows should share the R0 dynamic lane.");
+        SmokeAssert.True(!sharedR0Categories.Events.Any(evt => evt.EventType == "driver.file.summary"),
+            "R0 summary rows must not enter the dynamic action lane.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
