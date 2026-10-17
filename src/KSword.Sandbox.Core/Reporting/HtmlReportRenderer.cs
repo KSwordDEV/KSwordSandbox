@@ -5963,7 +5963,9 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static string RenderProcessTreeNodeContent(SandboxEvent evt, string label, string badges, ProcessTreeActivity activity)
     {
-        var image = FirstNonEmpty(evt.Path, evt.CommandLine);
+        // Process-tree rows may be open by default; keep command lines in the
+        // nested technical disclosure instead of exposing them in the label.
+        var image = evt.Path;
         var displayImage = string.IsNullOrWhiteSpace(image) ? string.Empty : DisplayEventTarget(evt, image);
         var imageHint = string.IsNullOrWhiteSpace(image)
             ? string.Empty
