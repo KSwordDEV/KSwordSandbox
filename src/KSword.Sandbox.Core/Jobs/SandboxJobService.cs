@@ -975,10 +975,21 @@ public sealed partial class SandboxJobService
         List<SandboxEvent> fullEvents,
         List<BehaviorFinding> rawFindings)
     {
-        guestEvents.Clear();
-        events.Clear();
-        fullEvents.Clear();
-        rawFindings.Clear();
+        ClearAndRelease(guestEvents);
+        ClearAndRelease(events);
+        ClearAndRelease(fullEvents);
+        ClearAndRelease(rawFindings);
+    }
+
+    /// <summary>
+    /// Clears a mutable list and drops its oversized backing array. The input
+    /// is one transient collection owned by report regeneration; processing
+    /// returns no value.
+    /// </summary>
+    private static void ClearAndRelease<T>(List<T> values)
+    {
+        values.Clear();
+        values.TrimExcess();
     }
 
     /// <summary>

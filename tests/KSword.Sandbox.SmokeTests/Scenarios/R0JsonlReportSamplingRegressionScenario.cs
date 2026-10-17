@@ -18,7 +18,10 @@ namespace KSword.Sandbox.SmokeTests.Scenarios;
 /// </summary>
 internal sealed class R0JsonlReportSamplingRegressionScenario : ISmokeTestScenario
 {
-    private const int ImportedR0EventCount = 1_500;
+    // Keep this above SandboxJobService's transient-buffer release threshold
+    // so the smoke verifies that a high-volume import still writes and renders
+    // a complete sampled report after the raw lists are released.
+    private const int ImportedR0EventCount = 60_000;
     private const int R0SectionRowBudget = 250;
     private const int HtmlSizeBudgetBytes = 2_250 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
