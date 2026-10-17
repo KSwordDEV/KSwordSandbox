@@ -51,7 +51,7 @@ internal static class AgentProgram
 
     internal const int DefaultR0CollectorMaxOutputBytes = 64 * 1024 * 1024;
 
-    internal const int DefaultR0CollectorMinFreeOutputBytes = 256 * 1024 * 1024;
+    internal const int DefaultR0CollectorMinFreeOutputBytes = 128 * 1024 * 1024;
 
     // Timed collection continues draining already queued kernel records after
     // the sample window; this bounded grace period is operator-configurable.

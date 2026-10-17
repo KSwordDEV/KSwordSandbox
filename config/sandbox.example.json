@@ -90,7 +90,7 @@
     "r0CollectorPathInGuest": "C:\\KSwordSandbox\\r0collector\\KSword.Sandbox.R0Collector.exe",
     "devicePath": "\\\\.\\KSwordSandboxDriver",
     "r0CollectorMaxOutputBytes": 67108864,
-    "r0CollectorMinFreeOutputBytes": 268435456,
+    "r0CollectorMinFreeOutputBytes": 134217728,
     "useMockCollector": false
   }
 }
