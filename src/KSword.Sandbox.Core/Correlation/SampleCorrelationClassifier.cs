@@ -318,14 +318,28 @@ public static class SampleCorrelationClassifier
                 "processId");
         }
 
+        // A path alone is insufficient for R0 file/registry telemetry when
+        // the Agent failed before exporting a sample PID/process tree. Keep
+        // the raw row as unknown evidence rather than upgrading ambient
+        // machine mutations to probable sample behavior.
         if (isHighSignalMutation && targetsUserWritableOrPersistence)
         {
-            return CorrelationDisposition.Probable("driver-mutation-targets-user-writable-or-persistence-location-without-sample-pid", "path");
+            if (HasIndependentSampleEvidence(evt, targetPath, context, "mutation"))
+            {
+                return CorrelationDisposition.Probable("driver-mutation-targets-user-writable-or-persistence-location-with-cross-source-sample-evidence", "path", "probable-cross-source-mutation-boundary");
+            }
+
+            return CorrelationDisposition.Unknown("driver-mutation-targets-user-writable-or-persistence-location-without-cross-source-evidence", "path");
         }
 
         if (isHighSignalMutation && !targetsSystemOnly && !IsPathTruncated(data))
         {
-            return CorrelationDisposition.Probable("driver-mutation-has-non-system-target-but-no-lineage-join", "path");
+            if (HasIndependentSampleEvidence(evt, targetPath, context, "mutation"))
+            {
+                return CorrelationDisposition.Probable("driver-mutation-has-non-system-target-with-cross-source-sample-evidence", "path", "probable-cross-source-mutation-boundary");
+            }
+
+            return CorrelationDisposition.Unknown("driver-mutation-has-non-system-target-without-cross-source-evidence", "path");
         }
 
         return CorrelationDisposition.Unknown("driver-row-has-no-sample-pid-path-lineage-match", "processId");
@@ -423,9 +437,19 @@ public static class SampleCorrelationClassifier
         }
         data["pcapCorrelationStaticIocMatched"] = (!string.IsNullOrWhiteSpace(matchedIoc)).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         data["pcapCorrelationDnsCorroborated"] = dnsCorroborated.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        var crossSourceSampleEvidence = targets.Any(target => HasIndependentSampleEvidence(evt, target, context, "network"));
+        data["pcapCorrelationCrossSourceEvidence"] = crossSourceSampleEvidence.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         if (!string.IsNullOrWhiteSpace(matchedIoc))
         {
             data["pcapCorrelationStaticIoc"] = matchedIoc;
+            if (!crossSourceSampleEvidence)
+            {
+                data["pcapCorrelationUncertainty"] = dnsCorroborated
+                    ? "owner-pid-unavailable; lifecycle-overlap; dns-answer-corroboration-without-etw-or-r0-sample-owner"
+                    : "owner-pid-unavailable; lifecycle-overlap; static-ioc-without-etw-or-r0-sample-owner";
+                return false;
+            }
+
             data["pcapCorrelationUncertainty"] = dnsCorroborated
                 ? "owner-pid-unavailable; lifecycle-overlap; dns-answer-corroboration"
                 : "owner-pid-unavailable; lifecycle-overlap; static-ioc-corroboration";
@@ -448,8 +472,15 @@ public static class SampleCorrelationClassifier
         // generic flows still require an owner PID or IOC corroboration.
         if (IsPcapDnsEvidence(evt, data))
         {
-            data["pcapCorrelationUncertainty"] = "owner-pid-unavailable; lifecycle-overlap; unattributed-dns-query";
+            data["pcapCorrelationUncertainty"] = crossSourceSampleEvidence
+                ? "owner-pid-unavailable; lifecycle-overlap; unattributed-dns-query-with-etw-or-r0-sample-corroboration"
+                : "owner-pid-unavailable; lifecycle-overlap; unattributed-dns-query-without-etw-or-r0-sample-corroboration";
             data["pcapCorrelationDnsLifecycleMatched"] = "true";
+            if (!crossSourceSampleEvidence)
+            {
+                return false;
+            }
+
             disposition = CorrelationDisposition.Probable(
                 "pcap-lifecycle-overlap-unattributed-dns",
                 "timestamp+dnsLifecycle",
@@ -691,12 +722,22 @@ public static class SampleCorrelationClassifier
 
         if (LooksUserWritableOrPersistenceTarget(target, context) && IsHighSignalMutation(evt, data))
         {
-            return CorrelationDisposition.Probable("file-mutation-targets-user-writable-location", "path");
+            if (HasIndependentSampleEvidence(evt, target, context, "mutation"))
+            {
+                return CorrelationDisposition.Probable("file-mutation-targets-user-writable-location-with-cross-source-sample-evidence", "path", "probable-cross-source-mutation-boundary");
+            }
+
+            return CorrelationDisposition.Unknown("file-mutation-targets-user-writable-location-without-cross-source-evidence", "path");
         }
 
         if (IsHighSignalMutation(evt, data) && !LooksSystemOnlyPath(target) && !string.IsNullOrWhiteSpace(operation))
         {
-            return CorrelationDisposition.Probable("file-mutation-has-non-system-target", "path");
+            if (HasIndependentSampleEvidence(evt, target, context, "mutation"))
+            {
+                return CorrelationDisposition.Probable("file-mutation-has-non-system-target-with-cross-source-sample-evidence", "path", "probable-cross-source-mutation-boundary");
+            }
+
+            return CorrelationDisposition.Unknown("file-mutation-has-non-system-target-without-cross-source-evidence", "path");
         }
 
         return CorrelationDisposition.Unknown("file-row-has-no-sample-path-or-lineage-match", "path");
@@ -803,7 +844,122 @@ public static class SampleCorrelationClassifier
         var lifecycles = BuildSampleLifecycles(events, rootPids, samplePids);
         var staticIocs = BuildStaticNetworkIndicators(events);
         var dnsCorroboratedTargets = BuildDnsCorroboratedTargets(events, staticIocs);
-        return new CorrelationContext(sampleFullPath, sampleFileName, sampleDirectory, processes, samplePids, networkOwners, lifecycles, staticIocs, dnsCorroboratedTargets);
+        var crossSourceEvidence = BuildCrossSourceSampleEvidence(events, samplePids, rootPids);
+        return new CorrelationContext(sampleFullPath, sampleFileName, sampleDirectory, processes, samplePids, networkOwners, lifecycles, staticIocs, dnsCorroboratedTargets, crossSourceEvidence);
+    }
+
+    private static IReadOnlyList<CrossSourceEvidence> BuildCrossSourceSampleEvidence(
+        IEnumerable<SandboxEvent> events,
+        IReadOnlySet<int> samplePids,
+        IReadOnlySet<int> rootPids)
+    {
+        var evidence = new List<CrossSourceEvidence>();
+        foreach (var evt in events)
+        {
+            if (!IsIndependentRuntimeSource(evt) || IsExplicitNonBehaviorOrCollectionNoise(evt, evt.Data))
+            {
+                continue;
+            }
+
+            var pid = EventProcessId(evt, evt.Data);
+            var parentPid = evt.ParentProcessId ??
+                ParsePid(Value(evt.Data, "parentProcessId")) ??
+                ParsePid(Value(evt.Data, "actorParentProcessId"));
+            var rooted = pid is not null && samplePids.Contains(pid.Value) ||
+                parentPid is not null && samplePids.Contains(parentPid.Value) ||
+                rootPids.Any(root => LineageContainsPid(Value(evt.Data, "treeLineage"), root)) ||
+                rootPids.Any(root => ParsePid(Value(evt.Data, "rootProcessId")) == root);
+            if (!rooted)
+            {
+                continue;
+            }
+
+            var source = IsDriverEvidence(evt) ? "r0" : IsEtwEvidence(evt) ? "etw" : "guest";
+            foreach (var target in MutationTargets(evt))
+            {
+                evidence.Add(new CrossSourceEvidence(source, "mutation", target, evt.Timestamp));
+            }
+
+            foreach (var target in NetworkTargets(evt.Data))
+            {
+                evidence.Add(new CrossSourceEvidence(source, "network", target, evt.Timestamp));
+            }
+        }
+
+        return evidence;
+    }
+
+    private static bool HasIndependentSampleEvidence(
+        SandboxEvent evt,
+        string? target,
+        CorrelationContext context,
+        string family)
+    {
+        var targets = family.Equals("network", StringComparison.OrdinalIgnoreCase)
+            ? NetworkTargets(evt.Data)
+            : MutationTargets(evt);
+        if (!string.IsNullOrWhiteSpace(target))
+        {
+            targets = targets.Append(target);
+        }
+
+        var normalizedTargets = targets
+            .Select(NormalizeEvidenceTarget)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (normalizedTargets.Count == 0)
+        {
+            return false;
+        }
+
+        var currentSource = IsDriverEvidence(evt) ? "r0" :
+            IsPcapProtocolEvidence(evt, evt.Data) ? "pcap" :
+            IsEtwEvidence(evt) ? "etw" : "guest";
+        return context.CrossSourceEvidence.Any(evidence =>
+            evidence.Family.Equals(family, StringComparison.OrdinalIgnoreCase) &&
+            !evidence.Source.Equals(currentSource, StringComparison.OrdinalIgnoreCase) &&
+            normalizedTargets.Contains(evidence.Target) &&
+            (evidence.Timestamp - evt.Timestamp).Duration() <= TimeSpan.FromSeconds(10));
+    }
+
+    private static IEnumerable<string> MutationTargets(SandboxEvent evt)
+    {
+        return new[]
+        {
+            evt.Path,
+            Value(evt.Data, "path"),
+            Value(evt.Data, "filePath"),
+            Value(evt.Data, "target"),
+            Value(evt.Data, "destinationPath"),
+            Value(evt.Data, "sourcePath"),
+            Value(evt.Data, "keyPath"),
+            Value(evt.Data, "registryKeyPath"),
+            Value(evt.Data, "objectPath"),
+            Value(evt.Data, "imagePath"),
+            Value(evt.Data, "serviceDll"),
+            Value(evt.Data, "taskToRun")
+        }.Where(value => !string.IsNullOrWhiteSpace(value))!;
+    }
+
+    private static string NormalizeEvidenceTarget(string value)
+    {
+        var normalized = NormalizeSlashes(value.Trim().Trim('"', '\''));
+        return normalized.TrimEnd('\\', '/').ToLowerInvariant();
+    }
+
+    private static bool IsIndependentRuntimeSource(SandboxEvent evt)
+    {
+        return IsDriverEvidence(evt) || IsEtwEvidence(evt) ||
+            (string.Equals(evt.Source, "guest", StringComparison.OrdinalIgnoreCase) &&
+             (IsFileEvidence(evt) || IsNetworkEvidence(evt) || IsServiceOrScheduledTaskEvidence(evt)));
+    }
+
+    private static bool IsEtwEvidence(SandboxEvent evt)
+    {
+        return evt.Source.Contains("etw", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("etw.", StringComparison.OrdinalIgnoreCase) ||
+            ContainsAny(Value(evt.Data, "captureSource"), "etw") ||
+            ContainsAny(Value(evt.Data, "collectorSource"), "etw");
     }
 
     private static IReadOnlyList<SampleLifecycleWindow> BuildSampleLifecycles(
@@ -1861,7 +2017,8 @@ public static class SampleCorrelationClassifier
         IReadOnlyDictionary<string, int> NetworkEndpointOwners,
         IReadOnlyList<SampleLifecycleWindow> SampleLifecycles,
         IReadOnlySet<string> StaticNetworkIndicators,
-        IReadOnlySet<string> DnsCorroboratedTargets);
+        IReadOnlySet<string> DnsCorroboratedTargets,
+        IReadOnlyList<CrossSourceEvidence> CrossSourceEvidence);
 
     private sealed record SampleLifecycleWindow(DateTimeOffset StartUtc, DateTimeOffset EndUtc);
 
@@ -1873,6 +2030,12 @@ public static class SampleCorrelationClassifier
         int? ParentProcessId,
         int? RootProcessId,
         string TreeLineage);
+
+    private sealed record CrossSourceEvidence(
+        string Source,
+        string Family,
+        string Target,
+        DateTimeOffset Timestamp);
 
     private enum CorrelationKind
     {

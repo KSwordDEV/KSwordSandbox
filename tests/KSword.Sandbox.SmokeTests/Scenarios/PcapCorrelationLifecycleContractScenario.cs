@@ -6,10 +6,10 @@ using KSword.Sandbox.SmokeTests.Framework;
 namespace KSword.Sandbox.SmokeTests.Scenarios;
 
 /// <summary>
-/// Verifies ownerless PCAP protocol rows can become probable sample evidence
-/// only when capture time overlaps the sample lifecycle and a static IOC is
-/// corroborated. Compatibility rows, WinRM collection traffic, and packets
-/// outside the lifecycle remain unpromoted.
+/// Verifies ownerless PCAP protocol rows remain unattributed until a runtime
+/// ETW/R0 source independently joins the sample process and target. Static
+/// IOC strings and lifecycle overlap alone are retained as raw evidence but
+/// never enter the primary behavior lane.
 /// </summary>
 internal sealed class PcapCorrelationLifecycleContractScenario : ISmokeTestScenario
 {
@@ -63,6 +63,8 @@ internal sealed class PcapCorrelationLifecycleContractScenario : ISmokeTestScena
                         ["isReference"] = "false"
                     }
                 },
+                SampleOwnedNetworkEvent(inWindow, "c2.bad.test", "198.51.100.8"),
+                SampleOwnedNetworkEvent(inWindow.AddMilliseconds(30), "203.0.113.44", "203.0.113.44"),
                 PcapEvent("dns.query", inWindow, "c2.bad.test", 53),
                 PcapUncorroboratedDns(inWindow.AddMilliseconds(5), "gate.bad.test"),
                 PcapEvent("tls.connection", inWindow.AddMilliseconds(10), "c2.bad.test", 443),
@@ -75,15 +77,18 @@ internal sealed class PcapCorrelationLifecycleContractScenario : ISmokeTestScena
             SamplePath);
 
         var dns = Require(classified, "dns.query", inWindow);
-        SmokeAssert.True(dns.Data["sampleCorrelation"] == "probable", "An ownerless DNS row with lifecycle/static IOC corroboration must be probable.");
+        SmokeAssert.True(dns.Data["sampleCorrelation"] == "probable", "An ownerless DNS row must be probable only after ETW/R0 sample-owned network corroboration.");
         SmokeAssert.True(dns.Data["pcapCorrelationStaticIocMatched"] == "true", "Probable DNS attribution must preserve static IOC match state.");
         SmokeAssert.True(dns.Data["pcapCorrelationOwnerPidAvailable"] == "false", "PCAP attribution must disclose missing owner PID.");
+        SmokeAssert.True(dns.Data["pcapCorrelationCrossSourceEvidence"] == "true", "Probable DNS attribution must disclose the independent runtime source join.");
         SmokeAssert.True(dns.Data["behaviorCounted"] == "true", "Probable canonical PCAP rows must remain behavior candidates.");
 
         var lifecycleDns = Require(classified, "dns.query", inWindow.AddMilliseconds(5));
-        SmokeAssert.True(lifecycleDns.Data["sampleCorrelation"] == "probable", "An ownerless DNS query in the sample lifecycle must remain visible as probable even without a static IOC.");
+        SmokeAssert.True(lifecycleDns.Data["sampleCorrelation"] == "unknown", "An ownerless lifecycle DNS query without an ETW/R0 sample join must remain unattributed.");
         SmokeAssert.True(lifecycleDns.Data["pcapCorrelationStaticIocMatched"] == "false", "Unattributed lifecycle DNS must disclose that no static IOC matched.");
         SmokeAssert.True(lifecycleDns.Data["pcapCorrelationDnsLifecycleMatched"] == "true", "Unattributed lifecycle DNS must disclose the lifecycle join.");
+        SmokeAssert.True(lifecycleDns.Data["pcapCorrelationCrossSourceEvidence"] == "false", "Unattributed lifecycle DNS must disclose the missing cross-source join.");
+        SmokeAssert.True(lifecycleDns.Data["behaviorCounted"] == "false", "Unattributed lifecycle DNS must stay out of behavior counts.");
 
         var dnsAnswerFlow = classified.Single(evt => evt.EventType == "network.flow" && evt.Timestamp == inWindow.AddMilliseconds(30));
         SmokeAssert.True(dnsAnswerFlow.Data["sampleCorrelation"] == "probable", "A flow to a static-IOC DNS answer must use DNS corroboration when no owner PID is available.");
@@ -175,6 +180,25 @@ internal sealed class PcapCorrelationLifecycleContractScenario : ISmokeTestScena
         data.Remove("answersNormalized");
         data.Remove("destinationIp");
         return evt with { Data = data };
+    }
+
+    private static SandboxEvent SampleOwnedNetworkEvent(DateTimeOffset timestamp, string target, string destinationIp)
+    {
+        return new SandboxEvent
+        {
+            EventType = "network.etw",
+            Source = "etwLive",
+            Timestamp = timestamp,
+            ProcessId = 100,
+            Data = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["networkTarget"] = target,
+                ["destinationIp"] = destinationIp,
+                ["behaviorCounted"] = "true",
+                ["nonbehavior"] = "false",
+                ["captureSource"] = "etwLive"
+            }
+        };
     }
 
     private const string SamplePath = @"C:\KSwordSandbox\incoming\sample.exe";
