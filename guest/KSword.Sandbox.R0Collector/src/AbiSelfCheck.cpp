@@ -321,7 +321,7 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUnsigned("defaultReadEventsMaxEvents", kReadEventsMaxEvents);
     data.AddUnsigned("requestedMaxEvents", options.readEventsMaxEvents);
     data.AddUnsigned("readEventsMaxEvents", options.readEventsMaxEvents);
-    data.AddUtf8("maxEventsBounds", "1..1024");
+    data.AddUtf8("maxEventsBounds", "1..8192");
     data.AddSigned("maxReadBatches", options.maxReadBatches);
     data.AddUtf8("maxReadBatchesMode", "0=unbounded;n=stop-after-n-successful-READ_EVENTS-batches");
     data.AddUnsigned("driverEventSampleStride", options.driverEventSampleStride);

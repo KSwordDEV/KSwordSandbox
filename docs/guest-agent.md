@@ -25,11 +25,11 @@ Guest Agent 运行在 analysis VM 内，负责按限定时间启动样本、采�
 ```text
 [--r0collector <path>] [--driver-device <path>] [--r0-mock]
 [--r0-enable-mask <decimal-or-0x-mask>]
-[--r0-max-events <1-1024>] [--r0-max-read-batches <0-1000000>]
+[--r0-max-events <1-8192>] [--r0-max-read-batches <0-1000000>]
 [--r0-driver-event-sample-stride <1-1000000>]
 ```
 
-默认 R0 sidecar 参数偏向 live 稳定性：每批最多读取 1024 条、批次数 `0` 表示不因批次
+默认 R0 sidecar 参数偏向 live 稳定性：每批最多读取 8192 条、批次数 `0` 表示不因批次
 上限提前停止、真实 runbook 明确传入 `--r0-driver-event-sample-stride 1` 写出每条
 eligible R0 行；Collector 仍会 drain 并记录 `lostCount`、`highWatermark`、producer
 mask 和 backpressure，便于识别固定 ring 在启动突发流量下的丢失。低速/压力测试如需

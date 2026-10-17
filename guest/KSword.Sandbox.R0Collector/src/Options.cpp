@@ -219,7 +219,7 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             if (!readValue(arg, &value)) {
                 return false;
             }
-            if (!ParseUnsignedMask(value, arg, 1, 1024, &options->readEventsMaxEvents, error)) {
+            if (!ParseUnsignedMask(value, arg, 1, 8192, &options->readEventsMaxEvents, error)) {
                 return false;
             }
         } else if (arg == L"--driver-event-sample-stride" || arg == L"--event-sample-stride") {
@@ -286,7 +286,7 @@ void PrintUsage(const wchar_t* programName) {
         << L"      --readiness              Alias for --diagnose / --diagnose \u522b\u540d\n"
         << L"      --readiness-check        Alias for --diagnose / --diagnose \u522b\u540d\n"
         << L"      --read-timeout-ms <ms>   READ_EVENTS timeout used by --diagnose (default: 2000) / --diagnose \u7684 READ_EVENTS \u8d85\u65f6\n"
-        << L"      --max-events <count>     READ_EVENTS MaxEvents request cap 1..1024 (default: 64) / READ_EVENTS \u5355\u6279\u4e8b\u4ef6\u4e0a\u9650\n"
+        << L"      --max-events <count>     READ_EVENTS MaxEvents request cap 1..8192 (default: 8192) / READ_EVENTS \u5355\u6279\u4e8b\u4ef6\u4e0a\u9650\n"
         << L"      --max-read-batches <n>   Stop after n READ_EVENTS batches; 0 means unlimited / \u6700\u591a\u8bfb\u53d6 n \u6279\uff0c0 \u8868\u793a\u4e0d\u9650\n"
         << L"      --driver-event-sample-stride <n>  Emit first and every nth eligible driver row; 1 emits all / \u9a71\u52a8\u884c\u91c7\u6837\u6b65\u957f\uff0c1 \u8868\u793a\u5168\u91cf\n"
         << L"      --enable-mask <mask>     Set producer enable mask through SET_PRODUCER_ENABLE_MASK / \u8bbe\u7f6e\u9a71\u52a8 producer enable mask\n"

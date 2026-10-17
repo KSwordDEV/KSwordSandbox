@@ -386,11 +386,17 @@ public:
 
     bool Open(const std::wstring& outputPath, std::wstring* error) {
         outputPath_ = outputPath;
+        // The collector emits large compact JSONL bursts. Disable the
+        // iostream/C stdio synchronization and give file output a dedicated
+        // buffer so draining a batch does not flush once per small write.
+        std::ios::sync_with_stdio(false);
         if (outputPath == L"-") {
             stream_ = &std::cout;
             return true;
         }
 
+        fileBuffer_.resize(kFileBufferBytes);
+        file_.rdbuf()->pubsetbuf(fileBuffer_.data(), static_cast<std::streamsize>(fileBuffer_.size()));
         file_.open(std::filesystem::path(outputPath), std::ios::out | std::ios::binary | std::ios::trunc);
         if (!file_.is_open()) {
             if (error != nullptr) {
@@ -431,9 +437,11 @@ public:
 private:
     std::wstring outputPath_;
     std::ofstream file_;
+    std::vector<char> fileBuffer_;
     std::ostream* stream_ = nullptr;
     size_t linesSinceFlush_ = 0;
-    static constexpr size_t kFlushInterval = 256;
+    static constexpr size_t kFlushInterval = 8192;
+    static constexpr size_t kFileBufferBytes = 4U * 1024U * 1024U;
 };
 
 bool EmitEvent(EventWriter& writer, const SandboxEventFields& fields);

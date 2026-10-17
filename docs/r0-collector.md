@@ -406,7 +406,7 @@ KSword.Sandbox.R0Collector.exe `
   默认 `KSwordSandboxDriver`。
 - `--read-timeout-ms <ms>` / `--diagnose-read-timeout-ms <ms>`：`--diagnose` overlapped
   `READ_EVENTS` probe timeout；默认 `2000`。
-- `--max-events <count>`：每个 `READ_EVENTS` request 限制在 1..1024 events。synthetic
+- `--max-events <count>`：每个 `READ_EVENTS` request 限制在 1..8192 events。synthetic
   stress check 中用小值证明 batching 和 sequence continuity。
 - `--max-read-batches <n>`：成功 drain `n` 个 READ_EVENTS batch 后停止；`0` 表示直到 duration
   deadline 或 empty batch 前不限。这是安全本地测试的 bounded batch limit 和
@@ -421,7 +421,7 @@ KSword.Sandbox.R0Collector.exe `
   the default is `10` ms so boot and sample-launch bursts are drained before
   the fixed kernel ring overwrites records. Operators can increase it for
   low-rate or stress-only runs.
-- Guest Agent 的默认 sidecar 参数面向完整性：`--max-events 1024`、
+- Guest Agent 的默认 sidecar 参数面向完整性：`--max-events 8192`、
   `--max-read-batches 0`（不因固定批次上限提前停读）以及
   `--driver-event-sample-stride 1`。这会持续 drain R0 ring 并写出每条 eligible
   JSONL 行，避免隐式采样造成大面积丢行；如需降低输出量，操作者可显式传入更大的

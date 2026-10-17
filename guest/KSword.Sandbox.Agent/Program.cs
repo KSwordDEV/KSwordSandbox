@@ -47,7 +47,7 @@ internal static class AgentProgram
 
     private const string DroppedFileSelectorVersion = "artifact-selectors-v1";
 
-    internal const int DefaultR0CollectorMaxEventsPerRead = 1024;
+    internal const int DefaultR0CollectorMaxEventsPerRead = 8192;
 
     internal const int DefaultR0CollectorMaxReadBatches = 0;
 
@@ -3686,7 +3686,7 @@ internal sealed record AgentOptions
         }
 
         var captureScreenshots = flags.Contains("screenshot") || flags.Contains("screenshots");
-        var r0MaxEventsPerRead = ParseBoundedOption(values, 1, 1024, AgentProgram.DefaultR0CollectorMaxEventsPerRead, "r0-max-events", "r0-read-events-max-events", "driver-max-events");
+        var r0MaxEventsPerRead = ParseBoundedOption(values, 1, 8192, AgentProgram.DefaultR0CollectorMaxEventsPerRead, "r0-max-events", "r0-read-events-max-events", "driver-max-events");
         var r0MaxReadBatches = ParseBoundedOption(values, 0, 1_000_000, AgentProgram.DefaultR0CollectorMaxReadBatches, "r0-max-read-batches", "driver-max-read-batches");
         var r0DriverEventSampleStride = ParseBoundedOption(values, 1, 1_000_000, AgentProgram.DefaultR0CollectorDriverEventSampleStride, "r0-driver-event-sample-stride", "driver-event-sample-stride", "r0-event-sample-stride");
         uint? r0EnableMask = null;
