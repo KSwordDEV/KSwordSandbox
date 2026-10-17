@@ -1,4 +1,5 @@
 #include "Producers/File/FileFilter.h"
+#include "Common/KernelString.h"
 
 C_ASSERT(sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD) <=
     KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE);
@@ -537,8 +538,9 @@ KswMapFileOperation(
  *
  * Inputs : Payload receives the copied name; FileName is an optional source
  *          UNICODE_STRING; SourceFlag identifies normalized vs fallback names.
- * Logic  : copies at most PATH_CHARS - 1 WCHARs, stores a NUL terminator, and
- *          marks truncation when the original path exceeds the fixed payload.
+ * Logic  : copies a bounded suffix so the final file name remains available
+ *          when the original path exceeds the fixed payload, stores a NUL
+ *          terminator, and marks truncation explicitly.
  * Return : TRUE when a non-empty bounded path was copied; FALSE otherwise.
  */
 static
@@ -549,10 +551,8 @@ KswCopyFilePathToPayload(
     _In_ ULONG SourceFlag
     )
 {
-    ULONG maxBytes;
     ULONG bytesToCopy;
-    ULONG sourceBytes;
-    ULONG copiedChars;
+    BOOLEAN truncated;
 
     if (Payload == NULL ||
         FileName == NULL ||
@@ -561,31 +561,18 @@ KswCopyFilePathToPayload(
         return FALSE;
     }
 
-    sourceBytes = FileName->Length;
-    if (FileName->MaximumLength != 0 && sourceBytes > FileName->MaximumLength) {
-        sourceBytes = FileName->MaximumLength;
-    }
-    sourceBytes -= sourceBytes % (ULONG)sizeof(WCHAR);
-    if (sourceBytes == 0) {
+    truncated = FALSE;
+    if (!KswCopyUnicodeSuffix(
+            Payload->Path,
+            KSWORD_SANDBOX_FILE_EVENT_PATH_CHARS,
+            FileName,
+            &bytesToCopy,
+            &truncated)) {
         return FALSE;
     }
-
-    maxBytes =
-        (KSWORD_SANDBOX_FILE_EVENT_PATH_CHARS - 1U) * (ULONG)sizeof(WCHAR);
-    bytesToCopy = sourceBytes;
-    if (bytesToCopy > maxBytes) {
-        bytesToCopy = maxBytes;
+    if (truncated) {
         Payload->Flags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_TRUNCATED;
     }
-
-    bytesToCopy -= bytesToCopy % (ULONG)sizeof(WCHAR);
-    if (bytesToCopy == 0) {
-        return FALSE;
-    }
-
-    RtlCopyMemory(Payload->Path, FileName->Buffer, bytesToCopy);
-    copiedChars = bytesToCopy / (ULONG)sizeof(WCHAR);
-    Payload->Path[copiedChars] = L'\0';
     Payload->PathLengthBytes = bytesToCopy;
     Payload->Flags |=
         KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_PRESENT |

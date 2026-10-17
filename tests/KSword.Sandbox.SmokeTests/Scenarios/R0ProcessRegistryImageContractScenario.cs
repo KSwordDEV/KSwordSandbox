@@ -178,6 +178,7 @@ internal sealed class R0ProcessRegistryImageContractScenario : ISmokeTestScenari
         RequireContains(processSource, "Source->MaximumLength", "Process string copy should clamp to MaximumLength.");
         RequireContains(registrySource, "Source->MaximumLength", "Registry string copy should clamp to MaximumLength.");
         RequireContains(processSource, "KswCopyUnicodePrefix", "Process producer should use bounded UTF-16 copies.");
+        RequireContains(processSource, "KswCopyUnicodeSuffix", "Process image paths should retain the executable basename when truncated.");
         RequireContains(registrySource, "KswCopyUnicodePrefix", "Registry producer should use bounded UTF-16 copies.");
         RequireContains(imageSource, "KswCopyUnicodeSuffix", "Image producer should preserve the module basename when a kernel path is truncated.");
         RequireContains(processSource, "g_KswProcessMonitorRuntime.Active", "Process teardown should disable emission first.");

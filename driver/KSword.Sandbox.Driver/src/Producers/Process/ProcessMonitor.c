@@ -440,7 +440,9 @@ KswPrepareProcessCallbackString(
  * Inputs : Destination is fixed payload storage; Source may be NULL; PresentFlag
  *          and TruncatedFlag identify the payload bits to update.
  * Logic  : validates IRQL and UNICODE_STRING bounds before delegating to the
- *          shared bounded UTF-16 helper; no allocation or blocking occurs.
+ *          shared bounded UTF-16 helper; image paths use a suffix copy so the
+ *          executable basename survives truncation, while command lines keep
+ *          their leading executable/verb prefix.
  * Return : TRUE when text was copied; FALSE when the field is intentionally
  *          absent. Flags and length are updated in place.
  */
@@ -452,6 +454,7 @@ KswCopyProcessPayloadString(
     _In_opt_ PCUNICODE_STRING Source,
     _In_ ULONG PresentFlag,
     _In_ ULONG TruncatedFlag,
+    _In_ BOOLEAN PreserveTail,
     _Inout_ PULONG Flags,
     _Out_ PULONG LengthBytes
     )
@@ -475,12 +478,19 @@ KswCopyProcessPayloadString(
     bytesCopied = 0;
 
     if (KswPrepareProcessCallbackString(Source, &safeSource) &&
-        KswCopyUnicodePrefix(
+        (PreserveTail
+            ? KswCopyUnicodeSuffix(
+                Destination,
+                DestinationChars,
+                &safeSource,
+                &bytesCopied,
+                &truncated)
+            : KswCopyUnicodePrefix(
             Destination,
             DestinationChars,
             &safeSource,
             &bytesCopied,
-            &truncated)) {
+            &truncated))) {
         *Flags |= PresentFlag;
         *LengthBytes = bytesCopied;
         copied = TRUE;
@@ -1001,6 +1011,7 @@ KswProcessCreateNotifyEx(
             CreateInfo->ImageFileName,
             KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT,
             KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_TRUNCATED,
+            TRUE,
             &payload.Flags,
             &payload.ImagePathLengthBytes);
         KswCopyProcessPayloadString(
@@ -1009,6 +1020,7 @@ KswProcessCreateNotifyEx(
             CreateInfo->CommandLine,
             KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_PRESENT,
             KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_TRUNCATED,
+            FALSE,
             &payload.Flags,
             &payload.CommandLineLengthBytes);
         KswRememberProcessLineage(&payload);
