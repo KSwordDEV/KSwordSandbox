@@ -902,7 +902,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         var hidden = Math.Max(0, rows.Count - inlineRowsSelected.Count);
         var overflowRows = rows
             .Where(row => !inlineKeySet.Contains(EventIdentityKey(row.Event)))
-            .GroupBy(row => string.Join("|", row.Event.EventType, row.Event.Source, row.Family, row.Stage, row.Severity, row.SampleBehavior), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(row => string.Join("|", row.Event.EventType, row.Event.Source, row.Family, row.Stage, row.Severity, row.SampleBehavior, row.Disposition), StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToList();
         var renderRows = inlineRowsSelected.Concat(overflowRows).ToList();
