@@ -1237,9 +1237,13 @@ public static class SampleCorrelationClassifier
             var eventType = evt.EventType ?? string.Empty;
             if (eventType.Equals("process.start", StringComparison.OrdinalIgnoreCase) &&
                 EventLooksLikeSubmittedSample(evt, sampleFullPath, sampleFileName) &&
-                evt.ProcessId is not null)
+                EventProcessId(evt, evt.Data) is int processId)
             {
-                rootPids.Add(evt.ProcessId.Value);
+                // Imported guest/R0 rows may carry the PID only in the
+                // normalized data envelope.  ResolveRootProcessIds used to
+                // require SandboxEvent.ProcessId, so those rows never seeded
+                // the sample tree and every child mutation stayed unknown.
+                rootPids.Add(processId);
             }
 
             if ((eventType.Equals("process.tree.summary", StringComparison.OrdinalIgnoreCase) ||
