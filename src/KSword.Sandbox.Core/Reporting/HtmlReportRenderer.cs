@@ -860,7 +860,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine("<div class=\"focus-coverage-warning\"><strong>Collection coverage warning</strong><span>Runtime evidence coverage is incomplete; review Collection coverage gaps before treating a quiet result as evidence that the sample had no behavior.</span></div>");
         }
         html.AppendLine("<div class=\"focus-next\">");
-        html.AppendLine($"<div class=\"focus-next-copy copyable\" data-copy=\"{A(focusCopy)}\"><strong>Next review</strong><br><span>{E(topFinding?.Title ?? "Review static evidence and runtime events")}</span><small>{E(topFinding?.Summary ?? "No sample-attributed behavior was observed in the captured runtime events.")}</small></div>");
+        html.AppendLine($"<div class=\"focus-next-copy copyable\" data-copy=\"{A(focusCopy)}\"><strong>Next review</strong><br><span>{E(topFinding?.Title ?? "Review static evidence and runtime events")}</span></div>");
         html.AppendLine($"<a class=\"focus-action\" href=\"#event-explorer\">Open filtered event table</a><a class=\"focus-action secondary\" href=\"#failure\">Open failure log</a>");
         html.AppendLine("</div>");
         html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy analyst focus", focusCopy)}</div>");
@@ -5389,7 +5389,6 @@ html[lang="en"] .localized-evidence-field{display:none}
             var pageCount = RawEventPageCount(inlineEvents.Count);
             var open = pageNumber == 1 ? " open" : string.Empty;
             var copy = string.Join(Environment.NewLine, pageEvents.Select(EventOneLine));
-            var foldedTechnicalCount = pageEvents.Sum(RawEventFoldedTechnicalFieldCount);
             var pageFamilies = string.Join(
                 ", ",
                 pageEvents.Select(EventFamilyLabel).Distinct(StringComparer.OrdinalIgnoreCase).Take(3));
@@ -5399,7 +5398,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                     .Select(evt => string.IsNullOrWhiteSpace(evt.EventType) ? "(empty)" : evt.EventType)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .Take(3));
-            html.AppendLine($"<details id=\"raw-page-{pageNumber}\" class=\"raw-event-page copyable\" data-copy=\"{A(copy)}\"{open}><summary>Raw event page {pageNumber}/{pageCount}: rows {first}-{last} of {totalEventCount}; folded technical fields {foldedTechnicalCount}; families {E(FirstNonEmpty(pageFamilies, "-"))}; top types {E(FirstNonEmpty(pageTypes, "-"))}</summary>");
+            html.AppendLine($"<details id=\"raw-page-{pageNumber}\" class=\"raw-event-page copyable\" data-copy=\"{A(copy)}\"{open}><summary>Raw event page {pageNumber}/{pageCount}: rows {first}-{last} of {totalEventCount}; families {E(FirstNonEmpty(pageFamilies, "-"))}; top types {E(FirstNonEmpty(pageTypes, "-"))}</summary>");
             html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy raw page", copy)}</div>");
             html.AppendLine("<div class=\"copy-hint\">Page evidence sample. This page is a bounded native-details chunk; long command/output/script fields remain folded. Use the copy button or right-click to copy this inline page; open report.json/events.json for complete row payloads.</div>");
             AppendEventRows(html, pageEvents, artifactLookup, artifacts);
@@ -10023,7 +10022,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         var displayLabel = TechnicalFieldLabel(label);
         var prefix = string.Equals(displayLabel, "Command line", StringComparison.OrdinalIgnoreCase) ? "Execute: " : $"{displayLabel}: ";
-        return $"<div class=\"technical-field\"><span class=\"ui-field-label\">{E(prefix)}</span><pre class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</pre></div>";
+        return $"<div class=\"technical-field\"><span class=\"ui-field-label\">{E(prefix)}</span><pre class=\"copyable\" data-copy=\"{A(value)}\">{E(VisibleEvidenceFieldValue(label, value, 1_200))}</pre></div>";
     }
 
     /// <summary>
@@ -10053,7 +10052,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         var processExitContext = BuildProcessExitCodeContext(evt);
         if (!string.IsNullOrWhiteSpace(processExitContext))
         {
-            html.Append($"<div class=\"process-exit-context\"><span class=\"ui-field-label\">退出码：</span>{E(processExitContext)}</div>");
+            html.Append($"<div class=\"process-exit-context\"><span class=\"ui-field-label\">Exit code: </span>{E(processExitContext)}</div>");
         }
         if (compactFields.Count == 0 && technicalFields.Count == 0)
         {
@@ -10070,7 +10069,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 foreach (var pair in inlineCompactFields)
                 {
                     var copy = $"{pair.Key}={pair.Value}";
-                    var displayValue = FormatBoundedEvidenceFieldValue(pair.Key, pair.Value, EventCompactFieldValueLimit);
+                    var displayValue = VisibleEvidenceFieldValue(pair.Key, pair.Value, EventCompactFieldValueLimit);
                     var localizedClass = IsLocalizedEvidenceField(pair.Key) ? " localized-evidence-field" : string.Empty;
                     // Keep the label outside the protected evidence <code> block so
                     // the Chinese renderer can localize chrome while the original
@@ -10086,8 +10085,8 @@ html[lang="en"] .localized-evidence-field{display:none}
                 html.Append("<div class=\"raw-technical-fields\">");
                 foreach (var field in technicalFields)
                 {
-                    var boundedValue = FormatBoundedEvidenceFieldValue(field.Label, field.Value, 1_200);
-                    var copy = $"{field.Label}={boundedValue}";
+                    var boundedValue = VisibleEvidenceFieldValue(field.Label, field.Value, 1_200);
+                    var copy = $"{field.Label}={field.Value}";
                     var localizedClass = IsLocalizedEvidenceField(field.Label) ? " localized-evidence-field" : string.Empty;
                     var label = TechnicalFieldLabel(field.Label);
                     var prefix = string.Equals(label, "Command line", StringComparison.OrdinalIgnoreCase) ? "Execute: " : $"{label}: ";
@@ -11456,6 +11455,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Copy process card", "复制进程卡"),
         ("Copy network card", "复制网络卡"),
         ("Copied", "已复制"),
+        ("Copy", "复制"),
+        ("Exit code: ", "退出码："),
         ("Command line hidden by default", "命令行默认隐藏"),
         ("Command/stdout/stderr/PowerShell fields hidden by default", "命令/stdout/stderr/PowerShell 字段默认隐藏"),
         ("Hidden technical field", "隐藏技术字段"),
@@ -12951,6 +12952,40 @@ html[lang="en"] .localized-evidence-field{display:none}
         return $"<{key} list: {itemCount} item(s), {value.Length} chars>{AbbreviateEvidenceValue(previewText, Math.Min(maxLength, 120))}";
     }
 
+    private static string VisibleEvidenceFieldValue(string key, string value, int maxLength)
+    {
+        var bounded = FormatBoundedEvidenceFieldValue(key, value, maxLength);
+        var normalized = key.Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace(".", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+        if (IsAbsolutePath(bounded) || normalized.Contains("path", StringComparison.Ordinal) && IsAbsolutePath(value))
+        {
+            return SafePathLeaf(value);
+        }
+
+        if (normalized.Contains("command", StringComparison.Ordinal) ||
+            normalized.Contains("cmdline", StringComparison.Ordinal) ||
+            normalized.Contains("powershell", StringComparison.Ordinal))
+        {
+            var tokens = bounded.Split(' ', StringSplitOptions.None);
+            for (var index = 0; index < tokens.Length; index++)
+            {
+                var token = tokens[index];
+                var trimmed = token.Trim('"', '\'', ',', ';');
+                if (IsAbsolutePath(trimmed))
+                {
+                    var leaf = SafePathLeaf(trimmed);
+                    tokens[index] = token.Replace(trimmed, leaf, StringComparison.Ordinal);
+                }
+            }
+
+            return string.Join(' ', tokens);
+        }
+
+        return bounded;
+    }
+
     private static string AbbreviateEvidenceValue(string value, int maxLength)
     {
         if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
@@ -13749,7 +13784,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         if (!string.IsNullOrWhiteSpace(artifact.FullPath))
         {
-            html.Append(RenderTechnicalDisclosure("Host/local path hidden by default", artifact.FullPath));
+            html.Append(RenderTechnicalDisclosure("Path", artifact.FullPath));
         }
 
         html.Append("</div>");

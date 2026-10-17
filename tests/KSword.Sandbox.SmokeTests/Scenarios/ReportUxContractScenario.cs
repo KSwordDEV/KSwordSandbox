@@ -629,8 +629,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
             RequireNotContains(collapsedVisibleEnglish, sensitivePath, $"Collapsed English report must not expose host path {sensitivePath}.");
             RequireNotContains(collapsedVisibleChinese, sensitivePath, $"Collapsed Chinese report must not expose host path {sensitivePath}.");
         }
-        RequireContains(chineseHtml, "技术路径默认隐藏", "Chinese report should label collapsed host paths in pure Chinese.");
-        RequireContains(chineseHtml, "主机/本地路径默认隐藏", "Chinese artifact rows should collapse host paths behind a Chinese summary.");
+        RequireNotContains(chineseHtml, "技术路径默认隐藏", "Chinese report should not expose technical-path implementation wording.");
+        RequireNotContains(chineseHtml, "主机/本地路径默认隐藏", "Chinese artifact rows should not expose path-hiding implementation wording.");
         RequireContains(chineseHtml, "报告导航", "Chinese HTML should localize the left report navigation label.");
         RequireContains(chineseHtml, ">章节<", "Chinese HTML should localize the mobile sections toggle.");
         RequireContains(chineseHtml, "overflow:auto", "Chinese localization must preserve valid overflow CSS declarations.");
