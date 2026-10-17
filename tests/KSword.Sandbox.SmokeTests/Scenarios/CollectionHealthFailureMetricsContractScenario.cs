@@ -104,6 +104,7 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(6, model.CollectionHealth.FailureRows, "AnalysisReport should carry the collection-health model.");
 
         AssertStateBoundaries();
+        AssertRequestedMaxEventsBatchCap();
         AssertExpectedDisabledProducerSuppression();
         AssertExpectedTimeoutTermination();
         AssertR0OutputFailureSidecarFinalStatus();
@@ -235,6 +236,60 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         ]);
         RequireTrue(unknownFinal.State == "partial", "Zero loss without a final queue state must remain partial.");
         RequireTrue(!unknownFinal.DriverQueueDepthAtStopKnown, "A startup/status snapshot must not prove a final queue state.");
+    }
+
+    private static void AssertRequestedMaxEventsBatchCap()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        CollectionHealthSummary BuildBatch(string reason, bool cappedByMaxEvents, string eventsDropped) =>
+            CollectionHealthSummaryBuilder.Build(
+            [
+                new SandboxEvent
+                {
+                    EventType = "r0collector.driverReadEvents",
+                    Source = "r0collector",
+                    Timestamp = timestamp,
+                    Data =
+                    {
+                        ["collectionHealth"] = "true",
+                        ["backpressure"] = "true",
+                        ["backpressureReason"] = reason,
+                        ["cappedByMaxEvents"] = cappedByMaxEvents ? "true" : "false",
+                        ["eventsDropped"] = eventsDropped,
+                        ["lostCount"] = "0"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "r0collector.stopped",
+                    Source = "r0collector",
+                    Timestamp = timestamp.AddSeconds(1),
+                    Data =
+                    {
+                        ["statusPhase"] = "final",
+                        ["finalStatusAvailable"] = "true",
+                        ["queueDrained"] = "true",
+                        ["remainingQueueDepth"] = "0"
+                    }
+                }
+            ]);
+
+        var benign = BuildBatch("requested-max-events-reached", cappedByMaxEvents: true, eventsDropped: "0");
+
+        RequireEqual(0, benign.DriverQualityWarningRows, "A requested-max-events batch cap with zero loss must not become a driver quality warning.");
+        RequireEqual(1, benign.DriverHealthRows, "A benign requested-max-events batch cap should stay out of the health lane while the final status remains visible.");
+        RequireTrue(benign.State == "complete", "A drained capture with only a requested-max-events batch cap must remain complete.");
+
+        var queueFull = BuildBatch("queue-full", cappedByMaxEvents: false, eventsDropped: "0");
+
+        RequireEqual(1, queueFull.DriverQualityWarningRows, "A queue-full backpressure batch must remain a driver quality warning.");
+        RequireTrue(queueFull.State == "degraded", "A drained capture with queue-full backpressure must remain degraded.");
+
+        var cappedWithLoss = BuildBatch("requested-max-events-reached", cappedByMaxEvents: true, eventsDropped: "1");
+
+        RequireEqual(1, cappedWithLoss.DriverQualityWarningRows, "A requested-max-events batch with dropped events must remain a driver quality warning.");
+        RequireEqual(1, cappedWithLoss.DriverLossRows, "Dropped events on a capped batch must remain in the driver loss lane.");
+        RequireTrue(cappedWithLoss.State == "partial", "Dropped events on a capped batch must keep the collection partial.");
     }
 
     private static void AssertExpectedDisabledProducerSuppression()

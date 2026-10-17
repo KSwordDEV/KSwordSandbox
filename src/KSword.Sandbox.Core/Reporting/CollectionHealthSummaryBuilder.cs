@@ -324,7 +324,7 @@ public static class CollectionHealthSummaryBuilder
         return !IsDrainStoppedAtDeadline(evt) &&
             !PositiveData(evt, DriverRemainingUnreadKeys) &&
             !PositiveData(evt, DriverLostKeys) &&
-            !BoolTrue(evt, "backpressure", "backpressureObserved") &&
+            (!BoolTrue(evt, "backpressure", "backpressureObserved") || IsBenignRequestedMaxEventsBatchCap(evt)) &&
             !HasUnexpectedProducerSuppression(evt) &&
             !IsMalformedDriverRow(evt) &&
             !IsOutputWriteFailureRow(evt);
@@ -466,6 +466,8 @@ public static class CollectionHealthSummaryBuilder
 
     private static bool IsDriverQualityWarning(SandboxEvent evt)
     {
+        var benignRequestedMaxEventsBatchCap = IsBenignRequestedMaxEventsBatchCap(evt);
+
         // Per-batch poll/read rows are control-plane progress, not final
         // health summaries. Loss and unread counters are still counted by
         // their dedicated lanes below; keeping these rows out of the warning
@@ -477,7 +479,7 @@ public static class CollectionHealthSummaryBuilder
             !IsDrainStoppedAtDeadline(evt) &&
             !PositiveData(evt, DriverRemainingUnreadKeys) &&
             !IsDriverLossRow(evt) &&
-            !BoolTrue(evt, "backpressure", "backpressureObserved") &&
+            (!BoolTrue(evt, "backpressure", "backpressureObserved") || benignRequestedMaxEventsBatchCap) &&
             !IsMalformedDriverRow(evt) &&
             !IsOutputWriteFailureRow(evt))
         {
@@ -497,6 +499,21 @@ public static class CollectionHealthSummaryBuilder
             IsDriverLossRow(evt) ||
             IsMalformedDriverRow(evt) ||
             IsOutputWriteFailureRow(evt);
+    }
+
+    private static bool IsBenignRequestedMaxEventsBatchCap(SandboxEvent evt)
+    {
+        // The driver can stop one read batch at the requested max-events
+        // boundary while the queue continues draining. This is intentional
+        // batching, not queue-full pressure, provided the batch reported no
+        // dropped events. Keep this exception narrow to read-events rows so
+        // other backpressure signals remain actionable.
+        return string.Equals(evt.EventType, "r0collector.driverReadEvents", StringComparison.OrdinalIgnoreCase) &&
+            BoolTrue(evt, "backpressure") &&
+            TextEqualsAny(Value(evt, "backpressureReason"), "requested-max-events-reached") &&
+            BoolTrue(evt, "cappedByMaxEvents") &&
+            !PositiveData(evt, ["eventsDropped", "lostCount"]) &&
+            !BoolTrue(evt, "lossObserved", "sequenceGapObserved", "outputBufferFull");
     }
 
     private static bool HasExpectedProducerSuppression(SandboxEvent evt) =>
