@@ -1090,7 +1090,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         };
         if (labels.TryGetValue(value, out var label)) return label;
         var prefix = value;
-        foreach (var pair in new[] { ("driver.", "驱动·"), ("process.", "进程·"), ("file.", "文件·"), ("registry.", "注册表·"), ("network.", "网络·"), ("etw_security.", "ETW 安全·"), ("security_eventlog.", "安全日志·"), ("artifact.", "证据·") })
+        foreach (var pair in new[] { ("driver.", "驱动·"), ("process.", "进程·"), ("file.", "文件·"), ("registry.", "注册表·"), ("network.", "网络·"), ("etw_security.", "ETW 安全·"), ("security_eventlog.", "安全日志·"), ("eventlog.", "事件日志·"), ("r0collector.", "R0·"), ("service.", "服务·"), ("startup.", "启动项·"), ("thread.", "线程·"), ("artifact.", "证据·") })
         {
             if (prefix.StartsWith(pair.Item1, StringComparison.OrdinalIgnoreCase))
                 return pair.Item2 + LocalizeMachineToken(prefix[pair.Item1.Length..], "·");
@@ -1107,7 +1107,8 @@ html[lang="en"] .localized-evidence-field{display:none}
             "driver" => "内核驱动",
             "r0collector" => "R0 采集器",
             "host" => "宿主",
-            "windows行为EventLog" => "Windows 行为日志",
+            "windowsBehaviorEventLog" => "Windows 行为日志",
+            "r0" => "R0",
             "unknown" => "未知",
             _ => LocalizeMachineToken(value, "·")
         };
@@ -1139,9 +1140,22 @@ html[lang="en"] .localized-evidence-field{display:none}
             ["created"] = "已创建", ["modified"] = "已修改", ["deleted"] = "已删除", ["closed"] = "已关闭",
             ["opened"] = "已打开", ["status"] = "状态", ["summary"] = "摘要", ["unknown"] = "未知",
             ["live"] = "实时", ["security"] = "安全", ["health"] = "健康", ["disabled"] = "已禁用",
-            ["skipped"] = "已跳过", ["partial"] = "部分", ["environment"] = "环境", ["other"] = "其他"
+            ["skipped"] = "已跳过", ["partial"] = "部分", ["environment"] = "环境", ["other"] = "其他",
+            ["host"] = "主机", ["guest"] = "来宾", ["import"] = "导入", ["imported"] = "已导入",
+            ["detail"] = "详情", ["details"] = "详情", ["observed"] = "已观察", ["added"] = "新增",
+            ["removed"] = "已关闭", ["powershell"] = "PowerShell", ["script"] = "脚本", ["block"] = "块",
+            ["netstat"] = "连接快照", ["deviceopened"] = "设备打开", ["driverhealth"] = "驱动健康",
+            ["driverreadevents"] = "读取事件", ["driverstatus"] = "驱动状态", ["r0"] = "R0",
+            ["raw"] = "原始", ["item"] = "项", ["wmi"] = "WMI", ["contract"] = "契约", ["index"] = "索引",
+            ["memory"] = "内存", ["dump"] = "转储", ["packet"] = "数据包", ["pe"] = "PE", ["resource"] = "资源",
+            ["static"] = "静态", ["analysis"] = "分析", ["timeout"] = "超时", ["enrichment"] = "增强",
+            ["virustotal"] = "VirusTotal", ["lookup"] = "查询",
+            ["driver"] = "驱动", ["network"] = "网络", ["registry"] = "注册表", ["process"] = "进程",
+            ["file"] = "文件", ["device"] = "设备", ["read"] = "读取", ["events"] = "事件",
+            ["event"] = "事件"
         };
-        var parts = value.Split(['.', '_', '-'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        var camelSeparated = Regex.Replace(value, "(?<=[a-z0-9])(?=[A-Z])", "_", RegexOptions.CultureInvariant);
+        var parts = camelSeparated.Split(['.', '_', '-'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(part => labels.TryGetValue(part, out var translated) ? translated : part)
             .ToArray();
         return string.Join(separator, parts);
@@ -11511,6 +11525,15 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Reset filters", "重置筛选"),
         ("visible rows", "可见行"),
         ("Execute: ", "执行："),
+        ("Additional detail: ", "附加详情："),
+        ("Additional value: ", "附加值："),
+        ("Collector evidence (path folded)", "采集器证据（路径已折叠）"),
+        ("Host path hidden", "主机路径已隐藏"),
+        ("Open evidence", "打开证据"),
+        ("Related artifacts", "关联证据文件"),
+        ("Copy artifact evidence", "复制证据文件证据"),
+        ("Copy artifacts", "复制证据文件"),
+        ("Exit code: ", "退出码："),
         ("Evidence completeness", "证据完整性"),
         ("<b>Raw</b>", "<b>原始</b>"),
         ("<b>Report</b>", "<b>报告</b>"),
@@ -13950,9 +13973,9 @@ html[lang="en"] .localized-evidence-field{display:none}
     }
 
     /// <summary>
-    /// Renders collapsible related-artifact evidence for one event.
-    /// Inputs are related descriptors; processing writes safe links plus flat
-    /// inline copy actions; the method returns trusted local HTML.
+    /// Renders related-artifact evidence directly in the event row.
+    /// Inputs are related descriptors; processing writes safe links plus icon
+    /// copy actions without another disclosure layer or explanatory prompt.
     /// </summary>
     private static string RenderRelatedArtifacts(IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
@@ -13962,18 +13985,17 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         var html = new StringBuilder();
-        html.AppendLine($"<details open class=\"flat-details related-artifacts-flat\"><summary>Related artifacts ({artifacts.Count})</summary><ul class=\"artifact-list\">");
+        html.AppendLine("<ul class=\"artifact-list inline-artifact-list\">");
         foreach (var artifact in artifacts)
         {
             var plain = ArtifactToPlainText(artifact);
             html.Append("<li>");
             html.Append(RenderArtifactLocation(artifact));
-            html.Append($"<br><span class=\"muted\">{E(artifact.Kind.ToString())} / {E(artifact.Category)}</span>");
-            html.Append($"<br><span class=\"inline-actions\">{CopyButton("Copy artifact evidence", plain)}</span>");
+            html.Append($"<span class=\"inline-actions\">{CopyIconButton(plain)}</span>");
             html.AppendLine("</li>");
         }
 
-        html.AppendLine("</ul></details>");
+        html.AppendLine("</ul>");
         return html.ToString();
     }
 
@@ -14568,11 +14590,6 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.Append("<div class=\"artifact-location\">");
         html.Append($"<code class=\"copyable\" data-copy=\"{A(displayPath)}\">{E(string.IsNullOrWhiteSpace(displayPath) ? "-" : displayPath)}</code>");
         html.Append(RenderArtifactActionButtons(artifact));
-
-        if (!string.IsNullOrWhiteSpace(artifact.FullPath))
-        {
-            html.Append(RenderTechnicalDisclosure("Path", artifact.FullPath));
-        }
 
         html.Append("</div>");
         return html.ToString();

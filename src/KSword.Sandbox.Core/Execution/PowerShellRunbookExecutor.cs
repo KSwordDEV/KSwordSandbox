@@ -17,6 +17,11 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     private const string DryRunMessage = "Dry-run mode recorded the command without launching PowerShell.";
     private const string ElevationFailureMessage = "This live runbook contains host operations that require an elevated PowerShell session. 修复建议：请使用“以管理员身份运行”的 PowerShell/服务进程重新启动后再执行 live 模式。";
     private const string LiveExecutionLeaseFailureMessage = "The exclusive live execution lease could not be acquired. Another live job may be running, or the runtime lock directory is unavailable. No provider command was executed. 修复建议：等待当前 live job 完成；若没有任务运行，请检查 runtime root 的 locks 目录权限后重试。";
+    // Windows PowerShell rejects a very long -EncodedCommand argument before
+    // the child process starts. VMware fallback steps can exceed that limit
+    // after their safety guards are expanded, so spill only oversized scripts
+    // to a short-lived .ps1 file and invoke it with -File.
+    private const int MaxEncodedCommandChars = 7000;
     private static readonly TimeSpan StepHeartbeatInterval = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan StreamReadTimeout = TimeSpan.FromSeconds(5);
     private static readonly System.Text.RegularExpressions.Regex SensitiveEnvironmentNamePattern = new(
@@ -442,16 +447,15 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     {
         var startedAtUtc = DateTimeOffset.UtcNow;
         var stepTimer = Stopwatch.StartNew();
-        using var process = new Process
-        {
-            StartInfo = CreatePowerShellStartInfo(step.PowerShell, options)
-        };
+        string? temporaryScriptPath = null;
+        using var process = new Process();
 
         Task<string>? stdoutTask = null;
         Task<string>? stderrTask = null;
 
         try
         {
+            process.StartInfo = CreatePowerShellStartInfo(step.PowerShell, options, out temporaryScriptPath);
             if (!process.Start())
             {
                 stepTimer.Stop();
@@ -576,6 +580,20 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 startedAtUtc: startedAtUtc,
                 duration: stepTimer.Elapsed,
                 message: $"{RunbookProgressFacts.BuildStepPrefix(step, stepIndex, totalSteps)} failed before or during PowerShell launch: {ex.Message}. 修复建议：确认 PowerShell 可执行文件路径、工作目录和宿主权限。");
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(temporaryScriptPath))
+            {
+                try
+                {
+                    File.Delete(temporaryScriptPath);
+                }
+                catch
+                {
+                    // Preserve the primary result if cleanup races process exit.
+                }
+            }
         }
     }
 
@@ -1001,11 +1019,17 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     /// Builds ProcessStartInfo for a single PowerShell step.
     /// Inputs are command text and executor options; processing wraps the command
     /// in a fail-fast script, encodes it for PowerShell, and applies environment
-    /// overrides; the configured start info is returned to the caller.
+    /// overrides; oversized scripts use a temporary file to avoid the Windows
+    /// PowerShell command-line limit.
     /// </summary>
-    private static ProcessStartInfo CreatePowerShellStartInfo(string powerShell, SandboxRunbookExecutionOptions options)
+    private static ProcessStartInfo CreatePowerShellStartInfo(
+        string powerShell,
+        SandboxRunbookExecutionOptions options,
+        out string? temporaryScriptPath)
     {
-        var encodedCommand = BuildEncodedCommand(powerShell);
+        temporaryScriptPath = null;
+        var script = BuildFailFastScript(powerShell);
+        var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
         var startInfo = new ProcessStartInfo
         {
             FileName = options.PowerShellExecutablePath,
@@ -1025,8 +1049,20 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         startInfo.ArgumentList.Add("-NonInteractive");
         startInfo.ArgumentList.Add("-ExecutionPolicy");
         startInfo.ArgumentList.Add("Bypass");
-        startInfo.ArgumentList.Add("-EncodedCommand");
-        startInfo.ArgumentList.Add(encodedCommand);
+        if (encodedCommand.Length > MaxEncodedCommandChars)
+        {
+            temporaryScriptPath = Path.Combine(
+                Path.GetTempPath(),
+                $"ksword-runbook-{Guid.NewGuid():N}.ps1");
+            File.WriteAllText(temporaryScriptPath, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            startInfo.ArgumentList.Add("-File");
+            startInfo.ArgumentList.Add(temporaryScriptPath);
+        }
+        else
+        {
+            startInfo.ArgumentList.Add("-EncodedCommand");
+            startInfo.ArgumentList.Add(encodedCommand);
+        }
 
         SanitizeInheritedSecretEnvironment(startInfo);
         foreach (var item in options.EnvironmentVariables)
@@ -1510,7 +1546,20 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             currentStepIndex,
             success,
             message);
-        sink.Report(snapshot);
+        // Progress persistence is an observer of the runbook, not part of the
+        // provider operation.  A disconnected WebUI or a transient filesystem
+        // error must not abort the current step and strand a mutated VM before
+        // the mandatory cleanup tail runs.
+        try
+        {
+            sink.Report(snapshot);
+        }
+        catch (Exception)
+        {
+            // The durable runbook-execution result remains the source of truth;
+            // callers still receive the execution result even when a progress
+            // observer is unavailable.
+        }
     }
 
     /// <summary>

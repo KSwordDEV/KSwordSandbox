@@ -295,23 +295,34 @@ internal sealed class DriverJsonLinesReader
         // only the two PIDs bounds memory while preserving the raw JSONL as
         // the authoritative evidence source.
         var relationships = new List<(int? ProcessId, int? ParentProcessId)>();
-        foreach (var line in ReadSharedLines(path))
+        try
         {
-            if (string.IsNullOrWhiteSpace(line))
+            foreach (var line in ReadSharedLines(path))
             {
-                continue;
-            }
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
 
-            try
-            {
-                using var document = JsonDocument.Parse(line);
-                relationships.Add(ReadRelationship(document.RootElement));
+                try
+                {
+                    using var document = JsonDocument.Parse(line);
+                    relationships.Add(ReadRelationship(document.RootElement));
+                }
+                catch (JsonException)
+                {
+                    // The raw JSONL remains the authoritative malformed-row
+                    // evidence; a parse error cannot be assigned to a PID tree.
+                }
             }
-            catch (JsonException)
-            {
-                // The raw JSONL remains the authoritative malformed-row
-                // evidence; a parse error cannot be assigned to a PID tree.
-            }
+        }
+        catch (IOException ex)
+        {
+            return [CreateReadError(path, ex)];
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return [CreateReadError(path, ex)];
         }
 
         var processIds = new HashSet<int> { root };
@@ -332,64 +343,113 @@ internal sealed class DriverJsonLinesReader
 
         var events = new List<SandboxEvent>();
         var lineNumber = 0;
-        foreach (var line in ReadSharedLines(path))
+        try
         {
-            lineNumber++;
-            if (string.IsNullOrWhiteSpace(line))
+            foreach (var line in ReadSharedLines(path))
             {
-                continue;
-            }
-
-            try
-            {
-                using var document = JsonDocument.Parse(line);
-                var hasSource = document.RootElement.ValueKind == JsonValueKind.Object &&
-                    document.RootElement.EnumerateObject().Any(property => string.Equals(property.Name, "source", StringComparison.OrdinalIgnoreCase));
-                var evt = ParseSandboxEvent(document.RootElement);
-                var parent = ResolveDataPid(evt.Data, "parentProcessId", "parentPid", "parentId", "rootProcessId") ?? evt.ParentProcessId;
-                var isCollector = evt.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(evt.Source, "r0collector", StringComparison.OrdinalIgnoreCase);
-                // Driver JSONL is the authoritative R0 stream.  A large
-                // fraction of valid driver rows has no sample PID (for
-                // example image/load, registry and system network rows), so
-                // requiring process-tree attribution here silently discarded
-                // otherwise auditable telemetry.  Keep every driver-origin
-                // row in events.json; report sampling still separates noise
-                // from sample behavior and the raw JSONL remains available.
-                var isDriverRow = string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase) ||
-                    evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
-                    evt.EventType.StartsWith("image.", StringComparison.OrdinalIgnoreCase);
-                var belongsToTree = isCollector || isDriverRow ||
-                    (evt.ProcessId is int pid && processIds.Contains(pid)) ||
-                    (parent is int parentPid && processIds.Contains(parentPid));
-                if (belongsToTree)
+                lineNumber++;
+                if (string.IsNullOrWhiteSpace(line))
                 {
-                    events.Add(NormalizeParsedEvent(evt, hasSource, lineNumber, path));
+                    continue;
+                }
+
+                try
+                {
+                    using var document = JsonDocument.Parse(line);
+                    var hasSource = document.RootElement.ValueKind == JsonValueKind.Object &&
+                        document.RootElement.EnumerateObject().Any(property => string.Equals(property.Name, "source", StringComparison.OrdinalIgnoreCase));
+                    var evt = ParseSandboxEvent(document.RootElement);
+                    var parent = ResolveDataPid(evt.Data, "parentProcessId", "parentPid", "parentId", "rootProcessId") ?? evt.ParentProcessId;
+                    var isCollector = evt.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(evt.Source, "r0collector", StringComparison.OrdinalIgnoreCase);
+                    // Driver JSONL is the authoritative R0 stream.  A large
+                    // fraction of valid driver rows has no sample PID (for
+                    // example image/load, registry and system network rows), so
+                    // requiring process-tree attribution here silently discarded
+                    // otherwise auditable telemetry.  Keep every driver-origin
+                    // row in events.json; report sampling still separates noise
+                    // from sample behavior and the raw JSONL remains available.
+                    var isDriverRow = string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase) ||
+                        evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+                        evt.EventType.StartsWith("image.", StringComparison.OrdinalIgnoreCase);
+                    var belongsToTree = isCollector || isDriverRow ||
+                        (evt.ProcessId is int pid && processIds.Contains(pid)) ||
+                        (parent is int parentPid && processIds.Contains(parentPid));
+                    if (belongsToTree)
+                    {
+                        events.Add(NormalizeParsedEvent(evt, hasSource, lineNumber, path));
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    events.Add(CreateParseError(path, lineNumber, ex));
                 }
             }
-            catch (JsonException ex)
-            {
-                events.Add(new SandboxEvent
-                {
-                    EventType = "driver.parse_error",
-                    Source = "guest",
-                    Path = path,
-                    Data = new(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["lineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        ["jsonlPath"] = path,
-                        ["jsonlImportStatus"] = "parse-error-preserved",
-                        ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
-                        ["message"] = ex.Message,
-                        ["behaviorCounted"] = "false",
-                        ["nonbehavior"] = "true",
-                        ["collectionNoise"] = "true"
-                    }
-                });
-            }
+        }
+        catch (IOException ex)
+        {
+            events.Add(CreateReadError(path, ex));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            events.Add(CreateReadError(path, ex));
         }
 
         return events;
+    }
+
+    private static SandboxEvent CreateParseError(string path, int lineNumber, JsonException ex)
+    {
+        return new SandboxEvent
+        {
+            EventType = "driver.parse_error",
+            Source = "guest",
+            Path = path,
+            Data = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["lineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["jsonlPath"] = path,
+                ["jsonlImportStatus"] = "parse-error-preserved",
+                ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                ["message"] = ex.Message,
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["collectionNoise"] = "true",
+                ["jsonlLineSelector"] = BuildJsonlLineSelector(path, lineNumber),
+                ["jsonlLineCategory"] = "malformed-json",
+                ["jsonlNoisePolicy"] = "malformed rows are preserved as driver.parse_error; subsequent rows still imported",
+                ["parseErrorRecoverable"] = "true",
+                ["importAction"] = "preserve-error-and-continue"
+            }
+        };
+    }
+
+    private static SandboxEvent CreateReadError(string path, Exception ex)
+    {
+        return new SandboxEvent
+        {
+            EventType = "driver.read_error",
+            Source = "guest",
+            Path = path,
+            Data = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                ["message"] = ex.Message,
+                ["jsonlPath"] = path,
+                ["jsonlImportStatus"] = "read-error-preserved",
+                ["jsonlLineCategory"] = "unreadable-jsonl",
+                ["jsonlNoisePolicy"] = "read failures are preserved as driver.read_error so missing R0 evidence is explicit",
+                ["parseErrorRecoverable"] = "false",
+                ["importAction"] = "preserve-read-error",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["zhMessage"] = "Guest Agent 读取 driver-events JSONL 失败。",
+                ["zhHint"] = "请检查 R0Collector 是否成功写出该文件、路径是否正确，以及文件是否仍被占用或权限不足。",
+                ["eventOrigin"] = "guest-agent-import",
+                ["collectionNoise"] = "true",
+                ["attributionSummary"] = "guest-agent-import:driver-jsonl-read-error"
+            }
+        };
     }
 
     /// <summary>

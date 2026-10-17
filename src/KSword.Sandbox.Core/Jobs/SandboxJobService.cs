@@ -303,7 +303,10 @@ public sealed partial class SandboxJobService
         var jobRoot = GetJobRoot(jobId);
         Directory.CreateDirectory(jobRoot);
         var resultPath = Path.Combine(jobRoot, "runbook-execution.json");
-        File.WriteAllText(resultPath, JsonSerializer.Serialize(result, JsonOptions));
+        // Readers poll this file while background execution is being reported.
+        // Replace it atomically so recovery never sees a truncated JSON document
+        // after a process interruption or concurrent report read.
+        WriteJsonAtomically(resultPath, result);
 
         var status = result.Mode == SandboxRunbookExecutionMode.Live
             ? result.Success ? AnalysisStatus.Running : AnalysisStatus.Failed

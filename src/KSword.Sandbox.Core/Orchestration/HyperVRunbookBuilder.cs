@@ -1748,7 +1748,7 @@ public sealed class HyperVRunbookBuilder
             // Keep a reconnect retry idempotent.  If the first remoting stream
             // died after scheduling/starting the Agent, return without
             // unregistering its task or deleting its markers.
-            "$existingOutputRoot = Split-Path -Parent $pidPath; $existingPidFile = Test-Path -LiteralPath $pidPath -PathType Leaf; $existingPid = 0; $existingPidText = if ($existingPidFile) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '' }; [void][int]::TryParse($existingPidText, [ref]$existingPid); $existingProcess = if ($existingPid -gt 0) { Get-Process -Id $existingPid -ErrorAction SilentlyContinue } else { $null }; $existingEvents = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'events.json') -PathType Leaf; $existingExit = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'agent.exit') -PathType Leaf; if ($existingPidFile -or $existingEvents -or $existingExit -or $null -ne $existingProcess) { Write-Host 'KSWORDBOX_AGENT_MARKERS_PRESENT'; return; }",
+            "$existingOutputRoot = Split-Path -Parent $pidPath; $existingPidFile = Test-Path -LiteralPath $pidPath -PathType Leaf; $existingPid = 0; $existingPidText = if ($existingPidFile) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '' }; [void][int]::TryParse($existingPidText, [ref]$existingPid); $existingProcess = if ($existingPid -gt 0) { Get-Process -Id $existingPid -ErrorAction SilentlyContinue } else { $null }; $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue; $existingTaskRunning = $null -ne $existingTask -and [string]$existingTask.State -eq 'Running'; $existingEvents = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'events.json') -PathType Leaf; $existingExit = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'agent.exit') -PathType Leaf; if ($existingPidFile -or $existingEvents -or $existingExit -or $null -ne $existingProcess -or $existingTaskRunning) { Write-Host 'KSWORDBOX_AGENT_MARKERS_PRESENT'; return; }",
             "if (-not (Get-Command New-ScheduledTaskAction -ErrorAction SilentlyContinue)) { throw 'The ScheduledTasks PowerShell module is required for interactive sample launch.' };",
             "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue;",
             "Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue;",
@@ -1769,17 +1769,28 @@ public sealed class HyperVRunbookBuilder
             // Without this boundary a task that was slow to create its PID
             // marker could continue and race the S4U task into a second
             // Guest Agent/sample launch.
-            "try { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue } catch {};",
+            "$interactiveStopError = $null; try { Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop } catch { $interactiveStopError = $_.Exception.Message };",
+            // Stop-ScheduledTask returns before the wrapper necessarily exits.
+            // Do not start the S4U fallback until the interactive task has left
+            // Running, or the two wrappers could launch the sample concurrently.
+            "$interactiveTaskState = ''; $interactiveStopDeadline = (Get-Date).AddSeconds(10); do { $interactiveTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue; $interactiveTaskState = if ($null -eq $interactiveTask) { '' } else { [string]$interactiveTask.State }; if ($interactiveTaskState -ne 'Running') { break }; Start-Sleep -Milliseconds 250 } while ((Get-Date) -lt $interactiveStopDeadline);",
+            "if ($interactiveTaskState -eq 'Running') { throw \"Interactive Guest Agent task did not stop safely; refusing to start the S4U fallback. Stop error: $interactiveStopError\" };",
+            "if (-not [string]::IsNullOrWhiteSpace([string]$interactiveStopError)) { Write-Warning \"Interactive Guest Agent task stop reported: $interactiveStopError\" };",
             "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue;",
             "Write-Warning 'Interactive desktop is unavailable; starting Guest Agent in the remoting session.';",
-            "$existingOutputRoot = Split-Path -Parent $pidPath; $existingPidFile = Test-Path -LiteralPath $pidPath -PathType Leaf; $existingPid = 0; $existingPidText = if ($existingPidFile) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '' }; [void][int]::TryParse($existingPidText, [ref]$existingPid); $existingProcess = if ($existingPid -gt 0) { Get-Process -Id $existingPid -ErrorAction SilentlyContinue } else { $null }; $existingEvents = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'events.json') -PathType Leaf; $existingExit = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'agent.exit') -PathType Leaf; if ($existingPidFile -or $existingEvents -or $existingExit -or $null -ne $existingProcess) { Write-Host 'KSWORDBOX_AGENT_MARKERS_PRESENT'; return; }",
+            "$existingOutputRoot = Split-Path -Parent $pidPath; $existingPidFile = Test-Path -LiteralPath $pidPath -PathType Leaf; $existingPid = 0; $existingPidText = if ($existingPidFile) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '' }; [void][int]::TryParse($existingPidText, [ref]$existingPid); $existingProcess = if ($existingPid -gt 0) { Get-Process -Id $existingPid -ErrorAction SilentlyContinue } else { $null }; $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue; $existingTaskRunning = $null -ne $existingTask -and [string]$existingTask.State -eq 'Running'; $existingEvents = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'events.json') -PathType Leaf; $existingExit = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'agent.exit') -PathType Leaf; if ($existingPidFile -or $existingEvents -or $existingExit -or $null -ne $existingProcess -or $existingTaskRunning) { Write-Host 'KSWORDBOX_AGENT_MARKERS_PRESENT'; return; }",
             // A WinRM child process can be placed in the remoting job and be
             // terminated when this step returns.  A local S4U scheduled task
             // gives the fallback an independent lifetime while remaining
             // noninteractive; sync-live-output still owns the bounded wait
             // and exit-marker validation.
             "Register-ScheduledTask -TaskName $taskName -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $actionArguments -WorkingDirectory $workingDirectory) -Principal (New-ScheduledTaskPrincipal -UserId $guestUserName -LogonType S4U -RunLevel Highest) -Settings $settings -Force | Out-Null; Start-ScheduledTask -TaskName $taskName -ErrorAction Stop;",
-            "$fallbackDeadline=$launchDeadline; do { Start-Sleep -Milliseconds 250 } while (-not (Test-Path -LiteralPath $pidPath -PathType Leaf) -and (Get-Date) -lt $fallbackDeadline);",
+            // The S4U task can need several seconds to materialize the guest
+            // payload and publish agent.pid after the interactive task stop
+            // boundary. Keep launch-time allowance separate from the 30-second
+            // sample collection window so a healthy run is not reported as a
+            // launch failure merely because the marker is late.
+            "$fallbackDeadline=(Get-Date).AddSeconds(60); do { Start-Sleep -Milliseconds 250 } while (-not (Test-Path -LiteralPath $pidPath -PathType Leaf) -and (Get-Date) -lt $fallbackDeadline);",
             "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw \"S4U fallback did not create pid marker: $pidPath\" };",
             "Write-Host \"Guest Agent S4U fallback started; live sync will wait for agent.exit.\";",
             "} ",
@@ -2034,10 +2045,19 @@ public sealed class HyperVRunbookBuilder
         var command = string.Join(" ", new[]
         {
             "$session = $null;",
+            // Live sync performs a final copy after the Guest Agent exits. If
+            // that copy already completed, reopening a second WinRM session
+            // can fail while the guest is shutting down even though all
+            // required evidence is safely on the host. Validate the local
+            // job-scoped copy first and avoid turning that transient remoting
+            // race into a false collection failure.
+            $"$hostOut = {Q(hostOut)};",
+            "$requiredNames = @('events.json', 'agent-summary.json', 'agent.pid', 'agent.exit');",
+            "$hostOutputReady = @($requiredNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $hostOut $_) -PathType Leaf) }).Count -eq 0;",
+            "if ($hostOutputReady) { $exitPath = Join-Path $hostOut 'agent.exit'; $exitText = (Get-Content -LiteralPath $exitPath -Raw -ErrorAction SilentlyContinue).Trim(); $exitCode = 0; if (-not [int]::TryParse($exitText, [ref]$exitCode)) { throw \"Guest Agent output is already synchronized but agent.exit is invalid: $exitPath\" }; if ($exitCode -ne 0) { throw \"Guest Agent output is already synchronized but exited with code $exitCode.\" }; $statusPath = Join-Path $hostOut 'guest-agent-run-status.json'; $status = [ordered]@{ state = 'completed'; exitCode = $exitCode; exitText = $exitText; exitByteLength = [int64](Get-Item -LiteralPath $exitPath).Length; exitZeroByteCount = 0; missingArtifacts = @(); stdoutBytes = if (Test-Path -LiteralPath (Join-Path $hostOut 'agent.stdout.log') -PathType Leaf) { [int64](Get-Item -LiteralPath (Join-Path $hostOut 'agent.stdout.log')).Length } else { 0 }; stderrBytes = if (Test-Path -LiteralPath (Join-Path $hostOut 'agent.stderr.log') -PathType Leaf) { [int64](Get-Item -LiteralPath (Join-Path $hostOut 'agent.stderr.log')).Length } else { 0 }; capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }; $status | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $statusPath -Encoding UTF8; Write-Host \"Final guest output was already synchronized by live output sync under $hostOut.\"; return; }",
             BuildGuestSessionAssignment(config, provider, targetVmName),
             "try {",
             $"$guestOut = {Q(guestOut)};",
-            $"$hostOut = {Q(hostOut)};",
             "New-Item -ItemType Directory -Force -Path $hostOut | Out-Null;",
             "$guestOutputExists = Invoke-Command -Session $session -ScriptBlock { param($path) Test-Path -LiteralPath $path -PathType Container } -ArgumentList $guestOut -ErrorAction Stop;",
             "if (-not [bool]$guestOutputExists) { throw \"Guest output directory does not exist in the VM: $guestOut\" };",

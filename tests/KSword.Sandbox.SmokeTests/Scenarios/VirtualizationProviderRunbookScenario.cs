@@ -80,7 +80,7 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         RequireStepContains(vmware, "run-agent", "live sync will wait for agent.exit");
         RequireStepContains(vmware, "run-agent", "Stop-ScheduledTask -TaskName $taskName");
         RequireStepContains(vmware, "run-agent", "$launchDeadline = (Get-Date).AddSeconds(30);");
-        RequireStepContains(vmware, "run-agent", "$fallbackDeadline=$launchDeadline");
+        RequireStepContains(vmware, "run-agent", "$fallbackDeadline=(Get-Date).AddSeconds(60)");
         RequireStepContains(vmware, "check-sample-runtime", "mscoree\\.dll");
         RequireStepContains(vmware, "check-sample-runtime", "_CorExeMain");
         RequireStepContains(vmware, "check-sample-runtime", "v2\\.0\\.50727");
@@ -103,7 +103,10 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         RequireStepContains(vmware, "sync-live-output", "continuing so collect-output can preserve stdout/stderr");
         RequireStepContains(vmware, "sync-live-output", "$maxSyncSeconds = 210");
         RequireStepContains(vmware, "collect-output", "guest-agent-run-status.json");
+        RequireStepContains(vmware, "collect-output", "$statusPath = Join-Path $hostOut 'guest-agent-run-status.json'");
+        RequireStepContains(vmware, "collect-output", "state = 'completed'");
         RequireStepContains(vmware, "collect-output", "invalid-zero-filled-marker");
+        RequireStepContains(vmware, "collect-output", "$hostOutputReady");
         SmokeAssert.True(
             !RequireStep(vmware, "run-agent").PowerShell.Contains("Guest Agent fallback PowerShell exited with code $fallbackExitCode.\" }", StringComparison.Ordinal),
             "run-agent must not abort before diagnostic collection on fallback Agent failure.");

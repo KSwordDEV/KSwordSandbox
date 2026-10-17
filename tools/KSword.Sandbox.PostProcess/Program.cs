@@ -1110,6 +1110,25 @@ internal static class PostProcessProgram
         metrics["events.r0.driver.omitted"] = Math.Max(0, rawDriverRows.Count - reportDriverRows.Count);
         metrics["events.r0.driver.rawUnknown"] = rawDriverRows.Count - rawAttributedDriverRows;
         metrics["events.r0.driver.reportUnknown"] = reportDriverRows.Count - reportAttributedDriverRows;
+        // Keep the legacy `rawUnknown` aliases (which historically meant
+        // "not sample-attributed") for consumers that still use them, but
+        // split known environment/self-noise from unresolved attribution.
+        // A large R0 stream commonly contains thousands of collector-owned
+        // rows; counting those as unknown made a healthy run look like an
+        // attribution gap even though the classifier had explicitly marked
+        // them environment/nonbehavior.
+        var rawEnvironmentRows = rawDriverRows.Count(evt =>
+            !CollectionHealthSummaryBuilder.IsSampleAttributedR0DriverTelemetryRow(evt) &&
+            IsKnownEnvironmentalR0Row(evt));
+        var reportEnvironmentRows = reportDriverRows.Count(evt =>
+            !CollectionHealthSummaryBuilder.IsSampleAttributedR0DriverTelemetryRow(evt) &&
+            IsKnownEnvironmentalR0Row(evt));
+        var rawUnknownUnresolved = Math.Max(0, rawDriverRows.Count - rawAttributedDriverRows - rawEnvironmentRows);
+        var reportUnknownUnresolved = Math.Max(0, reportDriverRows.Count - reportAttributedDriverRows - reportEnvironmentRows);
+        metrics["events.r0.driver.rawEnvironment"] = rawEnvironmentRows;
+        metrics["events.r0.driver.reportEnvironment"] = reportEnvironmentRows;
+        metrics["events.r0.driver.rawUnknownUnresolved"] = rawUnknownUnresolved;
+        metrics["events.r0.driver.reportUnknownUnresolved"] = reportUnknownUnresolved;
         metrics["events.r0.driver.attributedRaw"] = rawAttributedDriverRows;
         metrics["events.r0.driver.attributedReport"] = reportAttributedDriverRows;
         metrics["events.r0.driver.attributedOmitted"] = Math.Max(0, rawAttributedDriverRows - reportAttributedDriverRows);
@@ -1117,6 +1136,9 @@ internal static class PostProcessProgram
             0,
             (rawDriverRows.Count - rawAttributedDriverRows) -
             (reportDriverRows.Count - reportAttributedDriverRows));
+        metrics["events.r0.driver.unknownUnresolvedOmitted"] = Math.Max(
+            0,
+            rawUnknownUnresolved - reportUnknownUnresolved);
         metrics["events.r0.driver.lossObserved"] = rawEvents.Count(IsR0LossEvidenceEvent);
         metrics["events.r0.driver.backpressureObserved"] = rawEvents.Count(IsR0BackpressureEvidenceEvent);
         metrics["events.r0.driver.drainStoppedAtDeadline"] = rawEvents.Count(evt => EventDataBoolTrue(evt, "drainStoppedAtDeadline"));
@@ -1144,6 +1166,29 @@ internal static class PostProcessProgram
 
     private static bool IsR0DriverTelemetryRow(SandboxEvent evt) =>
         CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow(evt);
+
+    private static bool IsKnownEnvironmentalR0Row(SandboxEvent evt)
+    {
+        if (EventDataEqualsAny(evt, "sampleCorrelation", "environment") ||
+            EventDataEqualsAny(evt, "sampleCorrelationStatus", "environment"))
+        {
+            return true;
+        }
+
+        return EventDataTruthy(
+            evt,
+            "collectorSelfNoise",
+            "collectorNoise",
+            "collectionNoise",
+            "selfNoise",
+            "selfProcess",
+            "nonbehavior",
+            "notSampleBehavior");
+    }
+
+    private static bool EventDataEqualsAny(SandboxEvent evt, string key, params string[] values) =>
+        evt.Data.TryGetValue(key, out var value) &&
+        values.Any(expected => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsR0LossEvidenceEvent(SandboxEvent evt) =>
         EventDataBoolTrue(evt, "lost", "lossObserved", "sequenceGapObserved") ||
@@ -1209,10 +1254,6 @@ internal static class PostProcessProgram
             EventDataEqualsAny(evt, "sampleCorrelationStatus", "correlated", "confirmed", "probable", "candidate") ||
             EventDataEqualsAny(evt, "evidenceDisposition", "behavior-candidate", "sample-attributed");
     }
-
-    private static bool EventDataEqualsAny(SandboxEvent evt, string key, params string[] values) =>
-        evt.Data.TryGetValue(key, out var value) &&
-        values.Any(expected => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase));
 
     private static bool EventDataTruthy(SandboxEvent evt, params string[] keys) =>
         keys.Any(key => evt.Data.TryGetValue(key, out var value) &&

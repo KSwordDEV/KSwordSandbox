@@ -363,6 +363,8 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("hostMergeRequired", StringComparison.Ordinal), "Deferred driver markers must require host-side JSONL merge.");
         SmokeAssert.True(driverReader.Contains("StreamSummary", StringComparison.Ordinal), "Driver reader must expose a bounded streaming summary contract.");
         SmokeAssert.True(driverReader.Contains("Summarize", StringComparison.Ordinal), "Driver reader must summarize large JSONL without materializing rows.");
+        SmokeAssert.True(driverReader.Contains("CreateReadError", StringComparison.Ordinal), "Tree-filtered driver imports must preserve JSONL read failures as diagnostics.");
+        SmokeAssert.True(driverReader.Contains("catch (IOException ex)", StringComparison.Ordinal) && driverReader.Contains("catch (UnauthorizedAccessException ex)", StringComparison.Ordinal), "Tree-filtered driver imports must catch IO/permission failures instead of aborting the Agent run.");
 
         SmokeAssert.True(guestAgentDoc.Contains("process.tree", StringComparison.Ordinal), "Guest agent doc must document process.tree.");
         SmokeAssert.True(guestAgentDoc.Contains("network.tcp.closed", StringComparison.Ordinal), "Guest agent doc must document TCP closed deltas.");

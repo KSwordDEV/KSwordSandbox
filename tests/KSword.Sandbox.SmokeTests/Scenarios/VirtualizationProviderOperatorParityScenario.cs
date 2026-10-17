@@ -521,6 +521,7 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
         Require(providerResourceValidator, "QEMU overlay mode does not accept an internal snapshot baseline override", "Core provider resource validation should reject silently ignored QEMU overlay baselines.");
         Require(providerResourceValidator, "QEMU disk format overrides apply only to Qemu", "Core provider resource validation should reject QEMU-only fields on Hyper-V and VMware.");
         Require(jobService, "Provider = expectedProvider", "Persisted execution results should use the job runbook provider.");
+        Require(jobService, "WriteJsonAtomically(resultPath, result)", "Persisted runbook execution JSON should be atomically replaced while background readers poll it.");
         Require(jobService, "EnsureRunbookExecutionIdentityMatches(job.Runbook, result)", "Persisted execution results should reject cross-provider or cross-resource identity conflicts before backfilling missing fields.");
         Require(jobService, "NormalizeExternalRunbookExecutionPath(jobRoot, runbookExecutionResultPath, runbook)", "Offline report imports should validate execution artifacts against the persisted provider runbook.");
         Require(jobService, "TargetVmName = runbook.TargetVmName", "Planned and regenerated reports should use the effective runbook VM target.");

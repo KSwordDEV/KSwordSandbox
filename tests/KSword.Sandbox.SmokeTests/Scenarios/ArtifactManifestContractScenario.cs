@@ -1658,7 +1658,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/artifacts/manifest.json\"", StringComparison.Ordinal), "HTML report should link artifact manifest.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/artifacts/dropped-files/drop.bin\"", StringComparison.Ordinal), "HTML report should link dropped files.");
         AssertContainsAny(html, ["Artifact evidence", "证据文件证据", "证据文件详情"], "HTML report should render collapsible artifact evidence.");
-        AssertContainsAny(html, ["Related artifacts", "相关证据文件"], "HTML report event evidence should expand related artifacts.");
+        SmokeAssert.True(html.Contains("evidence-expansion-card", StringComparison.Ordinal), "HTML report event evidence should render directly expandable evidence cards.");
         AssertContainsAny(html, ["Screenshot preview", "截图预览"], "HTML report should render screenshot evidence preview.");
         AssertContainsAny(html, ["Driver JSONL preview", "驱动 JSONL 预览"], "HTML report should render driver-events evidence preview.");
         AssertContainsAny(html, ["Manifest preview", "清单预览"], "HTML report should render artifact manifest evidence preview.");

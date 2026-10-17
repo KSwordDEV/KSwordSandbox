@@ -2019,14 +2019,47 @@ public static class SampleCorrelationClassifier
         CorrelationContext context)
     {
         var processName = FirstNonEmpty(evt.ProcessName, Value(data, "processName"), Value(data, "actorProcessName"));
-        if (TextEqualsAny(TrimExe(processName), "ksword.sandbox.agent", "ksword.sandbox.r0collector"))
+        if (IsCollectorOrAgentIdentity(processName))
+        {
+            return true;
+        }
+
+        // R0 rows commonly omit ProcessName and only retain the driver PID;
+        // use the image/command envelope when a producer supplies it. This
+        // keeps a self-noise row out of the sample lane even when no matching
+        // process snapshot was emitted.
+        var identity = FirstNonEmpty(
+            Value(data, "processImagePath"),
+            Value(data, "imagePath"),
+            Value(data, "actorProcessImagePath"),
+            Value(data, "driverProcessImagePath"),
+            Value(data, "processPath"),
+            Value(data, "commandLine"),
+            Value(data, "actorCommandLine"),
+            evt.CommandLine);
+        if (IsCollectorOrAgentIdentity(identity))
         {
             return true;
         }
 
         var processFacts = TryGetEventProcessFacts(evt, data, context);
         return processFacts is not null &&
-            TextEqualsAny(TrimExe(processFacts.Name), "ksword.sandbox.agent", "ksword.sandbox.r0collector");
+            (IsCollectorOrAgentIdentity(processFacts.Name) ||
+             IsCollectorOrAgentIdentity(processFacts.ImagePath) ||
+             IsCollectorOrAgentIdentity(processFacts.CommandLine));
+    }
+
+    private static bool IsCollectorOrAgentIdentity(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = NormalizeSlashes(value);
+        return ContainsAny(normalized,
+            "ksword.sandbox.agent",
+            "ksword.sandbox.r0collector");
     }
 
     private static bool IsGuestSampleStagingProcess(

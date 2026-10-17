@@ -29,12 +29,20 @@ internal sealed class VmwareWinRmReconnectContractScenario : ISmokeTestScenario
         Require(executor, "AnnotateVmwareRecoveryFailure", "Unavailable WinRM/guest markers must produce an explicit recovery diagnostic.");
         Require(executor, "sync-live-output", "Recovery must include live output synchronization.");
         Require(executor, "collect-output", "Recovery must include final guest output collection.");
+        Require(executor, "sink.Report(snapshot)", "Progress should still be published through the configured sink.");
+        Require(executor, "Progress persistence is an observer", "A progress sink failure must not strand a mutated VM before cleanup.");
+        Require(executor, "MaxEncodedCommandChars", "Long VMware runbook scripts must avoid the Windows PowerShell argument limit.");
+        Require(executor, "startInfo.ArgumentList.Add(\"-File\")", "Oversized PowerShell scripts must be launched from a temporary file.");
 
         Require(builder, "$existingEvents = Test-Path", "Guest launch must check events.json before retrying.");
         Require(builder, "$existingExit = Test-Path", "Guest launch must check agent.exit before retrying.");
         Require(builder, "$existingPidFile = Test-Path", "Guest launch must preserve any existing agent.pid marker before retrying.");
         Require(builder, "Get-Process -Id $existingPid", "Guest launch must preserve a still-running Agent process.");
+        Require(builder, "$existingTaskRunning", "Guest launch must preserve a still-running scheduled fallback task before reconnecting.");
         Require(builder, "KSWORDBOX_AGENT_MARKERS_PRESENT", "Guest launch must report preserved markers to the host executor.");
+        Require(builder, "$interactiveStopDeadline", "WinRM fallback must wait for an interactive task to stop before starting S4U.");
+        Require(builder, "refusing to start the S4U fallback", "WinRM fallback must fail closed if the interactive task cannot be stopped safely.");
+        Require(builder, "$fallbackDeadline=(Get-Date).AddSeconds(60)", "S4U marker wait must allow guest payload launch time beyond the sample collection window.");
 
         return Task.FromResult(new SmokeTestResult
         {
