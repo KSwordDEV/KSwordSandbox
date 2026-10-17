@@ -374,10 +374,21 @@ public sealed class HtmlReportRenderer
         AppendStaticAnalysis(html, report);
         AppendDynamicAnalysis(html, report);
         AppendVirusTotalSummary(html, report, artifactLookup, artifactLinks);
-        AppendBehaviorGraph(html, report, artifactLookup, artifactLinks, collectionList);
+        var largeReport = report.Events.Count > 1000;
+        if (largeReport)
+        {
+            AppendLargeReportRenderingNotice(html, report);
+        }
+        else
+        {
+            AppendBehaviorGraph(html, report, artifactLookup, artifactLinks, collectionList);
+        }
         AppendArtifactLinks(html, report, artifactLinks);
-        AppendTimeline(html, report, artifactLookup, artifactLinks);
-        AppendProcessDetails(html, report, artifactLookup, artifactLinks);
+        if (!largeReport)
+        {
+            AppendTimeline(html, report, artifactLookup, artifactLinks);
+            AppendProcessDetails(html, report, artifactLookup, artifactLinks);
+        }
         AppendSecurityPrivilegeTelemetry(html, report, artifactLookup, artifactLinks);
         AppendDroppedFiles(html, report, artifactLookup, artifactLinks);
         AppendStartupPersistence(html, report, artifactLookup, artifactLinks);
@@ -385,7 +396,10 @@ public sealed class HtmlReportRenderer
         AppendNetworkBehavior(html, report, artifactLookup, artifactLinks);
         AppendR0Events(html, report, artifactLookup, artifactLinks);
         AppendFailureReasons(html, report, artifactLookup, artifactLinks);
-        AppendRawEvents(html, report, artifactLookup, artifactLinks);
+        if (!largeReport)
+        {
+            AppendRawEvents(html, report, artifactLookup, artifactLinks);
+        }
         html.AppendLine("</main></div>");
         AppendReportScripts(html);
         html.AppendLine("</body></html>");
@@ -687,6 +701,13 @@ html[lang="en"] .localized-evidence-field{display:none}
         var total = report.Events.Count(IsEventExplorerEvent);
         var inline = Math.Min(total, EventExplorerInlineLimit);
         return $"{inline}/{total}";
+    }
+
+    private static void AppendLargeReportRenderingNotice(StringBuilder html, AnalysisReport report)
+    {
+        html.AppendLine("<section id=\"large-report-rendering\" class=\"report-section\"><h2>Large report view</h2>");
+        html.AppendLine($"<div class=\"section-note\"><strong>Large report rendering boundary.</strong> This report contains {E(report.Events.Count.ToString(CultureInfo.InvariantCulture))} normalized events. High-cost graph, timeline, process-detail, and raw-event expansions are kept in the JSON/JSONL evidence artifacts; the event explorer, coverage cards, R0, network, failure, and artifact sections remain available here so rendering stays responsive and complete evidence is not discarded.</div>");
+        html.AppendLine("</section>");
     }
 
     private static bool IsPrimaryBehaviorFactCard(BehaviorFactCard card)
@@ -10439,6 +10460,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("more evidence rows are available in the report.", "报告中还有更多证据行。"),
         ("more evidence rows are available in the report and can be revealed by filtering.", "报告中还有更多证据行。可通过筛选显示。"),
         ("Detailed fields remain in the raw event JSON; use the compact row to identify this event.", "详细字段保留在原始事件 JSON 中；可先用紧凑行定位该事件。"),
+        ("Large report view", "大型报告视图"),
+        ("Large report rendering boundary.", "大型报告渲染边界。"),
+        ("This report contains ", "本报告包含 "),
+        (" normalized events. High-cost graph, timeline, process-detail, and raw-event expansions are kept in the JSON/JSONL evidence artifacts; the event explorer, coverage cards, R0, network, failure, and artifact sections remain available here so rendering stays responsive and complete evidence is not discarded.", " 条规范化事件。高开销的图谱、时间线、进程详情和原始事件展开保留在 JSON/JSONL 证据文件中；事件筛选表、覆盖卡片、R0、网络、失败和证据文件区仍在此页提供，以保持渲染响应并确保完整证据不被丢弃。"),
         (" report-only rows; ", " 报告专用行；"),
         (" lifecycle rows folded in Raw normalized events.", " 生命周期行已折叠在原始规范化事件中。"),
         (" matching rows; filters apply to the visible evidence table.", " 个匹配行；筛选器作用于可见证据表。"),
