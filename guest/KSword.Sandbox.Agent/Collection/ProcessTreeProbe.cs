@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -48,6 +49,19 @@ internal sealed class ProcessTreeProbe : IGuestProbe
     private readonly HashSet<string> emittedMissingProcessKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> emittedRootUnavailableKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> emittedRootSummaryKeys = new(StringComparer.OrdinalIgnoreCase);
+    // schtasks.exe is a complete inventory query and can take several seconds.
+    // Keep an event-driven watcher on the task store so create/rename/delete
+    // edges that happen between the before/after inventories are retained.
+    private const int MaxQueuedScheduledTaskWatcherEvents = 512;
+    private readonly ConcurrentQueue<ScheduledTaskFileChange> scheduledTaskFileChanges = new();
+    private readonly ConcurrentQueue<ScheduledTaskWatcherError> scheduledTaskWatcherErrors = new();
+    private readonly ConcurrentDictionary<string, byte> queuedScheduledTaskWatcherKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> scheduledTaskWatcherKnownPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> scheduledTaskWatcherKnownDirectories = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<FileSystemWatcher> scheduledTaskWatchers = [];
+    private readonly HashSet<string> scheduledTaskWatchRoots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object scheduledTaskWatcherGate = new();
+    private long droppedScheduledTaskWatcherChanges;
     private Dictionary<int, ProcessTreeSnapshot> baselineByPid = [];
     private SystemChangeSnapshot baselineSystemState = SystemChangeSnapshot.Empty;
 
@@ -108,6 +122,8 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         var events = new List<SandboxEvent>();
         if (phase == ProbePhase.BeforeStart)
         {
+            DisposeScheduledTaskWatchers();
+            StartScheduledTaskWatchers();
             emittedNewProcessKeys.Clear();
             observedSnapshots.Clear();
             monitoredProcessKeys.Clear();
@@ -149,6 +165,12 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 events.AddRange(CreateCurrentProcessSnapshotEvents(current, phase, context, capturedAtUtc));
             }
             var rootTreeMetadata = CreateRootTreeMetadata(current, context);
+
+            // The full scheduled-task inventory is intentionally only queried
+            // before/after the run. Drain the task-store watcher on every
+            // 250 ms edge poll so a task that is created and removed between
+            // schtasks snapshots still becomes first-class evidence.
+            events.AddRange(DrainScheduledTaskWatcherEvents(phase, context, capturedAtUtc));
 
             foreach (var process in current.Values.OrderBy(process => process.ProcessId).ThenBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase))
             {
@@ -212,6 +234,11 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 events.AddRange(CreateSystemSnapshotEvents(currentSystemState, phase));
                 events.AddRange(CreateSystemDiffEvents(baselineSystemState, currentSystemState, phase));
                 events.AddRange(WithPhase(currentSystemState.Diagnostics, phase));
+                // A callback can arrive while the final schtasks query is in
+                // flight; drain once more after it completes and then stop
+                // the watchers so no post-analysis host changes leak in.
+                events.AddRange(DrainScheduledTaskWatcherEvents(phase, context, DateTimeOffset.UtcNow));
+                DisposeScheduledTaskWatchers();
             }
         }
 
@@ -1699,6 +1726,395 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         yield return CreateInventorySnapshotEvent("startup_item.snapshot", "startup_item", snapshot.StartupItems.Count, phase);
         yield return CreateInventorySnapshotEvent("registry.run.snapshot", "registry.run", snapshot.RegistryRunValues.Count, phase);
         yield return CreateInventorySnapshotEvent("startup.snapshot", "startup", snapshot.Services.Count + snapshot.ScheduledTasks.Count + snapshot.StartupItems.Count, phase);
+    }
+
+    /// <summary>
+    /// Starts bounded file-system watchers for the Windows task store. Inputs
+    /// are none; processing registers callbacks before sample launch; the
+    /// method returns no value. Task XML files are the durable edge source
+    /// while schtasks inventory queries provide the richer final metadata.
+    /// </summary>
+    private void StartScheduledTaskWatchers()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var windowsRoot = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        if (string.IsNullOrWhiteSpace(windowsRoot))
+        {
+            return;
+        }
+
+        var roots = new[]
+        {
+            Path.Combine(windowsRoot, "System32", "Tasks"),
+            Path.Combine(windowsRoot, "Tasks")
+        };
+        foreach (var root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!Directory.Exists(root))
+            {
+                continue;
+            }
+
+            lock (scheduledTaskWatcherGate)
+            {
+                if (!scheduledTaskWatchRoots.Add(root))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    SeedScheduledTaskFiles(root);
+
+                    var watcher = new FileSystemWatcher(root)
+                    {
+                        IncludeSubdirectories = true,
+                        NotifyFilter = NotifyFilters.FileName |
+                                       NotifyFilters.DirectoryName |
+                                       NotifyFilters.LastWrite |
+                                       NotifyFilters.Size,
+                        Filter = "*",
+                        InternalBufferSize = 64 * 1024,
+                        EnableRaisingEvents = true
+                    };
+                    watcher.Created += (_, args) => EnqueueScheduledTaskWatcherChange(ScheduledTaskWatcherChangeKind.Created, args.FullPath, null);
+                    watcher.Changed += (_, args) => EnqueueScheduledTaskWatcherChange(ScheduledTaskWatcherChangeKind.Changed, args.FullPath, null);
+                    watcher.Deleted += (_, args) => EnqueueScheduledTaskWatcherChange(ScheduledTaskWatcherChangeKind.Deleted, args.FullPath, null);
+                    watcher.Renamed += (_, args) => EnqueueScheduledTaskWatcherChange(ScheduledTaskWatcherChangeKind.Renamed, args.FullPath, args.OldFullPath);
+                    watcher.Error += (_, args) => EnqueueScheduledTaskWatcherError(args.GetException(), root);
+                    scheduledTaskWatchers.Add(watcher);
+                }
+                catch (Exception ex) when (ex is ArgumentException or IOException or InvalidOperationException or UnauthorizedAccessException)
+                {
+                    scheduledTaskWatchRoots.Remove(root);
+                    EnqueueScheduledTaskWatcherError(ex, root);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Drains task-store watcher callbacks into scheduled_task behavior rows.
+    /// Inputs are phase, context, and capture time; processing preserves
+    /// rename source/destination and explicit watcher health; the method
+    /// returns rows ready for report correlation.
+    /// </summary>
+    private IReadOnlyList<SandboxEvent> DrainScheduledTaskWatcherEvents(
+        ProbePhase phase,
+        GuestProbeContext context,
+        DateTimeOffset capturedAtUtc)
+    {
+        var events = new List<SandboxEvent>();
+        while (scheduledTaskWatcherErrors.TryDequeue(out var error))
+        {
+            var exception = error.Exception;
+            events.Add(new SandboxEvent
+            {
+                EventType = "scheduled_task.watcher.failed",
+                Source = "guest",
+                Path = error.Root,
+                Data =
+                {
+                    ["phase"] = ToPhaseLabel(phase),
+                    ["capturePhase"] = ToPhaseLabel(phase),
+                    ["captureSource"] = "scheduled-task-filesystem-watcher",
+                    ["captureState"] = "failed",
+                    ["status"] = "failed",
+                    ["collectionHealth"] = "true",
+                    ["nonbehavior"] = "true",
+                    ["behaviorCounted"] = "false",
+                    ["reason"] = exception is InternalBufferOverflowException ? "watcherBufferOverflow" : "watcherError",
+                    ["reasonCode"] = exception is InternalBufferOverflowException ? "watcherBufferOverflow" : "watcherError",
+                    ["watchRoot"] = error.Root ?? string.Empty,
+                    ["samplePath"] = context.SamplePath,
+                    ["zhMessage"] = "计划任务文件监视器发生错误；瞬时任务边沿可能不完整。",
+                    ["zhHint"] = "请结合 task-store 文件和 schtasks 最终清单判断计划任务证据是否完整。"
+                }
+            });
+            if (exception is not null)
+            {
+                events[^1].Data["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name;
+                events[^1].Data["exceptionMessage"] = exception.Message;
+            }
+        }
+
+        var dropped = Interlocked.Exchange(ref droppedScheduledTaskWatcherChanges, 0);
+        if (dropped > 0)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = "scheduled_task.watcher.dropped",
+                Source = "guest",
+                Path = context.SamplePath,
+                Data =
+                {
+                    ["phase"] = ToPhaseLabel(phase),
+                    ["captureSource"] = "scheduled-task-filesystem-watcher",
+                    ["captureState"] = "degraded",
+                    ["status"] = "degraded",
+                    ["collectionHealth"] = "true",
+                    ["nonbehavior"] = "true",
+                    ["behaviorCounted"] = "false",
+                    ["reason"] = "watcherQueueDrop",
+                    ["reasonCode"] = "watcherQueueDrop",
+                    ["droppedWatcherChanges"] = dropped.ToString(CultureInfo.InvariantCulture),
+                    ["zhMessage"] = "计划任务文件监视器队列丢弃了部分边沿；计划任务证据不完整。",
+                    ["zhHint"] = "请结合 droppedWatcherChanges 判断是否需要重复运行。"
+                }
+            });
+        }
+
+        while (scheduledTaskFileChanges.TryDequeue(out var change))
+        {
+            queuedScheduledTaskWatcherKeys.TryRemove(ScheduledTaskWatcherChangeKey(change.Kind, change.Path, change.OldPath), out _);
+            // The watcher starts before launching the sample so it can catch
+            // the first edge. Drop callbacks that belong to the short
+            // pre-launch gap; otherwise an unrelated Windows task refresh
+            // could be attributed to the sample. After the root starts, the
+            // same queue remains valid through the post-exit observation.
+            if (context.RootProcessStartTimeUtc is DateTime rootStartUtc &&
+                change.CapturedAtUtc < new DateTimeOffset(DateTime.SpecifyKind(rootStartUtc, DateTimeKind.Utc)))
+            {
+                continue;
+            }
+            if (Directory.Exists(change.Path))
+            {
+                continue;
+            }
+
+            var eventType = change.Kind switch
+            {
+                ScheduledTaskWatcherChangeKind.Created => ScheduledTaskCreatedEventType,
+                ScheduledTaskWatcherChangeKind.Deleted => ScheduledTaskDeletedEventType,
+                ScheduledTaskWatcherChangeKind.Changed or ScheduledTaskWatcherChangeKind.Renamed => ScheduledTaskModifiedEventType,
+                _ => string.Empty
+            };
+            if (string.IsNullOrWhiteSpace(eventType))
+            {
+                continue;
+            }
+
+            var taskName = TaskNameFromPath(change.Path);
+            var evt = new SandboxEvent
+            {
+                EventType = eventType,
+                Source = "guest",
+                Path = change.Path,
+                Data =
+                {
+                    ["phase"] = ToPhaseLabel(phase),
+                    ["capturedAtUtc"] = capturedAtUtc.ToString("O", CultureInfo.InvariantCulture),
+                    ["change"] = change.Kind == ScheduledTaskWatcherChangeKind.Renamed ? "renamed" : change.Kind.ToString().ToLowerInvariant(),
+                    ["taskName"] = taskName,
+                    ["taskStorePath"] = change.Path,
+                    ["captureSource"] = "scheduled-task-filesystem-watcher",
+                    ["captureState"] = change.Kind == ScheduledTaskWatcherChangeKind.Deleted ? "deleted" : "observed",
+                    ["metadataStatus"] = "task-file-edge-only",
+                    ["taskMetadataSource"] = "schtasks-final-inventory-or-unavailable",
+                    ["edgeCaptured"] = "true",
+                    ["behaviorCounted"] = "true",
+                    ["zhMessage"] = change.Kind == ScheduledTaskWatcherChangeKind.Deleted
+                        ? "任务存储中检测到计划任务文件删除。"
+                        : change.Kind == ScheduledTaskWatcherChangeKind.Renamed
+                            ? "任务存储中检测到计划任务文件重命名。"
+                            : "任务存储中检测到计划任务文件创建或修改。",
+                    ["zhHint"] = "请结合 taskName、taskToRun 和 schtasks 最终清单核对计划任务动作。"
+                }
+            };
+            if (!string.IsNullOrWhiteSpace(change.OldPath))
+            {
+                evt.Data["oldPath"] = change.OldPath;
+                evt.Data["sourcePath"] = change.OldPath;
+                evt.Data["destinationPath"] = change.Path;
+                evt.Data["oldTaskName"] = TaskNameFromPath(change.OldPath);
+            }
+
+            events.Add(evt);
+        }
+
+        return events;
+    }
+
+    private void EnqueueScheduledTaskWatcherChange(
+        ScheduledTaskWatcherChangeKind kind,
+        string? path,
+        string? oldPath)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !IsScheduledTaskStorePath(path))
+        {
+            return;
+        }
+
+        if (kind is ScheduledTaskWatcherChangeKind.Created or ScheduledTaskWatcherChangeKind.Changed or ScheduledTaskWatcherChangeKind.Renamed)
+        {
+            if (Directory.Exists(path))
+            {
+                scheduledTaskWatcherKnownDirectories[path] = 0;
+                if (!string.IsNullOrWhiteSpace(oldPath))
+                {
+                    scheduledTaskWatcherKnownDirectories[oldPath] = 0;
+                }
+                return;
+            }
+
+            scheduledTaskWatcherKnownPaths[path] = 0;
+            if (!string.IsNullOrWhiteSpace(oldPath))
+            {
+                scheduledTaskWatcherKnownPaths[oldPath] = 0;
+            }
+        }
+        else if (kind == ScheduledTaskWatcherChangeKind.Deleted)
+        {
+            if (scheduledTaskWatcherKnownDirectories.TryRemove(path, out _))
+            {
+                return;
+            }
+
+            if (!scheduledTaskWatcherKnownPaths.ContainsKey(path))
+            {
+                return;
+            }
+
+            scheduledTaskWatcherKnownPaths.TryRemove(path, out _);
+        }
+
+        var key = ScheduledTaskWatcherChangeKey(kind, path, oldPath);
+        if (!queuedScheduledTaskWatcherKeys.TryAdd(key, 0))
+        {
+            return;
+        }
+
+        while (scheduledTaskFileChanges.Count >= MaxQueuedScheduledTaskWatcherEvents && scheduledTaskFileChanges.TryDequeue(out var dropped))
+        {
+            queuedScheduledTaskWatcherKeys.TryRemove(ScheduledTaskWatcherChangeKey(dropped.Kind, dropped.Path, dropped.OldPath), out _);
+            Interlocked.Increment(ref droppedScheduledTaskWatcherChanges);
+        }
+
+        scheduledTaskFileChanges.Enqueue(new ScheduledTaskFileChange(kind, path, oldPath, DateTimeOffset.UtcNow));
+    }
+
+    private void SeedScheduledTaskFiles(string root)
+    {
+        try
+        {
+            // Seed existing task files so deletion edges are retained even
+            // when a task is removed before its first callback. The bounded
+            // seed avoids walking an unexpectedly large task store during the
+            // latency-sensitive launch path.
+            foreach (var taskFile in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Take(10_000))
+            {
+                scheduledTaskWatcherKnownPaths[taskFile] = 0;
+            }
+        }
+        catch (IOException ex)
+        {
+            EnqueueScheduledTaskWatcherError(ex, root);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            EnqueueScheduledTaskWatcherError(ex, root);
+        }
+    }
+
+    private void EnqueueScheduledTaskWatcherError(Exception? exception, string? root)
+    {
+        while (scheduledTaskWatcherErrors.Count >= 16 && scheduledTaskWatcherErrors.TryDequeue(out _))
+        {
+        }
+
+        scheduledTaskWatcherErrors.Enqueue(new ScheduledTaskWatcherError(exception, root));
+    }
+
+    private bool IsScheduledTaskStorePath(string path)
+    {
+        lock (scheduledTaskWatcherGate)
+        {
+            return scheduledTaskWatchRoots.Any(root => IsPathUnderRoot(root, path));
+        }
+    }
+
+    private string TaskNameFromPath(string path)
+    {
+        lock (scheduledTaskWatcherGate)
+        {
+            var root = scheduledTaskWatchRoots
+                .Where(candidate => IsPathUnderRoot(candidate, path))
+                .OrderByDescending(candidate => candidate.Length)
+                .FirstOrDefault();
+            if (root is null)
+            {
+                return path;
+            }
+
+            var relative = Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/');
+            return "/" + relative.TrimStart('/');
+        }
+    }
+
+    private static bool IsPathUnderRoot(string root, string path)
+    {
+        try
+        {
+            var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var fullPath = Path.GetFullPath(path);
+            return string.Equals(fullRoot, fullPath, StringComparison.OrdinalIgnoreCase) ||
+                   fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                   fullPath.StartsWith(fullRoot + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static string ScheduledTaskWatcherChangeKey(
+        ScheduledTaskWatcherChangeKind kind,
+        string path,
+        string? oldPath)
+    {
+        return string.Concat(kind.ToString(), "|", path, "|", oldPath ?? string.Empty);
+    }
+
+    private void DisposeScheduledTaskWatchers()
+    {
+        lock (scheduledTaskWatcherGate)
+        {
+            foreach (var watcher in scheduledTaskWatchers)
+            {
+                try
+                {
+                    watcher.EnableRaisingEvents = false;
+                    watcher.Dispose();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            }
+
+            scheduledTaskWatchers.Clear();
+            scheduledTaskWatchRoots.Clear();
+        }
+
+        while (scheduledTaskFileChanges.TryDequeue(out _))
+        {
+        }
+
+        while (scheduledTaskWatcherErrors.TryDequeue(out _))
+        {
+        }
+
+        queuedScheduledTaskWatcherKeys.Clear();
+        scheduledTaskWatcherKnownPaths.Clear();
+        scheduledTaskWatcherKnownDirectories.Clear();
+        Interlocked.Exchange(ref droppedScheduledTaskWatcherChanges, 0);
     }
 
     /// <summary>
@@ -4094,3 +4510,31 @@ internal sealed record SystemChangeSnapshot(
         new Dictionary<string, RegistryRunValueSnapshot>(StringComparer.OrdinalIgnoreCase),
         []);
 }
+
+/// <summary>
+/// Represents one task-store file-system edge. Inputs are watcher kind and
+/// source/destination paths; processing keeps transient rename/delete edges
+/// until the next probe drain.
+/// </summary>
+internal sealed record ScheduledTaskFileChange(
+    ScheduledTaskWatcherChangeKind Kind,
+    string Path,
+    string? OldPath,
+    DateTimeOffset CapturedAtUtc);
+
+/// <summary>
+/// Enumerates task-store watcher edge kinds.
+/// </summary>
+internal enum ScheduledTaskWatcherChangeKind
+{
+    Created,
+    Changed,
+    Deleted,
+    Renamed
+}
+
+/// <summary>
+/// Stores a non-fatal task-store watcher error for explicit collection-health
+/// evidence instead of silently dropping scheduled-task edges.
+/// </summary>
+internal sealed record ScheduledTaskWatcherError(Exception? Exception, string? Root);

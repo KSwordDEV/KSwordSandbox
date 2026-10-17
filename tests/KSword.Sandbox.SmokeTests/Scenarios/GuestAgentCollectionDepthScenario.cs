@@ -109,6 +109,11 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "imagePath", "Service diff events must preserve service ImagePath metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "serviceDll", "Service diff events must preserve service DLL metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "scheduled_task.created", "Process probe must emit scheduled task diff events.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "StartScheduledTaskWatchers", "Process probe must start an event-driven task-store watcher before sample launch.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "DrainScheduledTaskWatcherEvents", "Process probe must drain short-lived scheduled-task edges during in-flight polls.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "scheduled_task.watcher.failed", "Task-store watcher failures must remain explicit collection-health evidence.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "task-file-edge-only", "Task-store edge rows must disclose when rich schtasks metadata is unavailable.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "oldTaskName", "Renamed task-store rows must retain both source and destination task names.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "startup_item.created", "Process probe must emit startup item diff events.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "startup.created", "Process probe must emit unified startup diff events.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "wmi-permanent-event-subscription", "Startup diff must cover WMI permanent event subscription surfaces.");
