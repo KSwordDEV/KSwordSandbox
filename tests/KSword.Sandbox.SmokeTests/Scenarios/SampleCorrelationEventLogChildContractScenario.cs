@@ -84,6 +84,48 @@ internal sealed class SampleCorrelationEventLogChildContractScenario : ISmokeTes
         var basenameCollision = classified.Single(evt => evt.EventType == "file.created");
         SmokeAssert.True(basenameCollision.Data["sampleCorrelation"] != "confirmed", "An unattributed watcher path sharing the sample basename must not be confirmed by filename alone.");
 
+        var guiEtw = SampleCorrelationClassifier.Apply(
+            [
+                new SandboxEvent
+                {
+                    EventType = "process.start",
+                    Source = "guest",
+                    ProcessName = "notepad.exe",
+                    ProcessId = 500,
+                    Path = GuiSamplePath,
+                    CommandLine = GuiSamplePath,
+                    Data = new(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["processImagePath"] = GuiSamplePath
+                    }
+                },
+                EtwGuiLifecycle(500, "image.load", @"C:\Windows\System32\kernel32.dll"),
+                EtwGuiLifecycle(500, "image.load", @"C:\Users\SandboxUser\AppData\Local\payload.dll"),
+                EtwGuiLifecycle(500, "thread.start", null),
+                EtwGuiLifecycle(500, "thread.start", null, remote: true)
+            ],
+            GuiSamplePath);
+
+        var systemImage = guiEtw.Single(evt => evt.EventType == "image.load" && evt.Path?.EndsWith("kernel32.dll", StringComparison.OrdinalIgnoreCase) == true);
+        SmokeAssert.True(systemImage.Data["normalBehaviorBoundary"] == "normal-interactive-gui-baseline" &&
+                         systemImage.Data["behaviorCounted"] == "false",
+            "System DLL ETW image loads for a trusted GUI sample must remain evidence without becoming suspicious behavior.");
+
+        var userImage = guiEtw.Single(evt => evt.EventType == "image.load" && evt.Path?.EndsWith("payload.dll", StringComparison.OrdinalIgnoreCase) == true);
+        SmokeAssert.True(userImage.Data["sampleCorrelationBoundary"] == "sample-attribution-boundary" &&
+                         userImage.Data["behaviorCounted"] == "true",
+            "User-writable ETW image loads must remain sample candidates for a trusted GUI process.");
+
+        var normalThread = guiEtw.Single(evt => evt.EventType == "thread.start" && !evt.Data.ContainsKey("remoteThread"));
+        SmokeAssert.True(normalThread.Data["normalBehaviorBoundary"] == "normal-interactive-gui-baseline" &&
+                         normalThread.Data["behaviorCounted"] == "false",
+            "Routine ETW GUI thread lifecycle edges must remain baseline evidence.");
+
+        var remoteThread = guiEtw.Single(evt => evt.EventType == "thread.start" && evt.Data.ContainsKey("remoteThread"));
+        SmokeAssert.True(remoteThread.Data["sampleCorrelationBoundary"] == "sample-attribution-boundary" &&
+                         remoteThread.Data["behaviorCounted"] == "true",
+            "Explicit remote-thread ETW evidence must remain a sample behavior candidate.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
@@ -113,5 +155,30 @@ internal sealed class SampleCorrelationEventLogChildContractScenario : ISmokeTes
         };
     }
 
+    private static SandboxEvent EtwGuiLifecycle(int processId, string eventType, string? path, bool remote = false)
+    {
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["captureSource"] = "etw-live-tracerpt",
+            ["collectorSource"] = "etwLive",
+            ["rawDecoded"] = "true"
+        };
+        if (remote)
+        {
+            data["remoteThread"] = "true";
+        }
+
+        return new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "etwLive",
+            ProcessName = "notepad.exe",
+            ProcessId = processId,
+            Path = path,
+            Data = data
+        };
+    }
+
     private const string SamplePath = @"C:\KSwordSandbox\incoming\sample.exe";
+    private const string GuiSamplePath = @"C:\KSwordSandbox\incoming\notepad.exe";
 }

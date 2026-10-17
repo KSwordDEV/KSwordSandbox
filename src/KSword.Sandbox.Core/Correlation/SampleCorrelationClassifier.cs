@@ -1445,7 +1445,7 @@ public static class SampleCorrelationClassifier
             Path.GetFileName(Value(data, "imagePath")),
             context.SampleFileName));
 
-        if (TextEqualsOrStartsWithAny(processName, NormalInteractiveGuiProcessNamePrefixes) && IsNormalInteractiveGuiBaselineEvent(evt, data))
+        if (TextEqualsOrStartsWithAny(processName, NormalInteractiveGuiProcessNamePrefixes) && IsNormalInteractiveGuiBaselineEvent(evt, data, context))
         {
             return "normal-interactive-gui-baseline";
         }
@@ -1453,11 +1453,25 @@ public static class SampleCorrelationClassifier
         return "sample-attribution-boundary";
     }
 
-    private static bool IsNormalInteractiveGuiBaselineEvent(SandboxEvent evt, IReadOnlyDictionary<string, string> data)
+    private static bool IsNormalInteractiveGuiBaselineEvent(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context)
     {
         if (IsHighSignalMutation(evt, data) || IsNetworkEvidence(evt) || IsServiceOrScheduledTaskEvidence(evt))
         {
             return false;
+        }
+
+        // Kernel ETW emits ordinary module and thread lifecycle edges for a
+        // GUI process. Keep those rows in the evidence stream, but do not
+        // turn every System32 DLL or routine thread edge into a suspicious
+        // behavior finding. A user-writable image, the submitted sample
+        // image, or an explicit remote-thread/injection marker remains a
+        // sample candidate and is handled by the normal correlation path.
+        if (IsEtwGuiLifecycleBaseline(evt, data, context))
+        {
+            return true;
         }
 
         if (IsProcessEvidence(evt))
@@ -1469,6 +1483,55 @@ public static class SampleCorrelationClassifier
         var eventFamily = Value(data, "eventFamily");
         return TextEqualsAny(eventKind, "summary", "status", "metadata") ||
             TextEqualsAny(eventFamily, "process", "window", "ui", "screenshot");
+    }
+
+    private static bool IsEtwGuiLifecycleBaseline(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context)
+    {
+        if (!IsEtwEvidence(evt) ||
+            !TextEqualsAny(Value(data, "captureSource"), "etw-live-tracerpt") &&
+            !TextEqualsAny(Value(data, "collectorSource"), "etwLive"))
+        {
+            return false;
+        }
+
+        if (TextEqualsAny(evt.EventType, "image.load", "image.unload"))
+        {
+            var imagePath = FirstNonEmpty(
+                evt.Path,
+                Value(data, "fileName"),
+                Value(data, "path"),
+                Value(data, "imagePath"));
+            if (string.IsNullOrWhiteSpace(imagePath))
+            {
+                return false;
+            }
+
+            var imageName = imagePath.Replace('/', '\\').TrimEnd('\\').Split('\\').LastOrDefault();
+            var isSubmittedSampleImage = !string.IsNullOrWhiteSpace(imageName) &&
+                string.Equals(imageName, context.SampleFileName, StringComparison.OrdinalIgnoreCase);
+            return isSubmittedSampleImage || LooksSystemOnlyPath(imagePath);
+        }
+
+        if (TextEqualsAny(evt.EventType, "thread.start", "thread.exit"))
+        {
+            return !HasRemoteThreadSignal(data);
+        }
+
+        return false;
+    }
+
+    private static bool HasRemoteThreadSignal(IReadOnlyDictionary<string, string> data)
+    {
+        return IsTruthy(Value(data, "remoteThread")) ||
+            IsTruthy(Value(data, "remoteThreadCandidate")) ||
+            IsTruthy(Value(data, "injectionCandidate")) ||
+            IsTruthy(Value(data, "remoteInjection")) ||
+            !string.IsNullOrWhiteSpace(Value(data, "creatorProcessId")) ||
+            !string.IsNullOrWhiteSpace(Value(data, "sourceProcessId")) ||
+            ContainsAny(Value(data, "semanticEventTags"), "remote-thread", "injection");
     }
 
     private static bool HasExistingStrongCorrelation(IReadOnlyDictionary<string, string> data)
