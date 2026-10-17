@@ -322,6 +322,11 @@ public static class CollectionHealthSummaryBuilder
 
     private static bool HasExplicitRemainingUnread(SandboxEvent evt)
     {
+        if (BoolTrue(evt, "queueDepthAtStopUnknown"))
+        {
+            return false;
+        }
+
         // Older batch summaries use remainingUnread directly and are already
         // an explicit tail measurement. The newer collector status contract
         // also emits remainingQueueDepth on every snapshot, so that alias is
