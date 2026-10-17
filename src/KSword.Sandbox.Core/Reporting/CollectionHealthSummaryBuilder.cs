@@ -83,9 +83,40 @@ public static class CollectionHealthSummaryBuilder
             : FirstUnsigned(finalRemainingRow, DriverRemainingUnreadKeys);
         var malformedRows = raw.Count(IsMalformedDriverRow);
         var outputWriteFailureRows = raw.Count(IsOutputWriteFailureRow);
+        var etwFailureRows = raw.Count(IsEtwFailure);
+        var pcapFailureRows = raw.Count(IsPcapFailure);
+        var agentFailureRows = raw.Count(IsAgentFailure);
+        var stateReasons = BuildStateReasons(
+            raw,
+            driverHealthRows.Count,
+            driverQueueDepthAtStopKnown,
+            driverRemainingUnread,
+            driverLossRows,
+            malformedRows,
+            outputWriteFailureRows,
+            etwFailureRows,
+            pcapFailureRows,
+            agentFailureRows,
+            MaxDataUnsigned(driverHealthRows, DriverSuppressedKeys),
+            driverHealthRows.Count(IsDriverQualityWarning));
 
         return new CollectionHealthSummary
         {
+            State = DetermineState(
+                raw.Count,
+                driverHealthRows.Count,
+                driverQueueDepthAtStopKnown,
+                driverRemainingUnread,
+                driverLossRows.Count,
+                malformedRows,
+                outputWriteFailureRows,
+                etwFailureRows,
+                pcapFailureRows,
+                agentFailureRows,
+                MaxDataUnsigned(driverHealthRows, DriverSuppressedKeys),
+                driverHealthRows.Count(IsDriverQualityWarning)),
+            StateReasons = stateReasons,
+            DriverHealthRows = driverHealthRows.Count,
             RawRows = raw.Count,
             ReportRows = report.Count,
             OmittedRows = omitted,
@@ -107,7 +138,10 @@ public static class CollectionHealthSummaryBuilder
             ProcessTreeUnavailable = raw.Count(IsProcessTreeUnavailable),
             ScheduledTaskCaptureFailed = raw.Count(IsScheduledTaskCaptureFailed),
             PktmonStopFailed = raw.Count(IsPktmonStopFailed),
-            EtwDecodeFailed = raw.Count(IsEtwDecodeFailure)
+            EtwDecodeFailed = raw.Count(IsEtwDecodeFailure),
+            EtwFailureRows = etwFailureRows,
+            PcapFailureRows = pcapFailureRows,
+            AgentFailureRows = agentFailureRows
         };
     }
 
@@ -120,6 +154,12 @@ public static class CollectionHealthSummaryBuilder
         CollectionHealthSummary summary)
     {
         metrics["collectionHealth.raw"] = summary.RawRows;
+        metrics["collectionHealth.stateCode"] = StateCode(summary.State);
+        metrics["collectionHealth.complete"] = string.Equals(summary.State, "complete", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        metrics["collectionHealth.degraded"] = string.Equals(summary.State, "degraded", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        metrics["collectionHealth.partial"] = string.Equals(summary.State, "partial", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        metrics["collectionHealth.unknown"] = string.Equals(summary.State, "unknown", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        metrics["collectionHealth.driver.healthRows"] = summary.DriverHealthRows;
         metrics["collectionHealth.report"] = summary.ReportRows;
         metrics["collectionHealth.omitted"] = summary.OmittedRows;
         metrics["collectionHealth.total"] = summary.TotalRows;
@@ -142,6 +182,9 @@ public static class CollectionHealthSummaryBuilder
         metrics["collectionHealth.scheduledTask.captureFailed"] = summary.ScheduledTaskCaptureFailed;
         metrics["collectionHealth.pktmon.stopFailed"] = summary.PktmonStopFailed;
         metrics["collectionHealth.etw.decodeFailed"] = summary.EtwDecodeFailed;
+        metrics["collectionHealth.etw.failureRows"] = summary.EtwFailureRows;
+        metrics["collectionHealth.pcap.failureRows"] = summary.PcapFailureRows;
+        metrics["collectionHealth.agent.failureRows"] = summary.AgentFailureRows;
         metrics["runtime.collectionFailures"] = summary.FailureRows;
         metrics["runtime.failures"] = summary.FailureRows;
         metrics["events.runtime.collectionFailures"] = summary.FailureRows;
@@ -151,6 +194,12 @@ public static class CollectionHealthSummaryBuilder
         // aliases so report consumers can migrate from the flat health keys
         // without reparsing the raw diagnostic events.
         metrics["events.collectionHealth.raw"] = summary.RawRows;
+        metrics["events.collectionHealth.stateCode"] = StateCode(summary.State);
+        metrics["events.collectionHealth.complete"] = string.Equals(summary.State, "complete", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        metrics["events.collectionHealth.degraded"] = string.Equals(summary.State, "degraded", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        metrics["events.collectionHealth.partial"] = string.Equals(summary.State, "partial", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        metrics["events.collectionHealth.unknown"] = string.Equals(summary.State, "unknown", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        metrics["events.collectionHealth.driver.healthRows"] = summary.DriverHealthRows;
         metrics["events.collectionHealth.report"] = summary.ReportRows;
         metrics["events.collectionHealth.omitted"] = summary.OmittedRows;
         metrics["events.collectionHealth.total"] = summary.TotalRows;
@@ -173,6 +222,9 @@ public static class CollectionHealthSummaryBuilder
         metrics["events.collectionHealth.scheduledTask.captureFailed"] = summary.ScheduledTaskCaptureFailed;
         metrics["events.collectionHealth.pktmon.stopFailed"] = summary.PktmonStopFailed;
         metrics["events.collectionHealth.etw.decodeFailed"] = summary.EtwDecodeFailed;
+        metrics["events.collectionHealth.etw.failureRows"] = summary.EtwFailureRows;
+        metrics["events.collectionHealth.pcap.failureRows"] = summary.PcapFailureRows;
+        metrics["events.collectionHealth.agent.failureRows"] = summary.AgentFailureRows;
     }
 
     private static bool IsHealthRow(SandboxEvent evt)
@@ -197,6 +249,9 @@ public static class CollectionHealthSummaryBuilder
             IsScheduledTaskCaptureFailed(evt) ||
             IsPktmonStopFailed(evt) ||
             IsEtwDecodeFailure(evt) ||
+            IsEtwFailure(evt) ||
+            IsPcapFailure(evt) ||
+            IsAgentFailure(evt) ||
             TextContainsAny(evt.EventType, "capture_failed", "capture-failed", "capture_error", "capture-error");
     }
 
@@ -204,6 +259,7 @@ public static class CollectionHealthSummaryBuilder
     {
         if (IsLossRow(evt) || IsProcessTreeUnavailable(evt) || IsScheduledTaskCaptureFailed(evt) ||
             IsPktmonStopFailed(evt) || IsEtwDecodeFailure(evt) ||
+            IsEtwFailure(evt) || IsPcapFailure(evt) || IsAgentFailure(evt) ||
             IsMalformedDriverRow(evt) || IsOutputWriteFailureRow(evt))
         {
             return true;
@@ -219,6 +275,10 @@ public static class CollectionHealthSummaryBuilder
     private static bool IsEtwLossRow(SandboxEvent evt)
     {
         var source = Value(evt, "captureSource", "collectorSource", "source");
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            source = evt.Source ?? string.Empty;
+        }
         var type = evt.EventType ?? string.Empty;
         var etwTagged = type.Contains("etw", StringComparison.OrdinalIgnoreCase) ||
             source.Contains("etw", StringComparison.OrdinalIgnoreCase);
@@ -376,6 +436,205 @@ public static class CollectionHealthSummaryBuilder
         (evt.EventType.Contains("etw", StringComparison.OrdinalIgnoreCase) &&
          (TextContainsAny(evt.EventType, "decode_failed", "decode-failed", "decode_error", "decode-error") ||
           TextEqualsAny(Value(evt, "decodeStatus", "decodeState", "decodeFailure"), "failed", "failure", "error")));
+
+    private static bool IsEtwFailure(SandboxEvent evt)
+    {
+        if (!IsEtwTagged(evt))
+        {
+            return false;
+        }
+
+        return IsEtwDecodeFailure(evt) ||
+            TextContainsAny(evt.EventType, "failed", "failure", "error", "unavailable") ||
+            TextEqualsAny(Value(evt, "status", "captureState", "readinessState", "decodeStatus"), "failed", "failure", "error", "unavailable");
+    }
+
+    private static bool IsPcapFailure(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        var source = Value(evt, "captureSource", "collectorSource", "source");
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            source = evt.Source ?? string.Empty;
+        }
+        var pcapTagged = type.Contains("pcap", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains("packet_capture", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains("pktmon", StringComparison.OrdinalIgnoreCase) ||
+            source.Contains("pcap", StringComparison.OrdinalIgnoreCase) ||
+            source.Contains("pktmon", StringComparison.OrdinalIgnoreCase);
+        if (!pcapTagged)
+        {
+            return false;
+        }
+
+        return IsPktmonStopFailed(evt) ||
+            TextContainsAny(type, "failed", "failure", "error", "unavailable") ||
+            TextEqualsAny(Value(evt, "status", "captureState", "readinessState"), "failed", "failure", "error", "unavailable");
+    }
+
+    private static bool IsAgentFailure(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        var source = Value(evt, "captureSource", "collectorSource", "source");
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            source = evt.Source ?? string.Empty;
+        }
+        var agentTagged = type.StartsWith("agent.", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains("guest_agent", StringComparison.OrdinalIgnoreCase) ||
+            source.Contains("agent", StringComparison.OrdinalIgnoreCase);
+        if (!agentTagged)
+        {
+            return false;
+        }
+
+        if (TextContainsAny(type, "failed", "failure", "error", "unavailable"))
+        {
+            return true;
+        }
+
+        if (TextEqualsAny(Value(evt, "status", "captureState", "readinessState"), "failed", "failure", "error", "unavailable"))
+        {
+            return true;
+        }
+
+        var exitCode = Value(evt, "exitCode", "commandExitCode", "processExitCode");
+        return TryParseUnsigned(exitCode, out var code) && code != 0;
+    }
+
+    private static bool IsEtwTagged(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        var source = Value(evt, "captureSource", "collectorSource", "source");
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            source = evt.Source ?? string.Empty;
+        }
+        return type.Contains("etw", StringComparison.OrdinalIgnoreCase) ||
+            source.Contains("etw", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DetermineState(
+        int rawRows,
+        int driverHealthRows,
+        bool queueDepthAtStopKnown,
+        ulong remainingUnread,
+        int driverLossRows,
+        int malformedRows,
+        int outputWriteFailureRows,
+        int etwFailureRows,
+        int pcapFailureRows,
+        int agentFailureRows,
+        ulong suppressedEvents,
+        int qualityWarningRows)
+    {
+        if (rawRows == 0)
+        {
+            return "unknown";
+        }
+
+        var primaryGap = driverHealthRows == 0 ||
+            !queueDepthAtStopKnown ||
+            remainingUnread > 0 ||
+            driverLossRows > 0 ||
+            malformedRows > 0 ||
+            outputWriteFailureRows > 0;
+        if (primaryGap)
+        {
+            return "partial";
+        }
+
+        var optionalGap = etwFailureRows > 0 || pcapFailureRows > 0 || agentFailureRows > 0 ||
+            suppressedEvents > 0 || qualityWarningRows > 0;
+        return optionalGap ? "degraded" : "complete";
+    }
+
+    private static List<string> BuildStateReasons(
+        IReadOnlyCollection<SandboxEvent> raw,
+        int driverHealthRows,
+        bool queueDepthAtStopKnown,
+        ulong remainingUnread,
+        IReadOnlyCollection<SandboxEvent> driverLossRows,
+        int malformedRows,
+        int outputWriteFailureRows,
+        int etwFailureRows,
+        int pcapFailureRows,
+        int agentFailureRows,
+        ulong suppressedEvents,
+        int qualityWarningRows)
+    {
+        var reasons = new List<string>();
+        if (raw.Count == 0)
+        {
+            reasons.Add("no-health-evidence");
+            return reasons;
+        }
+
+        if (driverHealthRows == 0)
+        {
+            reasons.Add("driver-health-missing");
+        }
+
+        if (!queueDepthAtStopKnown)
+        {
+            reasons.Add("driver-final-queue-unknown");
+        }
+
+        if (remainingUnread > 0)
+        {
+            reasons.Add("driver-queue-not-drained");
+        }
+
+        if (driverLossRows.Count > 0)
+        {
+            reasons.Add("driver-loss");
+        }
+
+        if (malformedRows > 0)
+        {
+            reasons.Add("driver-malformed-jsonl");
+        }
+
+        if (outputWriteFailureRows > 0)
+        {
+            reasons.Add("driver-output-write-failure");
+        }
+
+        if (etwFailureRows > 0)
+        {
+            reasons.Add("etw-failure");
+        }
+
+        if (pcapFailureRows > 0)
+        {
+            reasons.Add("pcap-failure");
+        }
+
+        if (agentFailureRows > 0)
+        {
+            reasons.Add("agent-failure");
+        }
+
+        if (suppressedEvents > 0)
+        {
+            reasons.Add("driver-events-suppressed");
+        }
+
+        if (qualityWarningRows > 0)
+        {
+            reasons.Add("driver-quality-warning");
+        }
+
+        return reasons;
+    }
+
+    private static int StateCode(string? state) => state?.ToLowerInvariant() switch
+    {
+        "complete" => 1,
+        "degraded" => 2,
+        "partial" => 3,
+        _ => 0
+    };
 
     private static string Value(SandboxEvent evt, params string[] keys)
     {

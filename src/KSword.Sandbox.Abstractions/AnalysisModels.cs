@@ -199,6 +199,27 @@ public sealed record BehaviorFinding
 /// </summary>
 public sealed record CollectionHealthSummary
 {
+    /// <summary>
+    /// Overall evidence-collection state. This is deliberately separate from
+    /// sample risk: complete means the primary collector closed cleanly,
+    /// degraded means optional lanes or bounded sampling lowered confidence,
+    /// partial means the primary capture has an unresolved gap, and unknown
+    /// means no collection health evidence was emitted.
+    /// </summary>
+    public string State { get; init; } = "unknown";
+
+    /// <summary>
+    /// Stable machine-readable reasons for the state. These codes describe
+    /// collection quality only and must never become sample behavior findings.
+    /// </summary>
+    public List<string> StateReasons { get; init; } = [];
+
+    /// <summary>
+    /// Number of R0 collector health/status rows observed in the raw stream.
+    /// A final queue value cannot be inferred when this lane is absent.
+    /// </summary>
+    public int DriverHealthRows { get; init; }
+
     public int RawRows { get; init; }
 
     public int ReportRows { get; init; }
@@ -274,6 +295,21 @@ public sealed record CollectionHealthSummary
     public int PktmonStopFailed { get; init; }
 
     public int EtwDecodeFailed { get; init; }
+
+    /// <summary>
+    /// Total ETW lane failures, including startup/stop/decode failures.
+    /// </summary>
+    public int EtwFailureRows { get; init; }
+
+    /// <summary>
+    /// Total packet-capture lane failures, including pktmon stop failures.
+    /// </summary>
+    public int PcapFailureRows { get; init; }
+
+    /// <summary>
+    /// Agent process/collection failures reported by the guest lane.
+    /// </summary>
+    public int AgentFailureRows { get; init; }
 }
 
 /// <summary>

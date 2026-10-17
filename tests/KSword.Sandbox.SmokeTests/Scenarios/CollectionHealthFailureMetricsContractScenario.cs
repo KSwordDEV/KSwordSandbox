@@ -64,6 +64,12 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(1, summary.ScheduledTaskCaptureFailed, "Scheduled task capture failures should count as collection failures.");
         RequireEqual(1, summary.PktmonStopFailed, "pktmon stop failures should count as collection failures.");
         RequireEqual(1, summary.EtwDecodeFailed, "ETW decode failures should count as collection failures.");
+        RequireEqual(1, summary.EtwFailureRows, "ETW startup/decode failures should aggregate into the ETW lane.");
+        RequireEqual(1, summary.PcapFailureRows, "PCAP/pktmon failures should aggregate into the PCAP lane.");
+        RequireEqual(0, summary.AgentFailureRows, "No guest Agent failure was present in this fixture.");
+        RequireTrue(summary.State == "partial", "Loss, driver drain evidence, and malformed primary telemetry must produce partial collection state.");
+        RequireTrue(summary.StateReasons.Contains("driver-loss"), "Partial state should expose the driver loss reason code.");
+        RequireTrue(summary.StateReasons.Contains("etw-failure"), "Partial state should preserve ETW failure as a quality reason.");
 
         var metrics = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         CollectionHealthSummaryBuilder.AddMetrics(metrics, summary);
@@ -76,6 +82,7 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(2, metrics["collectionHealth.driver.eventsSuppressed"], "Driver suppression metric should preserve the count.");
         RequireEqual(1, metrics["collectionHealth.driver.qualityWarningRows"], "Driver quality warning metric should remain non-zero.");
         RequireEqual(6, metrics["runtime.failures"], "Runtime failure alias should include collection failures.");
+        RequireEqual(3, metrics["collectionHealth.stateCode"], "Partial collection state should use the stable state code.");
 
         var model = new AnalysisReport
         {
@@ -95,12 +102,104 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         };
         RequireEqual(6, model.CollectionHealth.FailureRows, "AnalysisReport should carry the collection-health model.");
 
+        AssertStateBoundaries();
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
             Message = "Collection loss and capture failures produce non-zero shared metrics with raw diagnostics preserved."
         });
+    }
+
+    private static void AssertStateBoundaries()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        var clean = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "r0collector.stopped",
+                Source = "r0collector",
+                Timestamp = timestamp,
+                Data =
+                {
+                    ["statusPhase"] = "final",
+                    ["finalStatusAvailable"] = "true",
+                    ["queueDrained"] = "true",
+                    ["remainingQueueDepth"] = "0"
+                }
+            }
+        ]);
+        RequireTrue(clean.State == "complete", "A final zero unread queue with no losses or warnings should be complete.");
+        RequireTrue(clean.DriverQueueDepthAtStopKnown, "A final stopped row should establish a known queue state.");
+
+        var suppressed = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "r0collector.stopped",
+                Source = "r0collector",
+                Timestamp = timestamp,
+                Data =
+                {
+                    ["statusPhase"] = "final",
+                    ["finalStatusAvailable"] = "true",
+                    ["queueDrained"] = "true",
+                    ["remainingQueueDepth"] = "0",
+                    ["eventsSuppressed"] = "1"
+                }
+            }
+        ]);
+        RequireTrue(suppressed.State == "degraded", "Suppression must lower collection state even when lostCount is zero.");
+
+        var agentFailed = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "r0collector.stopped",
+                Source = "r0collector",
+                Timestamp = timestamp,
+                Data =
+                {
+                    ["statusPhase"] = "final",
+                    ["finalStatusAvailable"] = "true",
+                    ["queueDrained"] = "true",
+                    ["remainingQueueDepth"] = "0"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "agent.exit",
+                Source = "agent",
+                Timestamp = timestamp.AddSeconds(1),
+                Data =
+                {
+                    ["exitCode"] = "1"
+                }
+            }
+        ]);
+        RequireEqual(1, agentFailed.AgentFailureRows, "A non-zero Agent exit must remain a collection-health failure.");
+        RequireTrue(agentFailed.State == "degraded", "An optional Agent failure must degrade a complete primary R0 capture.");
+        RequireTrue(agentFailed.StateReasons.Contains("agent-failure"), "Agent failure must retain a stable state reason.");
+
+        var unknownFinal = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "r0collector.driverStatus",
+                Source = "r0collector",
+                Timestamp = timestamp,
+                Data =
+                {
+                    ["queueDepth"] = "12",
+                    ["lostCount"] = "0",
+                    ["eventsSuppressed"] = "0"
+                }
+            }
+        ]);
+        RequireTrue(unknownFinal.State == "partial", "Zero loss without a final queue state must remain partial.");
+        RequireTrue(!unknownFinal.DriverQueueDepthAtStopKnown, "A startup/status snapshot must not prove a final queue state.");
     }
 
     private static List<SandboxEvent> BuildEvents()
