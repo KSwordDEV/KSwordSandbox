@@ -499,6 +499,12 @@ driver-category rows.
 - `--duration` controls whether the driver path is one-shot (`0`) or timed.
 - `--poll-ms` / `--poll-interval-ms` controls sleep between timed poll/read
   iterations.
+- `--drain-grace-ms` (alias `--drain-max-ms`) bounds the post-window drain for
+  timed runs. The collector continues until a POLL snapshot reports
+  `eventsQueued=0` or the grace deadline; `r0collector.stopped` preserves
+  `drainQueueDepthAtStart`, `remainingQueueDepth`, `drainQueueDrained`, and
+  `drainStoppedAtDrainDeadline` so a non-empty queue is never mistaken for a
+  complete capture.
 - `--health` opens the live device, emits health, and exits without poll/read
   drain so readiness checks do not consume queued telemetry.
 - `--diagnose` / `--readiness` opens the live device only after output is ready,
