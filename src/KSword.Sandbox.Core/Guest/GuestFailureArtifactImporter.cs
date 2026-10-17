@@ -111,6 +111,67 @@ public static class GuestFailureArtifactImporter
         return rows;
     }
 
+    /// <summary>
+    /// Converts a failed persisted runbook step into an Agent collection
+    /// failure when the guest output tree was never created. This closes the
+    /// startup-before-markers gap (for example an Out-File disk-full error).
+    /// </summary>
+    public static IReadOnlyList<SandboxEvent> ImportRunbookFailure(string? resultPath)
+    {
+        if (string.IsNullOrWhiteSpace(resultPath) || !File.Exists(resultPath)) return [];
+        try
+        {
+            var result = JsonSerializer.Deserialize<SandboxRunbookExecutionResult>(File.ReadAllText(resultPath), new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            if (result is null || result.Success) return [];
+            var failed = result.StepResults.Where(step => !step.Success).OrderBy(step => step.StepIndex).FirstOrDefault();
+            if (failed is null) return [];
+            var output = $"{failed.Title}\n{failed.Message}\n{failed.StandardOutput}\n{failed.StandardError}";
+            var guestAgentFailure = failed.StepId.Equals("run-agent", StringComparison.OrdinalIgnoreCase) ||
+                failed.StepId.Equals("sync-live-output", StringComparison.OrdinalIgnoreCase) ||
+                failed.StepId.Equals("collect-output", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("Guest Agent", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("events.json", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("disk was full", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("allocation size", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("Out-File", StringComparison.OrdinalIgnoreCase);
+            if (!guestAgentFailure) return [];
+
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["collectionHealth"] = "true",
+                ["captureState"] = "failed",
+                ["status"] = "failed",
+                ["failureType"] = "guestAgentRunbookFailure",
+                ["agentFailure"] = "true",
+                ["runbookFailure"] = "true",
+                ["runbookResultPath"] = resultPath,
+                ["failedStepId"] = failed.StepId,
+                ["failedStepIndex"] = failed.StepIndex.ToString(CultureInfo.InvariantCulture),
+                ["exitCode"] = failed.ExitCode?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                ["missingGuestMarkers"] = "true",
+                ["failureReason"] = "guest-agent-startup-or-output-failed-before-guest-markers",
+                ["stderrPreview"] = output.Length > 4096 ? output[..4096] : output,
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["notSampleBehavior"] = "true",
+                ["sampleBehaviorCandidate"] = "false",
+                ["eventKind"] = "diagnostic",
+                ["evidenceRole"] = "collection-diagnostic",
+                ["sourceComponent"] = "guest-agent",
+                ["zhMessage"] = "Guest Agent 在生成来宾标记前失败，动态采集结果只能按部分/失败处理。",
+                ["zhHint"] = "请查看 runbook-execution.json 失败步骤、标准错误和来宾磁盘空间；没有 events.json 不代表未检出。"
+            };
+            return [new SandboxEvent { EventType = "agent.run.failed", Source = "host", Path = resultPath, Data = data }];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return [];
+        }
+    }
+
     private static SandboxEvent CreateFailureRow(string eventType, string path, Dictionary<string, string> values, string hint)
     {
         values["behaviorCounted"] = "false";

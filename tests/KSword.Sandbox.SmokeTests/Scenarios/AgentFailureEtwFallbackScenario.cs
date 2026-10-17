@@ -33,6 +33,37 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
 
         var failures = GuestFailureArtifactImporter.Import(root);
         SmokeAssert.True(failures.Any(evt => evt.EventType == "agent.run.failed"), "Agent status/stderr/exit must produce a structured failure row.");
+        var runbookPath = Path.Combine(context.RuntimeRoot, "agent-failure-etw", "runbook-execution.json");
+        File.WriteAllText(runbookPath, JsonSerializer.Serialize(new SandboxRunbookExecutionResult
+        {
+            JobId = Guid.NewGuid(),
+            Provider = VirtualizationProvider.VMware,
+            TargetVmName = "sandbox-vm",
+            Mode = SandboxRunbookExecutionMode.Live,
+            Success = false,
+            TotalSteps = 1,
+            ExecutedSteps = 1,
+            FailedStepIndex = 0,
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            Duration = TimeSpan.FromSeconds(2),
+            StepResults =
+            [
+                new SandboxRunbookStepExecutionResult
+                {
+                    StepIndex = 0,
+                    StepId = "run-agent",
+                    Title = "Start guest collector",
+                    PowerShell = "Out-File",
+                    Success = false,
+                    ExitCode = 1,
+                    StandardError = "Out-File : The disk was full.",
+                    StartedAtUtc = DateTimeOffset.UtcNow,
+                    Duration = TimeSpan.FromSeconds(1)
+                }
+            ]
+        }));
+        var runbookFailures = GuestFailureArtifactImporter.ImportRunbookFailure(runbookPath);
+        SmokeAssert.True(runbookFailures.Count == 1 && runbookFailures[0].EventType == "agent.run.failed", "A failed run-agent step must create an Agent failure even when no guest markers exist.");
         var etwRows = EtwTraceXmlEventImporter.Import(root);
         SmokeAssert.True(etwRows.Any(evt => evt.EventType == "process.start"), "ETW fallback must retain process.start.");
         SmokeAssert.True(etwRows.Any(evt => evt.EventType == "image.load"), "ETW fallback must retain image.load.");
@@ -50,7 +81,7 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
         SmokeAssert.True(classified.Data.TryGetValue("sampleCorrelation", out var correlation) && correlation == "unknown", "R0 file rows without a sample PID or cross-source anchor must remain unknown.");
         SmokeAssert.True(!string.Equals(correlation, "probable", StringComparison.OrdinalIgnoreCase), "Missing Agent output must not upgrade R0 file rows to probable.");
 
-        var summary = CollectionHealthSummaryBuilder.Build([.. failures, .. etwRows]);
+        var summary = CollectionHealthSummaryBuilder.Build([.. failures, .. runbookFailures, .. etwRows]);
         SmokeAssert.True(summary.AgentFailureRows > 0, "Structured Agent failure must enter CollectionHealth.");
         var sampled = ReportEventSampler.SampleForReport(failures);
         SmokeAssert.True(sampled.Events.Any(evt => evt.EventType == "agent.run.failed"), "Agent failure must survive report sampling ahead of the diagnostic quota.");

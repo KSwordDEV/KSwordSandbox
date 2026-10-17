@@ -921,6 +921,7 @@ public sealed partial class SandboxJobService
         var jobConfig = BuildJobConfig(job.Submission, ResolveDuration(job.Submission));
         var events = CreatePlanningEvents(sample, job.Submission, runbook, staticAnalysis, jobConfig.ArtifactCollection);
         AppendRunbookExecutionEvent(events, job.RunbookExecutionResultPath, runbook.Provider);
+        events.AddRange(GuestFailureArtifactImporter.ImportRunbookFailure(job.RunbookExecutionResultPath));
         events.AddRange(LoadEnrichmentEvents(job.JobId));
         events.AddRange(guestEvents.Select(NormalizeEvent));
         AppendGuestImportEvent(events, guestEventsPath, guestEvents.Count, importSummary);

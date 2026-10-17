@@ -75,7 +75,7 @@ internal static class PostProcessProgram
             // unavailable dynamic lane with a report-generation failure; the
             // report renderer separately states that runtime evidence was not
             // collected.
-            var agentFailed = guestEvents.Any(IsAgentFailureEvent);
+            var agentFailed = allEvents.Any(IsAgentFailureEvent);
             var status = !agentFailed && (guestEvents.Count > 0 || staticEvents.Count > 0)
                 ? AnalysisStatus.Completed
                 : AnalysisStatus.Failed;
@@ -929,8 +929,8 @@ internal static class PostProcessProgram
     private static List<SandboxEvent> BuildHostPostProcessEvents(Guid jobId, string jobRoot, string eventsPath, int guestEventCount)
     {
         var now = DateTimeOffset.UtcNow;
-        return
-        [
+        var events = new List<SandboxEvent>
+        {
             new SandboxEvent
             {
                 EventType = "guest.events.imported",
@@ -963,7 +963,10 @@ internal static class PostProcessProgram
                     ["generator"] = "KSword.Sandbox.PostProcess"
                 })
             }
-        ];
+        };
+        var runbookPath = Path.Combine(jobRoot, "runbook-execution.json");
+        events.AddRange(GuestFailureArtifactImporter.ImportRunbookFailure(runbookPath));
+        return events;
     }
 
     private static Dictionary<string, string> CreateHostOperationalEventData(
