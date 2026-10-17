@@ -55,6 +55,7 @@ internal sealed class HyperVVmConfigurationContractScenario : ISmokeTestScenario
             "UserName",
             "WorkingDirectory",
             "GuestPayloadRoot",
+            "Enabled",
             "UseMockCollector"
         })
         {
@@ -68,6 +69,7 @@ internal sealed class HyperVVmConfigurationContractScenario : ISmokeTestScenario
             "GuestUserName",
             "GuestWorkingDirectory",
             "GuestPayloadRoot",
+            "DriverEnabled",
             "UseMockCollector"
         })
         {
@@ -85,6 +87,8 @@ internal sealed class HyperVVmConfigurationContractScenario : ISmokeTestScenario
         RequireContains(runbookBuilder, "config.Guest.UserName", "Runbook builder should use the configured guest user.");
         RequireContains(runbookBuilder, "config.Guest.WorkingDirectory", "Runbook builder should use the configured guest working directory.");
         RequireContains(runbookBuilder, "config.Paths.GuestPayloadRoot", "Runbook builder should use the configured host guest payload root.");
+        RequireContains(runbookBuilder, "record-driver-collection-disabled", "Runbook builder should emit an explicit diagnostic when R0 collection is disabled.");
+        RequireContains(runbookBuilder, "driver-collection-diagnostic.json", "Disabled R0 mode should persist a diagnostic artifact.");
         RequireContains(runbookBuilder, "config.Driver.UseMockCollector", "Runbook builder should honor mock collector configuration.");
 
         return Task.FromResult(new SmokeTestResult

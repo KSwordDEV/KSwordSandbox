@@ -82,6 +82,7 @@ public sealed class RunbookPlanningStage : IAnalysisPipelineStage
             },
             Driver = config.Driver with
             {
+                Enabled = submission.DriverEnabled ?? config.Driver.Enabled,
                 UseMockCollector = submission.UseMockCollector ?? config.Driver.UseMockCollector
             },
             ArtifactCollection = config.ArtifactCollection with

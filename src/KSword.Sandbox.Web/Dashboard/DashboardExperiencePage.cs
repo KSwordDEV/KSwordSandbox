@@ -1040,6 +1040,7 @@ internal static class DashboardExperiencePage
                 guestUserName: clean('guestUserName'),
                 guestWorkingDirectory: clean('guestWorkingDirectory'),
                 guestPayloadRoot: clean('guestPayloadRoot'),
+                driverEnabled: document.getElementById('r0Enabled')?.checked === true,
                 useMockCollector: document.getElementById('useMockCollector').checked
               };
             }
@@ -2377,7 +2378,7 @@ internal static class DashboardExperiencePage
                 : provider === 'Qemu'
                   ? providerConfig?.diskImagePath
                   : null;
-              const r0Enabled = runtimeConfigDefaults?.driver?.enabled;
+              const r0Enabled = submission.driverEnabled ?? runtimeConfigDefaults?.driver?.enabled !== false;
               const r0Mode = r0Enabled === false
                 ? t('R0：config 关闭', 'R0: disabled by config')
                 : (submission.useMockCollector ? t('R0：Mock 采集器（collector）', 'R0: mock collector') : t('R0：真实采集器（collector）', 'R0: real collector'));

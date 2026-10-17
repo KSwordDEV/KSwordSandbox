@@ -1098,13 +1098,38 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("copy-sample", "Copy submitted sample into guest", BuildCopySampleCommand(config, provider, targetVmName, sample.FullPath, guestSample)));
         steps.Add(Step("make-host-output", "Create host output folder", $"New-Item -ItemType Directory -Force -Path {Q(hostOut)} | Out-Null", mutatesVmState: false));
         steps.Add(Step("record-artifact-policy", "Record artifact collection policy", BuildRecordArtifactCollectionPolicyCommand(config, hostOut), requiresElevation: false, mutatesVmState: false));
-        // Check the volume before the Agent starts.  A full guest volume used
-        // to fail much later while JSONL/ETL output was being written, which
-        // made the resulting report look like a quiet sample.  This remains a
-        // read-only capacity check; its small JSON diagnostic is written only
-        // so collection can preserve the measured value with the job output.
-        steps.Add(Step("check-guest-output-space", "Check guest output volume capacity", BuildGuestOutputSpacePreflightCommand(config, provider, targetVmName, guestOut), mutatesVmState: false));
         steps.Add(Step("prepare-guest-output", "Prepare job-specific guest output folder", BuildPrepareGuestOutputCommand(config, provider, targetVmName, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
+        // Check the volume after stale output cleanup and before the Agent
+        // starts. A full guest volume used to fail much later while JSONL/ETL
+        // output was being written, which made the resulting report look like
+        // a quiet sample. This remains a read-only capacity check; its small
+        // JSON diagnostic is written only so collection can preserve the
+        // measured value with the job output.
+        steps.Add(Step("check-guest-output-space", "Check guest output volume capacity", BuildGuestOutputSpacePreflightCommand(config, provider, targetVmName, guestOut), mutatesVmState: false));
+        if (!config.Driver.Enabled)
+        {
+            // A user-mode-only run is an explicit mode, but a missing
+            // driver-events.jsonl must never look like a complete telemetry
+            // run. Preserve a durable host-side diagnostic for the report.
+            steps.Add(Step(
+                "record-driver-collection-disabled",
+                "Record disabled R0 collection diagnostic",
+                BuildDriverCollectionDisabledDiagnosticCommand(config, hostOut),
+                requiresElevation: false,
+                mutatesVmState: false));
+        }
+        // Legacy managed samples can fail inside the guest with the opaque
+        // CLR HRESULT 0x80131700 when NetFx3 is disabled.  Probe the sample
+        // bytes and the guest framework state before launching anything; the
+        // probe is read-only and writes a host-side diagnostic even when it
+        // blocks the run so report recovery can distinguish this from a quiet
+        // sample.
+        steps.Add(Step(
+            "check-sample-runtime",
+            "Check sample CLR and guest .NET Framework compatibility",
+            BuildSampleRuntimePreflightCommand(config, provider, targetVmName, sample.FullPath, guestSample, guestOut, hostOut),
+            requiresElevation: false,
+            mutatesVmState: false));
         if (config.Driver.Enabled && !config.Driver.UseMockCollector && !string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
         {
             steps.Add(Step(
@@ -1155,6 +1180,34 @@ public sealed class HyperVRunbookBuilder
             "};",
             "$policy | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $policyPath -Encoding UTF8;",
             "Write-Host \"Artifact collection policy written: $policyPath\";"
+        });
+    }
+
+    /// <summary>
+    /// Builds the explicit host diagnostic for a job whose resolved config has
+    /// disabled the R0 lane. Inputs are the resolved driver mode and host
+    /// output directory; processing writes a small durable JSON marker and a
+    /// warning; the method returns a host-only PowerShell command.
+    /// </summary>
+    private static string BuildDriverCollectionDisabledDiagnosticCommand(SandboxConfig config, string hostOut)
+    {
+        return string.Join(" ", new[]
+        {
+            $"$hostOut = {Q(hostOut)};",
+            "New-Item -ItemType Directory -Force -Path $hostOut | Out-Null;",
+            "$diagnosticPath = Join-Path $hostOut 'driver-collection-diagnostic.json';",
+            "$diagnostic = [ordered]@{",
+            "schema = 'ksword.driver-collection-diagnostic.v1';",
+            "state = 'disabled';",
+            "enabled = $false;",
+            $"useMockCollector = {PsBool(config.Driver.UseMockCollector)};",
+            "source = 'resolved-job-config';",
+            "reason = 'R0 driver collection is disabled for this job; driver-events.jsonl will not be produced.';",
+            "reasonZh = '本任务已关闭 R0 驱动采集；不会生成 driver-events.jsonl，报告不得将其视为完整采集。';",
+            "checkedAtUtc = (Get-Date).ToUniversalTime().ToString('o')",
+            "};",
+            "$diagnostic | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $diagnosticPath -Encoding UTF8;",
+            "Write-Warning \"R0 driver collection is disabled for this job; R0 evidence is unavailable. Diagnostic: $diagnosticPath\""
         });
     }
 
@@ -1498,6 +1551,73 @@ public sealed class HyperVRunbookBuilder
             $"Invoke-Command -Session $session -ScriptBlock {{ param($outputRoot, $diagnosticPath, $minimumFreeBytes) $volumeRoot = Split-Path -Path $outputRoot -Qualifier; if ([string]::IsNullOrWhiteSpace($volumeRoot)) {{ throw \"Could not resolve output volume for $outputRoot\" }}; $drive = Get-CimInstance -ClassName Win32_LogicalDisk -Filter (\"DeviceID='\" + $volumeRoot.TrimEnd('\\\\') + \"'\") -ErrorAction SilentlyContinue; $freeBytes = if ($null -ne $drive) {{ [int64]$drive.FreeSpace }} else {{ [int64]([IO.DriveInfo]::new($volumeRoot)).AvailableFreeSpace }}; $state = if ($freeBytes -ge [int64]$minimumFreeBytes) {{ 'ready' }} else {{ 'insufficient-space' }}; $diagnostic = [ordered]@{{ schema = 'ksword.guest-output-preflight.v1'; state = $state; outputRoot = $outputRoot; volumeRoot = $volumeRoot; availableFreeBytes = $freeBytes; requiredFreeBytes = [int64]$minimumFreeBytes; reserveSource = 'driver.r0CollectorMinFreeOutputBytes'; checkedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }}; New-Item -ItemType Directory -Force -Path (Split-Path -Parent $diagnosticPath) | Out-Null; $diagnostic | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $diagnosticPath -Encoding UTF8; Write-Host (\"Guest output preflight: state={{0}}; availableFreeBytes={{1}}; requiredFreeBytes={{2}}; volume={{3}}\" -f $state,$freeBytes,$minimumFreeBytes,$volumeRoot); if ($freeBytes -lt [int64]$minimumFreeBytes) {{ throw (\"Guest output volume has insufficient free space: available={{0}} bytes; required reserve={{1}} bytes; volume={{2}}\" -f $freeBytes,$minimumFreeBytes,$volumeRoot) }} }} -ArgumentList {Q(guestOut)}, {Q(diagnosticPath)}, {reserveBytes} -ErrorAction Stop;",
             "}",
             "finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
+        });
+        return WithGuestCredential(config, command);
+    }
+
+    /// <summary>
+    /// Builds a read-only CLR/NetFx compatibility preflight for the submitted
+    /// sample.  The host scans PE bytes for the legacy CLR import/metadata
+    /// markers (mscoree.dll, _CorExeMain, or v2.0.50727), while the guest
+    /// probe reads NetFx3 and .NET Framework 4 registry/feature state.  Inputs
+    /// are sample and provider paths; processing writes a diagnostic JSON to
+    /// both the guest output and host output roots, and fails before sample or
+    /// collector launch when a legacy sample cannot run.  The method never
+    /// loads or executes the sample and never enables a Windows feature.
+    /// </summary>
+    private static string BuildSampleRuntimePreflightCommand(
+        SandboxConfig config,
+        VirtualizationProvider provider,
+        string targetVmName,
+        string hostSamplePath,
+        string guestSamplePath,
+        string guestOut,
+        string hostOut)
+    {
+        var guestDiagnosticPath = $"{guestOut}\\sample-runtime-preflight.json";
+        var hostDiagnosticPath = Path.Combine(hostOut, "sample-runtime-preflight.json").Replace('/', '\\');
+        var command = string.Join(" ", new[]
+        {
+            $"$hostSamplePath = {Q(hostSamplePath)};",
+            $"$guestSamplePath = {Q(guestSamplePath)};",
+            $"$guestOut = {Q(guestOut)};",
+            $"$guestDiagnosticPath = {Q(guestDiagnosticPath)};",
+            $"$hostDiagnosticPath = {Q(hostDiagnosticPath)};",
+            "if (-not (Test-Path -LiteralPath $hostSamplePath -PathType Leaf)) { throw \"Sample file was not found for CLR preflight: $hostSamplePath\" };",
+            // A bounded byte-string scan is deliberately used instead of
+            // loading the submitted assembly.  It works in Windows PowerShell
+            // 5, keeps very large samples out of one giant allocation, and
+            // does not run constructors or any sample code.
+            "$sampleFile = [IO.FileInfo]::new($hostSamplePath); $scanLength = [Math]::Min([int64]$sampleFile.Length, [int64](32 * 1024 * 1024)); $sampleStream = [IO.File]::OpenRead($hostSamplePath); $sampleBytes = [byte[]]::new([int]$scanLength); $sampleBytesRead = 0; try { while ($sampleBytesRead -lt $sampleBytes.Length) { $read = $sampleStream.Read($sampleBytes, $sampleBytesRead, $sampleBytes.Length - $sampleBytesRead); if ($read -le 0) { break }; $sampleBytesRead += $read } } finally { $sampleStream.Dispose() };",
+            "$sampleAscii = [Text.Encoding]::ASCII.GetString($sampleBytes, 0, $sampleBytesRead);",
+            "$sampleUnicode = [Text.Encoding]::Unicode.GetString($sampleBytes, 0, $sampleBytesRead);",
+            "$legacyMarkers = [System.Collections.Generic.List[string]]::new();",
+            "if ($sampleAscii -match '(?i)mscoree\\.dll') { [void]$legacyMarkers.Add('mscoree.dll') };",
+            "if ($sampleAscii -match '(?i)_CorExeMain' -or $sampleUnicode -match '(?i)_CorExeMain') { [void]$legacyMarkers.Add('_CorExeMain') };",
+            "if ($sampleAscii -match '(?i)v2\\.0\\.50727' -or $sampleUnicode -match '(?i)v2\\.0\\.50727') { [void]$legacyMarkers.Add('v2.0.50727') };",
+            "if ($sampleAscii -match '(?i)v3\\.0(?:\\.\\d+)?' -or $sampleUnicode -match '(?i)v3\\.0(?:\\.\\d+)?') { [void]$legacyMarkers.Add('v3.0') };",
+            "if ($sampleAscii -match '(?i)v3\\.5(?:\\.\\d+)?' -or $sampleUnicode -match '(?i)v3\\.5(?:\\.\\d+)?') { [void]$legacyMarkers.Add('v3.5') };",
+            "$managedClrDetected = @($legacyMarkers | Where-Object { $_ -in @('mscoree.dll','_CorExeMain') }).Count -gt 0;",
+            "$legacyMetadataDetected = @($legacyMarkers | Where-Object { $_ -in @('v2.0.50727','v3.0','v3.5') }).Count -gt 0;",
+            "$legacyClrDetected = $managedClrDetected -and $legacyMetadataDetected;",
+            "$session = $null;",
+            BuildGuestSessionAssignment(config, provider, targetVmName),
+            "try {",
+            // Keep the guest query read-only.  NetFx3 is the Windows feature
+            // that provides CLR 2.0/3.5 (including v2.0.50727 samples).
+            "$guestRuntime = Invoke-Command -Session $session -ScriptBlock { param($samplePath, $outputRoot) $feature = $null; try { $feature = Get-WindowsOptionalFeature -Online -FeatureName NetFx3 -ErrorAction Stop } catch { $feature = $null }; $netFx3State = if ($null -eq $feature) { 'query-failed' } else { [string]$feature.State }; $netFx3Enabled = $netFx3State -eq 'Enabled'; $framework4 = @(); foreach ($registryPath in @('HKLM:\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full','HKLM:\\SOFTWARE\\Wow6432Node\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full')) { try { $item = Get-ItemProperty -LiteralPath $registryPath -ErrorAction Stop; if ($null -ne $item) { $framework4 += [pscustomobject]@{ path = $registryPath; version = [string]$item.Version; release = if ($null -ne $item.Release) { [int64]$item.Release } else { $null } } } } catch {} }; $samplePresent = Test-Path -LiteralPath $samplePath -PathType Leaf; $volume = Split-Path -Path $outputRoot -Qualifier; [pscustomobject]@{ samplePresent = $samplePresent; netFx3State = $netFx3State; netFx3Enabled = $netFx3Enabled; framework4 = @($framework4); guestComputerName = [string]$env:COMPUTERNAME; outputVolume = $volume } } -ArgumentList $guestSamplePath, $guestOut -ErrorAction Stop;",
+            "$guestRuntime = @($guestRuntime)[-1];",
+            "$runtimeQueryFailed = $null -eq $guestRuntime -or -not [bool]$guestRuntime.samplePresent -or [string]$guestRuntime.netFx3State -eq 'query-failed';",
+            "$netFx3Enabled = $false; if ($null -ne $guestRuntime) { $netFx3Enabled = [bool]$guestRuntime.netFx3Enabled };",
+            "$state = if ($legacyClrDetected -and $runtimeQueryFailed) { 'sample-runtime-blocked' } elseif ($legacyClrDetected -and -not $netFx3Enabled) { 'sample-runtime-blocked' } elseif ($legacyClrDetected) { 'legacy-netfx-ready' } elseif ($managedClrDetected -and $runtimeQueryFailed) { 'managed-runtime-query-unavailable' } elseif ($managedClrDetected) { 'managed-runtime-present' } else { 'native-or-unmanaged' };",
+            "$failureCode = if ($legacyClrDetected -and $runtimeQueryFailed) { 'sample-runtime-preflight-query-failed' } elseif ($legacyClrDetected -and -not $netFx3Enabled) { 'sample-runtime-blocked-netfx3-disabled' } else { $null };",
+            "$diagnostic = [ordered]@{ schema = 'ksword.sample-runtime-preflight.v1'; state = $state; failureCode = $failureCode; sampleFileName = [IO.Path]::GetFileName($hostSamplePath); sampleSizeBytes = [int64]$sampleFile.Length; scanBytes = [int64]$sampleBytesRead; managedClrDetected = $managedClrDetected; legacyClrDetected = $legacyClrDetected; legacyMetadataDetected = $legacyMetadataDetected; legacyMarkers = @($legacyMarkers); guestSamplePresent = if ($null -ne $guestRuntime) { [bool]$guestRuntime.samplePresent } else { $false }; guestNetFx3State = if ($null -ne $guestRuntime) { [string]$guestRuntime.netFx3State } else { 'query-failed' }; guestNetFx3Enabled = $netFx3Enabled; guestFramework4 = if ($null -ne $guestRuntime) { @($guestRuntime.framework4) } else { @() }; guestComputerName = if ($null -ne $guestRuntime) { [string]$guestRuntime.guestComputerName } else { '' }; checkedAtUtc = (Get-Date).ToUniversalTime().ToString('o'); readOnly = $true; sampleExecuted = $false };",
+            "New-Item -ItemType Directory -Force -Path (Split-Path -Parent $hostDiagnosticPath) | Out-Null; $diagnostic | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $hostDiagnosticPath -Encoding UTF8;",
+            "try { Invoke-Command -Session $session -ScriptBlock { param($path, $json) New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null; Set-Content -LiteralPath $path -Value $json -Encoding UTF8 } -ArgumentList $guestDiagnosticPath, ($diagnostic | ConvertTo-Json -Depth 8) -ErrorAction Stop } catch { Write-Warning \"Could not persist guest CLR preflight copy: $($_.Exception.Message)\" };",
+            "Write-Host (\"Sample CLR preflight: state={0}; managedClrDetected={1}; legacyClrDetected={2}; markers={3}; NetFx3={4}; sampleExecuted=False\" -f $state,$managedClrDetected,$legacyClrDetected,($legacyMarkers -join ','),($(if ($null -ne $guestRuntime) { [string]$guestRuntime.netFx3State } else { 'query-failed' })));",
+            "if ($legacyClrDetected -and $runtimeQueryFailed) { throw (\"SAMPLE_RUNTIME_BLOCKED: unable to verify guest .NET Framework state or copied legacy CLR sample; failureCode={0}; sampleExecuted=False\" -f $failureCode) };",
+            "if ($legacyClrDetected -and -not $netFx3Enabled) { throw (\"SAMPLE_RUNTIME_BLOCKED: legacy CLR sample requires NetFx3/CLR 2.0-3.5; guest state={0}; markers={1}; failureCode={2}; sampleExecuted=False\" -f $guestRuntime.netFx3State,($legacyMarkers -join ','),$failureCode) };",
+            "} finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
         });
         return WithGuestCredential(config, command);
     }

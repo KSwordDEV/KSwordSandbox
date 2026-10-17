@@ -360,6 +360,41 @@ internal static class SmokeTestProgram
         Assert(liveSyncStep.PowerShell.Contains("Remove-Item -LiteralPath (Join-Path $root $name)", StringComparison.Ordinal), "live sync should release closed guest R0 segments after host verification");
         Assert(liveSyncStep.PowerShell.Contains("if (-not ($running -or $processUnknown))", StringComparison.Ordinal), "final R0 segment cleanup must never run while the Guest Agent may still be writing");
         Assert(runbook.Steps.Any(step => step.Id == "collect-output"), "runbook should keep a final guest output collection step");
+
+        // Per-job driver mode must reach the runbook. Verify the explicit
+        // disabled mode emits a durable diagnostic and does not silently
+        // masquerade as a complete R0 capture, while an enabled override on a
+        // disabled host default still emits the full collector CLI contract.
+        var disabledJob = service.Plan(new SandboxSubmission
+        {
+            SamplePath = samplePath,
+            DurationSeconds = 5,
+            DriverEnabled = false,
+            DryRun = true
+        });
+        var disabledRunbook = disabledJob.Runbook ?? throw new InvalidOperationException("disabled-driver runbook should be set");
+        var disabledDiagnostic = disabledRunbook.Steps.Single(step => step.Id == "record-driver-collection-disabled");
+        Assert(!disabledDiagnostic.MutatesVmState, "disabled driver diagnostic must be host-only");
+        Assert(disabledDiagnostic.PowerShell.Contains("driver-collection-diagnostic.json", StringComparison.Ordinal), "disabled driver mode must persist an explicit diagnostic artifact");
+        Assert(disabledDiagnostic.PowerShell.Contains("R0 driver collection is disabled", StringComparison.Ordinal), "disabled driver mode must state that R0 evidence is unavailable");
+        var disabledAgentCommand = DecodeEncodedPowerShellCommands(disabledRunbook.Steps.Single(step => step.Id == "run-agent").PowerShell);
+        Assert(!disabledAgentCommand.Contains("--r0collector", StringComparison.Ordinal), "disabled driver mode must not pass an R0 collector path");
+        Assert(!disabledAgentCommand.Contains("--driver-events", StringComparison.Ordinal), "disabled driver mode must not pass a driver output path");
+
+        var disabledConfig = config with { Driver = config.Driver with { Enabled = false, UseMockCollector = false } };
+        var overrideService = new SandboxJobService(disabledConfig, rules);
+        var enabledOverrideJob = overrideService.Plan(new SandboxSubmission
+        {
+            SamplePath = samplePath,
+            DurationSeconds = 5,
+            DriverEnabled = true,
+            UseMockCollector = true,
+            DryRun = true
+        });
+        var enabledOverrideCommand = DecodeEncodedPowerShellCommands((enabledOverrideJob.Runbook ?? throw new InvalidOperationException("enabled override runbook should be set")).Steps.Single(step => step.Id == "run-agent").PowerShell);
+        Assert(enabledOverrideCommand.Contains("--r0collector", StringComparison.Ordinal), "enabled per-job driver override must pass the R0 collector path");
+        Assert(enabledOverrideCommand.Contains("--driver-events", StringComparison.Ordinal), "enabled per-job driver override must pass the driver output path");
+        Assert(enabledOverrideCommand.Contains("--r0-mock", StringComparison.Ordinal), "per-job mock collector override must reach the Guest Agent");
         Assert(File.Exists(job.JsonReportPath), "json report should exist");
         Assert(File.Exists(job.HtmlReportPath), "html report should exist");
         var savedExecutionJob = service.SaveRunbookExecutionResult(job.JobId, new SandboxRunbookExecutionResult
