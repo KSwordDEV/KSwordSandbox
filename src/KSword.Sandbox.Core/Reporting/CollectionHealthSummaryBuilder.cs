@@ -377,7 +377,8 @@ public static class CollectionHealthSummaryBuilder
         var failureType = Value(evt, "failureType", "outputFailureType", "reason");
         var exitCode = Value(evt, "exitCode", "commandExitCode");
         return TextContainsAny(type, "outputWriteFailure", "output-write-failure") ||
-            string.Equals(failureType, "outputWriteFailure", StringComparison.OrdinalIgnoreCase) ||
+            TextEqualsAny(failureType, "outputWriteFailure", "outputSpaceInsufficient", "outputOpenFailure") ||
+            BoolTrue(evt, "outputWriteFailure", "driverOutputFailure") ||
             (string.Equals(type, "r0collector.failed", StringComparison.OrdinalIgnoreCase) &&
              (exitCode == "70" || exitCode.Equals("0x46", StringComparison.OrdinalIgnoreCase)));
     }

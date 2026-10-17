@@ -1,4 +1,5 @@
 using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Core.Guest;
 using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.SmokeTests.Assertions;
 using KSword.Sandbox.SmokeTests.Framework;
@@ -103,6 +104,7 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(6, model.CollectionHealth.FailureRows, "AnalysisReport should carry the collection-health model.");
 
         AssertStateBoundaries();
+        AssertR0OutputFailureSidecarFinalStatus();
 
         return Task.FromResult(new SmokeTestResult
         {
@@ -200,6 +202,38 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         ]);
         RequireTrue(unknownFinal.State == "partial", "Zero loss without a final queue state must remain partial.");
         RequireTrue(!unknownFinal.DriverQueueDepthAtStopKnown, "A startup/status snapshot must not prove a final queue state.");
+    }
+
+    private static void AssertR0OutputFailureSidecarFinalStatus()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ksword-r0-sidecar-health-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var annotatedPath = Path.Combine(root, "driver-events.jsonl.failure.json");
+            File.WriteAllText(annotatedPath, "{\"schema\":\"ksword.sandbox.r0.output-failure\",\"failureType\":\"outputSpaceInsufficient\",\"captureState\":\"partial\",\"statusAnnotated\":true,\"finalStatusAvailable\":true,\"queueDepthAtStopKnown\":true,\"queueDepthAtStopUnknown\":false,\"queueDepthAtStop\":998259,\"bytesAccepted\":808442433,\"exitCode\":70}");
+            var annotated = GuestFailureArtifactImporter.Import(root);
+            var final = annotated.Single(evt => evt.EventType == "r0collector.finalStatus");
+            RequireTrue(final.Source == "r0collector", "R0 failure sidecar should become a collector health row.");
+            RequireTrue(final.Data["healthRowType"] == "driver.output.failure", "R0 sidecar row should retain the driver output failure lane.");
+            RequireTrue(final.Data["queueDepthAtStopKnown"] == "true", "Annotated sidecar should establish a known final queue state.");
+            RequireTrue(final.Data["remainingUnread"] == "998259", "Final queue depth should be promoted to remainingUnread.");
+            var summary = CollectionHealthSummaryBuilder.Build(annotated);
+            RequireEqual(998259, summary.DriverRemainingUnread, "Collection health should consume annotated final unread queue depth.");
+            RequireTrue(summary.DriverQueueDepthAtStopKnown, "Annotated sidecar should establish final queue knowledge.");
+            RequireEqual(1, summary.DriverOutputWriteFailureRows, "R0 output sidecar should remain an output-write failure row.");
+
+            File.WriteAllText(annotatedPath, "{\"schema\":\"ksword.sandbox.r0.output-failure\",\"failureType\":\"outputSpaceInsufficient\",\"statusAnnotated\":false,\"finalStatusAvailable\":false,\"queueDepthAtStopKnown\":false,\"queueDepthAtStop\":42}");
+            var unannotated = GuestFailureArtifactImporter.Import(root);
+            var unknown = unannotated.Single(evt => evt.EventType == "r0collector.finalStatus");
+            RequireTrue(unknown.Data["queueDepthAtStopUnknown"] == "true", "Unannotated sidecar must retain unknown final queue state.");
+            var unknownSummary = CollectionHealthSummaryBuilder.Build(unannotated);
+            RequireTrue(!unknownSummary.DriverQueueDepthAtStopKnown, "Unannotated sidecar must not prove final queue state.");
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
     }
 
     private static List<SandboxEvent> BuildEvents()

@@ -10388,6 +10388,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         // runs so raw evidence tags remain byte stable. Translate this
         // operator-facing search hint after those fragments are restored.
         html = html.Replace("placeholder=\"type, path, process, target\"", "placeholder=\"事件类型、路径、进程或目标\"", StringComparison.Ordinal);
+        html = html.Replace(">Copy<", ">复制<", StringComparison.Ordinal);
         // The cover status value is wrapped explicitly so this replacement
         // localizes the UI label without touching same-named evidence values.
         html = html.Replace("ui-status-value\">Failed", "ui-status-value\">失败", StringComparison.Ordinal);

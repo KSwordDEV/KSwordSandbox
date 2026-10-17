@@ -344,6 +344,17 @@ internal static class AgentProgram
             await StopR0CollectorAsync(r0Collector, events);
         }
 
+        // The R0 writer emits an independent failure sidecar when the JSONL
+        // sink cannot accept another row.  Import its final GET_STATUS fields
+        // into events.json before the host sees the guest output; the host
+        // importer repeats this operation for old Agent outputs, and stable
+        // event identity keeps the two paths idempotent.
+        var r0FailureStatus = ImportR0OutputFailureSidecar(options.DriverEventsPath);
+        if (r0FailureStatus is not null)
+        {
+            events.Add(r0FailureStatus);
+        }
+
         var driverEventPaths = EnumerateDriverEventPaths(options.DriverEventsPath);
         var driverEventsDeferred = ShouldDeferDriverEvents(driverEventPaths);
         var driverEvents = driverEventsDeferred
@@ -2030,6 +2041,120 @@ internal static class AgentProgram
         var driverJsonLinesReader = new DriverJsonLinesReader();
         return driverJsonLinesReader.ReadForSampleTree(paths, rootProcessId);
     }
+
+    /// <summary>
+    /// Reads the R0 output-failure sidecar after sidecar shutdown.  Inputs are
+    /// the configured canonical driver JSONL path; processing preserves scalar
+    /// diagnostic fields and promotes an annotated queueDepthAtStop to the
+    /// explicit remainingUnread aliases consumed by host health aggregation.
+    /// </summary>
+    private static SandboxEvent? ImportR0OutputFailureSidecar(string? driverEventsPath)
+    {
+        if (string.IsNullOrWhiteSpace(driverEventsPath))
+        {
+            return null;
+        }
+
+        var sidecarPath = driverEventsPath + ".failure.json";
+        if (!File.Exists(sidecarPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(sidecarPath));
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["collectionHealth"] = "true",
+                ["captureState"] = ReadR0SidecarScalar(document.RootElement, "captureState") ?? "partial",
+                ["status"] = "failed",
+                ["failureType"] = ReadR0SidecarScalar(document.RootElement, "failureType") ?? "outputWriteFailure",
+                ["outputFailureType"] = ReadR0SidecarScalar(document.RootElement, "failureType") ?? "outputWriteFailure",
+                ["outputWriteFailure"] = "true",
+                ["driverOutputFailure"] = "true",
+                ["healthRowType"] = "driver.output.failure",
+                ["eventTypeAlias"] = "driver.output.failure",
+                ["outputFailurePath"] = sidecarPath,
+                ["outputFailureRelativePath"] = Path.GetFileName(sidecarPath),
+                ["sourceComponent"] = "ksword-r0collector",
+                ["eventOrigin"] = "collector-sidecar",
+                ["producerCategory"] = "r0collector",
+                ["subjectKind"] = "collector-diagnostic",
+                ["actorRole"] = "collector-infrastructure",
+                ["subjectRole"] = "collector-diagnostic",
+                ["collectionNoise"] = "true",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["notSampleBehavior"] = "true",
+                ["sampleBehaviorCandidate"] = "false",
+                ["eventKind"] = "diagnostic",
+                ["evidenceRole"] = "collection-diagnostic",
+                ["zhMessage"] = "R0Collector 输出失败侧车已导入；最终队列状态以 statusAnnotated 标记为准。",
+                ["zhHint"] = "该行来自独立 failure.json，不代表样本行为；请同时查看原始 JSONL 分片、丢失计数和磁盘空间。"
+            };
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                var scalar = ReadR0SidecarScalar(property.Value);
+                if (!string.IsNullOrWhiteSpace(scalar))
+                {
+                    data[property.Name] = scalar;
+                }
+            }
+
+            var statusAnnotated = IsR0SidecarTrue(data, "statusAnnotated");
+            var finalStatusAvailable = IsR0SidecarTrue(data, "finalStatusAvailable");
+            var queueDepthKnown = IsR0SidecarTrue(data, "queueDepthAtStopKnown");
+            var finalQueueKnown = statusAnnotated && finalStatusAvailable && queueDepthKnown;
+            data["statusAnnotated"] = statusAnnotated ? "true" : "false";
+            data["finalStatusAvailable"] = finalStatusAvailable ? "true" : "false";
+            data["queueDepthAtStopKnown"] = finalQueueKnown ? "true" : "false";
+            data["queueDepthAtStopUnknown"] = finalQueueKnown ? "false" : "true";
+            data["finalStatusSource"] = finalQueueKnown ? "r0-output-failure-sidecar" : "r0-output-failure-sidecar-unannotated";
+            if (finalQueueKnown && data.TryGetValue("queueDepthAtStop", out var queueText) &&
+                ulong.TryParse(queueText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var queueDepth))
+            {
+                data["remainingUnread"] = queueDepth.ToString(CultureInfo.InvariantCulture);
+                data["remainingUnreadEvents"] = queueDepth.ToString(CultureInfo.InvariantCulture);
+                data["remainingQueueDepth"] = queueDepth.ToString(CultureInfo.InvariantCulture);
+            }
+
+            var lastWrite = File.GetLastWriteTimeUtc(sidecarPath);
+            return new SandboxEvent
+            {
+                EventType = "r0collector.finalStatus",
+                Timestamp = lastWrite == default ? DateTimeOffset.UtcNow : new DateTimeOffset(lastWrite, TimeSpan.Zero),
+                Source = "r0collector",
+                Path = sidecarPath,
+                Data = data
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadR0SidecarScalar(JsonElement root, string propertyName) =>
+        root.TryGetProperty(propertyName, out var value) ? ReadR0SidecarScalar(value) : null;
+
+    private static string? ReadR0SidecarScalar(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString(),
+        JsonValueKind.Number => value.GetRawText(),
+        JsonValueKind.True => "true",
+        JsonValueKind.False => "false",
+        _ => null
+    };
+
+    private static bool IsR0SidecarTrue(IReadOnlyDictionary<string, string> data, string key) =>
+        data.TryGetValue(key, out var value) &&
+        (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) || value == "1");
 
     /// <summary>
     /// Writes events, optional dropped-file artifacts, optional screenshot and

@@ -32,6 +32,7 @@ public static class GuestFailureArtifactImporter
         var pidPath = FindNewest(root, "agent.pid");
         var eventsPath = FindNewest(root, "events.json");
         var summaryPath = FindNewest(root, "agent-summary.json");
+        var r0FailurePath = FindNewest(root, "driver-events.jsonl.failure.json");
         var rows = new List<SandboxEvent>();
 
         var status = statusPath is null ? null : ReadStatus(statusPath);
@@ -40,75 +41,184 @@ public static class GuestFailureArtifactImporter
         var stderr = ReadText(stderrPath);
         var missing = status?.MissingArtifacts ?? [];
         var hasAgentMarker = statusPath is not null || stderrPath is not null || exitPath is not null || pidPath is not null || summaryPath is not null;
+        var hasR0Failure = r0FailurePath is not null;
         // Offline fixtures and older externally-produced events.json files do
         // not necessarily carry the Agent marker set. Do not invent a missing
         // summary failure for those already-complete event streams.
-        if (!hasAgentMarker)
+        if (!hasAgentMarker && !hasR0Failure)
         {
             return rows;
         }
 
-        if (missing.Count == 0)
+        if (hasAgentMarker && missing.Count == 0)
         {
             if (eventsPath is null) missing.Add("events.json");
             if (summaryPath is null) missing.Add("agent-summary.json");
         }
 
         var state = status?.State;
-        var failed = !string.Equals(state, "completed", StringComparison.OrdinalIgnoreCase) ||
+        var failed = hasAgentMarker && (!string.Equals(state, "completed", StringComparison.OrdinalIgnoreCase) ||
             (parsedExit && exitCode != 0) ||
             (!string.IsNullOrWhiteSpace(exitText) && !parsedExit) ||
             missing.Count > 0 ||
             // Preserve any Agent stderr as a structured runtime diagnostic.
             // Even when the exit marker says 0, stderr means the collector
             // reported an issue that must remain visible to operators.
-            !string.IsNullOrWhiteSpace(stderr);
-        if (!failed)
+            !string.IsNullOrWhiteSpace(stderr));
+
+        if (failed)
         {
-            return rows;
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["collectionHealth"] = "true",
+                ["captureState"] = "failed",
+                ["status"] = "failed",
+                ["failureType"] = "agentFailure",
+                ["agentFailure"] = "true",
+                ["agentOutputRoot"] = root,
+                ["eventsJsonPresent"] = (eventsPath is not null).ToString().ToLowerInvariant(),
+                ["agentSummaryPresent"] = (summaryPath is not null).ToString().ToLowerInvariant(),
+                ["stderrPresent"] = (!string.IsNullOrWhiteSpace(stderr)).ToString().ToLowerInvariant(),
+                ["missingArtifacts"] = string.Join(",", missing),
+                ["exitText"] = exitText ?? string.Empty,
+                ["exitCodeStatus"] = parsedExit ? "parsed" : string.IsNullOrWhiteSpace(exitText) ? "missing" : "invalid"
+            };
+            if (statusPath is not null) values["statusPath"] = statusPath;
+            if (stderrPath is not null) values["stderrPath"] = stderrPath;
+            if (exitPath is not null) values["exitPath"] = exitPath;
+            if (pidPath is not null) values["pidPath"] = pidPath;
+            if (parsedExit) values["exitCode"] = exitCode.ToString(CultureInfo.InvariantCulture);
+            if (status is not null)
+            {
+                values["statusState"] = status.State ?? string.Empty;
+                values["statusCapturedAtUtc"] = status.CapturedAtUtc ?? string.Empty;
+                values["stdoutBytes"] = status.StdoutBytes.ToString(CultureInfo.InvariantCulture);
+                values["stderrBytes"] = Math.Max(status.StderrBytes, FileLength(stderrPath)).ToString(CultureInfo.InvariantCulture);
+            }
+            else if (stderrPath is not null)
+            {
+                values["stderrBytes"] = FileLength(stderrPath).ToString(CultureInfo.InvariantCulture);
+            }
+            if (!string.IsNullOrWhiteSpace(stderr))
+            {
+                values["stderrPreview"] = stderr.Length > 4096 ? stderr[..4096] : stderr;
+            }
+            rows.Add(CreateFailureRow(
+                "agent.run.failed",
+                statusPath ?? stderrPath ?? exitPath ?? root,
+                values,
+                "Guest Agent failed or produced incomplete output; dynamic evidence is partial and must not be reported as clean."));
         }
 
-        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        if (r0FailurePath is not null)
         {
-            ["collectionHealth"] = "true",
-            ["captureState"] = "failed",
-            ["status"] = "failed",
-            ["failureType"] = "agentFailure",
-            ["agentFailure"] = "true",
-            ["agentOutputRoot"] = root,
-            ["eventsJsonPresent"] = (eventsPath is not null).ToString().ToLowerInvariant(),
-            ["agentSummaryPresent"] = (summaryPath is not null).ToString().ToLowerInvariant(),
-            ["stderrPresent"] = (!string.IsNullOrWhiteSpace(stderr)).ToString().ToLowerInvariant(),
-            ["missingArtifacts"] = string.Join(",", missing),
-            ["exitText"] = exitText ?? string.Empty,
-            ["exitCodeStatus"] = parsedExit ? "parsed" : string.IsNullOrWhiteSpace(exitText) ? "missing" : "invalid"
-        };
-        if (statusPath is not null) values["statusPath"] = statusPath;
-        if (stderrPath is not null) values["stderrPath"] = stderrPath;
-        if (exitPath is not null) values["exitPath"] = exitPath;
-        if (pidPath is not null) values["pidPath"] = pidPath;
-        if (parsedExit) values["exitCode"] = exitCode.ToString(CultureInfo.InvariantCulture);
-        if (status is not null)
-        {
-            values["statusState"] = status.State ?? string.Empty;
-            values["statusCapturedAtUtc"] = status.CapturedAtUtc ?? string.Empty;
-            values["stdoutBytes"] = status.StdoutBytes.ToString(CultureInfo.InvariantCulture);
-            values["stderrBytes"] = Math.Max(status.StderrBytes, FileLength(stderrPath)).ToString(CultureInfo.InvariantCulture);
+            var r0Failure = ImportR0OutputFailure(r0FailurePath);
+            if (r0Failure is not null)
+            {
+                rows.Add(r0Failure);
+            }
         }
-        else if (stderrPath is not null)
-        {
-            values["stderrBytes"] = FileLength(stderrPath).ToString(CultureInfo.InvariantCulture);
-        }
-        if (!string.IsNullOrWhiteSpace(stderr))
-        {
-            values["stderrPreview"] = stderr.Length > 4096 ? stderr[..4096] : stderr;
-        }
-        rows.Add(CreateFailureRow(
-            "agent.run.failed",
-            statusPath ?? stderrPath ?? exitPath ?? root,
-            values,
-            "Guest Agent failed or produced incomplete output; dynamic evidence is partial and must not be reported as clean."));
+
         return rows;
+    }
+
+    /// <summary>
+    /// Imports the R0Collector output-failure sidecar independently from the
+    /// broken JSONL stream.  The sidecar may contain a final GET_STATUS
+    /// snapshot that was obtained after the sink failed; this row is the
+    /// authoritative final unread/queue evidence when statusAnnotated=true.
+    /// Inputs are a single sidecar path, processing preserves every scalar
+    /// field and adds normalized health aliases, and the method returns one
+    /// report-ready diagnostic row or null for invalid/unreadable JSON.
+    /// </summary>
+    public static SandboxEvent? ImportR0OutputFailure(string? sidecarPath)
+    {
+        if (string.IsNullOrWhiteSpace(sidecarPath) || !File.Exists(sidecarPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(sidecarPath), JsonOptions);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["collectionHealth"] = "true",
+                ["captureState"] = ReadScalar(document.RootElement, "captureState") ?? "partial",
+                ["status"] = "failed",
+                ["failureType"] = ReadScalar(document.RootElement, "failureType") ?? "outputWriteFailure",
+                ["outputFailureType"] = ReadScalar(document.RootElement, "failureType") ?? "outputWriteFailure",
+                ["outputWriteFailure"] = "true",
+                ["driverOutputFailure"] = "true",
+                ["healthRowType"] = "driver.output.failure",
+                ["eventTypeAlias"] = "driver.output.failure",
+                ["outputFailurePath"] = sidecarPath,
+                ["outputFailureRelativePath"] = Path.GetFileName(sidecarPath),
+                ["sourceComponent"] = "ksword-r0collector",
+                ["eventOrigin"] = "collector-sidecar",
+                ["producerCategory"] = "r0collector",
+                ["subjectKind"] = "collector-diagnostic",
+                ["actorRole"] = "collector-infrastructure",
+                ["subjectRole"] = "collector-diagnostic",
+                ["collectionNoise"] = "true",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["notSampleBehavior"] = "true",
+                ["sampleBehaviorCandidate"] = "false",
+                ["eventKind"] = "diagnostic",
+                ["evidenceRole"] = "collection-diagnostic",
+                ["zhMessage"] = "R0Collector 输出失败侧车已导入；最终队列状态以 statusAnnotated 标记为准。",
+                ["zhHint"] = "该行来自独立 failure.json，不代表样本行为；请同时查看原始 JSONL 分片、丢失计数和磁盘空间。"
+            };
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                var scalar = ScalarText(property.Value);
+                if (!string.IsNullOrWhiteSpace(scalar))
+                {
+                    data[property.Name] = scalar;
+                }
+            }
+
+            var statusAnnotated = BoolText(data, "statusAnnotated");
+            var finalStatusAvailable = BoolText(data, "finalStatusAvailable");
+            var queueDepthKnown = BoolText(data, "queueDepthAtStopKnown");
+            var finalQueueKnown = statusAnnotated && finalStatusAvailable && queueDepthKnown;
+            data["statusAnnotated"] = statusAnnotated ? "true" : "false";
+            data["finalStatusAvailable"] = finalStatusAvailable ? "true" : "false";
+            data["queueDepthAtStopKnown"] = finalQueueKnown ? "true" : "false";
+            data["queueDepthAtStopUnknown"] = finalQueueKnown ? "false" : "true";
+            data["finalStatusSource"] = finalQueueKnown ? "r0-output-failure-sidecar" : "r0-output-failure-sidecar-unannotated";
+
+            if (finalQueueKnown && TryGetUnsigned(data, "queueDepthAtStop", out var queueDepthAtStop))
+            {
+                // CollectionHealthSummaryBuilder consumes remainingUnread as
+                // the explicit final tail.  Keep the original queueDepthAtStop
+                // field too, so raw sidecar semantics remain inspectable.
+                data["remainingUnread"] = queueDepthAtStop.ToString(CultureInfo.InvariantCulture);
+                data["remainingUnreadEvents"] = queueDepthAtStop.ToString(CultureInfo.InvariantCulture);
+                data["remainingQueueDepth"] = queueDepthAtStop.ToString(CultureInfo.InvariantCulture);
+            }
+
+            var timestamp = File.GetLastWriteTimeUtc(sidecarPath);
+            return new SandboxEvent
+            {
+                EventType = "r0collector.finalStatus",
+                Timestamp = timestamp == default ? DateTimeOffset.UtcNow : new DateTimeOffset(timestamp, TimeSpan.Zero),
+                Source = "r0collector",
+                Path = sidecarPath,
+                Data = data
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -244,6 +354,32 @@ public static class GuestFailureArtifactImporter
 
     private static string? ReadString(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static string? ReadScalar(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) ? ScalarText(value) : null;
+
+    private static string? ScalarText(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null
+        };
+    }
+
+    private static bool BoolText(IReadOnlyDictionary<string, string> data, string key) =>
+        data.TryGetValue(key, out var value) &&
+        (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) || value == "1");
+
+    private static bool TryGetUnsigned(IReadOnlyDictionary<string, string> data, string key, out ulong value)
+    {
+        value = 0;
+        return data.TryGetValue(key, out var text) &&
+            ulong.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+    }
 
     private static long ReadLong(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.TryGetInt64(out var number) ? number : 0;
