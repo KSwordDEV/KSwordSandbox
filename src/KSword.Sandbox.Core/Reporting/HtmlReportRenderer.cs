@@ -11037,6 +11037,24 @@ html[lang="en"] .localized-evidence-field{display:none}
                     .Replace("captureState=skipped", "采集状态=已跳过", StringComparison.OrdinalIgnoreCase)
                     .Replace("status=skipped", "状态=已跳过", StringComparison.OrdinalIgnoreCase)
                     .Replace("status=not-run", "状态=未运行", StringComparison.OrdinalIgnoreCase);
+
+                foreach (var (raw, display) in new (string Raw, string Display)[]
+                {
+                    ("artifact.dropped_file.copied", "落地文件已复制"),
+                    ("artifact.dropped_file.skipped", "落地文件未采集"),
+                    ("driver.file", "驱动·文件"),
+                    ("driver.network", "驱动·网络"),
+                    ("driver.process", "驱动·进程"),
+                    ("driver.registry", "驱动·注册表"),
+                    ("network.tcp.closed", "网络·TCP 关闭"),
+                    ("network.tcp", "网络·TCP"),
+                    ("process.new", "进程·创建"),
+                    ("process.tree", "进程树"),
+                    ("eventlog.powershell.script_block", "PowerShell 脚本块")
+                })
+                {
+                    body = body.Replace(raw, display, StringComparison.OrdinalIgnoreCase);
+                }
                 return match.Groups[1].Value + body + match.Groups[3].Value;
             },
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
@@ -11068,6 +11086,77 @@ html[lang="en"] .localized-evidence-field{display:none}
             return token;
         }, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         html = html.Replace("collectionName=", "证据通道=", StringComparison.OrdinalIgnoreCase);
+
+        // Collection summary cards are ordinary visible text rather than
+        // bounded raw-evidence blocks.  Keep their copy payloads intact while
+        // replacing the few machine tokens that otherwise leak into the
+        // operator-facing sentence (for example “最新诊断: sourceFileMissing”).
+        foreach (var (raw, display) in new (string Raw, string Display)[]
+        {
+            ("sourceFileMissing", "源文件已不存在"),
+            ("after-run", "运行后采集"),
+            ("status=not-run", "状态=未运行"),
+            ("状态=not-run", "状态=未运行"),
+            ("type=artifact.dropped_file.copied", "类型=落地文件已复制"),
+            ("type=artifact.dropped_file.skipped", "类型=落地文件未采集"),
+            ("type=driver.file", "类型=驱动·文件"),
+            ("type=driver.network", "类型=驱动·网络"),
+            ("type=driver.process", "类型=驱动·进程"),
+            ("type=driver.registry", "类型=驱动·注册表"),
+            ("type=network.tcp.closed", "类型=网络·TCP 关闭"),
+            ("type=network.tcp", "类型=网络·TCP"),
+            ("type=process.new", "类型=进程·创建"),
+            ("type=process.tree", "类型=进程树"),
+            ("type=eventlog.powershell.script_block", "类型=PowerShell 脚本块"),
+            ("source=driver", "来源=内核驱动"),
+            ("packet-captures", "抓包"),
+            ("driver-events", "驱动事件"),
+            ("dropped-files", "落地文件"),
+            ("screenshots", "截图"),
+            ("memory-dumps", "内存转储")
+        })
+        {
+            html = Regex.Replace(
+                html,
+                $"(?<![A-Za-z0-9_-]){Regex.Escape(raw)}(?![A-Za-z0-9_-])",
+                display,
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        // Raw event summaries are rendered in code/table cells rather than
+        // the bounded <pre> evidence blocks above.  Localize only those cell
+        // bodies so filter/data attributes and JavaScript machine values keep
+        // their stable identifiers.
+        foreach (var tag in new[] { "code", "td" })
+        {
+            html = Regex.Replace(
+                html,
+                $"(<{tag}\\b[^>]*>)([^<]*)(</{tag}>)",
+                match =>
+                {
+                    var body = match.Groups[2].Value;
+                    foreach (var (raw, display) in new (string Raw, string Display)[]
+                    {
+                        ("artifact.dropped_file.copied", "落地文件已复制"),
+                        ("artifact.dropped_file.skipped", "落地文件未采集"),
+                        ("driver.file", "驱动·文件"),
+                        ("driver.network", "驱动·网络"),
+                        ("driver.process", "驱动·进程"),
+                        ("driver.registry", "驱动·注册表"),
+                        ("network.tcp.closed", "网络·TCP 关闭"),
+                        ("network.tcp", "网络·TCP"),
+                        ("process.new", "进程·创建"),
+                        ("process.tree", "进程树")
+                    })
+                    {
+                        body = body.Replace(raw, display, StringComparison.OrdinalIgnoreCase);
+                    }
+
+                    return match.Groups[1].Value + body + match.Groups[3].Value;
+                },
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
         for (var index = 0; index < copyAttributes.Count; index++)
         {
             html = html.Replace($"__KSWORD_ZH_COPY_ATTRIBUTE_{index}__", copyAttributes[index], StringComparison.Ordinal);
