@@ -615,6 +615,14 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     // Always assign this value so a late enqueue cannot leave the lifecycle
     // row claiming that the queue drained when remainingQueueDepth is nonzero.
     drainQueueDrained = options.durationSeconds > 0 && finalQueueDepth == 0;
+    // The bounded drain loop can reach its wall-clock check immediately after
+    // consuming the last batch.  In that case the final GET_STATUS is the
+    // authoritative proof that no unread tail remains; retaining the deadline
+    // marker would misclassify a complete drain as backpressure.  Keep the
+    // deadline marker only when the final status still reports unread data.
+    if (drainQueueDrained && !drainStoppedAtBatchLimit) {
+        drainStoppedAtDeadline = false;
+    }
 
     JsonDataObjectBuilder data;
     data.AddUtf8("reason", options.durationSeconds > 0 ? "durationElapsed" : "oneShotComplete");

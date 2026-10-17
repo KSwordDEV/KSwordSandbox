@@ -613,6 +613,16 @@ public static class CollectionHealthSummaryBuilder
 
     private static ulong ExpectedProducerSuppressedMask(SandboxEvent evt)
     {
+        // The collector deliberately disables callbacks before its final
+        // queue/status read.  Any suppression bits reported by that final
+        // status are shutdown accounting, not a disabled producer capability
+        // during the sample window.  Preserve the raw mask, but do not turn
+        // an intentional shutdown transition into a health warning.
+        if (IsShutdownProducerStatus(evt))
+        {
+            return 0;
+        }
+
         var suppressed = FirstUnsigned(evt, ProducerSuppressedMaskKeys);
         if (suppressed == 0)
         {
@@ -622,6 +632,10 @@ public static class CollectionHealthSummaryBuilder
         var enabled = FirstUnsigned(evt, ProducerEnableMaskKeys);
         return suppressed & ~enabled;
     }
+
+    private static bool IsShutdownProducerStatus(SandboxEvent evt) =>
+        string.Equals(evt.EventType, "r0collector.driverStatus", StringComparison.OrdinalIgnoreCase) &&
+        BoolTrue(evt, "shutdownProducerDisable");
 
     private static ulong UnexpectedProducerSuppressedMask(SandboxEvent evt)
     {

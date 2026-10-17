@@ -4635,6 +4635,10 @@ std::string BuildStatusData(
     data.AddUnsigned("remainingQueueDepth", reply.QueueDepth);
     data.AddUtf8("statusPhase", finalStatus ? "final" : "snapshot");
     data.AddBool("finalStatusAvailable", finalStatus);
+    // The collector intentionally disables callbacks before the final status
+    // read. Keep this marker so health aggregation can distinguish shutdown
+    // accounting from a producer lane disabled during the sample.
+    data.AddBool("shutdownProducerDisable", finalStatus);
     data.AddBool("queueDrained", reply.QueueDepth == 0);
     data.AddBool("drainQueueDrained", reply.QueueDepth == 0);
     data.AddUnsigned("queueHighWatermark", reply.QueueHighWatermark);

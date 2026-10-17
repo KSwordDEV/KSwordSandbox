@@ -462,6 +462,32 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(0, expected.DriverUnsupportedProducerMask, "A supported but inactive producer must not contribute to the unsupported mask.");
         RequireTrue(expected.StateReasons.Contains("driver-expected-disabled-producer"), "Expected disabled producer capability gaps must remain visible in state reasons.");
 
+        var shutdownSuppression = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "r0collector.driverStatus",
+                Source = "r0collector",
+                Timestamp = timestamp,
+                Data =
+                {
+                    ["statusPhase"] = "final",
+                    ["finalStatusAvailable"] = "true",
+                    ["remainingQueueDepth"] = "0",
+                    ["producerSuppressedMask"] = "92",
+                    ["producerEnableMask"] = "0",
+                    ["supportedProducerMask"] = "127",
+                    ["shutdownProducerDisable"] = "true",
+                    ["totalEventsSuppressed"] = "5281"
+                }
+            }
+        ]);
+
+        RequireEqual(0, shutdownSuppression.DriverExpectedSuppressedRows, "Final shutdown producer disable must not be classified as a disabled producer capability gap.");
+        RequireEqual(5281, shutdownSuppression.DriverEventsSuppressed, "Shutdown suppression counters must remain visible as raw collector evidence.");
+        RequireTrue(shutdownSuppression.State == "complete", "A drained final status with intentional shutdown suppression should remain complete.");
+        RequireTrue(!shutdownSuppression.StateReasons.Contains("driver-expected-disabled-producer"), "Intentional shutdown suppression must not add the expected-disabled producer reason.");
+
         var unexpected = CollectionHealthSummaryBuilder.Build(
         [
             new SandboxEvent

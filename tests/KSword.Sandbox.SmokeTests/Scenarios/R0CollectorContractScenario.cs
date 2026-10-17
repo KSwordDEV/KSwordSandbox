@@ -87,6 +87,8 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(runtimeLoop, "EmitDriverSetProducerEnableMask(device, options, 0, writer, true)", "R0 shutdown should disable producer callbacks before draining the queued tail.");
         RequireContains(runtimeLoop, "consecutiveEmptyPolls >= 2", "R0 shutdown should require consecutive empty polls before declaring the queue drained.");
         RequireContains(runtimeLoop, "drainQueueDrained = options.durationSeconds > 0 && finalQueueDepth == 0", "R0 shutdown should derive queue-drained state from final GET_STATUS.");
+        RequireContains(runtimeLoop, "if (drainQueueDrained && !drainStoppedAtBatchLimit)", "R0 shutdown should clear a stale drain-deadline marker when final GET_STATUS proves an empty queue.");
+        RequireContains(runtimeLoop, "drainStoppedAtDeadline = false", "R0 shutdown should not report deadline backpressure after a fully drained final status.");
         RequireContains(abiSelfCheck, "r0collector.abiSelfCheck", "ABI self-check should emit a dedicated JSONL row.");
         RequireContains(abiSelfCheck, "collectorAbiVersion", "ABI self-check should preserve collector ABI version.");
         RequireContains(abiSelfCheck, "capabilityFlagsCurrentHex", "ABI self-check should preserve capability flags.");
@@ -170,6 +172,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(statusData, "highWatermark", "Status row should expose a stable high-watermark alias.");
         RequireContains(statusData, "remainingQueueDepth", "Status row should expose remaining queue depth.");
         RequireContains(statusData, "queueDrained", "Status row should expose an explicit queue-drained verdict.");
+        RequireContains(statusData, "shutdownProducerDisable", "Final status should identify intentional producer shutdown for health classification.");
         RequireContains(statusData, "lastEnqueueFailureStatus", "Status row should expose enqueue failure status.");
         RequireContains(statusData, "sequenceMeaning", "Status row should distinguish nextSequence from a concrete event sequence.");
         RequireContains(networkStatusData, "supportedLayerMaskHex", "Network status row should preserve supported WFP/ALE layer mask.");
