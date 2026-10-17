@@ -132,7 +132,7 @@ public static class EtwTraceXmlEventImporter
     }
 
     private static bool IsUsefulType(string type) =>
-        type is "process.start" or "process.exit" or "image.load" or "thread.start" or "thread.exit" or "registry.etw" ||
+        type is "process.start" or "process.exit" or "image.load" or "image.unload" or "thread.start" or "thread.exit" or "registry.etw" ||
         type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
         type.StartsWith("network.", StringComparison.OrdinalIgnoreCase);
 
@@ -140,10 +140,11 @@ public static class EtwTraceXmlEventImporter
     {
         var value = (name + " " + provider + " " + task + " " + opcode).ToLowerInvariant();
         if (value.Contains("process", StringComparison.Ordinal) && (value.Contains("start", StringComparison.Ordinal) || value.Contains("create", StringComparison.Ordinal) || value.Contains("dcstart", StringComparison.Ordinal))) return "process.start";
-        if (value.Contains("process", StringComparison.Ordinal) && (value.Contains("stop", StringComparison.Ordinal) || value.Contains("exit", StringComparison.Ordinal) || value.Contains("end", StringComparison.Ordinal) || value.Contains("dcexit", StringComparison.Ordinal))) return "process.exit";
-        if (value.Contains("image", StringComparison.Ordinal) || value.Contains("load", StringComparison.Ordinal)) return "image.load";
-        if (value.Contains("thread", StringComparison.Ordinal) && value.Contains("start", StringComparison.Ordinal)) return "thread.start";
-        if (value.Contains("thread", StringComparison.Ordinal) && (value.Contains("stop", StringComparison.Ordinal) || value.Contains("end", StringComparison.Ordinal))) return "thread.exit";
+        if (value.Contains("process", StringComparison.Ordinal) && (value.Contains("stop", StringComparison.Ordinal) || value.Contains("exit", StringComparison.Ordinal) || value.Contains("end", StringComparison.Ordinal) || value.Contains("dcexit", StringComparison.Ordinal) || value.Contains("terminate", StringComparison.Ordinal) || value.Contains("defunct", StringComparison.Ordinal))) return "process.exit";
+        if (value.Contains("image", StringComparison.Ordinal) && (value.Contains("unload", StringComparison.Ordinal) || value.Contains("dcend", StringComparison.Ordinal))) return "image.unload";
+        if (value.Contains("image", StringComparison.Ordinal) && (value.Contains("load", StringComparison.Ordinal) || value.Contains("start", StringComparison.Ordinal) || value.Contains("dcstart", StringComparison.Ordinal))) return "image.load";
+        if (value.Contains("thread", StringComparison.Ordinal) && (value.Contains("start", StringComparison.Ordinal) || value.Contains("dcstart", StringComparison.Ordinal))) return "thread.start";
+        if (value.Contains("thread", StringComparison.Ordinal) && (value.Contains("stop", StringComparison.Ordinal) || value.Contains("end", StringComparison.Ordinal) || value.Contains("exit", StringComparison.Ordinal) || value.Contains("dcexit", StringComparison.Ordinal))) return "thread.exit";
         if (value.Contains("file", StringComparison.Ordinal) || value.Contains("fileio", StringComparison.Ordinal)) return "file.etw";
         if (value.Contains("network", StringComparison.Ordinal) || value.Contains("tcp", StringComparison.Ordinal)) return "network.etw";
         return value.Contains("registry", StringComparison.Ordinal) ? "registry.etw" : "etw.event";
@@ -208,6 +209,18 @@ public static class EtwTraceXmlEventImporter
     private static string Child(XElement? element, params string[] names) => element is null ? string.Empty : First(names.Select(name => element.Elements().FirstOrDefault(child => child.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase))?.Value).ToArray());
     private static string First(params string?[] values) => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
     private static string Value(IReadOnlyDictionary<string, string> values, params string[] names) => First(names.Select(name => values.TryGetValue(Normalize(name), out var value) ? value : null).ToArray());
-    private static int? ParsePid(string? value) => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pid) && pid > 0 ? pid : null;
+    private static int? ParsePid(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var normalized = value.Trim();
+        if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(normalized[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexPid) &&
+            hexPid > 0)
+        {
+            return hexPid;
+        }
+
+        return int.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pid) && pid > 0 ? pid : null;
+    }
     private static DateTimeOffset? ParseTimestamp(string? value) => DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var timestamp) ? timestamp : null;
 }

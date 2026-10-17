@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Abstractions.Artifacts;
@@ -1352,10 +1353,16 @@ public sealed partial class SandboxJobService
 
         // A crashed Agent can leave the status/stderr markers and tracerpt XML
         // while never reaching events.json serialization. Preserve those
-        // diagnostics and any decoded ETW lifecycle rows instead of turning
-        // the import into a clean zero-event run.
-        foreach (var diagnostic in GuestFailureArtifactImporter.Import(searchRoot)
-            .Concat(EtwTraceXmlEventImporter.Import(searchRoot)))
+        // diagnostics and use the XML decoder only as a fallback in that
+        // case. A successful Agent already serializes the decoded ETW rows in
+        // events.json; importing the same full-machine XML again would add
+        // tens of thousands of duplicate ambient process/image rows (and can
+        // make a report look more complete than the sample actually was).
+        var agentFailures = GuestFailureArtifactImporter.Import(searchRoot);
+        var etwFallback = HasDecodedEtwRows(events)
+            ? []
+            : EtwTraceXmlEventImporter.Import(searchRoot);
+        foreach (var diagnostic in agentFailures.Concat(etwFallback))
         {
             var normalized = NormalizeEvent(diagnostic);
             if (eventKeys.Add(EventKey(normalized)))
@@ -1371,6 +1378,31 @@ public sealed partial class SandboxJobService
             driverRowsRead,
             driverRowsMerged);
         return NormalizeHostParsedProtocolSummary(events.Select(NormalizeEvent).ToList());
+    }
+
+    private static bool HasDecodedEtwRows(IReadOnlyCollection<SandboxEvent> events)
+    {
+        if (events.Any(evt =>
+                evt.Source.Equals("etwLive", StringComparison.OrdinalIgnoreCase) &&
+                evt.Data.TryGetValue("captureSource", out var captureSource) &&
+                captureSource.Equals("etw-live-tracerpt", StringComparison.OrdinalIgnoreCase) &&
+                evt.Data.TryGetValue("rawDecoded", out var rawDecoded) &&
+                rawDecoded.Equals("true", StringComparison.OrdinalIgnoreCase) &&
+                !evt.EventType.StartsWith("etw_live.", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        // Keep compatibility with older Agent builds that emitted the
+        // captured summary but did not tag each decoded row with rawDecoded.
+        var captured = events.FirstOrDefault(evt =>
+            evt.EventType.Equals("etw_live.captured", StringComparison.OrdinalIgnoreCase));
+        return captured is not null &&
+            captured.Data.TryGetValue("semanticRowsAvailable", out var rowsAvailable) &&
+            rowsAvailable.Equals("true", StringComparison.OrdinalIgnoreCase) &&
+            captured.Data.TryGetValue("parsedEventCount", out var countText) &&
+            int.TryParse(countText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) &&
+            count > 0;
     }
 
     private static IReadOnlyList<string> EnumerateCanonicalDriverJsonlPaths(string eventsPath, string searchRoot)

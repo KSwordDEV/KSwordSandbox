@@ -30,6 +30,12 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
         File.WriteAllText(Path.Combine(etw, "sample.xml"), """
             <Events><Event><System><Provider Name="Microsoft-Windows-Kernel-Process"/><EventID>1</EventID><TimeCreated SystemTime="2026-01-01T00:00:00Z"/><Execution ProcessID="4242" ThreadID="11"/></System><RenderingInfo><Task>Process</Task><Opcode>Start</Opcode><EventName>ProcessStart</EventName></RenderingInfo><EventData><Data Name="ProcessId">4242</Data><Data Name="ParentProcessId">4</Data><Data Name="ImageFileName">sample.exe</Data></EventData></Event><Event><System><Provider Name="Microsoft-Windows-Kernel-Image"/><EventID>5</EventID><TimeCreated SystemTime="2026-01-01T00:00:01Z"/><Execution ProcessID="4242" ThreadID="11"/></System><RenderingInfo><Task>Image</Task><Opcode>Load</Opcode></RenderingInfo><EventData><Data Name="ProcessId">4242</Data><Data Name="ImageFileName">payload.dll</Data></EventData></Event><Event><System><Provider Name="Microsoft-Windows-Kernel-Process"/><EventID>2</EventID><TimeCreated SystemTime="2026-01-01T00:00:02Z"/><Execution ProcessID="4242" ThreadID="11"/></System><RenderingInfo><Task>Process</Task><Opcode>Stop</Opcode><EventName>ProcessExit</EventName></RenderingInfo><EventData><Data Name="ProcessId">4242</Data><Data Name="ExitStatus">1</Data></EventData></Event></Events>
             """);
+        // tracerpt's kernel XML commonly serializes PIDs in hexadecimal. Keep
+        // that path covered, and ensure an Image UnLoad opcode is not reduced
+        // to the misleading image.load type.
+        File.WriteAllText(Path.Combine(etw, "hex.xml"), """
+            <Events><Event><System><Provider Name="Microsoft-Windows-Kernel-Image"/><EventID>5</EventID><TimeCreated SystemTime="2026-01-01T00:00:03Z"/><Execution ProcessID="0x10" ThreadID="0x11"/></System><RenderingInfo><Task>Image</Task><Opcode>UnLoad</Opcode><EventName>Image</EventName></RenderingInfo><EventData><Data Name="ProcessId">0x10</Data><Data Name="ImageFileName">payload.dll</Data></EventData></Event></Events>
+            """);
 
         var failures = GuestFailureArtifactImporter.Import(root);
         SmokeAssert.True(failures.Any(evt => evt.EventType == "agent.run.failed"), "Agent status/stderr/exit must produce a structured failure row.");
@@ -69,6 +75,8 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
         SmokeAssert.True(etwRows.Any(evt => evt.EventType == "image.load"), "ETW fallback must retain image.load.");
         SmokeAssert.True(etwRows.Any(evt => evt.EventType == "process.exit"), "ETW fallback must retain process.exit.");
         SmokeAssert.True(etwRows.All(evt => evt.Data.TryGetValue("captureSource", out var source) && source == "etw-live-tracerpt"), "ETW fallback rows must retain source provenance.");
+        var hexUnload = etwRows.Single(evt => evt.EventType == "image.unload");
+        SmokeAssert.True(hexUnload.ProcessId == 16 && hexUnload.ParentProcessId is null, "ETW fallback must parse hexadecimal process IDs from tracerpt XML.");
 
         var r0 = new SandboxEvent
         {
