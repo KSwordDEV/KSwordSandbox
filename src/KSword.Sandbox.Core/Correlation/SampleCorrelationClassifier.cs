@@ -1151,8 +1151,7 @@ public static class SampleCorrelationClassifier
                 TryGetRootProcessId(evt.Data, out var rootPid))
             {
                 if (EventLooksLikeSubmittedSample(evt, sampleFullPath, sampleFileName) ||
-                    PathOrCommandMatchesSample(Value(evt.Data, "rootImagePath"), sampleFullPath, sampleFileName) ||
-                    eventType.Equals("process.tree.summary", StringComparison.OrdinalIgnoreCase))
+                    PathOrCommandMatchesSample(Value(evt.Data, "rootImagePath"), sampleFullPath, sampleFileName))
                 {
                     rootPids.Add(rootPid);
                 }

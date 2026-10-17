@@ -51,7 +51,19 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
             DriverFile(start.AddSeconds(1), filePath),
             DriverRegistry(start.AddSeconds(1), keyPath),
             EtwFile(start.AddSeconds(1), filePath),
-            EtwRegistry(start.AddSeconds(1), keyPath)
+            EtwRegistry(start.AddSeconds(1), keyPath),
+            new SandboxEvent
+            {
+                EventType = "process.tree.summary",
+                Source = "guest",
+                Timestamp = start.AddMilliseconds(2),
+                ProcessId = 200,
+                Data = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["rootProcessId"] = "200"
+                }
+            },
+            EtwFile(start.AddSeconds(1), filePath) with { ProcessId = 200 }
         };
 
         var withCrossSource = SampleCorrelationClassifier.Apply(events, SamplePath);
@@ -64,7 +76,8 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
 
         var withoutCrossSource = SampleCorrelationClassifier.Apply(
             events.Where(evt => evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase) ||
-                evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase)),
+                evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(evt.Source, "etwLive", StringComparison.OrdinalIgnoreCase) && evt.ProcessId == 200)),
             SamplePath);
         var ambientFile = Require(withoutCrossSource, "driver.file", filePath);
         SmokeAssert.True(ambientFile.Data["sampleCorrelation"] == "unknown", "Ownerless R0 file mutation must remain unknown without an independent source.");
@@ -72,6 +85,11 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
         var ambientRegistry = Require(withoutCrossSource, "driver.registry", keyPath);
         SmokeAssert.True(ambientRegistry.Data["sampleCorrelation"] == "unknown", "Ownerless R0 registry mutation must remain unknown without an independent source.");
         SmokeAssert.True(ambientRegistry.Data["behaviorCounted"] == "false", "Ownerless R0 registry mutation must stay out of primary behavior counts.");
+
+        SmokeAssert.True(withoutCrossSource.All(evt =>
+            !evt.Data.TryGetValue("sampleCorrelation", out var value) ||
+            !string.Equals(value, "probable", StringComparison.OrdinalIgnoreCase)),
+            "An unrelated process-tree summary must not become a sample root and promote ownerless R0 rows.");
 
         return Task.FromResult(new SmokeTestResult
         {
