@@ -1233,16 +1233,50 @@ bool EmitDriverEventRecords(
     DriverReadEventsBatchCounters* batchCounters) {
     size_t offset = 0;
     DriverReadEventsBatchCounters counters;
+    // Serialize rows in memory and commit them in one bounded JSONL batch.
+    // The old loop called ostream insertion once per event, which left the
+    // consumer behind a sustained producer even though READ_EVENTS itself
+    // returned large complete batches.
+    std::vector<std::string> serializedRows;
+    std::vector<unsigned long long> serializedSequences;
+    constexpr size_t kSerializedRowBatch = 256U;
+    serializedRows.reserve(kSerializedRowBatch);
+    serializedSequences.reserve(kSerializedRowBatch);
+
+    const auto commitSerializedRows = [&]() -> bool {
+        if (serializedRows.empty()) {
+            return true;
+        }
+
+        size_t acceptedRows = 0;
+        const bool rowsWritten = writer.WriteLines(serializedRows, &acceptedRows);
+        for (size_t index = 0; index < acceptedRows; ++index) {
+            ObserveEmittedSequence(&counters, serializedSequences[index]);
+            ++counters.eventsEmitted;
+        }
+        serializedRows.clear();
+        serializedSequences.clear();
+        return rowsWritten;
+    };
+
+    const auto emitProtocolErrorAfterPendingRows = [&](const wchar_t* message) -> bool {
+        if (!commitSerializedRows()) {
+            SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
+            return false;
+        }
+        SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
+        return EmitProtocolError(
+            writer,
+            options,
+            "IOCTL_KSWORD_SANDBOX_READ_EVENTS",
+            message,
+            static_cast<DWORD>(eventByteCount));
+    };
 
     while (counters.recordsProcessed < eventsWritten) {
         if (eventByteCount - offset < sizeof(KSWORD_SANDBOX_EVENT_HEADER)) {
-            SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
-            return EmitProtocolError(
-                writer,
-                options,
-                "IOCTL_KSWORD_SANDBOX_READ_EVENTS",
-                L"READ_EVENTS ended before the next KSWORD_SANDBOX_EVENT_HEADER.",
-                static_cast<DWORD>(eventByteCount));
+            return emitProtocolErrorAfterPendingRows(
+                L"READ_EVENTS ended before the next KSWORD_SANDBOX_EVENT_HEADER.");
         }
 
         KSWORD_SANDBOX_EVENT_HEADER header {};
@@ -1251,24 +1285,14 @@ bool EmitDriverEventRecords(
         if (header.Version != KSWORD_SANDBOX_EVENT_HEADER_VERSION ||
             header.Size < sizeof(header) ||
             static_cast<size_t>(header.Size) > eventByteCount - offset) {
-            SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
-            return EmitProtocolError(
-                writer,
-                options,
-                "IOCTL_KSWORD_SANDBOX_READ_EVENTS",
-                L"READ_EVENTS returned an event record with an incompatible header.",
-                static_cast<DWORD>(eventByteCount));
+            return emitProtocolErrorAfterPendingRows(
+                L"READ_EVENTS returned an event record with an incompatible header.");
         }
 
         const size_t payloadCapacity = static_cast<size_t>(header.Size) - sizeof(header);
         if (static_cast<size_t>(header.PayloadSize) > payloadCapacity) {
-            SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
-            return EmitProtocolError(
-                writer,
-                options,
-                "IOCTL_KSWORD_SANDBOX_READ_EVENTS",
-                L"READ_EVENTS returned an event record whose PayloadSize exceeds record Size.",
-                static_cast<DWORD>(eventByteCount));
+            return emitProtocolErrorAfterPendingRows(
+                L"READ_EVENTS returned an event record whose PayloadSize exceeds record Size.");
         }
 
         const unsigned char* payload = eventBytes + offset + sizeof(header);
@@ -1333,26 +1357,25 @@ bool EmitDriverEventRecords(
             header.PayloadSize,
             attribution);
 
-        if (!EmitEvent(writer, event)) {
+        ObserveProcessedSequence(&counters, header.Sequence);
+        serializedRows.push_back(BuildSandboxEventJsonLine(event));
+        serializedSequences.push_back(header.Sequence);
+        offset += header.Size;
+        ++counters.recordsProcessed;
+        if (serializedRows.size() >= kSerializedRowBatch && !commitSerializedRows()) {
             SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
             return false;
         }
-
-        ObserveProcessedSequence(&counters, header.Sequence);
-        ObserveEmittedSequence(&counters, header.Sequence);
-        offset += header.Size;
-        ++counters.eventsEmitted;
-        ++counters.recordsProcessed;
     }
 
     if (offset != eventByteCount) {
+        return emitProtocolErrorAfterPendingRows(
+            L"READ_EVENTS returned extra bytes after the advertised event records.");
+    }
+
+    if (!commitSerializedRows()) {
         SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
-        return EmitProtocolError(
-            writer,
-            options,
-            "IOCTL_KSWORD_SANDBOX_READ_EVENTS",
-            L"READ_EVENTS returned extra bytes after the advertised event records.",
-            static_cast<DWORD>(eventByteCount));
+        return false;
     }
 
     SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);

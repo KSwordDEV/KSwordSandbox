@@ -80,6 +80,12 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             "KSword.Sandbox.R0Collector",
             "src",
             "IoctlClient.cpp");
+        var jsonWriter = ReadRepositoryText(
+            context,
+            "guest",
+            "KSword.Sandbox.R0Collector",
+            "src",
+            "JsonWriter.h");
         var options = ReadRepositoryText(
             context,
             "guest",
@@ -287,6 +293,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(options, "--inject-jsonl-noise", "Collector CLI must expose explicit JSONL noise injection.");
         RequireContains(options, "--driver-event-sample-stride", "Collector CLI must expose driver-row sampling for large streams.");
         RequireContains(options, "--event-sample-stride", "Collector CLI must expose the sampling alias.");
+        RequireContains(jsonWriter, "WriteLines", "Collector writer must expose a batched JSONL write path for high-rate READ_EVENTS drains.");
+        RequireContains(ioctlClient, "writer.WriteLines(serializedRows", "READ_EVENTS must commit serialized rows through the batched writer path.");
         RequireContains(options, "--suppress-self-noise", "Collector CLI must keep the default self-noise suppression switch.");
         RequireContains(options, "--emit-self-noise", "Collector CLI must expose self-noise emission for diagnostics.");
         RequireContains(options, "--no-suppress-self-noise", "Collector CLI must expose the self-noise emission alias.");

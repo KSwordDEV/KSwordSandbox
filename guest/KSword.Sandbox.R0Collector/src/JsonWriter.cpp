@@ -1,10 +1,12 @@
 #include "JsonWriter.h"
 
+#include <charconv>
 #include <chrono>
 #include <cstring>
 #include <ctime>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <vector>
 #include <system_error>
@@ -171,6 +173,101 @@ bool EventWriter::WriteLine(const std::string& line) {
     return true;
 }
 
+// Input: a bounded vector of complete JSON objects without trailing newlines.
+// Processing: checks each row's space/rotation contract, joins a batch into a
+// single buffered write, then updates the same accounting fields as
+// WriteLine.  Joining rows avoids thousands of ostream insertion calls while
+// preserving segment boundaries and the existing failure sidecar contract.
+// Return: true when every row was accepted by the sink.
+bool EventWriter::WriteLines(const std::vector<std::string>& lines, size_t* acceptedLines) {
+    if (acceptedLines != nullptr) {
+        *acceptedLines = 0;
+    }
+    if (lines.empty()) {
+        return true;
+    }
+    if (stream_ == nullptr || failure_.failed) {
+        if (!failure_.failed) {
+            RecordFailure("write", "JSONL output stream is not open.");
+        }
+        return false;
+    }
+
+    // Keep a chunk comfortably below the output rotation and filesystem
+    // reserve granularity.  This also bounds temporary memory when a future
+    // READ_EVENTS request is enlarged.
+    constexpr size_t kChunkBytes = 1U * 1024U * 1024U;
+    std::string chunk;
+    chunk.reserve(kChunkBytes);
+    unsigned long long chunkBytes = 0;
+    size_t chunkLines = 0;
+
+    const auto flushChunk = [&]() -> bool {
+        if (chunk.empty()) {
+            return true;
+        }
+
+        const unsigned long long acceptedChunkBytes = chunkBytes;
+        const size_t acceptedChunkLines = chunkLines;
+        errno = 0;
+        stream_->write(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+        if (!stream_->good()) {
+            RecordFailure("write", "JSONL stream entered fail/bad state while appending a batch.");
+            return false;
+        }
+
+        linesSinceFlush_ += chunkLines;
+        chunk.clear();
+        chunkBytes = 0;
+        chunkLines = 0;
+        if (linesSinceFlush_ >= kFlushInterval && !Flush()) {
+            return false;
+        }
+        failure_.bytesAccepted += acceptedChunkBytes;
+        currentOutputBytes_ += acceptedChunkBytes;
+        if (acceptedLines != nullptr) {
+            *acceptedLines += acceptedChunkLines;
+        }
+        return true;
+    };
+
+    for (const auto& line : lines) {
+        ++failure_.linesAttempted;
+        ++failure_.lineNumber;
+        failure_.lineBytes = static_cast<unsigned long long>(line.size()) + 1ULL;
+        failure_.bytesAttempted += failure_.lineBytes;
+        // The pending chunk is bounded to 1 MiB and is not reflected in
+        // currentOutputBytes_ until it is committed.  Probe free space once
+        // per chunk; probing for every row would turn a high-rate drain into
+        // thousands of filesystem metadata calls while preserving no extra
+        // safety beyond the existing one-chunk reserve bound.
+        if (chunk.empty() && !HasOutputSpace(failure_.lineBytes)) {
+            return false;
+        }
+
+        if (maxOutputBytes_ > 0 && currentOutputBytes_ > 0 &&
+            currentOutputBytes_ + chunkBytes + failure_.lineBytes > maxOutputBytes_) {
+            if (!flushChunk()) {
+                return false;
+            }
+            std::wstring rotateError;
+            if (!Rotate(&rotateError)) {
+                return false;
+            }
+        }
+
+        chunk.append(line);
+        chunk.push_back('\n');
+        chunkBytes += failure_.lineBytes;
+        ++chunkLines;
+        if (chunk.size() >= kChunkBytes && !flushChunk()) {
+            return false;
+        }
+    }
+
+    return flushChunk();
+}
+
 // Input: current output stream.
 // Processing: Flushes buffered bytes and captures stream/OS error state.  No
 // exception or diagnostic write is allowed to depend on the broken stream.
@@ -321,44 +418,50 @@ std::string Utf8FromWide(const std::wstring& value) {
 // emits control characters as \u00XX sequences so every JSONL row stays valid.
 // Return: Escaped UTF-8 text without surrounding quotation marks.
 std::string JsonEscapeUtf8(const std::string& value) {
-    std::ostringstream escaped;
-    escaped.fill('0');
+    // This is called for every field of every live R0 row.  Constructing an
+    // ostringstream per value made JSON serialization the consumer
+    // bottleneck under a sustained driver burst.  Keep the same escaping
+    // contract while writing directly into one reserved string.
+    std::string escaped;
+    escaped.reserve(value.size() + value.size() / 16U + 8U);
+    static constexpr char kHex[] = "0123456789abcdef";
 
     for (const unsigned char ch : value) {
         switch (ch) {
         case '\"':
-            escaped << "\\\"";
+            escaped += "\\\"";
             break;
         case '\\':
-            escaped << "\\\\";
+            escaped += "\\\\";
             break;
         case '\b':
-            escaped << "\\b";
+            escaped += "\\b";
             break;
         case '\f':
-            escaped << "\\f";
+            escaped += "\\f";
             break;
         case '\n':
-            escaped << "\\n";
+            escaped += "\\n";
             break;
         case '\r':
-            escaped << "\\r";
+            escaped += "\\r";
             break;
         case '\t':
-            escaped << "\\t";
+            escaped += "\\t";
             break;
         default:
             if (ch < 0x20) {
-                static constexpr char kHex[] = "0123456789abcdef";
-                escaped << "\\u00" << kHex[(ch >> 4) & 0x0F] << kHex[ch & 0x0F];
+                escaped += "\\u00";
+                escaped.push_back(kHex[(ch >> 4) & 0x0F]);
+                escaped.push_back(kHex[ch & 0x0F]);
             } else {
-                escaped << static_cast<char>(ch);
+                escaped.push_back(static_cast<char>(ch));
             }
             break;
         }
     }
 
-    return escaped.str();
+    return escaped;
 }
 
 // Input: UTF-8 text that should become a JSON string value.
@@ -380,13 +483,26 @@ std::string JsonStringFromWide(const std::wstring& value) {
 // diagnostic output in JSONL data fields.
 // Return: ASCII hexadecimal text.
 std::string HexUnsignedLongLong(const unsigned long long value, const int width) {
-    std::ostringstream hex;
-    hex << "0x" << std::uppercase << std::hex << std::setfill('0');
-    if (width > 0) {
-        hex << std::setw(width);
+    char digits[sizeof(value) * 2U]{};
+    const auto result = std::to_chars(std::begin(digits), std::end(digits), value, 16);
+    if (result.ec != std::errc{}) {
+        return "0x0";
     }
-    hex << value;
-    return hex.str();
+
+    const size_t digitCount = static_cast<size_t>(result.ptr - digits);
+    const size_t requestedWidth = width > 0 ? static_cast<size_t>(width) : 0U;
+    const size_t padding = requestedWidth > digitCount ? requestedWidth - digitCount : 0U;
+    std::string text;
+    text.reserve(2U + padding + digitCount);
+    text += "0x";
+    text.append(padding, '0');
+    for (size_t index = 0; index < digitCount; ++index) {
+        const char digit = digits[index];
+        text.push_back(digit >= 'a' && digit <= 'f'
+            ? static_cast<char>(digit - ('a' - 'A'))
+            : digit);
+    }
+    return text;
 }
 
 // Input: Raw payload bytes returned after a driver event header.
@@ -400,14 +516,13 @@ std::string HexBytes(const unsigned char* bytes, const size_t byteCount, const s
     }
 
     const size_t bytesToFormat = byteCount < maxBytes ? byteCount : maxBytes;
-    std::ostringstream hex;
-    hex << std::uppercase << std::hex << std::setfill('0');
-
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    std::string text(bytesToFormat * 2U, '\0');
     for (size_t index = 0; index < bytesToFormat; ++index) {
-        hex << std::setw(2) << static_cast<unsigned int>(bytes[index]);
+        text[index * 2U] = kHex[(bytes[index] >> 4U) & 0x0FU];
+        text[index * 2U + 1U] = kHex[bytes[index] & 0x0FU];
     }
-
-    return hex.str();
+    return text;
 }
 
 // Input: Address family and raw address bytes from a network payload.

@@ -402,6 +402,11 @@ public:
 
     bool Open(const std::wstring& outputPath, std::wstring* error, unsigned long long maxOutputBytes = 0, unsigned long long minFreeOutputBytes = 0);
     bool WriteLine(const std::string& line);
+    // Writes a bounded group of already serialized JSONL rows with fewer
+    // stream-buffer calls than one WriteLine per event.  Each row still goes
+    // through the same free-space and rotation checks; a failed group is
+    // reported through the existing independent sidecar.
+    bool WriteLines(const std::vector<std::string>& lines, size_t* acceptedLines = nullptr);
     bool Flush();
 
     // Records the result of a best-effort final GET_STATUS after output has

@@ -428,7 +428,8 @@ bool EmitMockDriverCategoryEvent(
     const std::wstring& commandLine,
     const std::string& driverEventTypeName,
     const std::string& operation,
-    const std::vector<std::pair<std::string, std::string>>& extraData) {
+    const std::vector<std::pair<std::string, std::string>>& extraData,
+    std::vector<std::string>* serializedBatch = nullptr) {
     bool hasSequence = false;
     bool hasVersion = false;
     for (const auto& item : extraData) {
@@ -577,6 +578,10 @@ bool EmitMockDriverCategoryEvent(
     }
 
     event.dataJson = data.Build();
+    if (serializedBatch != nullptr) {
+        serializedBatch->push_back(BuildSandboxEventJsonLine(event));
+        return true;
+    }
     return EmitEvent(writer, event);
 }
 
@@ -1025,6 +1030,8 @@ bool EmitSyntheticStressEvents(EventWriter& writer, const Options& options, cons
     const std::string currentProcessIdText = std::to_string(kSyntheticSampleProcessId);
     const std::string stressSequenceStartText = std::to_string(kSyntheticStressSequenceStart);
     const std::string stressSequenceEndText = std::to_string(kSyntheticStressSequenceStart + options.stressCount - 1);
+    std::vector<std::string> serializedBatch;
+    serializedBatch.reserve(64);
 
     for (int index = 0; index < options.stressCount; ++index) {
         const int sequence = kSyntheticStressSequenceStart + index;
@@ -1088,12 +1095,20 @@ bool EmitSyntheticStressEvents(EventWriter& writer, const Options& options, cons
                     {"maxReadBatches", std::to_string(options.maxReadBatches)},
                     {"drainStoppedAtBatchLimit", "false"},
                     {"sampling", options.driverEventSampleStride <= 1 ? "none" : "stride:not-applied-in-synthetic-stress"}
-                })) {
+                },
+                &serializedBatch)) {
             return false;
+        }
+
+        if (serializedBatch.size() >= 64U) {
+            if (!writer.WriteLines(serializedBatch)) {
+                return false;
+            }
+            serializedBatch.clear();
         }
     }
 
-    return true;
+    return writer.WriteLines(serializedBatch);
 }
 
 // Input: Collector options and JSONL sink after synthetic stress rows.
