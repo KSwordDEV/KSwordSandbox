@@ -429,9 +429,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(chineseVisibleText, "报告中还有更多证据行。", "Chinese event explorer status should avoid the verbose additional-row hint.");
         RequireContains(chineseHtml, "样本归因：", "Chinese network coverage should localize sample attribution labels.");
         RequireContains(chineseHtml, "data-copy=\"Failed\"><span class=\"ui-status-value\">失败</span></td>", "Chinese report should localize the cover analysis status while preserving the original machine-readable value.");
-        RequireContains(chineseVisibleText, "可按事件类型、来源、阶段、严重性和样本行为状态搜索或筛选。", "Chinese event explorer note should be fully localized.");
-        RequireContains(chineseVisibleText, "证据归因状态会区分已确认/可能关联的样本行为、未归因观察和采集诊断。", "Chinese event explorer should explain evidence dispositions.");
-        RequireContains(chineseVisibleText, "未归因观察会保留在原始证据中，选择该归因状态后即可显示。", "Chinese event explorer should explain how to reveal unattributed rows.");
+        RequireNotContains(chineseVisibleText, "可按事件类型、来源、阶段、严重性和样本行为状态搜索或筛选。", "Chinese event explorer should not show the long filter instruction.");
+        RequireNotContains(chineseVisibleText, "证据归因状态会区分已确认/可能关联的样本行为、未归因观察和采集诊断。", "Chinese event explorer should not show internal disposition guidance.");
+        RequireNotContains(chineseVisibleText, "未归因观察会保留在原始证据中，选择该归因状态后即可显示。", "Chinese event explorer should not show the long unattributed-row instruction.");
         RequireContains(chineseVisibleText, "证据覆盖警告。", "Chinese report should visibly explain incomplete evidence coverage.");
         RequireNotContains(chineseVisibleText, "type, path, process, target", "Chinese event explorer must not leak the English search placeholder.");
         RequireContains(chineseHtml, "placeholder=\"事件类型、路径、进程或目标\"", "Chinese event explorer search placeholder should be localized in the control attribute.");
@@ -439,7 +439,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(chineseVisibleText, "隐藏技术字段", "Chinese event evidence must use compact field labels instead of the technical-field prompt.");
         RequireNotContains(chineseVisibleText, "复制行为证据", "Chinese event evidence copy buttons should use the compact 复制 label.");
         RequireNotContains(chineseVisibleText, "证据字段", "Chinese event evidence must not expose an evidence-field count or heading.");
-        RequireContains(chineseHtml, "data-copy-button=\"true\">复制</button>", "Chinese event evidence should expose a compact 复制 button.");
+        RequireContains(chineseHtml, "class=\"copy-btn copy-icon\"", "Chinese event evidence should expose an icon copy button.");
+        RequireContains(chineseHtml, "<span class=\"sr-only\">复制</span>", "Chinese icon copy button should keep an accessible localized label.");
         RequireNotContains(chineseVisibleText, "行为规则命中“命令和脚本解释器”", "Chinese behavior cards must not repeat verbose rule-hit guidance.");
         RequireNotContains(chineseVisibleText, "请结合 evidenceFields、进程树和样本上下文复核", "Chinese behavior cards must not leak internal evidenceFields review instructions.");
         RequireNotContains(chineseVisibleText, "evidenceFields", "Chinese report chrome must not leak the internal evidenceFields key.");
@@ -491,7 +492,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Index by event family", "Rendered raw event index should include family grouping.");
         RequireContains(englishHtml, "report.json only", "Rendered raw event index should point beyond inline rows to report.json.");
         RequireContains(englishHtml, "Closed by default", "Rendered raw event shell should label the default folded state.");
-        RequireContains(englishHtml, "folded technical fields", "Rendered raw page summaries should include folded technical field counts.");
+        RequireNotContains(englishHtml, "folded technical fields", "Rendered raw page summaries should not expose technical field counters.");
         RequireContains(englishHtml, "Copy raw index summary", "Rendered raw event index cards should include copy buttons.");
         RequireContains(englishHtml, "Copy distribution summary", "Rendered raw event distribution cards should include copy buttons.");
         RequireContains(englishHtml, "Total events", "Rendered raw event overview should show the total count label.");
@@ -501,7 +502,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "No raw source artifacts were indexed; report.json remains the sampled normalized report view, not proof that no additional raw telemetry existed.", "Rendered raw source hints should explain missing raw artifacts without overstating report.json completeness.");
         RequireContains(englishHtml, "class=\"artifact-btn artifact-open\" href=\"artifacts/contract-drop.bin\"", "Rendered artifact links should expose a safe Open button.");
         RequireContains(englishHtml, "class=\"artifact-btn download\" href=\"artifacts/contract-drop.bin\" download=\"contract-drop.bin\"", "Rendered artifact links should expose a safe Download button.");
-        RequireContains(englishHtml, "Host/local path hidden by default", "Rendered artifact full paths should be collapsed technical evidence.");
+        RequireContains(englishHtml, "technical-metadata", "Rendered artifact full paths should remain in bounded technical metadata.");
         RequireNotContains(englishHtml, "href=\"D:\\", "Rendered HTML must not expose local absolute Windows paths as href values.");
         RequireNotContains(englishHtml, "href=\"C:\\", "Rendered HTML must not expose guest/local absolute Windows paths as href values.");
         RequireNotContains(englishHtml, "file://", "Rendered HTML must not expose file:// artifact hrefs.");
@@ -514,7 +515,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(englishHtml, "Copy behavior evidence", "Rendered event evidence copy buttons should use a compact label.");
         RequireNotContains(englishHtml, "<summary>Evidence fields (", "Rendered event evidence must not expose a field-count summary.");
         RequireNotContains(englishHtml, "evidenceFields", "Rendered behavior cards must not leak the internal evidenceFields key.");
-        RequireContains(englishHtml, "data-copy-button=\"true\">Copy</button>", "English event evidence should expose a compact Copy button.");
+        RequireContains(englishHtml, "class=\"copy-btn copy-icon\"", "English event evidence should expose an icon copy button.");
+        RequireContains(englishHtml, "<span class=\"sr-only\">Copy</span>", "English icon copy button should keep an accessible label.");
         RequireNotContains(englishHtml, "<br><span class=\"muted\">cmd.exe /c whoami</span>", "Rendered event tables should not inline command lines directly.");
         RequireContains(englishHtml, "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>", "Rendered HTML should include the behavior graph section.");
         RequireContains(englishHtml, "Evidence graph edges", "Rendered HTML should include graph edge evidence.");
