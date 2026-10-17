@@ -745,17 +745,20 @@ bool EmitDriverSetProducerEnableMask(
     const UniqueHandle& device,
     const Options& options,
     const ULONG automaticProducerMask,
-    EventWriter& writer) {
+    EventWriter& writer,
+    const bool forceRequestedMask) {
     // Older drivers may not implement GET_CAPABILITIES. Preserve their boot
     // default when no negotiated mask is available; an explicit operator mask
     // still exercises the optional SET_PRODUCER_ENABLE_MASK path.
-    if (!options.enableMaskSpecified && automaticProducerMask == 0) {
+    if (!forceRequestedMask && !options.enableMaskSpecified && automaticProducerMask == 0) {
         return true;
     }
 
-    const ULONG requestedEnableMask = options.enableMaskSpecified
+    const ULONG requestedEnableMask = forceRequestedMask
+        ? 0
+        : (options.enableMaskSpecified
         ? options.enableMask
-        : automaticProducerMask;
+        : automaticProducerMask);
 
     std::vector<unsigned char> buffer(sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY));
     auto* request = reinterpret_cast<PKSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST>(buffer.data());
@@ -765,7 +768,9 @@ bool EmitDriverSetProducerEnableMask(
     // capabilities-negotiated normal producer set so file/registry rows are
     // enabled before sample launch.
     request->EnableMask = options.enableMask;
-    if (!options.enableMaskSpecified) {
+    if (forceRequestedMask) {
+        request->EnableMask = 0;
+    } else if (!options.enableMaskSpecified) {
         request->EnableMask = requestedEnableMask;
     }
     request->Flags = 0;

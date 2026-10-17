@@ -498,6 +498,16 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
         std::this_thread::sleep_for(std::chrono::milliseconds(options.pollIntervalMs));
     } while (std::chrono::steady_clock::now() < captureDeadline);
 
+    // Stop the producer callbacks before draining the tail.  Leaving the
+    // callbacks enabled while the collector is writing its own final status
+    // rows creates a small race: the queue can be empty at a POLL snapshot,
+    // then receive a few collector/driver records before GET_STATUS.  The
+    // explicit zero mask keeps already queued records readable while making
+    // the shutdown boundary deterministic.
+    if (!EmitDriverSetProducerEnableMask(device, options, 0, writer, true)) {
+        return RuntimeFailureAfterOutputWrite(device, options, writer);
+    }
+
     // Phase 2: after a timed capture window, drain the queue that was already
     // produced.  This phase is explicitly bounded and reports a non-zero
     // remaining queue when the grace deadline or batch limit is reached.
@@ -505,6 +515,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
         drainStartedAfterCapture = true;
         const auto drainDeadline =
             std::chrono::steady_clock::now() + std::chrono::milliseconds(options.drainGraceMs);
+        unsigned int consecutiveEmptyPolls = 0;
         while (std::chrono::steady_clock::now() < drainDeadline) {
             unsigned long long queueDepthSnapshot = 0;
             if (!EmitDriverPoll(device, options, writer, &queueDepthSnapshot)) {
@@ -517,13 +528,20 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
             }
 
             // A poll snapshot of zero is the strongest cheap proof that the
-            // ring is empty.  The final GET_STATUS below independently records
-            // the authoritative queue depth at stop.
+            // ring is empty. Require two consecutive snapshots so a producer
+            // callback racing the first zero cannot leave a tail behind. The
+            // final GET_STATUS below independently records the authoritative
+            // queue depth at stop.
             if (queueDepthSnapshot == 0) {
-                drainQueueDrained = true;
-                drainQueueDepthAtStop = 0;
-                break;
+                ++consecutiveEmptyPolls;
+                if (consecutiveEmptyPolls >= 2) {
+                    drainQueueDepthAtStop = 0;
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(options.pollIntervalMs));
+                continue;
             }
+            consecutiveEmptyPolls = 0;
 
             for (;;) {
                 if (options.maxReadBatches > 0 &&
@@ -593,9 +611,10 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
         return RuntimeFailureAfterOutputWrite(device, options, writer);
     }
     drainQueueDepthAtStop = finalQueueDepth;
-    if (options.durationSeconds > 0 && finalQueueDepth == 0) {
-        drainQueueDrained = true;
-    }
+    // A prior empty POLL is only a hint; the final status is authoritative.
+    // Always assign this value so a late enqueue cannot leave the lifecycle
+    // row claiming that the queue drained when remainingQueueDepth is nonzero.
+    drainQueueDrained = options.durationSeconds > 0 && finalQueueDepth == 0;
 
     JsonDataObjectBuilder data;
     data.AddUtf8("reason", options.durationSeconds > 0 ? "durationElapsed" : "oneShotComplete");

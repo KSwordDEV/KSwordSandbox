@@ -84,6 +84,9 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(runtimeLoop, "RunAbiSelfCheckMode", "Runtime loop should support no-device ABI self-check mode.");
         RequireContains(runtimeLoop, "RunReadinessDiagnoseMode(options, writer)", "Runtime loop should support live readiness diagnose mode before opening the normal device path.");
         RequireContains(runtimeLoop, "EmitDeviceUnavailableDiagnostic(writer, options, openError, \"openDevice\")", "Runtime loop should emit structured device-unavailable diagnostics.");
+        RequireContains(runtimeLoop, "EmitDriverSetProducerEnableMask(device, options, 0, writer, true)", "R0 shutdown should disable producer callbacks before draining the queued tail.");
+        RequireContains(runtimeLoop, "consecutiveEmptyPolls >= 2", "R0 shutdown should require consecutive empty polls before declaring the queue drained.");
+        RequireContains(runtimeLoop, "drainQueueDrained = options.durationSeconds > 0 && finalQueueDepth == 0", "R0 shutdown should derive queue-drained state from final GET_STATUS.");
         RequireContains(abiSelfCheck, "r0collector.abiSelfCheck", "ABI self-check should emit a dedicated JSONL row.");
         RequireContains(abiSelfCheck, "collectorAbiVersion", "ABI self-check should preserve collector ABI version.");
         RequireContains(abiSelfCheck, "capabilityFlagsCurrentHex", "ABI self-check should preserve capability flags.");

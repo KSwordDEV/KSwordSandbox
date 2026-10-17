@@ -77,7 +77,8 @@ bool EmitDriverSetProducerEnableMask(
     const UniqueHandle& device,
     const Options& options,
     ULONG automaticProducerMask,
-    EventWriter& writer);
+    EventWriter& writer,
+    bool forceRequestedMask = false);
 bool EmitDriverPoll(
     const UniqueHandle& device,
     const Options& options,
