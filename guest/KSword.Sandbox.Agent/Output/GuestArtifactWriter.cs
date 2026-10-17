@@ -112,9 +112,29 @@ internal sealed class GuestArtifactWriter
     {
         Directory.CreateDirectory(outputDirectory);
         var path = Path.Combine(outputDirectory, "agent-summary.json");
+        string? sampleSha256 = null;
+        long? sampleSizeBytes = null;
+        try
+        {
+            var info = new FileInfo(samplePath);
+            if (info.Exists)
+            {
+                using var stream = info.OpenRead();
+                sampleSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
+                sampleSizeBytes = info.Length;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            // The event stream remains authoritative; the host identity gate
+            // will report an explicit mismatch if a later source disagrees.
+        }
+
         File.WriteAllText(path, JsonSerializer.Serialize(new
         {
             sample = samplePath,
+            sampleSha256,
+            sampleSizeBytes,
             eventCount,
             generatedAt = DateTimeOffset.UtcNow
         }, JsonOptions));

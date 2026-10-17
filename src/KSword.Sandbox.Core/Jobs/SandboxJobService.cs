@@ -229,6 +229,7 @@ public sealed partial class SandboxJobService
             MachineDefinitionPath = runbook.MachineDefinitionPath,
             QemuDiskFormat = runbook.QemuDiskFormat,
             Sample = sample,
+            SampleIdentityStatus = "valid",
             Status = AnalysisStatus.Planned,
             StaticAnalysis = staticAnalysis,
             Events = seedEvents,
@@ -554,6 +555,13 @@ public sealed partial class SandboxJobService
         var jobRoot = GetJobRoot(jobId);
         Directory.CreateDirectory(jobRoot);
 
+        // Capture persisted identity before replacing the in-memory job.  A
+        // stale report or metadata file must be rejected rather than silently
+        // becoming the identity of a newly rebuilt report.
+        var persistedSample = existingJob?.Sample;
+        var persistedReport = LoadExistingReport(
+            existingJob?.JsonReportPath ?? Path.Combine(jobRoot, "report.json"));
+
         var sample = SampleHasher.Compute(normalizedSubmission.SamplePath, config.Analysis.MaxSampleBytes);
         var staticAnalysis = AnalyzeSample(sample);
         var jobConfig = BuildJobConfig(normalizedSubmission, duration);
@@ -614,7 +622,7 @@ public sealed partial class SandboxJobService
             Status = status,
             GuestEventsPath = Path.GetFullPath(eventsPath),
             Messages = AppendMessage(job.Messages, message)
-        }, status, guestEvents, eventsPath, importSummary);
+        }, status, guestEvents, eventsPath, importSummary, persistedSample, persistedReport?.Sample);
 
         PersistGuestImportState(updated, Path.GetFullPath(eventsPath), importedEventCount, status, message);
         StoreJob(updated);
@@ -911,6 +919,122 @@ public sealed partial class SandboxJobService
         }
     }
 
+    private static GuestSampleIdentity ResolveGuestSampleIdentity(
+        IReadOnlyCollection<SandboxEvent> guestEvents,
+        string? guestEventsPath)
+    {
+        string? path = null;
+        string? sha256 = null;
+        long? sizeBytes = null;
+
+        // Prefer explicit samplePath fields emitted by the agent. Restricting
+        // the fallback to sample lifecycle rows avoids treating an artifact
+        // path as the guest input identity.
+        foreach (var evt in guestEvents)
+        {
+            if (evt.Data.TryGetValue("samplePath", out var eventPath) &&
+                !string.IsNullOrWhiteSpace(eventPath))
+            {
+                path ??= eventPath;
+            }
+
+            if (evt.Data.TryGetValue("sampleSha256", out var eventHash) &&
+                !string.IsNullOrWhiteSpace(eventHash))
+            {
+                sha256 ??= eventHash;
+            }
+
+            if (evt.Data.TryGetValue("sampleSizeBytes", out var eventSize) &&
+                long.TryParse(eventSize, out var parsedSize) &&
+                parsedSize >= 0)
+            {
+                sizeBytes ??= parsedSize;
+            }
+
+            if (path is null &&
+                (string.Equals(evt.EventType, "agent.start", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase)) &&
+                evt.Path?.Contains("\\incoming\\", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                path = evt.Path;
+            }
+        }
+
+        // The compact summary is produced even when events are heavily
+        // sampled. Older summaries contain only the guest path; newer ones
+        // may carry the guest SHA-256 and size.
+        if (!string.IsNullOrWhiteSpace(guestEventsPath))
+        {
+            var summaryPath = Path.Combine(
+                Path.GetDirectoryName(Path.GetFullPath(guestEventsPath)) ?? string.Empty,
+                "agent-summary.json");
+            if (File.Exists(summaryPath))
+            {
+                try
+                {
+                    using var document = JsonDocument.Parse(File.ReadAllText(summaryPath));
+                    var root = document.RootElement;
+                    path ??= ReadJsonString(root, "sample", "samplePath");
+                    sha256 ??= ReadJsonString(root, "sampleSha256", "sha256");
+                    if (!sizeBytes.HasValue &&
+                        root.TryGetProperty("sampleSizeBytes", out var sizeElement) &&
+                        sizeElement.TryGetInt64(out var summarySize) && summarySize >= 0)
+                    {
+                        sizeBytes = summarySize;
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+                {
+                    // Legacy imports may not contain a summary. Collection
+                    // health retains that fact; report rebuild remains usable.
+                }
+            }
+        }
+
+        return new GuestSampleIdentity(path, sha256, sizeBytes);
+    }
+
+    private static string? ReadJsonString(JsonElement root, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (root.TryGetProperty(name, out var value) &&
+                value.ValueKind == JsonValueKind.String)
+            {
+                var text = value.GetString();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    return text;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static SandboxEvent CreateSampleIdentityMismatchEvent(
+        SampleIdentity sample,
+        SampleIdentityValidationResult identity)
+    {
+        return new SandboxEvent
+        {
+            EventType = "sample.identity_mismatch",
+            Source = "host",
+            Path = sample.FullPath,
+            ProcessName = sample.FileName,
+            Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["collectionHealth"] = "true",
+                ["notSampleBehavior"] = "true",
+                ["sampleIdentityStatus"] = identity.Status,
+                ["sampleIdentityIssues"] = string.Join(",", identity.Issues),
+                ["zhHint"] = "样本身份与任务元数据、报告或来宾输入不一致；本报告不可作为有效样本结果。"
+            }
+        };
+    }
+
+    private sealed record GuestSampleIdentity(string? Path, string? Sha256, long? SizeBytes);
+
     /// <summary>
     /// Rewrites report.json and report.html from current host and guest data.
     /// Inputs are job metadata, target status, guest events, and source path;
@@ -922,16 +1046,32 @@ public sealed partial class SandboxJobService
         AnalysisStatus status,
         List<SandboxEvent> guestEvents,
         string? guestEventsPath,
-        GuestEventImportSummary? importSummary = null)
+        GuestEventImportSummary? importSummary = null,
+        SampleIdentity? persistedMetadataSample = null,
+        SampleIdentity? persistedReportSample = null)
     {
         var sample = job.Sample ?? throw new InvalidOperationException("Job does not have sample metadata.");
         var runbook = job.Runbook ?? throw new InvalidOperationException("Job does not have a runbook.");
         var jobRoot = GetJobRoot(job.JobId);
         Directory.CreateDirectory(jobRoot);
 
-        var staticAnalysis = LoadExistingReport(job.JsonReportPath)?.StaticAnalysis ?? AnalyzeSample(sample);
+        var previousReport = LoadExistingReport(job.JsonReportPath);
+        var staticAnalysis = previousReport?.StaticAnalysis ?? AnalyzeSample(sample);
+        var guestIdentity = ResolveGuestSampleIdentity(guestEvents, guestEventsPath);
+        var identity = SampleIdentityValidation.Validate(
+            sample,
+            persistedMetadataSample ?? job.Sample,
+            persistedReportSample ?? previousReport?.Sample,
+            job.Submission.SamplePath,
+            guestIdentity.Path,
+            guestIdentity.Sha256,
+            guestIdentity.SizeBytes);
         var jobConfig = BuildJobConfig(job.Submission, ResolveDuration(job.Submission));
         var events = CreatePlanningEvents(sample, job.Submission, runbook, staticAnalysis, jobConfig.ArtifactCollection);
+        if (!identity.IsValid)
+        {
+            events.Add(CreateSampleIdentityMismatchEvent(sample, identity));
+        }
         AppendRunbookExecutionEvent(events, job.RunbookExecutionResultPath, runbook.Provider);
         events.AddRange(GuestFailureArtifactImporter.ImportRunbookFailure(job.RunbookExecutionResultPath));
         events.AddRange(LoadEnrichmentEvents(job.JobId));
@@ -957,6 +1097,12 @@ public sealed partial class SandboxJobService
             driverEventsPath: driverEventsPath,
             driverEventsPaths: driverEventPaths,
             findings: rawFindings);
+        var effectiveStatus = identity.IsValid ? status : AnalysisStatus.Failed;
+        var messages = identity.IsValid
+            ? job.Messages
+            : AppendMessage(
+                job.Messages,
+                $"样本身份校验失败，报告不可作为有效样本结果：{string.Join(", ", identity.Issues)} / Sample identity validation failed; report is not a valid sample result: {string.Join(", ", identity.Issues)}.");
         var report = new AnalysisReport
         {
             JobId = job.JobId,
@@ -966,7 +1112,9 @@ public sealed partial class SandboxJobService
             MachineDefinitionPath = runbook.MachineDefinitionPath,
             QemuDiskFormat = runbook.QemuDiskFormat,
             Sample = sample,
-            Status = status,
+            SampleIdentityStatus = identity.Status,
+            SampleIdentityIssues = identity.Issues,
+            Status = effectiveStatus,
             StaticAnalysis = staticAnalysis,
             Events = sampling.Events,
             Findings = findings,
@@ -1000,7 +1148,8 @@ public sealed partial class SandboxJobService
 
         return job with
         {
-            Status = status,
+            Status = effectiveStatus,
+            Messages = messages,
             JsonReportPath = jsonPath,
             HtmlReportPath = htmlPath,
             HtmlReportZhPath = zhHtmlPath,

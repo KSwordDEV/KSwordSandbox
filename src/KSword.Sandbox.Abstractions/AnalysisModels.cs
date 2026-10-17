@@ -376,6 +376,18 @@ public sealed record AnalysisReport
 
     public required SampleIdentity Sample { get; init; }
 
+    /// <summary>
+    /// Stable identity gate result for the sample carried by this report.
+    /// A mismatch means the report must not be accepted as a valid sample
+    /// result, even when the event stream itself is otherwise complete.
+    /// </summary>
+    public string SampleIdentityStatus { get; init; } = "unknown";
+
+    /// <summary>
+    /// Machine-readable identity mismatch reasons retained for auditability.
+    /// </summary>
+    public List<string> SampleIdentityIssues { get; init; } = [];
+
     public DateTimeOffset GeneratedAt { get; init; } = DateTimeOffset.UtcNow;
 
     public AnalysisStatus Status { get; init; } = AnalysisStatus.Planned;
