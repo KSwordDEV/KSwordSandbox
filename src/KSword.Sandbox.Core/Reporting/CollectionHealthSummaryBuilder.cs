@@ -67,6 +67,15 @@ public static class CollectionHealthSummaryBuilder
         var driverHealthRows = raw.Where(IsDriverHealthRow).ToList();
         var failureRows = raw.Where(IsFailureRow).ToList();
         var omitted = Math.Max(0, raw.Count - report.Count);
+        var driverQueueDepth = MaxDataUnsigned(driverHealthRows, DriverQueueDepthKeys);
+        var driverRemainingUnread = MaxDataUnsigned(driverHealthRows, DriverRemainingUnreadKeys);
+        // Older collector status contracts expose the unread tail only as
+        // queueDepth. Preserve that value in the explicit remaining-unread
+        // field so a non-zero queue cannot be mistaken for a complete drain.
+        if (driverRemainingUnread == 0)
+        {
+            driverRemainingUnread = driverQueueDepth;
+        }
 
         return new CollectionHealthSummary
         {
@@ -80,8 +89,8 @@ public static class CollectionHealthSummaryBuilder
             EtwEventsLost = ToMetricInt(MaxDataUnsigned(etwLossRows, EtwLostKeys)),
             DriverLossRows = driverLossRows.Count,
             DriverLostCount = ToMetricInt(MaxDataUnsigned(driverLossRows, DriverLostKeys)),
-            DriverQueueDepth = ToMetricInt(MaxDataUnsigned(driverHealthRows, DriverQueueDepthKeys)),
-            DriverRemainingUnread = ToMetricInt(MaxDataUnsigned(driverHealthRows, DriverRemainingUnreadKeys)),
+            DriverQueueDepth = ToMetricInt(driverQueueDepth),
+            DriverRemainingUnread = ToMetricInt(driverRemainingUnread),
             DriverDrainStoppedAtDeadlineRows = driverHealthRows.Count(IsDrainStoppedAtDeadline),
             DriverEventsSuppressed = ToMetricInt(MaxDataUnsigned(driverHealthRows, DriverSuppressedKeys)),
             DriverQualityWarningRows = driverHealthRows.Count(IsDriverQualityWarning),
