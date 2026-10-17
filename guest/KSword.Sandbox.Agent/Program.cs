@@ -194,7 +194,8 @@ internal static class AgentProgram
                 executionProcessName,
                 options.SamplePath,
                 executionCommandLine,
-                executionProcessStartTimeUtc);
+                executionProcessStartTimeUtc,
+                rootProcessExitObserved: HasProcessExited(process));
             events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterStart, runningProbeContext));
 
             // Take one edge poll immediately after launch. Very short-lived
@@ -260,6 +261,13 @@ internal static class AgentProgram
                     events.Add(CreateSampleExecutionFailureEvent("process.kill_failed", options.SamplePath, process.Id, executionStage, ex));
                 }
             }
+
+            // The executor owns the process handle and therefore has the
+            // authoritative exit boundary. Carry it into all remaining probe
+            // phases so a root that finished before a Toolhelp snapshot is
+            // represented as recovered root/exit evidence instead of a false
+            // process-tree collection gap.
+            runningProbeContext = runningProbeContext with { RootProcessExitObserved = true };
 
             executionStage = "exit";
             events.Add(new SandboxEvent
@@ -589,7 +597,8 @@ internal static class AgentProgram
         string? rootProcessName = null,
         string? rootProcessPath = null,
         string? rootCommandLine = null,
-        DateTime? rootProcessStartTimeUtc = null)
+        DateTime? rootProcessStartTimeUtc = null,
+        bool rootProcessExitObserved = false)
     {
         return new GuestProbeContext
         {
@@ -602,6 +611,7 @@ internal static class AgentProgram
             RootProcessPath = rootProcessPath,
             RootCommandLine = rootCommandLine,
             RootProcessStartTimeUtc = rootProcessStartTimeUtc,
+            RootProcessExitObserved = rootProcessExitObserved,
             CaptureScreenshots = options.CaptureScreenshots,
             CollectDroppedFiles = options.CollectDroppedFiles,
             CaptureMemoryDump = options.CaptureMemoryDump,

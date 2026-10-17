@@ -26,6 +26,14 @@ internal sealed record GuestProbeContext
 
     public DateTime? RootProcessStartTimeUtc { get; init; }
 
+    /// <summary>
+    /// Indicates that the agent has observed the launched root process exit.
+    /// This lets process-tree probes distinguish an exited process that raced
+    /// the first snapshot from a live process that the snapshot failed to
+    /// capture.
+    /// </summary>
+    public bool RootProcessExitObserved { get; init; }
+
     public bool CaptureScreenshots { get; init; }
 
     public bool CollectDroppedFiles { get; init; }

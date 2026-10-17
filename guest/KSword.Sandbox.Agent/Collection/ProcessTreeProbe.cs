@@ -555,8 +555,18 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         var processKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var rootVisible = snapshot.TryGetValue(rootProcessId, out var root) && IsSameRootProcess(root, context);
         var rootProcess = rootVisible ? root : null;
+        // A process can complete between launch and the first Toolhelp poll.
+        // The executor's process handle is authoritative in that case, while
+        // an alive root that is absent from the snapshot remains a real
+        // collection gap. Keep the distinction explicit so fast native tools
+        // such as hostname.exe retain root/exit evidence without masking a
+        // live-process capture failure.
+        var rootExitState = rootVisible
+            ? RootExitState.NotExited
+            : ResolveRootExitState(rootProcessId, context);
+        var rootExitObserved = rootExitState == RootExitState.Exited;
         var unavailableKey = rootProcessId.ToString(CultureInfo.InvariantCulture) + "|" + ToPhaseLabel(phase);
-        if (!rootVisible && emittedRootUnavailableKeys.Add(unavailableKey))
+        if (!rootVisible && !rootExitObserved && emittedRootUnavailableKeys.Add(unavailableKey))
         {
             events.Add(CreateRootUnavailableEvent(rootProcessId, phase, context, capturedAtUtc, root));
         }
@@ -565,6 +575,16 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         if (rootVisible && rootProcess is not null)
         {
             queue.Enqueue((rootProcess, 0, rootProcess.ProcessId.ToString(CultureInfo.InvariantCulture)));
+        }
+        else if (rootExitObserved)
+        {
+            // Launch metadata is a valid root node when the process handle has
+            // already reported exit. Mark the row as recovered from launch
+            // context rather than as an unavailable tree so collection-health
+            // accounting can distinguish an exited root from a true gap.
+            var recoveredRoot = CreateRootFallbackSnapshot(context);
+            rootProcess = recoveredRoot;
+            queue.Enqueue((recoveredRoot, 0, recoveredRoot.ProcessId.ToString(CultureInfo.InvariantCulture)));
         }
         else if (childrenByParent.TryGetValue(rootProcessId, out var orphanedChildren))
         {
@@ -598,7 +618,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
 
             processKeys.Add(process.Key);
             var childCount = childrenByParent.TryGetValue(process.ProcessId, out var children) ? children.Count : 0;
-            events.Add(CreateProcessSnapshotEvent(
+            var treeEvent = CreateProcessSnapshotEvent(
                 "process.tree",
                 process,
                 phase,
@@ -609,7 +629,34 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 snapshot,
                 snapshotState: "present",
                 capturedAtUtc: capturedAtUtc,
-                context: context));
+                context: context);
+            if (rootExitObserved && depth == 0 && !rootVisible)
+            {
+                treeEvent.Data["snapshotState"] = "exited-before-snapshot";
+                treeEvent.Data["captureState"] = "exited-before-snapshot";
+                treeEvent.Data["status"] = "exited";
+                treeEvent.Data["treeNodeState"] = "exited-before-snapshot";
+                treeEvent.Data["rootVisibleInSnapshot"] = "false";
+                treeEvent.Data["rootExitObserved"] = "true";
+                treeEvent.Data["rootRecoveredFromLaunchContext"] = "true";
+                treeEvent.Data["processExited"] = "true";
+                treeEvent.Data["exitMissing"] = "false";
+                treeEvent.Data["processMissing"] = "false";
+                treeEvent.Data["exitedBeforeSnapshot"] = "true";
+                treeEvent.Data["reason"] = "rootExitedBeforeProcessSnapshot";
+                treeEvent.Data["reasonCode"] = "rootExitedBeforeProcessSnapshot";
+                treeEvent.Data["processTreeCoverageState"] = "root-exit-recovered";
+                treeEvent.Data["lineageStabilityReason"] = "root-relative-lineage-derived-from-launch-context";
+                if (root is not null)
+                {
+                    treeEvent.Data["pidReuseSuspected"] = "true";
+                    treeEvent.Data["visiblePidSnapshotKey"] = root.Key;
+                    AddIfNotEmpty(treeEvent.Data, "visiblePidProcessName", root.ProcessName);
+                    AddIfNotEmpty(treeEvent.Data, "visiblePidImagePath", root.Path);
+                }
+                treeEvent.Data["zhMessage"] = "样本根进程已退出，Guest Agent 使用启动上下文保留根进程证据。";
+            }
+            events.Add(treeEvent);
 
             if (childCount == 0 || children is null)
             {
@@ -627,6 +674,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             events,
             processKeys.ToList(),
             RootVisible: rootVisible,
+            RootExitObserved: rootExitObserved,
             RootProcess: rootProcess,
             RootProcessId: rootProcessId,
             VisibleProcessCount: visited.Count,
@@ -634,7 +682,76 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             VisibleDirectChildProcessCount: visibleDirectChildProcessCount,
             VisibleDeeperDescendantProcessCount: visibleDeeperDescendantProcessCount,
             MaxDepth: maxDepth,
-            OrphanedChildProcessCount: rootVisible ? 0 : directChildCount);
+            OrphanedChildProcessCount: rootVisible || rootExitObserved ? 0 : directChildCount);
+    }
+
+    /// <summary>
+    /// Resolves whether an absent root is known to have exited. Inputs are a
+    /// root PID and launch context; processing first trusts the executor's
+    /// exit marker, then performs a best-effort local process-handle check;
+    /// the method returns Unknown when access prevents a safe conclusion.
+    /// </summary>
+    private static RootExitState ResolveRootExitState(
+        int rootProcessId,
+        GuestProbeContext context)
+    {
+        if (context.RootProcessExitObserved)
+        {
+            return RootExitState.Exited;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(rootProcessId);
+            if (process.HasExited)
+            {
+                return RootExitState.Exited;
+            }
+
+            if (context.RootProcessStartTimeUtc is DateTime expectedStart)
+            {
+                try
+                {
+                    var actualStart = process.StartTime.ToUniversalTime();
+                    if (Math.Abs((actualStart - expectedStart).TotalSeconds) > 2)
+                    {
+                        // The PID belongs to a later process. The launched
+                        // root is gone, so retain root/exit evidence while
+                        // marking the visible PID as unrelated reuse.
+                        return RootExitState.Exited;
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    return RootExitState.Unknown;
+                }
+                catch (Win32Exception)
+                {
+                    return RootExitState.Unknown;
+                }
+            }
+
+            return RootExitState.NotExited;
+        }
+        catch (ArgumentException)
+        {
+            // Process.GetProcessById uses ArgumentException when no process
+            // currently owns the PID, which is the normal short-lived exit
+            // race rather than an inaccessible process.
+            return RootExitState.Exited;
+        }
+        catch (InvalidOperationException)
+        {
+            return RootExitState.Exited;
+        }
+        catch (Win32Exception)
+        {
+            return RootExitState.Unknown;
+        }
+        catch (SecurityException)
+        {
+            return RootExitState.Unknown;
+        }
     }
 
     /// <summary>
@@ -1307,6 +1424,8 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         GuestProbeContext context,
         DateTimeOffset capturedAtUtc)
     {
+        var rootExitRecovered = !tree.RootVisible && tree.RootExitObserved;
+        var rootMissing = !tree.RootVisible && !rootExitRecovered;
         var root = tree.RootProcess ?? observedSnapshots.Values
             .Where(observation => observation.Snapshot.ProcessId == tree.RootProcessId)
             .OrderByDescending(observation => observation.LastSeenAtUtc)
@@ -1333,11 +1452,13 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["treeDepth"] = "0",
                 ["treeLineage"] = tree.RootProcessId.ToString(CultureInfo.InvariantCulture),
                 ["rootVisible"] = tree.RootVisible.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
-                ["rootMissing"] = (!tree.RootVisible).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
-                ["rootExited"] = (!tree.RootVisible).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
-                ["processMissing"] = (!tree.RootVisible).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
-                ["exitMissing"] = (!tree.RootVisible).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
-                ["processExited"] = (!tree.RootVisible).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["rootMissing"] = rootMissing.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["rootExited"] = tree.RootExitObserved.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["processMissing"] = rootMissing.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["exitMissing"] = rootMissing.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["processExited"] = tree.RootExitObserved.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["rootExitObserved"] = tree.RootExitObserved.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["rootRecoveredFromLaunchContext"] = rootExitRecovered.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
                 ["visibleProcessCount"] = tree.VisibleProcessCount.ToString(CultureInfo.InvariantCulture),
                 ["treeProcessCount"] = tree.VisibleProcessCount.ToString(CultureInfo.InvariantCulture),
                 ["snapshotProcessCount"] = snapshot.Count.ToString(CultureInfo.InvariantCulture),
@@ -1349,8 +1470,8 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["deeperDescendantProcessCount"] = tree.VisibleDeeperDescendantProcessCount.ToString(CultureInfo.InvariantCulture),
                 ["maxTreeDepth"] = tree.MaxDepth.ToString(CultureInfo.InvariantCulture),
                 ["orphanedChildProcessCount"] = tree.OrphanedChildProcessCount.ToString(CultureInfo.InvariantCulture),
-                ["orphanedDescendantProcessCount"] = (!tree.RootVisible ? tree.VisibleProcessCount : 0).ToString(CultureInfo.InvariantCulture),
-                ["rootOrphanedTreeRecovered"] = (!tree.RootVisible && tree.VisibleProcessCount > 0).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["orphanedDescendantProcessCount"] = (rootMissing ? tree.VisibleProcessCount : 0).ToString(CultureInfo.InvariantCulture),
+                ["rootOrphanedTreeRecovered"] = (rootMissing && tree.VisibleProcessCount > 0).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
                 ["missingProcessCount"] = missingProcessCount.ToString(CultureInfo.InvariantCulture),
                 ["trackedProcessCount"] = monitoredProcessKeys.Count.ToString(CultureInfo.InvariantCulture),
                 ["summaryEvent"] = "true",
@@ -1362,13 +1483,13 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["capturePolicy"] = "always-on-visible-process-tree",
                 ["processTreeSamplingMode"] = "phase-snapshot",
                 ["shortLivedProcessCoverage"] = "best-effort-phase-snapshot",
-                ["processTreeCoverageState"] = tree.RootVisible ? "visible-root-tree" : "partial-root-missing",
-                ["processTreeCompleteness"] = tree.RootVisible ? "complete-visible-root-tree" : "partial-root-missing-visible-descendants-only",
-                ["captureState"] = tree.RootVisible ? "complete" : "partial",
-                ["status"] = tree.RootVisible ? "complete" : "partial",
-                ["reason"] = tree.RootVisible ? "rootVisibleTreeCaptured" : "rootMissingTreePartiallyCaptured",
-                ["reasonCode"] = tree.RootVisible ? "rootVisibleTreeCaptured" : "rootMissingTreePartiallyCaptured",
-                ["reasonCategory"] = tree.RootVisible ? "process-tree-captured" : "process-tree-visibility",
+                ["processTreeCoverageState"] = tree.RootVisible ? "visible-root-tree" : rootExitRecovered ? "root-exit-recovered" : "partial-root-missing",
+                ["processTreeCompleteness"] = tree.RootVisible ? "complete-visible-root-tree" : rootExitRecovered ? "root-exit-context-plus-visible-descendants" : "partial-root-missing-visible-descendants-only",
+                ["captureState"] = tree.RootVisible ? "complete" : rootExitRecovered ? "exited-before-snapshot" : "partial",
+                ["status"] = tree.RootVisible ? "complete" : rootExitRecovered ? "exited" : "partial",
+                ["reason"] = tree.RootVisible ? "rootVisibleTreeCaptured" : rootExitRecovered ? "rootExitedBeforeProcessSnapshot" : "rootMissingTreePartiallyCaptured",
+                ["reasonCode"] = tree.RootVisible ? "rootVisibleTreeCaptured" : rootExitRecovered ? "rootExitedBeforeProcessSnapshot" : "rootMissingTreePartiallyCaptured",
+                ["reasonCategory"] = tree.RootVisible || rootExitRecovered ? "process-tree-captured" : "process-tree-visibility",
                 ["reasonTaxonomy"] = ReasonTaxonomy,
                 ["reasonTaxonomyVersion"] = "v1",
                 ["artifactEvent"] = "false",
@@ -1377,7 +1498,9 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["collectionHealth"] = "true",
                 ["zhMessage"] = tree.RootVisible
                     ? "进程树快照已采集，根进程仍可见。"
-                    : "进程树快照已采集，但根进程当前不可见，可能已经退出。",
+                    : rootExitRecovered
+                        ? "样本根进程已退出，进程树保留了启动上下文根节点。"
+                        : "进程树快照已采集，但根进程当前不可见，可能已经退出。",
                 ["zhHint"] = "请使用 rootProcessId/treeLineage 关联 process.tree、process.snapshot missing 行和最终 process.exit 事件。"
             }
         };
@@ -1424,7 +1547,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         evt.Data["rootAncestorProcessId"] = tree.RootProcessId.ToString(CultureInfo.InvariantCulture);
         evt.Data["rootRelativeDepth"] = "0";
         evt.Data["descendantDepth"] = "0";
-        evt.Data["treeNodeState"] = tree.RootVisible ? "present" : "missing";
+        evt.Data["treeNodeState"] = tree.RootVisible ? "present" : rootExitRecovered ? "exited-before-snapshot" : "missing";
         evt.Data["treeScope"] = "sample-root-tree";
         evt.Data["lineageStable"] = "true";
         evt.Data["lineageIncludesRoot"] = "true";
@@ -4451,6 +4574,7 @@ internal sealed record ProcessTreeEventResult(
     IReadOnlyList<SandboxEvent> Events,
     IReadOnlyList<string> ProcessKeys,
     bool RootVisible,
+    bool RootExitObserved,
     ProcessTreeSnapshot? RootProcess,
     int RootProcessId,
     int VisibleProcessCount,
@@ -4459,6 +4583,16 @@ internal sealed record ProcessTreeEventResult(
     int VisibleDeeperDescendantProcessCount,
     int MaxDepth,
     int OrphanedChildProcessCount);
+
+/// <summary>
+/// Describes the confidence of a root-process liveness check.
+/// </summary>
+internal enum RootExitState
+{
+    Unknown,
+    NotExited,
+    Exited
+}
 
 /// <summary>
 /// Root-relative process relationship metadata attached to process.snapshot

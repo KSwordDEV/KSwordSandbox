@@ -20,6 +20,8 @@ internal sealed class GuestCollectorShortLivedEdgeSyntheticScenario : ISmokeTest
     {
         var result = await GuestCollectorSyntheticDiagnostics.RunAsync(cancellationToken).ConfigureAwait(false);
         SmokeAssert.True(result.ProcessChildObservedThenMissing, "Synthetic process child must produce observed and exited/missing evidence.");
+        SmokeAssert.True(result.FastRootExitRecovered, "A root that exits before the first snapshot must retain root/exit evidence without a false process.tree_unavailable gap.");
+        SmokeAssert.True(result.LiveRootGapRetained, "A live root that is absent from snapshots must retain a process.tree_unavailable collection diagnostic.");
         SmokeAssert.True(result.TcpOpenedAndClosed, "Synthetic TCP edge must produce opened and closed rows plus a poll summary.");
         SmokeAssert.True(result.FileRenameAndDeleteCaptured, "Synthetic file sequence must retain rename and delete watcher edges.");
         SmokeAssert.True(result.ScheduledTaskEdgeCaptured, "Synthetic task-store sequence must retain create, rename, and delete edges.");

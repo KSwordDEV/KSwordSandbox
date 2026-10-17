@@ -1,4 +1,5 @@
 using System.Net;
+using System.Diagnostics;
 using KSword.Sandbox.Abstractions;
 
 namespace KSword.Sandbox.Agent.Collection;
@@ -43,6 +44,44 @@ public static class GuestCollectorSyntheticDiagnostics
             events.AddRange(await processProbe.CollectAsync(ProbePhase.AfterRun, context, cancellationToken).ConfigureAwait(false));
             events.AddRange(processProbe.CollectSyntheticScheduledTaskEdgeDiagnostics(context));
 
+            // Reproduce a root that exits before the first Toolhelp snapshot.
+            // The executor's exit marker must preserve a root process.tree row
+            // and avoid misreporting process.tree_unavailable as a collection
+            // gap.
+            var fastExitContext = context with
+            {
+                RootProcessId = 200,
+                RootProcessName = "fast-exit-root",
+                RootProcessPath = Path.Combine(root, "fast-exit-root.exe"),
+                RootCommandLine = "fast-exit-root",
+                RootProcessExitObserved = true
+            };
+            var fastExitProbe = new ProcessTreeProbe(
+                new ScriptedProcessSnapshotProvider([[], [], []]),
+                new ScriptedSystemSnapshotProvider([SystemChangeSnapshot.Empty, SystemChangeSnapshot.Empty]));
+            events.AddRange(await fastExitProbe.CollectAsync(ProbePhase.BeforeStart, fastExitContext, cancellationToken).ConfigureAwait(false));
+            events.AddRange(await fastExitProbe.CollectAsync(ProbePhase.AfterStart, fastExitContext, cancellationToken).ConfigureAwait(false));
+            events.AddRange(await fastExitProbe.CollectAsync(ProbePhase.AfterRun, fastExitContext, cancellationToken).ConfigureAwait(false));
+
+            // Keep a live-but-invisible root as a control case: a missing
+            // snapshot for a process that is still running must remain an
+            // explicit process.tree_unavailable diagnostic.
+            using var liveProcess = System.Diagnostics.Process.GetCurrentProcess();
+            var liveGapContext = context with
+            {
+                RootProcessId = liveProcess.Id,
+                RootProcessName = "live-gap-root",
+                RootProcessPath = Path.Combine(root, "live-gap-root.exe"),
+                RootCommandLine = "live-gap-root",
+                RootProcessStartTimeUtc = liveProcess.StartTime.ToUniversalTime(),
+                RootProcessExitObserved = false
+            };
+            var liveGapProbe = new ProcessTreeProbe(
+                new ScriptedProcessSnapshotProvider([[], []]),
+                new ScriptedSystemSnapshotProvider([SystemChangeSnapshot.Empty]));
+            events.AddRange(await liveGapProbe.CollectAsync(ProbePhase.BeforeStart, liveGapContext, cancellationToken).ConfigureAwait(false));
+            events.AddRange(await liveGapProbe.CollectAsync(ProbePhase.AfterStart, liveGapContext, cancellationToken).ConfigureAwait(false));
+
             var tcpProbe = new TcpConnectionDiffProbe(
                 new ScriptedTcpSnapshotProvider(TcpSnapshots()),
                 new EmptyNetworkStateSnapshotProvider());
@@ -66,6 +105,8 @@ public static class GuestCollectorSyntheticDiagnostics
 
             return new GuestCollectorSyntheticDiagnosticsResult(
                 ProcessChildObservedThenMissing: HasProcessExitEvidence(events),
+                FastRootExitRecovered: HasFastRootExitRecoveryEvidence(events),
+                LiveRootGapRetained: HasLiveRootGapEvidence(events, liveProcess.Id),
                 TcpOpenedAndClosed: HasTcpOpenCloseEvidence(events),
                 FileRenameAndDeleteCaptured: HasFileRenameDeleteEvidence(events),
                 ScheduledTaskEdgeCaptured: HasTaskEdgeEvidence(events),
@@ -97,6 +138,22 @@ public static class GuestCollectorSyntheticDiagnostics
         return events.Any(evt => evt.EventType == "process.new" && evt.ProcessId == 101) &&
                events.Any(evt => evt.EventType == "process.snapshot" && evt.ProcessId == 101 &&
                                  evt.Data.TryGetValue("processExited", out var exited) && exited == "true");
+    }
+
+    private static bool HasFastRootExitRecoveryEvidence(IEnumerable<SandboxEvent> events)
+    {
+        var rootRows = events.Where(evt => evt.EventType == "process.tree" && evt.ProcessId == 200).ToList();
+        return rootRows.Any(evt => evt.Data.GetValueOrDefault("rootRecoveredFromLaunchContext") == "true" &&
+                                   evt.Data.GetValueOrDefault("processExited") == "true" &&
+                                   evt.Data.GetValueOrDefault("captureState") == "exited-before-snapshot") &&
+               !events.Any(evt => evt.EventType == "process.tree_unavailable" && evt.ProcessId == 200);
+    }
+
+    private static bool HasLiveRootGapEvidence(IEnumerable<SandboxEvent> events, int rootProcessId)
+    {
+        return events.Any(evt => evt.EventType == "process.tree_unavailable" &&
+                                 evt.ProcessId == rootProcessId &&
+                                 evt.Data.GetValueOrDefault("reasonCode") == "rootProcessNotVisible");
     }
 
     private static bool HasTcpOpenCloseEvidence(IEnumerable<SandboxEvent> events)
@@ -245,6 +302,8 @@ public static class GuestCollectorSyntheticDiagnostics
 /// </summary>
 public sealed record GuestCollectorSyntheticDiagnosticsResult(
     bool ProcessChildObservedThenMissing,
+    bool FastRootExitRecovered,
+    bool LiveRootGapRetained,
     bool TcpOpenedAndClosed,
     bool FileRenameAndDeleteCaptured,
     bool ScheduledTaskEdgeCaptured,
