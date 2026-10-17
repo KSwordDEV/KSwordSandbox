@@ -24,7 +24,9 @@ public static class CollectionHealthSummaryBuilder
         "TotalEventsDropped",
         "totalEventsDropped",
         "TotalEventsLost",
-        "totalEventsLost"
+        "totalEventsLost",
+        "rawJsonlLostEventCount",
+        "rawJsonlLossRowCount"
     ];
 
     private static readonly string[] DriverQueueDepthKeys =
