@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using KSword.Sandbox.Agent.Diagnostics;
 using KSword.Sandbox.Abstractions;
@@ -28,6 +29,24 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
     private const string KernelLoggerSessionName = "NT Kernel Logger";
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan DecodeTimeout = TimeSpan.FromSeconds(30);
+    // Some tracerpt builds flatten kernel payloads into a single unnamed
+    // <Data> element instead of emitting one named element per field. Keep
+    // the key set explicit so an '=' inside CommandLine is not mistaken for
+    // the start of another field. The value remains in rawDecoded/payload
+    // even when a field cannot be recovered.
+    private const string UnnamedPayloadKeyPattern =
+        "UniqueProcessKey|ProcessId|Pid|ParentProcessId|ParentPid|ParentId|" +
+        "ThreadId|TThreadId|Tid|EventName|Task|Opcode|Operation|" +
+        "ImageFileName|ImageName|ProcessName|Process|FileName|Image|" +
+        "CommandLine|Command|ExitStatus|ExitTime|Status|Path|ImagePath|" +
+        "KeyName|KeyPath|ObjectName|PackageFullName|ApplicationId|" +
+        "SessionId|DirectoryTableBase|Flags|UserSID|StackBase|StackLimit|" +
+        "UserStackBase|UserStackLimit|Affinity|Win32StartAddr|TebBase|" +
+        "SubProcessTag|BasePriority|PagePriority|IoPriority|ThreadFlags|" +
+        "ImageBase|ImageSize|ImageChecksum|TimeDateStamp|DefaultBase";
+    private static readonly Regex UnnamedPayloadFieldRegex = new(
+        $"(?ix)(?<![A-Za-z0-9_.-])(?<key>{UnnamedPayloadKeyPattern})\\s*=\\s*(?<value>.*?)(?=(?:\\s*[;,]\\s*|\\r?\\n|\\s+)(?:{UnnamedPayloadKeyPattern})\\s*=|$)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
     private EtwTraceSession? activeSession;
 
     public string ProbeId => "etw-live-trace";
@@ -320,19 +339,50 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
                 opcode,
                 provider + ":" + eventId);
             var payload = eventElement.Descendants().Where(static element => element.Name.LocalName.Equals("Data", StringComparison.OrdinalIgnoreCase));
-            var payloadValues = payload
-                .Select(element =>
+            var payloadValues = new List<string>();
+            var payloadByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var unnamedPayloadCount = 0;
+            var unnamedPayloadParsedFieldCount = 0;
+            var unparsedUnnamedPayload = new List<string>();
+            foreach (var element in payload)
+            {
+                var name = FirstNonEmpty(element.Attribute("Name")?.Value, element.Attribute("name")?.Value);
+                var value = element.Value.Trim();
+                if (string.IsNullOrWhiteSpace(value))
                 {
-                    var name = FirstNonEmpty(element.Attribute("Name")?.Value, element.Attribute("name")?.Value);
-                    return string.IsNullOrWhiteSpace(name) ? element.Value : name + "=" + element.Value;
-                })
-                .Where(static value => !string.IsNullOrWhiteSpace(value))
-                .ToList();
-            var payloadByName = payload
-                .Select(element => (Name: NormalizeColumnName(FirstNonEmpty(element.Attribute("Name")?.Value, element.Attribute("name")?.Value)), Value: element.Value.Trim()))
-                .Where(static pair => !string.IsNullOrWhiteSpace(pair.Name))
-                .GroupBy(static pair => pair.Name, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(static group => group.Key, static group => group.First().Value, StringComparer.OrdinalIgnoreCase);
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    unnamedPayloadCount++;
+                    payloadValues.Add(value);
+                    var parsed = ParseUnnamedPayloadFields(value);
+                    unnamedPayloadParsedFieldCount += parsed.Count;
+                    foreach (var pair in parsed)
+                    {
+                        // Match the named-data behavior: preserve the first
+                        // occurrence while retaining the complete raw payload.
+                        payloadByName.TryAdd(pair.Name, pair.Value);
+                    }
+
+                    if (parsed.Count == 0)
+                    {
+                        unparsedUnnamedPayload.Add(Truncate(value) ?? string.Empty);
+                    }
+
+                    continue;
+                }
+
+                payloadValues.Add(name + "=" + value);
+                payloadByName.TryAdd(NormalizeColumnName(name), value);
+            }
+
+            // A few tracerpt providers repeat EventName inside the payload and
+            // omit RenderingInfo names. Prefer that semantic name over the
+            // provider/event-id fallback so process/thread rows do not become
+            // generic kernel events.
+            eventName = FirstNonEmpty(ValueOrEmpty(payloadByName, "eventname", "taskname"), eventName);
             var payloadProcessId = ParseProcessId(ValueOrEmpty(payloadByName, "processid", "pid"));
             processId = payloadProcessId ?? processId;
             var parentProcessId = ParseProcessId(ValueOrEmpty(payloadByName, "parentprocessid", "parentpid", "parentid"));
@@ -340,8 +390,17 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             var image = ValueOrEmpty(payloadByName, "imagename", "imagefilename", "image", "processname", "process");
             var path = ValueOrEmpty(payloadByName, "filename", "file", "path", "imagepath", "keyname", "keypath", "objectname");
             var commandLine = ValueOrEmpty(payloadByName, "commandline", "command");
-            var eventType = MapEventType(eventName, provider + " " + opcode + " " + task + " " + eventId);
+            var eventType = MapEventType(eventName, provider + " " + opcode + " " + task + " " + eventId, payloadByName);
             var data = CreateDecodedData(eventType, eventName, provider, eventId, opcode, threadId, session, context, string.Join("; ", payloadValues));
+            if (unnamedPayloadCount > 0)
+            {
+                data["xmlUnnamedDataCount"] = unnamedPayloadCount.ToString(CultureInfo.InvariantCulture);
+                data["xmlUnnamedDataParsedFieldCount"] = unnamedPayloadParsedFieldCount.ToString(CultureInfo.InvariantCulture);
+                data["xmlUnnamedDataParseStatus"] = unparsedUnnamedPayload.Count == 0
+                    ? "parsed"
+                    : unnamedPayloadParsedFieldCount > 0 ? "partial" : "unparsed";
+                AddIfNotEmpty(data, "xmlUnnamedDataUnparsed", string.Join(" | ", unparsedUnnamedPayload));
+            }
             rows.Add(new SandboxEvent
             {
                 EventType = eventType,
@@ -513,6 +572,27 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         }
 
         return string.Empty;
+    }
+
+    private static IReadOnlyList<(string Name, string Value)> ParseUnnamedPayloadFields(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !value.Contains('=', StringComparison.Ordinal))
+        {
+            return [];
+        }
+
+        var fields = new List<(string Name, string Value)>();
+        foreach (Match match in UnnamedPayloadFieldRegex.Matches(value))
+        {
+            var name = NormalizeColumnName(match.Groups["key"].Value);
+            var fieldValue = match.Groups["value"].Value.Trim().TrimEnd(';', ',').Trim();
+            if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(fieldValue))
+            {
+                fields.Add((name, fieldValue));
+            }
+        }
+
+        return fields;
     }
 
     private static string FirstNonEmpty(params string?[] values) =>
@@ -755,7 +835,10 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             .Select(item => item.value.Trim()));
     }
 
-    private static string MapEventType(string eventName, string provider)
+    private static string MapEventType(
+        string eventName,
+        string provider,
+        IReadOnlyDictionary<string, string>? payloadByName = null)
     {
         var value = (eventName + " " + provider).Trim();
         if (ContainsAny(value, "processstart", "process/start", "process start", "processcreate") ||
@@ -767,9 +850,9 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         }
 
         if (ContainsAny(value, "processstop", "process/stop", "process stop", "processexit") ||
-            (ContainsAny(value, "process") && ContainsAny(value, "stop", "dcstop", "exit")) ||
+            (ContainsAny(value, "process") && ContainsAny(value, "stop", "dcstop", "dcend", "exit", "end", "terminate", "defunct")) ||
             (ContainsAny(value, "kernel-process", "kernel process", "kernelprocess") &&
-             ContainsAny(value, "stop", "dcstop", "exit")))
+             ContainsAny(value, "stop", "dcstop", "dcend", "exit", "end", "terminate", "defunct")))
         {
             return "process.exit";
         }
@@ -783,14 +866,20 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         }
 
         if (ContainsAny(value, "threadstop", "thread/stop", "thread stop", "threadexit") ||
-            (ContainsAny(value, "thread") && ContainsAny(value, "stop", "dcstop", "exit")) ||
+            (ContainsAny(value, "thread") && ContainsAny(value, "stop", "dcstop", "dcend", "exit", "end")) ||
             (ContainsAny(value, "kernel-thread", "kernel thread", "kernelthread") &&
-             ContainsAny(value, "stop", "dcstop", "exit")))
+             ContainsAny(value, "stop", "dcstop", "dcend", "exit", "end")))
         {
             return "thread.exit";
         }
 
-        if (ContainsAny(value, "imageload", "image/load", "image load", "imageunload") ||
+        if (ContainsAny(value, "imageunload", "image/unload", "image unload") ||
+            (ContainsAny(value, "image") && ContainsAny(value, "unload", "dcend")))
+        {
+            return "image.unload";
+        }
+
+        if (ContainsAny(value, "imageload", "image/load", "image load") ||
             (ContainsAny(value, "image") && ContainsAny(value, "start", "dcstart", "load")))
         {
             return "image.load";
@@ -806,14 +895,35 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             return "registry.etw";
         }
 
+        // If RenderingInfo is absent, use payload shape as a constrained
+        // fallback. This never invents a PID; it only recovers the semantic
+        // family when the decoded row carries its own process/thread fields.
+        if (payloadByName is not null)
+        {
+            var hasThreadPayload = !string.IsNullOrWhiteSpace(ValueOrEmpty(payloadByName, "tthreadid", "threadid", "tid"));
+            var hasProcessPayload = !string.IsNullOrWhiteSpace(ValueOrEmpty(payloadByName, "processid", "pid")) &&
+                (!string.IsNullOrWhiteSpace(ValueOrEmpty(payloadByName, "parentid", "parentprocessid", "parentpid")) ||
+                 !string.IsNullOrWhiteSpace(ValueOrEmpty(payloadByName, "imagename", "imagefilename", "processname")));
+            if (hasThreadPayload && !hasProcessPayload)
+            {
+                return "thread.event";
+            }
+
+            if (hasProcessPayload)
+            {
+                return "process.event";
+            }
+        }
+
         return "etw.kernel.event";
     }
 
     private static string EventClassForType(string eventType) => eventType switch
     {
         "process.start" or "process.exit" => "process",
-        "thread.start" or "thread.exit" => "thread",
-        "image.load" => "image",
+        "process.event" => "process",
+        "thread.start" or "thread.exit" or "thread.event" => "thread",
+        "image.load" or "image.unload" => "image",
         "file.etw.io" => "file",
         "registry.etw" => "registry",
         _ => "kernel"

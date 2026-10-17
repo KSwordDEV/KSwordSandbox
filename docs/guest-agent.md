@@ -107,7 +107,12 @@ root 启动时间前 5 秒的行也会被排除，避免 PID 复用污染。旧�
 - `etw-traces/*.xml` 或 `etw-traces/*.csv` - 使用 Windows `tracerpt.exe` 从同一 ETL 真实解码的
   XML，必要时回退到 CSV；其
   `RenderingInfo` 与 `EventData` 被转换为 `process.start/exit`、`thread.*`、`image.load`、
-  `file.etw.io`、`registry.etw` 和未分类 `etw.kernel.event` 行。
+  `image.unload`、`file.etw.io`、`registry.etw` 和未分类 `etw.kernel.event` 行。部分
+  Windows/tracerpt 版本会把进程、线程字段压成一个没有 `Name` 的 `Data` payload；解析器会
+  恢复其中的 `ProcessId`、`ParentId`、`TThreadId`、`ImageFileName`、`CommandLine`、
+  `ExitStatus` 等字段，并在无法完全拆分时保留 `xmlUnnamedDataParseStatus` 与原始诊断。
+  `End`、`Terminate`、`Defunct`、`DCEnd` 会映射到 `process.exit`/`thread.exit`，不能依靠
+  tracerpt 的宿主 `Execution/ProcessID` 充当样本 PID。
 - `artifacts/dropped-files/**` - 显式传入 `--collect-dropped-files` 或
   `--dropped-files` 时，样本工作目录下新增文件的可选副本。
 - `artifacts/manifest.json` - best-effort artifact manifest；即使敏感采集通道关闭，

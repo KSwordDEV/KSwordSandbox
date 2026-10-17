@@ -1,5 +1,6 @@
 using KSword.Sandbox.SmokeTests.Assertions;
 using KSword.Sandbox.SmokeTests.Framework;
+using KSword.Sandbox.Agent.Collection;
 
 namespace KSword.Sandbox.SmokeTests.Scenarios;
 
@@ -101,6 +102,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "decodedArtifactRelativePath", "ETW captured rows must expose the decoded XML artifact selector.");
         AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "ProbesForPhase", "After-run probes must stop bounded ETW/PCAP lanes before slow inventories.");
         var etwText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Collection", "EtwLiveTraceProbe.cs");
+        AssertEtwXmlPayloadParserContract();
         SmokeAssert.True(
             !etwText.Contains("AddIfNotEmpty(data, \"rootProcessId\", context.RootProcessId", StringComparison.Ordinal),
             "Decoded ETW rows must not inherit the sample root PID as a synthetic correlation hint.");
@@ -431,5 +433,38 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
     {
         SmokeAssert.True(File.Exists(path), $"{Path.GetFileName(path)} is missing.");
         SmokeAssert.True(File.ReadAllText(path).Contains(expected, StringComparison.Ordinal), message);
+    }
+
+    private static void AssertEtwXmlPayloadParserContract()
+    {
+        var assembly = typeof(GuestCollectorSyntheticDiagnostics).Assembly;
+        var probeType = assembly.GetType("KSword.Sandbox.Agent.Collection.EtwLiveTraceProbe");
+        SmokeAssert.True(probeType is not null, "ETW probe type should be present for the parser contract smoke.");
+
+        var parseMethod = probeType!.GetMethod(
+            "ParseUnnamedPayloadFields",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        SmokeAssert.True(parseMethod is not null, "ETW parser should expose its unnamed-payload decoder to the smoke contract.");
+        var parsed = (System.Collections.IEnumerable)parseMethod!.Invoke(
+            null,
+            ["ProcessId=0x123; ParentId=0x22; ImageFileName=sample.exe; CommandLine=cmd /c Foo=Bar; ExitStatus=0"] )!;
+        var fields = parsed.Cast<object>()
+            .ToDictionary(
+                item => ((string)item.GetType().GetField("Item1")!.GetValue(item)!).ToLowerInvariant(),
+                item => (string)item.GetType().GetField("Item2")!.GetValue(item)!);
+        SmokeAssert.True(fields.GetValueOrDefault("processid") == "0x123", "Unnamed ETW payload must recover ProcessId instead of using Execution/ProcessID.");
+        SmokeAssert.True(fields.GetValueOrDefault("parentid") == "0x22", "Unnamed ETW payload must recover ParentId for lineage.");
+        SmokeAssert.True(fields.GetValueOrDefault("imagefilename") == "sample.exe", "Unnamed ETW payload must recover ImageFileName.");
+        SmokeAssert.True(fields.GetValueOrDefault("commandline") == "cmd /c Foo=Bar", "Unnamed ETW payload must keep '=' inside CommandLine values.");
+        SmokeAssert.True(fields.GetValueOrDefault("exitstatus") == "0", "Unnamed ETW payload must recover ExitStatus.");
+
+        var mapMethod = probeType.GetMethod(
+            "MapEventType",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        SmokeAssert.True(mapMethod is not null, "ETW parser should keep a semantic event-type mapper.");
+        var processEnd = (string)mapMethod!.Invoke(null, ["Process", "End", new Dictionary<string, string>()])!;
+        var threadEnd = (string)mapMethod.Invoke(null, ["Thread", "End", new Dictionary<string, string>()])!;
+        SmokeAssert.True(processEnd == "process.exit", "ETW Process End must normalize to process.exit.");
+        SmokeAssert.True(threadEnd == "thread.exit", "ETW Thread End must normalize to thread.exit.");
     }
 }
