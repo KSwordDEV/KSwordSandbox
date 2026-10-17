@@ -348,11 +348,12 @@ public sealed partial class SandboxJobService
 
         var resolvedEventsPath = ResolveGuestEventsPath(jobId, eventsPath);
         var guestEvents = LoadGuestEventsWithDriverJsonl(resolvedEventsPath, out var importSummary);
+        var importedEventCount = guestEvents.Count;
         var sampleLaunchBlocked = HasTerminalSampleStartFailure(guestEvents);
-        var status = guestEvents.Count == 0 || sampleLaunchBlocked
+        var status = importedEventCount == 0 || sampleLaunchBlocked
             ? AnalysisStatus.Failed
             : AnalysisStatus.Completed;
-        var message = guestEvents.Count == 0
+        var message = importedEventCount == 0
             ? $"来宾事件导入未发现事件，报告状态已标记为 Failed：{resolvedEventsPath} / Guest event import found no events in {resolvedEventsPath}."
             : sampleLaunchBlocked
                 ? $"样本启动被来宾拦截且未观察到成功启动，报告状态已标记为 Failed：{resolvedEventsPath} / The guest blocked sample launch and no successful sample start was observed; report status is Failed: {resolvedEventsPath}."
@@ -386,7 +387,7 @@ public sealed partial class SandboxJobService
             Messages = AppendMessage(job.Messages, message)
         }, status, guestEvents, resolvedEventsPath, importSummary);
 
-        PersistGuestImportState(updated, resolvedEventsPath, guestEvents.Count, status, message);
+        PersistGuestImportState(updated, resolvedEventsPath, importedEventCount, status, message);
         StoreJob(updated);
         return updated;
     }
@@ -427,6 +428,7 @@ public sealed partial class SandboxJobService
             message,
             "来宾事件自动导入已按请求跳过；live run 已成功，报告状态已收敛为 Completed / Guest event auto-import was skipped by request; live run succeeded and report status is Completed.");
         var guestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
+        var importedEventCount = guestEvents.Count;
         var markerPath = string.IsNullOrWhiteSpace(job.GuestEventsPath) ? GetJobRoot(jobId) : job.GuestEventsPath;
         UpsertDurableHostEvent(jobId, CreateGuestImportOperationalMarker(
             "guest.events.import_skipped",
@@ -438,7 +440,7 @@ public sealed partial class SandboxJobService
             {
                 ["guestImportOutcome"] = "skipped",
                 ["failureKind"] = string.Empty,
-                ["eventCount"] = guestEvents.Count.ToString(),
+                ["eventCount"] = importedEventCount.ToString(),
                 ["importGuestEvents"] = "false",
                 ["terminalStatus"] = AnalysisStatus.Completed.ToString()
             }));
@@ -450,7 +452,7 @@ public sealed partial class SandboxJobService
             Messages = AppendMessage(job.Messages, terminalMessage)
         }, AnalysisStatus.Completed, guestEvents, job.GuestEventsPath);
 
-        PersistGuestImportState(updated, job.GuestEventsPath, guestEvents.Count, AnalysisStatus.Completed, terminalMessage);
+        PersistGuestImportState(updated, job.GuestEventsPath, importedEventCount, AnalysisStatus.Completed, terminalMessage);
         StoreJob(updated);
         return updated;
     }
@@ -578,21 +580,22 @@ public sealed partial class SandboxJobService
 
         StoreJob(job);
         var guestEvents = LoadGuestEventsWithDriverJsonl(eventsPath, out var importSummary);
+        var importedEventCount = guestEvents.Count;
         var failureSkeleton = guestEvents.Any(evt =>
             string.Equals(evt.EventType, "hyperv.e2e.failure_skeleton", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(evt.EventType, "vmware.e2e.failure_skeleton", StringComparison.OrdinalIgnoreCase));
         var failedRunbook = IsFailedRunbookExecution(resultPath);
         var sampleLaunchBlocked = HasTerminalSampleStartFailure(guestEvents);
-        var status = failureSkeleton || failedRunbook || sampleLaunchBlocked || guestEvents.Count == 0
+        var status = failureSkeleton || failedRunbook || sampleLaunchBlocked || importedEventCount == 0
             ? AnalysisStatus.Failed
             : AnalysisStatus.Completed;
-        var message = guestEvents.Count == 0
+        var message = importedEventCount == 0
             ? $"External guest event import found no events in {eventsPath}."
             : sampleLaunchBlocked
-                ? $"Imported {guestEvents.Count} diagnostic guest event(s) from {eventsPath}; no successful sample start was observed, so report status is Failed."
+                ? $"Imported {importedEventCount} diagnostic guest event(s) from {eventsPath}; no successful sample start was observed, so report status is Failed."
             : failedRunbook || failureSkeleton
-                ? $"Imported {guestEvents.Count} diagnostic guest event(s) from {eventsPath}; runbook failure keeps report status Failed."
-                : $"Imported {guestEvents.Count} external guest/driver event(s) from {eventsPath}.";
+                ? $"Imported {importedEventCount} diagnostic guest event(s) from {eventsPath}; runbook failure keeps report status Failed."
+                : $"Imported {importedEventCount} external guest/driver event(s) from {eventsPath}.";
         var updated = RegenerateReport(job with
         {
             Status = status,
@@ -600,7 +603,7 @@ public sealed partial class SandboxJobService
             Messages = AppendMessage(job.Messages, message)
         }, status, guestEvents, eventsPath, importSummary);
 
-        PersistGuestImportState(updated, Path.GetFullPath(eventsPath), guestEvents.Count, status, message);
+        PersistGuestImportState(updated, Path.GetFullPath(eventsPath), importedEventCount, status, message);
         StoreJob(updated);
         return updated;
     }
@@ -880,7 +883,7 @@ public sealed partial class SandboxJobService
     private AnalysisJob RegenerateReport(
         AnalysisJob job,
         AnalysisStatus status,
-        IReadOnlyCollection<SandboxEvent> guestEvents,
+        List<SandboxEvent> guestEvents,
         string? guestEventsPath,
         GuestEventImportSummary? importSummary = null)
     {
@@ -929,6 +932,23 @@ public sealed partial class SandboxJobService
         var zhHtmlPath = Path.Combine(jobRoot, "report.zh.html");
         var enHtmlPath = Path.Combine(jobRoot, "report.en.html");
         File.WriteAllText(jsonPath, JsonSerializer.Serialize(report, JsonOptions));
+
+        // The imported guest list and the derived full event/finding lists can
+        // be orders of magnitude larger than the bounded report model.  Keep
+        // them alive only through report.json serialization: HTML rendering
+        // needs the report model, not the raw classification graph.  Clearing
+        // the owned lists here also releases the caller's large guest list
+        // before the expensive bilingual renderer starts.  Callers capture
+        // the imported count before entering this method for persistence.
+        var transientEventCount = fullEvents.Count;
+        ReleaseTransientReportBuffers(guestEvents, events, fullEvents, rawFindings);
+        if (transientEventCount >= 50_000)
+        {
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);
+        }
+
         WriteHtmlReports(jobRoot, report, jobConfig.ArtifactCollection);
 
         return job with
@@ -940,6 +960,25 @@ public sealed partial class SandboxJobService
             HtmlReportEnPath = enHtmlPath,
             GuestEventsPath = guestEventsPath ?? job.GuestEventsPath
         };
+    }
+
+    /// <summary>
+    /// Drops the large mutable collections that are no longer needed after
+    /// report.json has been serialized. Inputs are the imported guest rows and
+    /// derived classification buffers owned by one regeneration; processing
+    /// clears them in place so the caller cannot keep a second copy alive while
+    /// HTML is rendered. The method returns no value.
+    /// </summary>
+    private static void ReleaseTransientReportBuffers(
+        List<SandboxEvent> guestEvents,
+        List<SandboxEvent> events,
+        List<SandboxEvent> fullEvents,
+        List<BehaviorFinding> rawFindings)
+    {
+        guestEvents.Clear();
+        events.Clear();
+        fullEvents.Clear();
+        rawFindings.Clear();
     }
 
     /// <summary>
