@@ -50,6 +50,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--max-events", "max-events should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--max-read-batches", "max-read-batches should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--drain-grace-ms", "drain-grace-ms should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--max-output-bytes", "max-output-bytes should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--heartbeat", "heartbeat should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--abi-self-check", "ABI self-check mode should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--contract-self-check", "contract self-check alias should be parsed.");
@@ -189,7 +190,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(readinessDiagnostics, "EmitDriverNetworkStatus", "Readiness diagnostics should include WFP/ALE network status when the device opens.");
         RequireContains(runtimeLoop, "r0collector.heartbeat", "heartbeat rows should be emitted by the runtime loop.");
 
-        foreach (var option in new[] { "--self-test", "--synthetic", "--enable-mask", "--max-events", "--max-read-batches", "--heartbeat", "--duration", "--poll-ms", "--stress-count", "--inject-jsonl-noise", "--driver-event-sample-stride", "--event-sample-stride", "--suppress-self-noise", "--emit-self-noise" })
+        foreach (var option in new[] { "--self-test", "--synthetic", "--enable-mask", "--max-events", "--max-read-batches", "--heartbeat", "--duration", "--poll-ms", "--stress-count", "--inject-jsonl-noise", "--driver-event-sample-stride", "--event-sample-stride", "--suppress-self-noise", "--emit-self-noise", "--max-output-bytes" })
         {
             RequireContains(collectorDoc, option, $"{option} should be documented in r0-collector.md.");
             RequireContains(schemaDoc, option, $"{option} should be documented in r0-jsonl-schema.md.");

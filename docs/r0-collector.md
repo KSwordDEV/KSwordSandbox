@@ -402,6 +402,9 @@ KSword.Sandbox.R0Collector.exe `
   `120000`，最大 `600000`）。停止行会记录 `drainQueueDepthAtStart`、
   `drainQueueDepthAtStop`、`drainQueueDrained` 和 `drainStoppedAtDrainDeadline`；剩余队列
   不会被隐藏。
+- `--max-output-bytes <n>` / `--output-max-bytes <n>`：JSONL 达到该字节上限后按事件行
+  轮转到 `driver-events.part-000001.jsonl` 等分片；默认 `268435456`，`0` 表示禁用。每个
+  分片保持完整 JSON 行，宿主导入会按顺序合并所有分片；轮转失败仍写入 failure sidecar。
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`：poll interval（毫秒）。
 - `--diagnose`, `--readiness`, `--readiness-check`：运行 live 但 non-mutating 的 readiness
   diagnostic pass。Collector 会查询 `--service-name` 的 SCM state、打开 device、检查

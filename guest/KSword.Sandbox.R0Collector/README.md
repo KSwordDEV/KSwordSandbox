@@ -52,6 +52,10 @@ Options:
   final `r0collector.stopped` row keeps start/stop queue depth and explicit
   `drainQueueDrained`/`drainStoppedAtDrainDeadline` evidence.
   中文：有界采集结束后继续读取内核队列；超时不会隐藏剩余队列。
+- `--max-output-bytes <n>` (alias `--output-max-bytes`): rotate each JSONL
+  segment at this byte limit. Default `268435456`; `0` disables rotation.
+  Parts are named `driver-events.part-000001.jsonl` and are merged by host
+  import in order. 中文：高容量 JSONL 自动分片，避免单文件写满导致丢失。
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in milliseconds.
   中文：轮询间隔，单位毫秒。
 - `--diagnose`, `--readiness`, `--readiness-check`: emit live non-mutating

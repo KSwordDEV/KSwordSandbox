@@ -505,6 +505,9 @@ driver-category rows.
   `drainQueueDepthAtStart`, `remainingQueueDepth`, `drainQueueDrained`, and
   `drainStoppedAtDrainDeadline` so a non-empty queue is never mistaken for a
   complete capture.
+- `--max-output-bytes` (alias `--output-max-bytes`) bounds each JSONL segment;
+  the collector rotates to `driver-events.part-000001.jsonl` and records
+  `maxOutputBytes`/`rotatedSegmentCount` in lifecycle and output-failure rows.
 - `--health` opens the live device, emits health, and exits without poll/read
   drain so readiness checks do not consume queued telemetry.
 - `--diagnose` / `--readiness` opens the live device only after output is ready,
