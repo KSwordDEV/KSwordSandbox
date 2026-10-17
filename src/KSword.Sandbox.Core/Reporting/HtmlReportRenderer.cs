@@ -12635,7 +12635,9 @@ html[lang="en"] .localized-evidence-field{display:none}
     /// </summary>
     private static string RenderInlineEventLocation(SandboxEvent evt, IReadOnlyCollection<ArtifactDescriptor> relatedArtifacts)
     {
-        var label = evt.Path ?? evt.CommandLine ?? string.Empty;
+        // Command lines are technical payloads and stay in the event details;
+        // timeline rows only show a readable path/target hint.
+        var label = evt.Path ?? string.Empty;
         if (string.IsNullOrWhiteSpace(label))
         {
             return string.Empty;
