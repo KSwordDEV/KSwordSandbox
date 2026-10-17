@@ -226,7 +226,7 @@ user-mode stack 等需要 draft R0 payload、ETW/audit、PCAP/sidecar 或 guest 
 机器逻辑应使用英文 `r0Coverage*` 字段。
 
 `R0Collector` 会在 drain 前和 final drain 后，为
-`IOCTL_KSWORD_SANDBOX_GET_STATUS` 输出 `r0collector.driverStatus`。这些行保留
+`IOCTL_KSWORD_SANDBOX_GET_STATUS` 输出 `r0collector.driverStatus`。这些行保留 `data.queueDepth` is the current kernel queue snapshot; `data.remainingQueueDepth` and `data.queueDrained` make the final empty/non-empty state explicit.
 queue depth/capacity、high watermark、`ProducerEnableMask`、`SupportedProducerMask`、
 `ActiveProducerMask`、`FailedProducerMask`、`EffectiveProducerMask`、
 `TotalEventsEnqueued`、`TotalEventsDropped`、`TotalEventsRead`、

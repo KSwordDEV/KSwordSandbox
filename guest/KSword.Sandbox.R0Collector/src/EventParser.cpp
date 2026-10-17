@@ -4589,6 +4589,9 @@ std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWOR
     data.AddUtf8("flagNames", StatusFlagNames(reply.Flags));
     data.AddUnsigned("queueCapacity", reply.QueueCapacity);
     data.AddUnsigned("queueDepth", reply.QueueDepth);
+    data.AddUnsigned("remainingQueueDepth", reply.QueueDepth);
+    data.AddBool("queueDrained", reply.QueueDepth == 0);
+    data.AddBool("drainQueueDrained", reply.QueueDepth == 0);
     data.AddUnsigned("queueHighWatermark", reply.QueueHighWatermark);
     data.AddUnsigned("highWatermark", reply.QueueHighWatermark);
     data.AddUnsigned("producerEnableMask", reply.ProducerEnableMask);

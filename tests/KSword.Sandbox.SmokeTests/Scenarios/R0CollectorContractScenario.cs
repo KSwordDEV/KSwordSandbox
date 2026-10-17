@@ -151,6 +151,8 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(eventParser, "totalEventsSuppressed", "Status row should preserve suppressed event counter.");
         RequireContains(statusData, "lostCount", "Status row should expose a stable lost-count alias.");
         RequireContains(statusData, "highWatermark", "Status row should expose a stable high-watermark alias.");
+        RequireContains(statusData, "remainingQueueDepth", "Status row should expose remaining queue depth.");
+        RequireContains(statusData, "queueDrained", "Status row should expose an explicit queue-drained verdict.");
         RequireContains(statusData, "lastEnqueueFailureStatus", "Status row should expose enqueue failure status.");
         RequireContains(statusData, "sequenceMeaning", "Status row should distinguish nextSequence from a concrete event sequence.");
         RequireContains(networkStatusData, "supportedLayerMaskHex", "Network status row should preserve supported WFP/ALE layer mask.");

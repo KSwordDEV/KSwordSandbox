@@ -80,7 +80,7 @@ Example:
 - `r0collector.driverProducerMask`: emitted when `--enable-mask` is supplied
   and `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` succeeds. It records
   requested, previous, effective, and supported masks.
-- `r0collector.driverStatus`: successful `IOCTL_KSWORD_SANDBOX_GET_STATUS`
+- `r0collector.driverStatus`: successful `IOCTL_KSWORD_SANDBOX_GET_STATUS` `data.queueDepth` is the queue snapshot; `data.remainingQueueDepth` and `data.queueDrained` preserve the explicit empty/non-empty verdict.
   reply. Driver mode emits it before draining and again after the final drain so
   queue depth, counters, active/failed producer masks, and last NTSTATUS are
   preserved.
