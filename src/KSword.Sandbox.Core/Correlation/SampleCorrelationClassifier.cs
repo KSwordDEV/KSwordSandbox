@@ -872,12 +872,20 @@ public static class SampleCorrelationClassifier
             var source = IsDriverEvidence(evt) ? "r0" : IsEtwEvidence(evt) ? "etw" : "guest";
             foreach (var target in MutationTargets(evt))
             {
-                evidence.Add(new CrossSourceEvidence(source, "mutation", target, evt.Timestamp));
+                var normalizedTarget = NormalizeEvidenceTarget(target);
+                if (!string.IsNullOrWhiteSpace(normalizedTarget))
+                {
+                    evidence.Add(new CrossSourceEvidence(source, "mutation", normalizedTarget, evt.Timestamp));
+                }
             }
 
             foreach (var target in NetworkTargets(evt.Data))
             {
-                evidence.Add(new CrossSourceEvidence(source, "network", target, evt.Timestamp));
+                var normalizedTarget = NormalizeEvidenceTarget(target);
+                if (!string.IsNullOrWhiteSpace(normalizedTarget))
+                {
+                    evidence.Add(new CrossSourceEvidence(source, "network", normalizedTarget, evt.Timestamp));
+                }
             }
         }
 
