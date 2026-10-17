@@ -64,10 +64,9 @@ bool EventWriter::Rotate(std::wstring* error) {
     const auto suffix = std::wstring(L".part-") +
         (outputSegmentIndex_ < 10 ? L"00000" : outputSegmentIndex_ < 100 ? L"0000" : outputSegmentIndex_ < 1000 ? L"000" : outputSegmentIndex_ < 10000 ? L"00" : outputSegmentIndex_ < 100000 ? L"0" : L"") +
         std::to_wstring(outputSegmentIndex_) + L".jsonl";
-    const auto dot = outputPath_.find_last_of(L'.');
-    currentOutputPath_ = dot == std::wstring::npos
-        ? outputPath_ + suffix
-        : outputPath_.substr(0, dot) + suffix;
+    const std::filesystem::path basePath(outputPath_);
+    const auto segmentName = basePath.stem().wstring() + suffix;
+    currentOutputPath_ = (basePath.parent_path() / segmentName).wstring();
     return OpenSegment(error);
 }
 
