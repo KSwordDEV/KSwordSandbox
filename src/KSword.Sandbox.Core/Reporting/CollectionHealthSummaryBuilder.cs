@@ -56,6 +56,24 @@ public static class CollectionHealthSummaryBuilder
         "suppressed"
     ];
 
+    private static readonly string[] CollectorSuppressedKeys =
+    [
+        // Only explicit collector-side output suppression is actionable here.
+        // Per-batch `suppressed` and `collectorSuppressedEvents` counters are
+        // the intentional self-noise filter and must remain raw evidence
+        // without degrading an otherwise drained capture.
+        "eventsSuppressed"
+    ];
+
+    private static readonly string[] ProducerSuppressedMaskKeys =
+    ["producerSuppressedMask", "producerSuppressedMaskHex"];
+
+    private static readonly string[] ProducerEnableMaskKeys =
+    ["effectiveProducerMask", "producerRuntimeEffectiveMask", "producerEnableMask"];
+
+    private static readonly string[] ProducerSupportedMaskKeys =
+    ["supportedProducerMask", "activeProducerMask"];
+
     public static CollectionHealthSummary Build(
         IReadOnlyCollection<SandboxEvent> rawEvents,
         IReadOnlyCollection<SandboxEvent>? reportEvents = null)
@@ -92,6 +110,13 @@ public static class CollectionHealthSummaryBuilder
         var pcapFailureRows = raw.Count(IsPcapFailure);
         var agentFailureRows = raw.Count(evt => IsAgentFailure(evt, rawEvents));
         var processTreeUnavailableRows = raw.Count(evt => IsProcessTreeUnavailableFailure(evt, rawEvents));
+        var expectedSuppressedRows = driverHealthRows.Count(HasExpectedProducerSuppression);
+        var unexpectedSuppressedRows = driverHealthRows.Count(HasUnexpectedProducerSuppression);
+        var unsupportedProducerRows = driverHealthRows.Count(HasUnsupportedProducerGap);
+        var expectedSuppressedMask = MaxMask(driverHealthRows, ExpectedProducerSuppressedMask);
+        var unexpectedSuppressedMask = MaxMask(driverHealthRows, UnexpectedProducerSuppressedMask);
+        var unsupportedProducerMask = MaxMask(driverHealthRows, UnsupportedProducerMask);
+        var collectorSuppressed = MaxDataUnsigned(driverHealthRows, CollectorSuppressedKeys);
         var stateReasons = BuildStateReasons(
             raw,
             driverHealthRows.Count,
@@ -103,8 +128,10 @@ public static class CollectionHealthSummaryBuilder
             etwFailureRows,
             pcapFailureRows,
             agentFailureRows,
-            MaxDataUnsigned(driverHealthRows, DriverSuppressedKeys),
-            driverHealthRows.Count(IsDriverQualityWarning));
+            collectorSuppressed,
+            driverHealthRows.Count(IsDriverQualityWarning),
+            expectedSuppressedRows,
+            unsupportedProducerRows);
 
         return new CollectionHealthSummary
         {
@@ -119,7 +146,7 @@ public static class CollectionHealthSummaryBuilder
                 etwFailureRows,
                 pcapFailureRows,
                 agentFailureRows,
-                MaxDataUnsigned(driverHealthRows, DriverSuppressedKeys),
+                collectorSuppressed,
                 driverHealthRows.Count(IsDriverQualityWarning)),
             StateReasons = stateReasons,
             DriverHealthRows = driverHealthRows.Count,
@@ -140,6 +167,12 @@ public static class CollectionHealthSummaryBuilder
             DriverOutputWriteFailureRows = outputWriteFailureRows,
             DriverDrainStoppedAtDeadlineRows = driverHealthRows.Count(IsDrainStoppedAtDeadline),
             DriverEventsSuppressed = ToMetricInt(MaxDataUnsigned(driverHealthRows, DriverSuppressedKeys)),
+            DriverExpectedSuppressedRows = expectedSuppressedRows,
+            DriverUnexpectedSuppressedRows = unexpectedSuppressedRows,
+            DriverUnsupportedProducerRows = unsupportedProducerRows,
+            DriverExpectedSuppressedMask = ToMetricInt(expectedSuppressedMask),
+            DriverUnexpectedSuppressedMask = ToMetricInt(unexpectedSuppressedMask),
+            DriverUnsupportedProducerMask = ToMetricInt(unsupportedProducerMask),
             DriverQualityWarningRows = driverHealthRows.Count(IsDriverQualityWarning),
             ProcessTreeUnavailable = processTreeUnavailableRows,
             ScheduledTaskCaptureFailed = raw.Count(IsScheduledTaskCaptureFailed),
@@ -183,6 +216,12 @@ public static class CollectionHealthSummaryBuilder
         metrics["collectionHealth.driver.outputWriteFailureRows"] = summary.DriverOutputWriteFailureRows;
         metrics["collectionHealth.driver.drainStoppedAtDeadlineRows"] = summary.DriverDrainStoppedAtDeadlineRows;
         metrics["collectionHealth.driver.eventsSuppressed"] = summary.DriverEventsSuppressed;
+        metrics["collectionHealth.driver.expectedSuppressedRows"] = summary.DriverExpectedSuppressedRows;
+        metrics["collectionHealth.driver.unexpectedSuppressedRows"] = summary.DriverUnexpectedSuppressedRows;
+        metrics["collectionHealth.driver.unsupportedProducerRows"] = summary.DriverUnsupportedProducerRows;
+        metrics["collectionHealth.driver.expectedSuppressedMask"] = summary.DriverExpectedSuppressedMask;
+        metrics["collectionHealth.driver.unexpectedSuppressedMask"] = summary.DriverUnexpectedSuppressedMask;
+        metrics["collectionHealth.driver.unsupportedProducerMask"] = summary.DriverUnsupportedProducerMask;
         metrics["collectionHealth.driver.qualityWarningRows"] = summary.DriverQualityWarningRows;
         metrics["collectionHealth.process.treeUnavailable"] = summary.ProcessTreeUnavailable;
         metrics["collectionHealth.scheduledTask.captureFailed"] = summary.ScheduledTaskCaptureFailed;
@@ -223,6 +262,12 @@ public static class CollectionHealthSummaryBuilder
         metrics["events.collectionHealth.driver.outputWriteFailureRows"] = summary.DriverOutputWriteFailureRows;
         metrics["events.collectionHealth.driver.drainStoppedAtDeadlineRows"] = summary.DriverDrainStoppedAtDeadlineRows;
         metrics["events.collectionHealth.driver.eventsSuppressed"] = summary.DriverEventsSuppressed;
+        metrics["events.collectionHealth.driver.expectedSuppressedRows"] = summary.DriverExpectedSuppressedRows;
+        metrics["events.collectionHealth.driver.unexpectedSuppressedRows"] = summary.DriverUnexpectedSuppressedRows;
+        metrics["events.collectionHealth.driver.unsupportedProducerRows"] = summary.DriverUnsupportedProducerRows;
+        metrics["events.collectionHealth.driver.expectedSuppressedMask"] = summary.DriverExpectedSuppressedMask;
+        metrics["events.collectionHealth.driver.unexpectedSuppressedMask"] = summary.DriverUnexpectedSuppressedMask;
+        metrics["events.collectionHealth.driver.unsupportedProducerMask"] = summary.DriverUnsupportedProducerMask;
         metrics["events.collectionHealth.driver.qualityWarningRows"] = summary.DriverQualityWarningRows;
         metrics["events.collectionHealth.process.treeUnavailable"] = summary.ProcessTreeUnavailable;
         metrics["events.collectionHealth.scheduledTask.captureFailed"] = summary.ScheduledTaskCaptureFailed;
@@ -397,6 +442,24 @@ public static class CollectionHealthSummaryBuilder
 
     private static bool IsDriverQualityWarning(SandboxEvent evt)
     {
+        // Per-batch poll/read rows are control-plane progress, not final
+        // health summaries. Loss and unread counters are still counted by
+        // their dedicated lanes below; keeping these rows out of the warning
+        // count prevents routine self-noise filtering from degrading a clean
+        // drained capture.
+        var batchControlRow = string.Equals(evt.EventType, "r0collector.driverPoll", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "r0collector.driverReadEvents", StringComparison.OrdinalIgnoreCase);
+        if (batchControlRow &&
+            !IsDrainStoppedAtDeadline(evt) &&
+            !PositiveData(evt, DriverRemainingUnreadKeys) &&
+            !IsDriverLossRow(evt) &&
+            !BoolTrue(evt, "backpressure", "backpressureObserved") &&
+            !IsMalformedDriverRow(evt) &&
+            !IsOutputWriteFailureRow(evt))
+        {
+            return false;
+        }
+
         // Point-in-time queueDepth/eventsQueued values describe collector
         // workload. They are not evidence of loss until an explicit final
         // unread tail, deadline, suppression, backpressure, or I/O failure.
@@ -404,12 +467,56 @@ public static class CollectionHealthSummaryBuilder
             PositiveData(evt, DriverRemainingUnreadKeys);
         return IsDrainStoppedAtDeadline(evt) ||
             finalUnread ||
-            PositiveData(evt, DriverSuppressedKeys) ||
+            PositiveData(evt, CollectorSuppressedKeys) ||
+            HasUnexpectedProducerSuppression(evt) ||
             BoolTrue(evt, "backpressure", "backpressureObserved") ||
             IsDriverLossRow(evt) ||
             IsMalformedDriverRow(evt) ||
             IsOutputWriteFailureRow(evt);
     }
+
+    private static bool HasExpectedProducerSuppression(SandboxEvent evt) =>
+        ExpectedProducerSuppressedMask(evt) != 0;
+
+    private static bool HasUnexpectedProducerSuppression(SandboxEvent evt) =>
+        UnexpectedProducerSuppressedMask(evt) != 0;
+
+    private static bool HasUnsupportedProducerGap(SandboxEvent evt) =>
+        UnsupportedProducerMask(evt) != 0;
+
+    private static ulong ExpectedProducerSuppressedMask(SandboxEvent evt)
+    {
+        var suppressed = FirstUnsigned(evt, ProducerSuppressedMaskKeys);
+        if (suppressed == 0)
+        {
+            return 0;
+        }
+
+        var enabled = FirstUnsigned(evt, ProducerEnableMaskKeys);
+        return suppressed & ~enabled;
+    }
+
+    private static ulong UnexpectedProducerSuppressedMask(SandboxEvent evt)
+    {
+        var suppressed = FirstUnsigned(evt, ProducerSuppressedMaskKeys);
+        if (suppressed == 0)
+        {
+            return 0;
+        }
+
+        var enabled = FirstUnsigned(evt, ProducerEnableMaskKeys);
+        return suppressed & enabled;
+    }
+
+    private static ulong UnsupportedProducerMask(SandboxEvent evt)
+    {
+        var suppressed = FirstUnsigned(evt, ProducerSuppressedMaskKeys);
+        var supported = FirstUnsigned(evt, ProducerSupportedMaskKeys);
+        return suppressed & ~supported;
+    }
+
+    private static ulong MaxMask(IEnumerable<SandboxEvent> events, Func<SandboxEvent, ulong> selector) =>
+        events.Select(selector).DefaultIfEmpty().Max();
 
     private static bool IsMalformedDriverRow(SandboxEvent evt)
     {
@@ -696,7 +803,9 @@ public static class CollectionHealthSummaryBuilder
         int pcapFailureRows,
         int agentFailureRows,
         ulong suppressedEvents,
-        int qualityWarningRows)
+        int qualityWarningRows,
+        int expectedSuppressedRows,
+        int unsupportedProducerRows)
     {
         var reasons = new List<string>();
         if (raw.Count == 0)
@@ -758,6 +867,22 @@ public static class CollectionHealthSummaryBuilder
         if (qualityWarningRows > 0)
         {
             reasons.Add("driver-quality-warning");
+        }
+
+        if (unsupportedProducerRows > 0)
+        {
+            // This is an explicit coverage gap, not a loss verdict. The raw
+            // producer mask and suppression count remain visible in metrics
+            // and the R0 evidence lane.
+            reasons.Add("driver-unsupported-producer-gap");
+        }
+
+        if (expectedSuppressedRows > 0)
+        {
+            // The lane is intentionally disabled and its raw count remains
+            // visible; this reason records the capability boundary without
+            // downgrading a capture whose enabled producers drained cleanly.
+            reasons.Add("driver-expected-disabled-producer");
         }
 
         return reasons;

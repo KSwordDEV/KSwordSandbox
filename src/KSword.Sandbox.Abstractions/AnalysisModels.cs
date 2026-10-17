@@ -290,6 +290,21 @@ public sealed record CollectionHealthSummary
     /// </summary>
     public int DriverEventsSuppressed { get; init; }
 
+    /// <summary>Rows suppressed by an explicitly disabled producer bit.</summary>
+    public int DriverExpectedSuppressedRows { get; init; }
+
+    /// <summary>Rows suppressed despite the producer bit being enabled.</summary>
+    public int DriverUnexpectedSuppressedRows { get; init; }
+
+    /// <summary>Rows whose producer bit is absent from the driver capability mask.</summary>
+    public int DriverUnsupportedProducerRows { get; init; }
+
+    public int DriverExpectedSuppressedMask { get; init; }
+
+    public int DriverUnexpectedSuppressedMask { get; init; }
+
+    public int DriverUnsupportedProducerMask { get; init; }
+
     /// <summary>
     /// Number of driver health rows with bounded-drain or suppression evidence.
     /// This remains visible even when lostCount is zero.

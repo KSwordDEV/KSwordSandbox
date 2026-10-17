@@ -104,6 +104,7 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(6, model.CollectionHealth.FailureRows, "AnalysisReport should carry the collection-health model.");
 
         AssertStateBoundaries();
+        AssertExpectedDisabledProducerSuppression();
         AssertExpectedTimeoutTermination();
         AssertR0OutputFailureSidecarFinalStatus();
 
@@ -234,6 +235,60 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         ]);
         RequireTrue(unknownFinal.State == "partial", "Zero loss without a final queue state must remain partial.");
         RequireTrue(!unknownFinal.DriverQueueDepthAtStopKnown, "A startup/status snapshot must not prove a final queue state.");
+    }
+
+    private static void AssertExpectedDisabledProducerSuppression()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        var expected = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "r0collector.driverStatus",
+                Source = "r0collector",
+                Timestamp = timestamp,
+                Data =
+                {
+                    ["statusPhase"] = "final",
+                    ["finalStatusAvailable"] = "true",
+                    ["remainingQueueDepth"] = "0",
+                    ["producerSuppressedMask"] = "64",
+                    ["producerEnableMask"] = "63",
+                    ["supportedProducerMask"] = "127",
+                    ["totalEventsSuppressed"] = "4440"
+                }
+            }
+        ]);
+
+        RequireTrue(expected.State == "complete", "A disabled producer lane must not turn a drained capture into degraded health.");
+        RequireEqual(4440, expected.DriverEventsSuppressed, "Raw suppression remains visible in the health model.");
+        RequireEqual(1, expected.DriverExpectedSuppressedRows, "Disabled producer suppression must be classified as expected.");
+        RequireEqual(0, expected.DriverUnexpectedSuppressedRows, "Expected disabled suppression must not be classified as unexpected.");
+        RequireEqual(64, expected.DriverExpectedSuppressedMask, "Expected suppression mask must preserve the disabled producer bit.");
+        RequireTrue(expected.StateReasons.Contains("driver-expected-disabled-producer"), "Expected disabled producer capability gaps must remain visible in state reasons.");
+
+        var unexpected = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "r0collector.driverStatus",
+                Source = "r0collector",
+                Timestamp = timestamp,
+                Data =
+                {
+                    ["statusPhase"] = "final",
+                    ["finalStatusAvailable"] = "true",
+                    ["remainingQueueDepth"] = "0",
+                    ["producerSuppressedMask"] = "8",
+                    ["producerEnableMask"] = "63",
+                    ["supportedProducerMask"] = "127",
+                    ["totalEventsSuppressed"] = "1"
+                }
+            }
+        ]);
+
+        RequireTrue(unexpected.State == "degraded", "Suppression from an enabled producer must remain a degraded capture signal.");
+        RequireEqual(1, unexpected.DriverUnexpectedSuppressedRows, "Enabled producer suppression must remain actionable.");
     }
 
     private static void AssertExpectedTimeoutTermination()
