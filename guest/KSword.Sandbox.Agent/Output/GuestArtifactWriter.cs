@@ -92,7 +92,14 @@ internal sealed class GuestArtifactWriter
     {
         Directory.CreateDirectory(outputDirectory);
         var path = Path.Combine(outputDirectory, "events.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(events, JsonOptions));
+        // Stream directly to disk. File.WriteAllText first materialized the
+        // entire JSON document as a second string and caused high-volume
+        // samples to exhaust guest memory/disk before the report could be
+        // finalized. A streaming serializer keeps the original event list
+        // authoritative while making IO failures observable to the caller.
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        JsonSerializer.Serialize(stream, events, JsonOptions);
+        stream.Flush(true);
         return path;
     }
 
@@ -1004,7 +1011,9 @@ internal sealed class GuestArtifactWriter
             return true;
         }
 
-        if (fileName.Contains("driver-events", StringComparison.OrdinalIgnoreCase) &&
+        if ((fileName.Contains("driver-events", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(fileName, "events.json.failure.json", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(fileName, "agent-summary.json.failure.json", StringComparison.OrdinalIgnoreCase)) &&
             fileName.EndsWith(".failure.json", StringComparison.OrdinalIgnoreCase))
         {
             classification = new ArtifactClassification(ArtifactKind.Log, "log", "diagnostic-log", "r0-logs");

@@ -675,17 +675,35 @@ internal static class PostProcessProgram
         var primaryPath = Path.GetFullPath(eventsPath);
         try
         {
-            return Directory.EnumerateFiles(searchRoot, "driver-events.jsonl", SearchOption.AllDirectories)
+            return Directory.EnumerateFiles(searchRoot, "driver-events*.jsonl", SearchOption.AllDirectories)
                 .Select(Path.GetFullPath)
                 .Where(path => !string.Equals(path, primaryPath, StringComparison.OrdinalIgnoreCase))
+                .Where(path => IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
         {
             return [];
         }
+    }
+
+    private static bool IsCanonicalOrRotatedDriverJsonl(string? fileName)
+    {
+        if (string.Equals(fileName, "driver-events.jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            !fileName.StartsWith("driver-events.part-", StringComparison.OrdinalIgnoreCase) ||
+            !fileName.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        var number = fileName["driver-events.part-".Length..^".jsonl".Length];
+        return number.Length == 6 && number.All(static ch => ch is >= '0' and <= '9');
     }
 
     private static void AddEventIfNew(List<SandboxEvent> events, HashSet<string> eventKeys, SandboxEvent evt)

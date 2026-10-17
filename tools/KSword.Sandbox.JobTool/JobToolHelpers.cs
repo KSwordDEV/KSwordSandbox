@@ -456,19 +456,31 @@ internal static partial class ProgramMain
             return [];
         }
 
-        var sibling = Path.Combine(directory, "driver-events.jsonl");
-        if (File.Exists(sibling) && !SamePath(sibling, fullPrimary))
-        {
-            return [Path.GetFullPath(sibling)];
-        }
-
-        // Keep recovery imports tolerant of nested output layouts while making
-        // selection stable. The service applies the same sibling-first rule.
-        return Directory.EnumerateFiles(directory, "driver-events.jsonl", SearchOption.AllDirectories)
+        // R0Collector rotates high-volume output into numbered siblings. Keep
+        // the canonical stream first, then merge every validated part.
+        return Directory.EnumerateFiles(directory, "driver-events*.jsonl", SearchOption.AllDirectories)
             .Where(path => !SamePath(path, fullPrimary))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .Where(path => IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
+            .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(Path.GetFullPath)
             .ToList();
+    }
+
+    private static bool IsCanonicalOrRotatedDriverJsonl(string? fileName)
+    {
+        if (string.Equals(fileName, "driver-events.jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            !fileName.StartsWith("driver-events.part-", StringComparison.OrdinalIgnoreCase) ||
+            !fileName.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        var number = fileName["driver-events.part-".Length..^".jsonl".Length];
+        return number.Length == 6 && number.All(static ch => ch is >= '0' and <= '9');
     }
 
     private static int CountJsonlRows(IEnumerable<string> paths)

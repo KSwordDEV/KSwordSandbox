@@ -1261,9 +1261,10 @@ public sealed partial class SandboxJobService
             return events.Select(NormalizeEvent).ToList();
         }
 
-        // Safe equivalent of Directory.EnumerateFiles(searchRoot, "driver-events.jsonl", SearchOption.AllDirectories)
-        // for the static import contract: only canonical driver-events.jsonl
-        // files are imported, while inaccessible/reparse paths are skipped.
+        // Safe equivalent of Directory.EnumerateFiles(searchRoot, "driver-events*.jsonl", SearchOption.AllDirectories)
+        // for the static import contract: only the canonical stream and its
+        // collector-created numbered rotation parts are imported. Arbitrary
+        // scratch JSONL remains excluded.
         var driverPaths = EnumerateCanonicalDriverJsonlPaths(eventsPath, searchRoot);
         var driverRowsRead = 0;
         var driverRowsMerged = 0;
@@ -1316,24 +1317,37 @@ public sealed partial class SandboxJobService
     private static IReadOnlyList<string> EnumerateCanonicalDriverJsonlPaths(string eventsPath, string searchRoot)
     {
         var primaryPath = Path.GetFullPath(eventsPath);
-        var sibling = Path.Combine(searchRoot, "driver-events.jsonl");
-        if (File.Exists(sibling) && !string.Equals(Path.GetFullPath(sibling), primaryPath, StringComparison.OrdinalIgnoreCase))
-        {
-            // The guest output contract places events.json and driver-events.jsonl
-            // beside one another. Prefer that sibling so stale nested outputs
-            // cannot be merged into a report by filesystem enumeration order.
-            return [Path.GetFullPath(sibling)];
-        }
-
-        // Keep the legacy recovery behavior for imported layouts that put the
-        // canonical stream below the selected events directory, but make the
-        // fallback deterministic and never re-read the primary file.
+        // The guest output contract places events.json and the stream parts
+        // beside one another. Include all parts in lexical sequence so a
+        // high-volume run cannot silently lose rows after JSONL rotation.
         return SafeEnumerateFiles(searchRoot, path =>
-                string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase))
+                IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
             .Where(path => !string.Equals(Path.GetFullPath(path), primaryPath, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(Path.GetFullPath)
             .ToList();
+    }
+
+    private static bool IsCanonicalOrRotatedDriverJsonl(string? fileName)
+    {
+        if (string.Equals(fileName, "driver-events.jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // R0Collector uses driver-events.part-000001.jsonl. Keep the
+        // predicate strict so unrelated files named driver-events-backup.jsonl
+        // cannot enter the behavior stream.
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            !fileName.StartsWith("driver-events.part-", StringComparison.OrdinalIgnoreCase) ||
+            !fileName.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var number = fileName["driver-events.part-".Length..^".jsonl".Length];
+        return number.Length == 6 && number.All(static ch => ch is >= '0' and <= '9');
     }
 
     private static SandboxEvent MergeMissingEventData(SandboxEvent existing, SandboxEvent imported)

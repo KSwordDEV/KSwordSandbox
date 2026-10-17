@@ -15,9 +15,11 @@ namespace KSword::Sandbox::R0Collector {
 // sidecar.  The sidecar is deliberately separate from the JSONL stream so a
 // disk-full or interrupted write can still leave structured evidence.
 // Return: true when the primary sink is ready.
-bool EventWriter::Open(const std::wstring& outputPath, std::wstring* error) {
+bool EventWriter::Open(const std::wstring& outputPath, std::wstring* error, const unsigned long long maxOutputBytes) {
     outputPath_ = outputPath;
+    currentOutputPath_ = outputPath;
     failurePath_ = outputPath == L"-" ? std::wstring{} : outputPath + L".failure.json";
+    maxOutputBytes_ = maxOutputBytes;
     std::ios::sync_with_stdio(false);
     if (outputPath == L"-") {
         stream_ = &std::cout;
@@ -25,20 +27,48 @@ bool EventWriter::Open(const std::wstring& outputPath, std::wstring* error) {
     }
 
     fileBuffer_.resize(kFileBufferBytes);
+    return OpenSegment(error);
+}
+
+bool EventWriter::OpenSegment(std::wstring* error) {
     file_.rdbuf()->pubsetbuf(fileBuffer_.data(), static_cast<std::streamsize>(fileBuffer_.size()));
     errno = 0;
-    file_.open(std::filesystem::path(outputPath), std::ios::out | std::ios::binary | std::ios::trunc);
+    file_.open(std::filesystem::path(currentOutputPath_), std::ios::out | std::ios::binary | std::ios::trunc);
     if (!file_.is_open()) {
         if (error != nullptr) {
-            *error = L"Unable to open output JSONL file: " + outputPath +
-                L" / \u65e0\u6cd5\u6253\u5f00\u8f93\u51fa JSONL \u6587\u4ef6\uff1a" + outputPath;
+            *error = L"Unable to open output JSONL file: " + currentOutputPath_ +
+                L" / \u65e0\u6cd5\u6253\u5f00\u8f93\u51fa JSONL \u6587\u4ef6\uff1a" + currentOutputPath_;
         }
-        RecordFailure("open", "Unable to open output JSONL file.");
+        RecordFailure(outputSegmentIndex_ == 0 ? "open" : "rotate", "Unable to open output JSONL segment.");
         return false;
     }
-
+    currentOutputBytes_ = 0;
     stream_ = &file_;
     return true;
+}
+
+bool EventWriter::Rotate(std::wstring* error) {
+    if (stream_ == nullptr || outputPath_ == L"-" || maxOutputBytes_ == 0 || currentOutputBytes_ == 0) {
+        return true;
+    }
+    if (!Flush()) {
+        return false;
+    }
+    file_.close();
+    if (file_.fail()) {
+        RecordFailure("rotate", "JSONL segment close failed.");
+        return false;
+    }
+    ++outputSegmentIndex_;
+    ++rotatedSegmentCount_;
+    const auto suffix = std::wstring(L".part-") +
+        (outputSegmentIndex_ < 10 ? L"00000" : outputSegmentIndex_ < 100 ? L"0000" : outputSegmentIndex_ < 1000 ? L"000" : outputSegmentIndex_ < 10000 ? L"00" : outputSegmentIndex_ < 100000 ? L"0" : L"") +
+        std::to_wstring(outputSegmentIndex_) + L".jsonl";
+    const auto dot = outputPath_.find_last_of(L'.');
+    currentOutputPath_ = dot == std::wstring::npos
+        ? outputPath_ + suffix
+        : outputPath_.substr(0, dot) + suffix;
+    return OpenSegment(error);
 }
 
 // Input: one serialized JSONL line.
@@ -56,6 +86,13 @@ bool EventWriter::WriteLine(const std::string& line) {
     ++failure_.linesAttempted;
     ++failure_.lineNumber;
     failure_.lineBytes = static_cast<unsigned long long>(line.size()) + 1ULL;
+    if (maxOutputBytes_ > 0 && currentOutputBytes_ > 0 &&
+        currentOutputBytes_ + failure_.lineBytes > maxOutputBytes_) {
+        std::wstring rotateError;
+        if (!Rotate(&rotateError)) {
+            return false;
+        }
+    }
     failure_.bytesAttempted += failure_.lineBytes;
     errno = 0;
     (*stream_) << line << '\n';
@@ -70,6 +107,7 @@ bool EventWriter::WriteLine(const std::string& line) {
     }
 
     failure_.bytesAccepted += failure_.lineBytes;
+    currentOutputBytes_ += failure_.lineBytes;
     return true;
 }
 
@@ -131,6 +169,9 @@ std::string EventWriter::BuildFailureDiagnosticJson() const {
     std::string json = "{\"schema\":\"ksword.sandbox.r0.output-failure\",\"failureType\":";
     json += JsonStringFromUtf8(writeFailure ? "outputWriteFailure" : "outputOpenFailure");
     json += ",\"outputPath\":" + JsonStringFromWide(outputPath_);
+    json += ",\"currentOutputPath\":" + JsonStringFromWide(currentOutputPath_);
+    json += ",\"maxOutputBytes\":" + std::to_string(maxOutputBytes_);
+    json += ",\"rotatedSegmentCount\":" + std::to_string(rotatedSegmentCount_);
     json += ",\"failurePath\":" + JsonStringFromWide(failurePath_);
     json += ",\"stage\":" + JsonStringFromUtf8(failure_.stage);
     json += ",\"message\":" + JsonStringFromUtf8(failure_.message);

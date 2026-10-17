@@ -400,7 +400,7 @@ class EventWriter {
 public:
     ~EventWriter() { Flush(); }
 
-    bool Open(const std::wstring& outputPath, std::wstring* error);
+    bool Open(const std::wstring& outputPath, std::wstring* error, unsigned long long maxOutputBytes = 0);
     bool WriteLine(const std::string& line);
     bool Flush();
 
@@ -442,14 +442,21 @@ private:
     void RecordFailure(const char* stage, const std::string& message);
     void WriteFailureDiagnostic() const;
     std::string BuildFailureDiagnosticJson() const;
+    bool OpenSegment(std::wstring* error);
+    bool Rotate(std::wstring* error);
 
     std::wstring outputPath_;
+    std::wstring currentOutputPath_;
     std::wstring failurePath_;
     std::ofstream file_;
     std::vector<char> fileBuffer_;
     std::ostream* stream_ = nullptr;
     size_t linesSinceFlush_ = 0;
     FailureState failure_;
+    unsigned long long maxOutputBytes_ = 0;
+    unsigned long long currentOutputBytes_ = 0;
+    unsigned long long outputSegmentIndex_ = 0;
+    unsigned long long rotatedSegmentCount_ = 0;
     static constexpr size_t kFlushInterval = 8192;
     static constexpr size_t kFileBufferBytes = 4U * 1024U * 1024U;
 };

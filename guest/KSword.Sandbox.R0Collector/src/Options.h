@@ -19,6 +19,9 @@ struct Options {
     // drain that backlog on the normal collector path; operators can lower it
     // explicitly when a hard run-time cap is preferred.
     int drainGraceMs = 120000;
+    // Rotate high-volume JSONL before the file system/CRT write boundary.
+    // Zero disables rotation for low-level diagnostics.
+    unsigned long long maxOutputBytes = 256ULL * 1024ULL * 1024ULL;
     // Keep the live ring drain responsive during guest boot and sample launch.
     // The producer queue is finite; a 500 ms default lets file/registry
     // startup bursts overwrite records before the first drain. Operators can

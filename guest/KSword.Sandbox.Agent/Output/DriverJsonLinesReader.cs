@@ -147,6 +147,36 @@ internal sealed class DriverJsonLinesReader
     }
 
     /// <summary>
+    /// Summarizes a canonical stream and its numbered rotation parts. Inputs
+    /// are ordered paths; processing aggregates counters without materializing
+    /// any row payload, preserving a single deferred-import contract.
+    /// </summary>
+    public StreamSummary Summarize(IEnumerable<string> paths)
+    {
+        long bytes = 0, lines = 0, nonEmpty = 0, malformed = 0, lossRows = 0, lost = 0;
+        string? contract = null;
+        var maxLineBytes = 0;
+        var completed = true;
+        var any = false;
+        foreach (var path in paths)
+        {
+            any = true;
+            var summary = Summarize(path);
+            bytes += summary.ByteCount;
+            lines += summary.LineCount;
+            nonEmpty += summary.NonEmptyLineCount;
+            malformed += summary.MalformedLineCount;
+            lossRows += summary.LossRowCount;
+            lost = Math.Max(lost, summary.LostEventCount);
+            contract ??= summary.RowContract;
+            maxLineBytes = Math.Max(maxLineBytes, summary.MaxLineBytes);
+            completed &= summary.ReadCompleted;
+        }
+
+        return new StreamSummary(bytes, lines, nonEmpty, malformed, lossRows, lost, contract, maxLineBytes, any && completed);
+    }
+
+    /// <summary>
     /// Reads all driver events from a JSONL file when present.
     /// The input is an optional path, processing tolerates missing files, and
     /// the method returns parsed events.
@@ -359,6 +389,21 @@ internal sealed class DriverJsonLinesReader
             }
         }
 
+        return events;
+    }
+
+    /// <summary>
+    /// Reads ordered canonical stream parts. Inputs are paths and a root PID;
+    /// processing retains each part's parse diagnostics and concatenates rows
+    /// without deduplicating raw evidence across segments.
+    /// </summary>
+    public IReadOnlyList<SandboxEvent> ReadForSampleTree(IEnumerable<string> paths, int? rootProcessId)
+    {
+        var events = new List<SandboxEvent>();
+        foreach (var path in paths)
+        {
+            events.AddRange(ReadForSampleTree(path, rootProcessId));
+        }
         return events;
     }
 

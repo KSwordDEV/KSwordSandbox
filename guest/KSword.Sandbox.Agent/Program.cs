@@ -341,14 +341,15 @@ internal static class AgentProgram
             await StopR0CollectorAsync(r0Collector, events);
         }
 
-        var driverEventsDeferred = ShouldDeferDriverEvents(options.DriverEventsPath);
+        var driverEventPaths = EnumerateDriverEventPaths(options.DriverEventsPath);
+        var driverEventsDeferred = ShouldDeferDriverEvents(driverEventPaths);
         var driverEvents = driverEventsDeferred
             ? Array.Empty<SandboxEvent>()
-            : ReadDriverEvents(options.DriverEventsPath, executionProcessId);
+            : ReadDriverEvents(driverEventPaths, executionProcessId);
         events.AddRange(driverEvents);
         if (driverEventsDeferred)
         {
-            var summary = new DriverJsonLinesReader().Summarize(options.DriverEventsPath);
+            var summary = new DriverJsonLinesReader().Summarize(driverEventPaths);
             events.Add(CreateDeferredDriverEventsMarker(
                 options,
                 executionProcessId,
@@ -385,16 +386,24 @@ internal static class AgentProgram
     /// processing uses a stable byte threshold and returns false for missing
     /// or small streams so existing compact smoke contracts remain unchanged.
     /// </summary>
-    private static bool ShouldDeferDriverEvents(string? path)
+    private static bool ShouldDeferDriverEvents(IReadOnlyList<string> paths)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (paths.Count == 0)
         {
             return false;
         }
 
         try
         {
-            return File.Exists(path) && new FileInfo(path).Length > DriverEventsInlineThresholdBytes;
+            long total = 0;
+            foreach (var path in paths)
+            {
+                if (File.Exists(path))
+                {
+                    total = checked(total + new FileInfo(path).Length);
+                }
+            }
+            return total > DriverEventsInlineThresholdBytes;
         }
         catch (IOException)
         {
@@ -404,6 +413,59 @@ internal static class AgentProgram
         {
             return false;
         }
+        catch (OverflowException)
+        {
+            return true;
+        }
+    }
+
+    private static IReadOnlyList<string> EnumerateDriverEventPaths(string? canonicalPath)
+    {
+        if (string.IsNullOrWhiteSpace(canonicalPath))
+        {
+            return [];
+        }
+
+        var fullPath = Path.GetFullPath(canonicalPath);
+        var root = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            return File.Exists(fullPath) ? [fullPath] : [];
+        }
+
+        try
+        {
+            return Directory.EnumerateFiles(root, "driver-events*.jsonl", SearchOption.TopDirectoryOnly)
+                .Where(path => IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
+                .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .Select(Path.GetFullPath)
+                .ToArray();
+        }
+        catch (IOException)
+        {
+            return File.Exists(fullPath) ? [fullPath] : [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return File.Exists(fullPath) ? [fullPath] : [];
+        }
+    }
+
+    private static bool IsCanonicalOrRotatedDriverJsonl(string? fileName)
+    {
+        if (string.Equals(fileName, "driver-events.jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            !fileName.StartsWith("driver-events.part-", StringComparison.OrdinalIgnoreCase) ||
+            !fileName.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        var number = fileName["driver-events.part-".Length..^".jsonl".Length];
+        return number.Length == 6 && number.All(static ch => ch is >= '0' and <= '9');
     }
 
     /// <summary>
@@ -1950,10 +2012,10 @@ internal static class AgentProgram
     /// as guest evidence, and the method returns normalized events for
     /// inclusion in events.json.
     /// </summary>
-    private static IReadOnlyList<SandboxEvent> ReadDriverEvents(string? path, int? rootProcessId)
+    private static IReadOnlyList<SandboxEvent> ReadDriverEvents(IReadOnlyList<string> paths, int? rootProcessId)
     {
         var driverJsonLinesReader = new DriverJsonLinesReader();
-        return driverJsonLinesReader.ReadForSampleTree(path, rootProcessId);
+        return driverJsonLinesReader.ReadForSampleTree(paths, rootProcessId);
     }
 
     /// <summary>
@@ -1978,8 +2040,63 @@ internal static class AgentProgram
         TryWriteArtifactManifest(options, events, artifactWriter, droppedFileMetadataByRelativePath);
         GuestSelfNoiseMetadata.Apply(events);
 
-        artifactWriter.WriteEvents(options.OutputDirectory, events);
-        artifactWriter.WriteSummary(options.OutputDirectory, options.SamplePath, events.Count);
+        try
+        {
+            artifactWriter.WriteEvents(options.OutputDirectory, events);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            WriteGuestOutputFailureDiagnostic(options.OutputDirectory, "events.json", ex);
+        }
+
+        try
+        {
+            artifactWriter.WriteSummary(options.OutputDirectory, options.SamplePath, events.Count);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            WriteGuestOutputFailureDiagnostic(options.OutputDirectory, "agent-summary.json", ex);
+        }
+    }
+
+    private static void WriteGuestOutputFailureDiagnostic(string outputDirectory, string artifactName, Exception exception)
+    {
+        var path = Path.Combine(outputDirectory, artifactName + ".failure.json");
+        try
+        {
+            var payload = new
+            {
+                schema = "ksword.sandbox.guest.output-failure",
+                artifact = artifactName,
+                captureState = "failed",
+                failureType = exception is UnauthorizedAccessException ? "accessDenied" : "outputWriteFailure",
+                exceptionType = exception.GetType().FullName ?? exception.GetType().Name,
+                message = exception.Message,
+                availableFreeBytes = TryGetAvailableFreeBytes(outputDirectory),
+                zhMessage = $"来宾 {artifactName} 写入失败，报告必须按部分采集处理。",
+                zhHint = "请检查来宾输出盘剩余空间；原始 driver-events 分片和失败诊断仍应保留。"
+            };
+            File.WriteAllText(path, JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        }
+        catch
+        {
+            // A full disk can also reject the tiny diagnostic. Preserve the
+            // failure on stderr so the host-side runbook still records it.
+            Console.Error.WriteLine($"guest-output-failure artifact={artifactName} type={exception.GetType().Name} message={exception.Message}");
+        }
+    }
+
+    private static long? TryGetAvailableFreeBytes(string outputDirectory)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(outputDirectory));
+            return string.IsNullOrWhiteSpace(root) ? null : new DriveInfo(root).AvailableFreeSpace;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
