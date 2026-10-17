@@ -66,7 +66,7 @@ public static class CollectionHealthSummaryBuilder
         var etwLossRows = raw.Where(IsEtwLossRow).ToList();
         var driverLossRows = raw.Where(IsDriverLossRow).ToList();
         var driverHealthRows = raw.Where(IsDriverHealthRow).ToList();
-        var failureRows = raw.Where(IsFailureRow).ToList();
+        var failureRows = raw.Where(evt => IsFailureRow(evt, raw)).ToList();
         var omitted = Math.Max(0, raw.Count - report.Count);
         var driverQueueDepth = MaxDataUnsigned(driverHealthRows, DriverQueueDepthKeys);
         // A startup POLL/GET_STATUS snapshot is not the unread tail at stop.
@@ -85,7 +85,7 @@ public static class CollectionHealthSummaryBuilder
         var outputWriteFailureRows = raw.Count(IsOutputWriteFailureRow);
         var etwFailureRows = raw.Count(IsEtwFailure);
         var pcapFailureRows = raw.Count(IsPcapFailure);
-        var agentFailureRows = raw.Count(IsAgentFailure);
+        var agentFailureRows = raw.Count(evt => IsAgentFailure(evt, raw));
         var stateReasons = BuildStateReasons(
             raw,
             driverHealthRows.Count,
@@ -251,15 +251,15 @@ public static class CollectionHealthSummaryBuilder
             IsEtwDecodeFailure(evt) ||
             IsEtwFailure(evt) ||
             IsPcapFailure(evt) ||
-            IsAgentFailure(evt) ||
+            IsAgentFailureCore(evt) ||
             TextContainsAny(evt.EventType, "capture_failed", "capture-failed", "capture_error", "capture-error");
     }
 
-    private static bool IsFailureRow(SandboxEvent evt)
+    private static bool IsFailureRow(SandboxEvent evt, IReadOnlyCollection<SandboxEvent> raw)
     {
         if (IsLossRow(evt) || IsProcessTreeUnavailable(evt) || IsScheduledTaskCaptureFailed(evt) ||
             IsPktmonStopFailed(evt) || IsEtwDecodeFailure(evt) ||
-            IsEtwFailure(evt) || IsPcapFailure(evt) || IsAgentFailure(evt) ||
+            IsEtwFailure(evt) || IsPcapFailure(evt) || IsAgentFailure(evt, raw) ||
             IsMalformedDriverRow(evt) || IsOutputWriteFailureRow(evt))
         {
             return true;
@@ -391,9 +391,13 @@ public static class CollectionHealthSummaryBuilder
 
     private static bool IsDriverQualityWarning(SandboxEvent evt)
     {
+        // Point-in-time queueDepth/eventsQueued values describe collector
+        // workload. They are not evidence of loss until an explicit final
+        // unread tail, deadline, suppression, backpressure, or I/O failure.
+        var finalUnread = HasExplicitRemainingUnread(evt) &&
+            PositiveData(evt, DriverRemainingUnreadKeys);
         return IsDrainStoppedAtDeadline(evt) ||
-            PositiveData(evt, DriverQueueDepthKeys) ||
-            PositiveData(evt, DriverRemainingUnreadKeys) ||
+            finalUnread ||
             PositiveData(evt, DriverSuppressedKeys) ||
             BoolTrue(evt, "backpressure", "backpressureObserved") ||
             IsDriverLossRow(evt) ||
@@ -514,7 +518,7 @@ public static class CollectionHealthSummaryBuilder
             TextEqualsAny(Value(evt, "status", "captureState", "readinessState"), "failed", "failure", "error", "unavailable");
     }
 
-    private static bool IsAgentFailure(SandboxEvent evt)
+    private static bool IsAgentFailureCore(SandboxEvent evt)
     {
         var type = evt.EventType ?? string.Empty;
         var source = Value(evt, "captureSource", "collectorSource", "source");
@@ -542,6 +546,26 @@ public static class CollectionHealthSummaryBuilder
 
         var exitCode = Value(evt, "exitCode", "commandExitCode", "processExitCode");
         return TryParseNonZeroExitCode(exitCode);
+    }
+
+    private static bool IsAgentFailure(SandboxEvent evt, IReadOnlyCollection<SandboxEvent> raw)
+    {
+        return IsAgentFailureCore(evt) && !IsExpectedTimedSampleExit(evt, raw);
+    }
+
+    private static bool IsExpectedTimedSampleExit(SandboxEvent evt, IReadOnlyCollection<SandboxEvent> raw)
+    {
+        if (!string.Equals(evt.EventType, "process.exit", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(evt.Source, "guest", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return raw.Any(other =>
+            string.Equals(other.EventType, "process.timeout", StringComparison.OrdinalIgnoreCase) &&
+            other.ProcessId == evt.ProcessId &&
+            (string.IsNullOrWhiteSpace(evt.Path) || string.IsNullOrWhiteSpace(other.Path) ||
+             string.Equals(evt.Path, other.Path, StringComparison.OrdinalIgnoreCase)));
     }
 
     /// <summary>

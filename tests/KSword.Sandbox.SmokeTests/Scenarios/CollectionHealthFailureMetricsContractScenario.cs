@@ -104,6 +104,7 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(6, model.CollectionHealth.FailureRows, "AnalysisReport should carry the collection-health model.");
 
         AssertStateBoundaries();
+        AssertExpectedTimeoutTermination();
         AssertR0OutputFailureSidecarFinalStatus();
 
         return Task.FromResult(new SmokeTestResult
@@ -233,6 +234,79 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         ]);
         RequireTrue(unknownFinal.State == "partial", "Zero loss without a final queue state must remain partial.");
         RequireTrue(!unknownFinal.DriverQueueDepthAtStopKnown, "A startup/status snapshot must not prove a final queue state.");
+    }
+
+    private static void AssertExpectedTimeoutTermination()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        var timedOut = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "r0collector.stopped",
+                Source = "r0collector",
+                Timestamp = timestamp,
+                Data =
+                {
+                    ["statusPhase"] = "final",
+                    ["finalStatusAvailable"] = "true",
+                    ["queueDrained"] = "true",
+                    ["remainingQueueDepth"] = "0"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.timeout",
+                Source = "guest",
+                ProcessId = 4242,
+                Path = @"C:\samples\long-running.exe",
+                Timestamp = timestamp.AddSeconds(30)
+            },
+            new SandboxEvent
+            {
+                EventType = "process.exit",
+                Source = "guest",
+                ProcessId = 4242,
+                Path = @"C:\samples\long-running.exe",
+                Timestamp = timestamp.AddSeconds(30),
+                Data = { ["exitCode"] = "-1" }
+            }
+        ]);
+
+        RequireEqual(0, timedOut.AgentFailureRows, "A timed sample termination must not be misclassified as a guest Agent collection failure.");
+        RequireEqual(0, timedOut.FailureRows, "A timed sample termination must not create a collection failure row.");
+        RequireTrue(timedOut.State == "complete", "A timed sample termination with complete collector evidence should remain complete.");
+
+        var busyPoll = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "r0collector.driverPoll",
+                Source = "r0collector",
+                Timestamp = timestamp,
+                Data =
+                {
+                    ["queueDepth"] = "512",
+                    ["eventsQueued"] = "512",
+                    ["lostCount"] = "0",
+                    ["backpressureObserved"] = "false"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "r0collector.stopped",
+                Source = "r0collector",
+                Timestamp = timestamp.AddSeconds(1),
+                Data =
+                {
+                    ["statusPhase"] = "final",
+                    ["finalStatusAvailable"] = "true",
+                    ["queueDrained"] = "true",
+                    ["remainingQueueDepth"] = "0"
+                }
+            }
+        ]);
+        RequireEqual(0, busyPoll.DriverQualityWarningRows, "A non-zero in-flight queue depth must not be reported as a quality warning when the final queue is drained.");
     }
 
     private static void AssertR0OutputFailureSidecarFinalStatus()
