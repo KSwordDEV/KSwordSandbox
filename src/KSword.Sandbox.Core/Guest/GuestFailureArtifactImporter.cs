@@ -82,7 +82,11 @@ public static class GuestFailureArtifactImporter
             values["statusState"] = status.State ?? string.Empty;
             values["statusCapturedAtUtc"] = status.CapturedAtUtc ?? string.Empty;
             values["stdoutBytes"] = status.StdoutBytes.ToString(CultureInfo.InvariantCulture);
-            values["stderrBytes"] = status.StderrBytes.ToString(CultureInfo.InvariantCulture);
+            values["stderrBytes"] = Math.Max(status.StderrBytes, FileLength(stderrPath)).ToString(CultureInfo.InvariantCulture);
+        }
+        else if (stderrPath is not null)
+        {
+            values["stderrBytes"] = FileLength(stderrPath).ToString(CultureInfo.InvariantCulture);
         }
         if (!string.IsNullOrWhiteSpace(stderr))
         {
@@ -147,8 +151,20 @@ public static class GuestFailureArtifactImporter
     private static string? ReadText(string? path)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
-        try { return File.ReadAllText(path).Trim(); }
+        try
+        {
+            using var reader = new StreamReader(path, detectEncodingFromByteOrderMarks: true);
+            var buffer = new char[4096];
+            var count = reader.ReadBlock(buffer, 0, buffer.Length);
+            return new string(buffer, 0, count).Trim();
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    private static long FileLength(string? path)
+    {
+        try { return string.IsNullOrWhiteSpace(path) ? 0 : new FileInfo(path).Length; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FileNotFoundException) { return 0; }
     }
 
     private static bool TryParseExit(string? text, out int exitCode) =>
