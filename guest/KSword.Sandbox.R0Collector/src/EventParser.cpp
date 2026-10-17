@@ -4534,7 +4534,10 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
 // Processing: Copies current producer mask, queue depth, counters, and last
 // driver status into JSON data for operator diagnostics before event draining.
 // Return: JSON object text for SandboxEvent.data.
-std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWORD bytesReturned) {
+std::string BuildStatusData(
+    const KSWORD_SANDBOX_STATUS_REPLY& reply,
+    const DWORD bytesReturned,
+    const bool finalStatus) {
     JsonDataObjectBuilder data;
     const bool lost = reply.TotalEventsDropped != 0 || reply.ProducerDroppedMask != 0;
     const bool atCapacity =
@@ -4590,6 +4593,8 @@ std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWOR
     data.AddUnsigned("queueCapacity", reply.QueueCapacity);
     data.AddUnsigned("queueDepth", reply.QueueDepth);
     data.AddUnsigned("remainingQueueDepth", reply.QueueDepth);
+    data.AddUtf8("statusPhase", finalStatus ? "final" : "snapshot");
+    data.AddBool("finalStatusAvailable", finalStatus);
     data.AddBool("queueDrained", reply.QueueDepth == 0);
     data.AddBool("drainQueueDrained", reply.QueueDepth == 0);
     data.AddUnsigned("queueHighWatermark", reply.QueueHighWatermark);

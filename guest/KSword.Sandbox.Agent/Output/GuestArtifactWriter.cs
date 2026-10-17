@@ -888,6 +888,8 @@ internal sealed class GuestArtifactWriter
             "sourceArtifactImportPath",
             "driverEventPath",
             "driverEventsPath",
+            "outputFailurePath",
+            "outputFailureRelativePath",
             "driverEventsRelativePath",
             "jsonlPath",
             "jsonlRelativePath",
@@ -925,6 +927,7 @@ internal sealed class GuestArtifactWriter
             "sourceArtifactFullPath",
             "driverEventPath",
             "driverEventsPath",
+            "outputFailurePath",
             "jsonlPath",
             "stdoutPath",
             "stderrPath",
@@ -998,6 +1001,13 @@ internal sealed class GuestArtifactWriter
             fileName.Contains("driver", StringComparison.OrdinalIgnoreCase))
         {
             classification = new ArtifactClassification(ArtifactKind.DriverEventsJsonLines, "telemetry", "driver-events", "driver-events");
+            return true;
+        }
+
+        if (fileName.Contains("driver-events", StringComparison.OrdinalIgnoreCase) &&
+            fileName.EndsWith(".failure.json", StringComparison.OrdinalIgnoreCase))
+        {
+            classification = new ArtifactClassification(ArtifactKind.Log, "log", "diagnostic-log", "r0-logs");
             return true;
         }
 

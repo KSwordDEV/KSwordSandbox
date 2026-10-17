@@ -233,6 +233,24 @@ public sealed record CollectionHealthSummary
     public int DriverRemainingUnread { get; init; }
 
     /// <summary>
+    /// True only when a final collector status/stopped row explicitly
+    /// reported the queue at stop. Initial POLL/GET_STATUS snapshots are not
+    /// substitutes for this value.
+    /// </summary>
+    public bool DriverQueueDepthAtStopKnown { get; init; }
+
+    /// <summary>
+    /// Number of malformed/unreadable driver JSONL rows preserved as health
+    /// evidence. These rows are never silently treated as sample behavior.
+    /// </summary>
+    public int DriverMalformedRows { get; init; }
+
+    /// <summary>
+    /// Number of R0 output-write failure diagnostics or exit-70 failures.
+    /// </summary>
+    public int DriverOutputWriteFailureRows { get; init; }
+
+    /// <summary>
     /// Number of driver health rows that report a drain deadline stop.
     /// </summary>
     public int DriverDrainStoppedAtDeadlineRows { get; init; }

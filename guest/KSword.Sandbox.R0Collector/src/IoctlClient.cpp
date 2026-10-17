@@ -577,9 +577,14 @@ bool EmitDriverStatus(
     const UniqueHandle& device,
     const Options& options,
     EventWriter& writer,
-    unsigned long long* queueDepth) {
+    unsigned long long* queueDepth,
+    bool* statusAvailable,
+    const bool finalStatus) {
     if (queueDepth != nullptr) {
         *queueDepth = 0;
+    }
+    if (statusAvailable != nullptr) {
+        *statusAvailable = false;
     }
     KSWORD_SANDBOX_STATUS_REPLY reply {};
     DWORD bytesReturned = 0;
@@ -628,11 +633,17 @@ bool EmitDriverStatus(
     if (queueDepth != nullptr) {
         *queueDepth = reply.QueueDepth;
     }
+    if (statusAvailable != nullptr) {
+        // This flag describes the driver IOCTL/reply, independently of the
+        // JSONL sink.  A later EmitEvent can fail after this point and the
+        // runtime failure sidecar still needs to distinguish those cases.
+        *statusAvailable = true;
+    }
 
     SandboxEventFields event;
     event.eventType = "r0collector.driverStatus";
     event.path = options.devicePath;
-    event.dataJson = BuildStatusData(reply, bytesReturned);
+    event.dataJson = BuildStatusData(reply, bytesReturned, finalStatus);
     return EmitEvent(writer, event);
 }
 

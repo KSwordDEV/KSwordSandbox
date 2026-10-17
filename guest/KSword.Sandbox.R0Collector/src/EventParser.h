@@ -53,7 +53,10 @@ unsigned long long ExtractTypedPayloadProcessId(
     unsigned long long fallbackProcessId);
 std::string BuildHealthData(const KSWORD_SANDBOX_HEALTH_REPLY& reply, DWORD bytesReturned);
 std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply, DWORD bytesReturned);
-std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, DWORD bytesReturned);
+std::string BuildStatusData(
+    const KSWORD_SANDBOX_STATUS_REPLY& reply,
+    DWORD bytesReturned,
+    bool finalStatus = false);
 std::string BuildNetworkStatusData(const KSWORD_SANDBOX_NETWORK_STATUS_REPLY& reply, DWORD bytesReturned);
 std::string BuildSetProducerEnableMaskData(
     const KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY& reply,

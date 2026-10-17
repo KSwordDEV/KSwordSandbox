@@ -12,6 +12,37 @@
 
 namespace KSword::Sandbox::R0Collector {
 
+// Input: a live driver handle, collector options, and an EventWriter that has
+// just reported an output failure.
+// Processing: Issues one best-effort GET_STATUS directly after the failed
+// JSONL write.  The status result is written to the independent failure
+// sidecar; it must not depend on the broken JSONL stream.
+// Return: the runtime-failure exit code used by the sidecar supervisor.
+int RuntimeFailureAfterOutputWrite(
+    const UniqueHandle& device,
+    const Options& options,
+    EventWriter& writer) {
+    if (writer.HasFailure() && !writer.FailureStatusAnnotated() && device.IsValid()) {
+        unsigned long long queueDepthAtStop = 0;
+        bool finalStatusAvailable = false;
+        // EmitDriverStatus still performs the IOCTL even though its final
+        // JSONL row cannot be written.  statusAvailable is set immediately
+        // after a valid reply, before EmitEvent touches the failed sink.
+        (void)EmitDriverStatus(
+            device,
+            options,
+            writer,
+            &queueDepthAtStop,
+            &finalStatusAvailable,
+            true);
+        writer.AnnotateFailureStatus(
+            finalStatusAvailable,
+            finalStatusAvailable,
+            queueDepthAtStop);
+    }
+    return kExitRuntimeFailure;
+}
+
 // Input: Collector options used for this run.
 // Processing: Serializes the configuration into the data object of lifecycle events.
 // Return: JSON object text for SandboxEvent.data.
@@ -349,24 +380,24 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     }
 
     if (!EmitDriverHealth(device, options, writer)) {
-        return kExitRuntimeFailure;
+        return RuntimeFailureAfterOutputWrite(device, options, writer);
     }
 
     ULONG supportedProducerMask = 0;
     if (!EmitDriverCapabilities(device, options, writer, &supportedProducerMask)) {
-        return kExitRuntimeFailure;
+        return RuntimeFailureAfterOutputWrite(device, options, writer);
     }
 
     if (!EmitDriverSetProducerEnableMask(device, options, supportedProducerMask, writer)) {
-        return kExitRuntimeFailure;
+        return RuntimeFailureAfterOutputWrite(device, options, writer);
     }
 
     if (!EmitDriverStatus(device, options, writer)) {
-        return kExitRuntimeFailure;
+        return RuntimeFailureAfterOutputWrite(device, options, writer);
     }
 
     if (!EmitDriverNetworkStatus(device, options, writer)) {
-        return kExitRuntimeFailure;
+        return RuntimeFailureAfterOutputWrite(device, options, writer);
     }
 
     unsigned long long polls = 0;
@@ -393,7 +424,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     do {
         unsigned long long queueDepthSnapshot = 0;
         if (!EmitDriverPoll(device, options, writer, &queueDepthSnapshot)) {
-            return kExitRuntimeFailure;
+            return RuntimeFailureAfterOutputWrite(device, options, writer);
         }
         ++polls;
 
@@ -415,7 +446,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
                     &eventsEmitted,
                     &recordsProcessed,
                     &suppressedEvents)) {
-                return kExitRuntimeFailure;
+                return RuntimeFailureAfterOutputWrite(device, options, writer);
             }
             ++readBatches;
             driverEvents += eventsEmitted;
@@ -447,7 +478,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
                 driverRecordsProcessed,
                 collectorSuppressedEvents,
                 collectorSkippedEvents)) {
-            return kExitRuntimeFailure;
+            return RuntimeFailureAfterOutputWrite(device, options, writer);
         }
 
         if (options.durationSeconds <= 0 ||
@@ -473,7 +504,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
         while (std::chrono::steady_clock::now() < drainDeadline) {
             unsigned long long queueDepthSnapshot = 0;
             if (!EmitDriverPoll(device, options, writer, &queueDepthSnapshot)) {
-                return kExitRuntimeFailure;
+                return RuntimeFailureAfterOutputWrite(device, options, writer);
             }
             ++polls;
             ++drainPolls;
@@ -512,7 +543,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
                         &eventsEmitted,
                         &recordsProcessed,
                         &suppressedEvents)) {
-                    return kExitRuntimeFailure;
+                    return RuntimeFailureAfterOutputWrite(device, options, writer);
                 }
                 ++readBatches;
                 ++drainReadBatches;
@@ -539,7 +570,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
                     driverRecordsProcessed,
                     collectorSuppressedEvents,
                     collectorSkippedEvents)) {
-                return kExitRuntimeFailure;
+                return RuntimeFailureAfterOutputWrite(device, options, writer);
             }
 
             if (drainStoppedAtBatchLimit || drainStoppedAtDeadline) {
@@ -553,8 +584,8 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     }
 
     unsigned long long finalQueueDepth = 0;
-    if (!EmitDriverStatus(device, options, writer, &finalQueueDepth)) {
-        return kExitRuntimeFailure;
+    if (!EmitDriverStatus(device, options, writer, &finalQueueDepth, nullptr, true)) {
+        return RuntimeFailureAfterOutputWrite(device, options, writer);
     }
     drainQueueDepthAtStop = finalQueueDepth;
     if (options.durationSeconds > 0 && finalQueueDepth == 0) {
@@ -796,3 +827,4 @@ int RunCollector(int argc, wchar_t* argv[]) {
 }
 
 } // namespace KSword::Sandbox::R0Collector
+

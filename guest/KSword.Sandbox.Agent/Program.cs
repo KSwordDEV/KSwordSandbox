@@ -1324,6 +1324,9 @@ internal static class AgentProgram
         string? standardErrorPath)
     {
         var driverEventsRelativePath = TryGetOutputRelativePath(outputDirectory, driverEventsPath);
+        var outputFailureRelativePath = TryGetOutputRelativePath(
+            outputDirectory,
+            string.IsNullOrWhiteSpace(driverEventsPath) ? null : driverEventsPath + ".failure.json");
         var stdoutRelativePath = TryGetOutputRelativePath(outputDirectory, standardOutputPath);
         var stderrRelativePath = TryGetOutputRelativePath(outputDirectory, standardErrorPath);
 
@@ -1331,6 +1334,8 @@ internal static class AgentProgram
         evt.Data["artifactRelativePathStatus"] = string.IsNullOrWhiteSpace(driverEventsRelativePath) ? "not-available" : "expected-or-captured";
         AddDataIfNotEmpty(evt.Data, "driverEventsRelativePath", driverEventsRelativePath);
         AddDataIfNotEmpty(evt.Data, "jsonlRelativePath", driverEventsRelativePath);
+        AddDataIfNotEmpty(evt.Data, "outputFailurePath", outputFailureRelativePath);
+        AddDataIfNotEmpty(evt.Data, "outputFailureRelativePath", outputFailureRelativePath);
         AddDataIfNotEmpty(evt.Data, "stdoutRelativePath", stdoutRelativePath);
         AddDataIfNotEmpty(evt.Data, "stderrRelativePath", stderrRelativePath);
         AddDataIfNotEmpty(evt.Data, "artifactRelativePath", driverEventsRelativePath);

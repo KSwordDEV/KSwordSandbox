@@ -68,7 +68,9 @@ bool EmitDriverStatus(
     const UniqueHandle& device,
     const Options& options,
     EventWriter& writer,
-    unsigned long long* queueDepth = nullptr);
+    unsigned long long* queueDepth = nullptr,
+    bool* statusAvailable = nullptr,
+    bool finalStatus = false);
 bool EmitDriverNetworkStatus(const UniqueHandle& device, const Options& options, EventWriter& writer);
 bool EmitDriverSetProducerEnableMask(
     const UniqueHandle& device,

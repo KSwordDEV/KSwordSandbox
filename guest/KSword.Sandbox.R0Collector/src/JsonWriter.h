@@ -3,6 +3,7 @@
 #include "Common.h"
 
 #include <filesystem>
+#include <cerrno>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -397,66 +398,57 @@ std::string BuildSandboxEventJsonLine(const SandboxEventFields& fields);
 // Return: true when future writes can proceed; false with an explanatory error.
 class EventWriter {
 public:
-    ~EventWriter() {
-        Flush();
-    }
+    ~EventWriter() { Flush(); }
 
-    bool Open(const std::wstring& outputPath, std::wstring* error) {
-        outputPath_ = outputPath;
-        // The collector emits large compact JSONL bursts. Disable the
-        // iostream/C stdio synchronization and give file output a dedicated
-        // buffer so draining a batch does not flush once per small write.
-        std::ios::sync_with_stdio(false);
-        if (outputPath == L"-") {
-            stream_ = &std::cout;
-            return true;
-        }
+    bool Open(const std::wstring& outputPath, std::wstring* error);
+    bool WriteLine(const std::string& line);
+    bool Flush();
 
-        fileBuffer_.resize(kFileBufferBytes);
-        file_.rdbuf()->pubsetbuf(fileBuffer_.data(), static_cast<std::streamsize>(fileBuffer_.size()));
-        file_.open(std::filesystem::path(outputPath), std::ios::out | std::ios::binary | std::ios::trunc);
-        if (!file_.is_open()) {
-            if (error != nullptr) {
-                *error = L"Unable to open output JSONL file: " + outputPath +
-                    L" / \u65e0\u6cd5\u6253\u5f00\u8f93\u51fa JSONL \u6587\u4ef6\uff1a" + outputPath;
-            }
-            return false;
-        }
+    // Records the result of a best-effort final GET_STATUS after output has
+    // failed. This is written to an independent sidecar because the JSONL
+    // sink may contain a partial final line and cannot be trusted anymore.
+    void AnnotateFailureStatus(
+        bool finalStatusAvailable,
+        bool queueDepthAtStopKnown,
+        unsigned long long queueDepthAtStop);
 
-        stream_ = &file_;
-        return true;
-    }
-
-    bool WriteLine(const std::string& line) {
-        if (stream_ == nullptr) {
-            return false;
-        }
-
-        (*stream_) << line << '\n';
-        ++linesSinceFlush_;
-        if (linesSinceFlush_ >= kFlushInterval) {
-            Flush();
-        }
-        return stream_->good();
-    }
-
-    void Flush() {
-        if (stream_ != nullptr) {
-            stream_->flush();
-            linesSinceFlush_ = 0;
-        }
-    }
+    bool HasFailure() const { return failure_.failed; }
+    bool FailureStatusAnnotated() const { return failure_.statusAnnotated; }
 
     const std::wstring& OutputPath() const {
         return outputPath_;
     }
 
 private:
+    struct FailureState {
+        bool failed = false;
+        bool statusAnnotated = false;
+        std::string stage;
+        std::string message;
+        unsigned long long lineNumber = 0;
+        unsigned long long lineBytes = 0;
+        unsigned long long bytesAttempted = 0;
+        unsigned long long linesAttempted = 0;
+        unsigned long long bytesAccepted = 0;
+        int streamState = 0;
+        int errnoCode = 0;
+        DWORD win32Error = ERROR_SUCCESS;
+        bool finalStatusAvailable = false;
+        bool queueDepthAtStopKnown = false;
+        unsigned long long queueDepthAtStop = 0;
+    };
+
+    void RecordFailure(const char* stage, const std::string& message);
+    void WriteFailureDiagnostic() const;
+    std::string BuildFailureDiagnosticJson() const;
+
     std::wstring outputPath_;
+    std::wstring failurePath_;
     std::ofstream file_;
     std::vector<char> fileBuffer_;
     std::ostream* stream_ = nullptr;
     size_t linesSinceFlush_ = 0;
+    FailureState failure_;
     static constexpr size_t kFlushInterval = 8192;
     static constexpr size_t kFileBufferBytes = 4U * 1024U * 1024U;
 };

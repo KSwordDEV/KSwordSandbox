@@ -1,6 +1,7 @@
 #include "JsonWriter.h"
 
 #include <chrono>
+#include <cstring>
 #include <ctime>
 #include <iomanip>
 #include <iostream>
@@ -8,6 +9,162 @@
 #include <vector>
 
 namespace KSword::Sandbox::R0Collector {
+
+// Input: collector output path and optional error destination.
+// Processing: Opens the JSONL sink and prepares an independent failure
+// sidecar.  The sidecar is deliberately separate from the JSONL stream so a
+// disk-full or interrupted write can still leave structured evidence.
+// Return: true when the primary sink is ready.
+bool EventWriter::Open(const std::wstring& outputPath, std::wstring* error) {
+    outputPath_ = outputPath;
+    failurePath_ = outputPath == L"-" ? std::wstring{} : outputPath + L".failure.json";
+    std::ios::sync_with_stdio(false);
+    if (outputPath == L"-") {
+        stream_ = &std::cout;
+        return true;
+    }
+
+    fileBuffer_.resize(kFileBufferBytes);
+    file_.rdbuf()->pubsetbuf(fileBuffer_.data(), static_cast<std::streamsize>(fileBuffer_.size()));
+    errno = 0;
+    file_.open(std::filesystem::path(outputPath), std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!file_.is_open()) {
+        if (error != nullptr) {
+            *error = L"Unable to open output JSONL file: " + outputPath +
+                L" / \u65e0\u6cd5\u6253\u5f00\u8f93\u51fa JSONL \u6587\u4ef6\uff1a" + outputPath;
+        }
+        RecordFailure("open", "Unable to open output JSONL file.");
+        return false;
+    }
+
+    stream_ = &file_;
+    return true;
+}
+
+// Input: one serialized JSONL line.
+// Processing: Appends the line, flushes at the bounded interval, and records
+// the exact write/flush context if the stream enters fail/bad state.
+// Return: true only while the sink remains writable.
+bool EventWriter::WriteLine(const std::string& line) {
+    if (stream_ == nullptr || failure_.failed) {
+        if (!failure_.failed) {
+            RecordFailure("write", "JSONL output stream is not open.");
+        }
+        return false;
+    }
+
+    ++failure_.linesAttempted;
+    ++failure_.lineNumber;
+    failure_.lineBytes = static_cast<unsigned long long>(line.size()) + 1ULL;
+    failure_.bytesAttempted += failure_.lineBytes;
+    errno = 0;
+    (*stream_) << line << '\n';
+    ++linesSinceFlush_;
+    if (linesSinceFlush_ >= kFlushInterval && !Flush()) {
+        return false;
+    }
+
+    if (!stream_->good()) {
+        RecordFailure("write", "JSONL stream entered fail/bad state while appending a line.");
+        return false;
+    }
+
+    failure_.bytesAccepted += failure_.lineBytes;
+    return true;
+}
+
+// Input: current output stream.
+// Processing: Flushes buffered bytes and captures stream/OS error state.  No
+// exception or diagnostic write is allowed to depend on the broken stream.
+// Return: true when flush succeeds or no flush is needed.
+bool EventWriter::Flush() {
+    if (stream_ == nullptr) {
+        return true;
+    }
+
+    if (failure_.failed) {
+        return false;
+    }
+
+    errno = 0;
+    stream_->flush();
+    linesSinceFlush_ = 0;
+    if (!stream_->good()) {
+        RecordFailure("flush", "JSONL stream flush failed (fail/bad state).");
+        return false;
+    }
+    return true;
+}
+
+void EventWriter::AnnotateFailureStatus(
+    const bool finalStatusAvailable,
+    const bool queueDepthAtStopKnown,
+    const unsigned long long queueDepthAtStop) {
+    if (!failure_.failed) {
+        return;
+    }
+
+    failure_.statusAnnotated = true;
+    failure_.finalStatusAvailable = finalStatusAvailable;
+    failure_.queueDepthAtStopKnown = queueDepthAtStopKnown;
+    failure_.queueDepthAtStop = queueDepthAtStop;
+    WriteFailureDiagnostic();
+}
+
+void EventWriter::RecordFailure(const char* stage, const std::string& message) {
+    if (failure_.failed) {
+        return;
+    }
+
+    failure_.failed = true;
+    failure_.stage = stage == nullptr ? "unknown" : stage;
+    failure_.message = message;
+    failure_.streamState = stream_ == nullptr ? 0 : static_cast<int>(stream_->rdstate());
+    failure_.errnoCode = errno;
+    failure_.win32Error = GetLastError();
+    WriteFailureDiagnostic();
+}
+
+std::string EventWriter::BuildFailureDiagnosticJson() const {
+    std::string json = "{\"schema\":\"ksword.sandbox.r0.output-failure\",\"failureType\":\"outputWriteFailure\"";
+    json += ",\"outputPath\":" + JsonStringFromWide(outputPath_);
+    json += ",\"failurePath\":" + JsonStringFromWide(failurePath_);
+    json += ",\"stage\":" + JsonStringFromUtf8(failure_.stage);
+    json += ",\"message\":" + JsonStringFromUtf8(failure_.message);
+    json += ",\"lineNumber\":" + std::to_string(failure_.lineNumber);
+    json += ",\"lineBytes\":" + std::to_string(failure_.lineBytes);
+    json += ",\"bytesAttempted\":" + std::to_string(failure_.bytesAttempted);
+    json += ",\"bytesAccepted\":" + std::to_string(failure_.bytesAccepted);
+    json += ",\"linesAttempted\":" + std::to_string(failure_.linesAttempted);
+    json += ",\"streamState\":" + std::to_string(failure_.streamState);
+    json += ",\"errno\":" + std::to_string(failure_.errnoCode);
+    json += ",\"win32Error\":" + std::to_string(failure_.win32Error);
+    json += ",\"statusAnnotated\":" + std::string(failure_.statusAnnotated ? "true" : "false");
+    json += ",\"finalStatusAvailable\":" + std::string(failure_.finalStatusAvailable ? "true" : "false");
+    json += ",\"queueDepthAtStopKnown\":" + std::string(failure_.queueDepthAtStopKnown ? "true" : "false");
+    json += ",\"queueDepthAtStopUnknown\":" + std::string(failure_.queueDepthAtStopKnown ? "false" : "true");
+    json += ",\"queueDepthAtStop\":" + std::to_string(failure_.queueDepthAtStop);
+    json += ",\"exitCode\":70,\"captureState\":\"failed\"}";
+    return json;
+}
+
+void EventWriter::WriteFailureDiagnostic() const {
+    const auto json = BuildFailureDiagnosticJson();
+    if (!failurePath_.empty()) {
+        std::ofstream diagnostic(
+            std::filesystem::path(failurePath_),
+            std::ios::out | std::ios::binary | std::ios::trunc);
+        if (diagnostic.is_open()) {
+            diagnostic << json << '\n';
+            diagnostic.flush();
+        }
+    }
+
+    // stderr is redirected by Guest Agent and remains independent from the
+    // potentially truncated driver-events.jsonl sink.
+    std::cerr << json << '\n';
+    std::cerr.flush();
+}
 
 // Input: UTF-16 text from Windows APIs or command-line arguments.
 // Processing: Converts the full input string to UTF-8 with WideCharToMultiByte.

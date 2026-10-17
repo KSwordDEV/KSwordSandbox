@@ -69,14 +69,20 @@ public static class CollectionHealthSummaryBuilder
         var failureRows = raw.Where(IsFailureRow).ToList();
         var omitted = Math.Max(0, raw.Count - report.Count);
         var driverQueueDepth = MaxDataUnsigned(driverHealthRows, DriverQueueDepthKeys);
-        var driverRemainingUnread = MaxDataUnsigned(driverHealthRows, DriverRemainingUnreadKeys);
-        // Older collector status contracts expose the unread tail only as
-        // queueDepth. Preserve that value in the explicit remaining-unread
-        // field so a non-zero queue cannot be mistaken for a complete drain.
-        if (driverRemainingUnread == 0)
-        {
-            driverRemainingUnread = driverQueueDepth;
-        }
+        // A startup POLL/GET_STATUS snapshot is not the unread tail at stop.
+        // Only consume an explicit final/stopped summary (or an explicit
+        // remainingUnread field from a batch summary); otherwise expose zero
+        // plus a false Known flag so the report cannot claim the queue drained
+        // or reuse the initial queue depth as "remaining".
+        var finalRemainingRow = driverHealthRows
+            .Where(HasExplicitRemainingUnread)
+            .LastOrDefault();
+        var driverQueueDepthAtStopKnown = finalRemainingRow is not null;
+        var driverRemainingUnread = finalRemainingRow is null
+            ? 0UL
+            : FirstUnsigned(finalRemainingRow, DriverRemainingUnreadKeys);
+        var malformedRows = raw.Count(IsMalformedDriverRow);
+        var outputWriteFailureRows = raw.Count(IsOutputWriteFailureRow);
 
         return new CollectionHealthSummary
         {
@@ -92,6 +98,9 @@ public static class CollectionHealthSummaryBuilder
             DriverLostCount = ToMetricInt(MaxDataUnsigned(driverLossRows, DriverLostKeys)),
             DriverQueueDepth = ToMetricInt(driverQueueDepth),
             DriverRemainingUnread = ToMetricInt(driverRemainingUnread),
+            DriverQueueDepthAtStopKnown = driverQueueDepthAtStopKnown,
+            DriverMalformedRows = malformedRows,
+            DriverOutputWriteFailureRows = outputWriteFailureRows,
             DriverDrainStoppedAtDeadlineRows = driverHealthRows.Count(IsDrainStoppedAtDeadline),
             DriverEventsSuppressed = ToMetricInt(MaxDataUnsigned(driverHealthRows, DriverSuppressedKeys)),
             DriverQualityWarningRows = driverHealthRows.Count(IsDriverQualityWarning),
@@ -122,6 +131,10 @@ public static class CollectionHealthSummaryBuilder
         metrics["collectionHealth.driver.lostCount"] = summary.DriverLostCount;
         metrics["collectionHealth.driver.queueDepth"] = summary.DriverQueueDepth;
         metrics["collectionHealth.driver.remainingUnread"] = summary.DriverRemainingUnread;
+        metrics["collectionHealth.driver.queueDepthAtStopKnown"] = summary.DriverQueueDepthAtStopKnown ? 1 : 0;
+        metrics["collectionHealth.driver.queueDepthAtStopUnknown"] = summary.DriverQueueDepthAtStopKnown ? 0 : 1;
+        metrics["collectionHealth.driver.malformedRows"] = summary.DriverMalformedRows;
+        metrics["collectionHealth.driver.outputWriteFailureRows"] = summary.DriverOutputWriteFailureRows;
         metrics["collectionHealth.driver.drainStoppedAtDeadlineRows"] = summary.DriverDrainStoppedAtDeadlineRows;
         metrics["collectionHealth.driver.eventsSuppressed"] = summary.DriverEventsSuppressed;
         metrics["collectionHealth.driver.qualityWarningRows"] = summary.DriverQualityWarningRows;
@@ -149,6 +162,10 @@ public static class CollectionHealthSummaryBuilder
         metrics["events.collectionHealth.driver.lostCount"] = summary.DriverLostCount;
         metrics["events.collectionHealth.driver.queueDepth"] = summary.DriverQueueDepth;
         metrics["events.collectionHealth.driver.remainingUnread"] = summary.DriverRemainingUnread;
+        metrics["events.collectionHealth.driver.queueDepthAtStopKnown"] = summary.DriverQueueDepthAtStopKnown ? 1 : 0;
+        metrics["events.collectionHealth.driver.queueDepthAtStopUnknown"] = summary.DriverQueueDepthAtStopKnown ? 0 : 1;
+        metrics["events.collectionHealth.driver.malformedRows"] = summary.DriverMalformedRows;
+        metrics["events.collectionHealth.driver.outputWriteFailureRows"] = summary.DriverOutputWriteFailureRows;
         metrics["events.collectionHealth.driver.drainStoppedAtDeadlineRows"] = summary.DriverDrainStoppedAtDeadlineRows;
         metrics["events.collectionHealth.driver.eventsSuppressed"] = summary.DriverEventsSuppressed;
         metrics["events.collectionHealth.driver.qualityWarningRows"] = summary.DriverQualityWarningRows;
@@ -174,6 +191,8 @@ public static class CollectionHealthSummaryBuilder
         }
 
         return IsLossRow(evt) ||
+            IsMalformedDriverRow(evt) ||
+            IsOutputWriteFailureRow(evt) ||
             IsProcessTreeUnavailable(evt) ||
             IsScheduledTaskCaptureFailed(evt) ||
             IsPktmonStopFailed(evt) ||
@@ -184,7 +203,8 @@ public static class CollectionHealthSummaryBuilder
     private static bool IsFailureRow(SandboxEvent evt)
     {
         if (IsLossRow(evt) || IsProcessTreeUnavailable(evt) || IsScheduledTaskCaptureFailed(evt) ||
-            IsPktmonStopFailed(evt) || IsEtwDecodeFailure(evt))
+            IsPktmonStopFailed(evt) || IsEtwDecodeFailure(evt) ||
+            IsMalformedDriverRow(evt) || IsOutputWriteFailureRow(evt))
         {
             return true;
         }
@@ -275,7 +295,62 @@ public static class CollectionHealthSummaryBuilder
             PositiveData(evt, DriverRemainingUnreadKeys) ||
             PositiveData(evt, DriverSuppressedKeys) ||
             BoolTrue(evt, "backpressure", "backpressureObserved") ||
-            IsDriverLossRow(evt);
+            IsDriverLossRow(evt) ||
+            IsMalformedDriverRow(evt) ||
+            IsOutputWriteFailureRow(evt);
+    }
+
+    private static bool IsMalformedDriverRow(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        var category = Value(evt, "jsonlLineCategory", "jsonlImportStatus");
+        return string.Equals(type, "driver.parse_error", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(type, "driver.read_error", StringComparison.OrdinalIgnoreCase) ||
+            TextContainsAny(category, "malformed", "unreadable", "read-error");
+    }
+
+    private static bool IsOutputWriteFailureRow(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        var failureType = Value(evt, "failureType", "outputFailureType", "reason");
+        var exitCode = Value(evt, "exitCode", "commandExitCode");
+        return TextContainsAny(type, "outputWriteFailure", "output-write-failure") ||
+            string.Equals(failureType, "outputWriteFailure", StringComparison.OrdinalIgnoreCase) ||
+            (string.Equals(type, "r0collector.failed", StringComparison.OrdinalIgnoreCase) &&
+             (exitCode == "70" || exitCode.Equals("0x46", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static bool HasExplicitRemainingUnread(SandboxEvent evt)
+    {
+        // Older batch summaries use remainingUnread directly and are already
+        // an explicit tail measurement. The newer collector status contract
+        // also emits remainingQueueDepth on every snapshot, so that alias is
+        // accepted only on a final/stopped marker.
+        var directTailKeys = new[] { "remainingUnread", "remainingUnreadEvents", "remainingEvents" };
+        if (directTailKeys.Any(key => evt.Data.ContainsKey(key) && TryParseUnsigned(evt.Data[key], out _)))
+        {
+            return true;
+        }
+
+        var finalMarker = string.Equals(evt.EventType, "r0collector.stopped", StringComparison.OrdinalIgnoreCase) ||
+            TextEqualsAny(Value(evt, "statusPhase", "statusState"), "final", "stopped", "completed") ||
+            BoolTrue(evt, "finalStatusAvailable", "drainQueueDrained", "queueDrained");
+        return finalMarker &&
+            DriverRemainingUnreadKeys.Any(key => evt.Data.ContainsKey(key) && TryParseUnsigned(evt.Data[key], out _));
+    }
+
+    private static ulong FirstUnsigned(SandboxEvent evt, IReadOnlyCollection<string> keys)
+    {
+        foreach (var key in keys)
+        {
+            if (ReadUnsigned(evt, key) > 0 ||
+                (evt.Data.TryGetValue(key, out var value) && TryParseUnsigned(value, out _)))
+            {
+                return ReadUnsigned(evt, key);
+            }
+        }
+
+        return 0UL;
     }
 
     private static bool IsProcessTreeUnavailable(SandboxEvent evt) =>
