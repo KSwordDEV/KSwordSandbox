@@ -862,6 +862,12 @@ html[lang="en"] .localized-evidence-field{display:none}
             .ToList();
         var inlineRows = Math.Min(EventExplorerInlineLimit, rows.Count);
         var hidden = Math.Max(0, rows.Count - inlineRows);
+        var overflowRows = rows
+            .Skip(inlineRows)
+            .GroupBy(row => string.Join("|", row.Event.EventType, row.Event.Source, row.Family, row.Stage, row.Severity, row.SampleBehavior), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+        var renderRows = rows.Take(inlineRows).Concat(overflowRows).ToList();
         var types = rows.Select(row => row.Event.EventType).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var sources = rows.Select(row => string.IsNullOrWhiteSpace(row.Event.Source) ? "unknown" : row.Event.Source).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var stages = rows.Select(row => row.Stage).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
@@ -880,7 +886,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("<label>Sample behavior <select data-event-sample><option value=\"all\">All</option><option value=\"true\">Yes</option><option value=\"false\">No</option></select></label>");
         html.AppendLine("<button type=\"button\" class=\"focus-action secondary\" data-event-reset>Reset filters</button>");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"event-explorer-status\" data-event-count>{E(inlineRows.ToString(CultureInfo.InvariantCulture))} visible evidence rows; {E(hidden.ToString(CultureInfo.InvariantCulture))} more evidence rows are available in the report and can be revealed by filtering.</div>");
+        html.AppendLine($"<div class=\"event-explorer-status\" data-event-count>{E(inlineRows.ToString(CultureInfo.InvariantCulture))} visible evidence rows; {E(hidden.ToString(CultureInfo.InvariantCulture))} more evidence rows are available in the report and can be revealed by filtering. Overflow rows use compact representatives; raw JSON/JSONL retains every event.</div>");
         if (rows.Count == 0)
         {
             Empty(html, "No dynamic evidence rows were retained for the event explorer.");
@@ -888,9 +894,9 @@ html[lang="en"] .localized-evidence-field{display:none}
         else
         {
             html.AppendLine("<div class=\"event-table-wrap event-explorer-wrap\"><table class=\"event-explorer-table\"><thead><tr><th>Time</th><th>Event type</th><th>Source</th><th>Stage</th><th>Severity</th><th>Sample behavior</th><th>Evidence</th></tr></thead><tbody>");
-            for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            for (var rowIndex = 0; rowIndex < renderRows.Count; rowIndex++)
             {
-                var row = rows[rowIndex];
+                var row = renderRows[rowIndex];
                 var evt = row.Event;
                 var target = ExtractReadableEventTarget(evt);
                 var search = string.Join(" ", evt.EventType, evt.Source, evt.ProcessName, evt.Path, target, row.Family, row.Stage, row.Severity);
@@ -10459,6 +10465,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("visible evidence rows; ", "可见证据行；"),
         ("more evidence rows are available in the report.", "报告中还有更多证据行。"),
         ("more evidence rows are available in the report and can be revealed by filtering.", "报告中还有更多证据行。可通过筛选显示。"),
+        ("Overflow rows use compact representatives; raw JSON/JSONL retains every event.", "溢出行使用紧凑代表项；原始 JSON/JSONL 保留每一条事件。"),
         ("Detailed fields remain in the raw event JSON; use the compact row to identify this event.", "详细字段保留在原始事件 JSON 中；可先用紧凑行定位该事件。"),
         ("Large report view", "大型报告视图"),
         ("Large report rendering boundary.", "大型报告渲染边界。"),
