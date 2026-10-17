@@ -124,7 +124,13 @@ internal sealed class DriverJsonLinesReader
             return Read(path);
         }
 
-        var relationships = new List<(int? ProcessId, int? ParentProcessId, string EventType, string Source)>();
+        // The first pass is deliberately relationship-only.  Do not call
+        // ParseSandboxEvent here: that method materializes the entire data
+        // dictionary (which may contain a large compact-v2 contract) for
+        // every row and the second pass would materialize it again.  Keeping
+        // only the two PIDs bounds memory while preserving the raw JSONL as
+        // the authoritative evidence source.
+        var relationships = new List<(int? ProcessId, int? ParentProcessId)>();
         foreach (var line in ReadSharedLines(path))
         {
             if (string.IsNullOrWhiteSpace(line))
@@ -135,8 +141,7 @@ internal sealed class DriverJsonLinesReader
             try
             {
                 using var document = JsonDocument.Parse(line);
-                var evt = ParseSandboxEvent(document.RootElement);
-                relationships.Add((evt.ProcessId, ResolveDataPid(evt.Data, "parentProcessId", "parentPid", "parentId", "rootProcessId") ?? evt.ParentProcessId, evt.EventType, evt.Source));
+                relationships.Add(ReadRelationship(document.RootElement));
             }
             catch (JsonException)
             {
@@ -221,6 +226,57 @@ internal sealed class DriverJsonLinesReader
         }
 
         return events;
+    }
+
+    /// <summary>
+    /// Reads only the process relationship fields needed to build the sample
+    /// tree.  Inputs are one parsed JSONL object; processing avoids allocating
+    /// SandboxEvent/Data and therefore avoids a second full object graph for
+    /// every compact-v2 driver row.  The method returns a PID pair or throws
+    /// JsonException for malformed/non-event rows so the normal import pass can
+    /// preserve a precise parse-error event.
+    /// </summary>
+    private static (int? ProcessId, int? ParentProcessId) ReadRelationship(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("Driver JSONL row must be a JSON object.");
+        }
+
+        var eventType = GetStringProperty(root, "eventType");
+        if (string.IsNullOrWhiteSpace(eventType))
+        {
+            throw new JsonException("Driver JSONL row is missing eventType.");
+        }
+
+        var processId = GetIntProperty(root, "processId");
+        var parentProcessId = GetIntProperty(root, "parentProcessId");
+        if (parentProcessId is null && TryGetProperty(root, "data", out var data) &&
+            data.ValueKind == JsonValueKind.Object)
+        {
+            parentProcessId = GetDataIntProperty(
+                data,
+                "parentProcessId",
+                "parentPid",
+                "parentId",
+                "rootProcessId");
+        }
+
+        return (processId, parentProcessId);
+    }
+
+    private static int? GetDataIntProperty(JsonElement data, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var value = GetIntProperty(data, name);
+            if (value is not null)
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static int? ResolveDataPid(IReadOnlyDictionary<string, string> data, params string[] names)

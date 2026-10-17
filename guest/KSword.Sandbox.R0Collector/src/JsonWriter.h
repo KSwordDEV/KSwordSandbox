@@ -8,6 +8,8 @@
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace KSword::Sandbox::R0Collector {
 
@@ -32,13 +34,11 @@ std::wstring BaseNameFromPath(const std::wstring& path);
 class JsonDataObjectBuilder {
 public:
     void AddUtf8(const std::string& key, const std::string& value) {
-        AddPrefixAndKey(key);
-        json_ += JsonStringFromUtf8(value);
+        entries_.push_back({key, JsonStringFromUtf8(value)});
     }
 
     void AddWide(const std::string& key, const std::wstring& value) {
-        AddPrefixAndKey(key);
-        json_ += JsonStringFromWide(value);
+        entries_.push_back({key, JsonStringFromWide(value)});
     }
 
     void AddUnsigned(const std::string& key, const unsigned long long value) {
@@ -54,22 +54,43 @@ public:
     }
 
     std::string Build() const {
-        return json_ + "}";
+        return BuildFiltered([](std::string_view) { return true; });
+    }
+
+    // Builds one object while omitting explicitly repeated metadata fields.
+    // The predicate is evaluated against the raw key, so callers can preserve
+    // dynamic payload evidence while folding static contracts into the
+    // lifecycle/capability rows. This keeps JSONL bounded without dropping
+    // driver records or hiding loss counters.
+    template <typename Predicate>
+    std::string BuildFiltered(Predicate&& predicate) const {
+        std::string json = "{";
+        bool first = true;
+        for (const auto& entry : entries_) {
+            if (!predicate(entry.key)) {
+                continue;
+            }
+
+            if (!first) {
+                json += ",";
+            }
+
+            first = false;
+            json += JsonStringFromUtf8(entry.key);
+            json += ":";
+            json += entry.encodedValue;
+        }
+
+        return json + "}";
     }
 
 private:
-    void AddPrefixAndKey(const std::string& key) {
-        if (!first_) {
-            json_ += ",";
-        }
+    struct Entry {
+        std::string key;
+        std::string encodedValue;
+    };
 
-        first_ = false;
-        json_ += JsonStringFromUtf8(key);
-        json_ += ":";
-    }
-
-    bool first_ = true;
-    std::string json_ = "{";
+    std::vector<Entry> entries_;
 };
 
 // Input: Mutable JSON data builder and optional process-handle capability state.

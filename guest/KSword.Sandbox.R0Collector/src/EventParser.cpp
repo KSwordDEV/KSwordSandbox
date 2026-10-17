@@ -5,6 +5,7 @@
 #include <cstring>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace KSword::Sandbox::R0Collector {
 
@@ -5127,6 +5128,110 @@ std::string BuildReadEventsBatchData(
     return data.Build();
 }
 
+// Input: One field name from a live driver row.
+// Processing: Keeps fields required to reconstruct behavior/loss/coverage
+// evidence while folding large, immutable contracts into the lifecycle and
+// capabilities rows.  Typed payload values, paths, process lineage, status,
+// sequence, loss, and backpressure remain per-row; omitted fields are named
+// explicitly by BuildDriverEventData so this is not silent sampling.
+// Return: true when the field belongs in the compact live-row contract.
+bool ShouldEmitCompactDriverField(
+    const ULONG eventType,
+    const std::string_view key) {
+    const auto contains = [key](const std::initializer_list<std::string_view> fields) {
+        for (const auto field : fields) {
+            if (field == key) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    // Stable framing, attribution, sequence, queue-loss/backpressure, and
+    // payload-version status are needed by both the Agent merge and reports.
+    if (contains({
+        "schema", "producer", "eventOrigin", "producerCategory", "subjectKind",
+        "actorRole", "subjectRole", "processIdSource", "sequence", "sequenceMeaning",
+        "sequenceScope", "sequenceConcrete", "noiseClass", "noiseDecision",
+        "sampleBehaviorCandidate", "behaviorCounted", "nonbehavior", "noisePolicy",
+        "noiseReasons", "collectorNoisePolicy", "stress", "noise", "collectorNoise",
+        "collectorSelfNoise", "selfProcess", "collectorNoiseReason", "collectorNoiseAction",
+        "selfNoise", "selfNoiseReason", "selfNoiseAction", "collectorSuppressed", "lost",
+        "lossObserved", "loss", "lostCount", "backpressure", "backpressureObserved",
+        "backpressureReason", "queueHighWatermark", "highWatermark", "lastEnqueueFailureStatus",
+        "ioctl", "batchIndex", "recordOffset", "version", "recordSize", "driverEventType",
+        "driverEventTypeName", "flags", "timestampQpc", "driverProcessId", "driverThreadId",
+        "payloadSize", "payloadHexBytes", "payloadTruncated", "payloadHex", "typedPayloadParsed",
+        "payloadVersion", "payloadVersionHex", "payloadSchemaVersion", "expectedPayloadVersion",
+        "expectedPayloadVersionHex", "expectedPayloadSize", "payloadVersionPrefixPresent",
+        "payloadSizePrefixPresent", "payloadVersionCompatible", "payloadSizePrefixCompatible",
+        "payloadVersionStatus", "payloadSchemaExpected", "r0CoverageTaxonomyVersion",
+        "r0CoverageCategory", "r0CoverageState", "r0CoverageKnownGaps",
+        "r0CoverageAvailableCategories", "r0ReadinessContribution", "operationName", "status",
+        "pathTruncated", "typedPayloadKind", "payloadSchema", "typedPayloadStatus",
+        "semanticFamily", "behaviorLane", "activityKind", "evidenceReady", "zhMessage", "zhHint",
+        "operation", "operationFailed", "statusHex", "processId", "path"})) {
+        return true;
+    }
+
+    switch (eventType) {
+    case KswSandboxEventTypeProcess:
+        return contains({
+            "processOperationName", "imagePath", "capturedCommandLine", "commandLine",
+            "imagePathDecoded", "commandLineDecoded", "parentProcessId", "creatingProcessId",
+            "imagePathLengthBytes", "commandLineLengthBytes", "pathDecoded", "imagePathPresent",
+            "commandLinePresent", "processExitCode", "processExitCodePresent", "exitCode",
+            "r0ProcessHandleAccessEvent", "processHandleAccessDraftPayloadParsed",
+            "processHandleAccessAvailability", "actorProcessId", "targetProcessId", "targetThreadId",
+            "sourceProcessId", "duplicateTargetProcessId", "objectType", "objectTypeName",
+            "requestedAccess", "grantedAccess", "accesses", "sensitiveProcessAccessRequested",
+            "sensitiveGrantedAccess", "preOperation", "postOperation", "processAccessPhase",
+            "kernelHandle", "userModeRequest", "accessReduced", "callbackOperation",
+            "processAccessStatus", "previousMode"});
+    case KswSandboxEventTypeImage:
+        return contains({
+            "imageOperationName", "imageLoadFamily", "injectionCandidate", "userWritableImageCandidate",
+            "systemModeImage", "processIdPresent", "propertiesPresent", "imagePathTruncated",
+            "mappedToAllPids", "extendedInfoPresent", "imageBase", "imageBaseHex", "imageSize",
+            "imageProperties", "pathLengthBytes", "pathDecoded", "imagePath"});
+    case KswSandboxEventTypeFile:
+        return contains({
+            "fileOperationName", "fileIntent", "artifactCandidateKind", "dropLocationFamily",
+            "droppedFileCandidate", "startupFolderCandidate", "fileSecurityIntent",
+            "fileSetSecurityR0Direct", "fileSecurityDescriptorBytesCaptured", "fileSecurityCoverage",
+            "downloadExecuteCandidate", "filePath", "pathDecoded", "majorFunction", "minorFunction",
+            "pathLengthBytes", "pathNormalized", "pathFallback", "deleteIntent", "renameIntent",
+            "securityIntent", "postOperation", "statusPresent"});
+    case KswSandboxEventTypeRegistry:
+        return contains({
+            "registryOperationName", "persistenceCandidate", "registryPersistenceSignal",
+            "persistenceFamily", "servicePersistenceCandidate", "ifeoPersistenceCandidate",
+            "startupRegistryCandidate", "registrySetKeySecurityR0Direct",
+            "registrySecurityInformationPresent", "registrySecurityDescriptorPresent",
+            "registrySecurityDescriptorBytesCaptured", "registrySecurityCoverage", "keyPath",
+            "valueName", "keyPathLengthBytes", "valueNameLengthBytes", "valueDataType",
+            "securityInformation", "valueDataSizeBytes", "valueDataEmpty", "setKeySecurityOperation",
+            "postOperation", "operationFailed"});
+    case KswSandboxEventTypeNetwork:
+        return contains({
+            "networkEvidenceKind", "sourceEndpoint", "destinationEndpoint", "flowKey", "flowKeyVersion",
+            "protocol", "protocolName", "direction", "localEndpoint", "remoteEndpoint", "remoteAddress",
+            "localAddress", "serviceHint", "serviceHintSource", "serviceHintConfidence", "serviceHintDns",
+            "serviceHintHttp", "serviceHintTls", "dnsQueryNameAvailable", "dnsQueryNameSource",
+            "httpHostAvailable", "httpUriAvailable", "httpMethodAvailable", "tlsSniAvailable",
+            "tlsCertificateAvailable", "externalAddressCandidate", "lateralMovementCandidate",
+            "downloadExecuteCandidate", "pcapCorrelationRequired", "pcapCorrelationStatus",
+            "pcapFlowKeyCandidate", "pcapCorrelationKey", "networkCorrelationRole", "pcapCorrelationRole",
+            "networkProtocolBoundaryFields", "wfpEventName", "wfpLayerSemanticName", "rawPacketPayloadAvailable",
+            "kernelPayloadParserEnabled", "protocolPayloadParsed", "protocolParserSource", "processId"});
+    default:
+        // Unknown future event types retain the complete data object so a new
+        // producer cannot be made opaque merely by this compact-row policy.
+        return true;
+    }
+}
+
 // Input: One driver event header plus optional opaque payload bytes.
 // Processing: Serializes framing metadata and a bounded payload hex preview as
 // string-valued data entries.
@@ -5214,8 +5319,22 @@ std::string BuildDriverEventData(
     data.AddUtf8("payloadHex", HexBytes(payload, payloadBytes, kMaxPayloadHexBytes));
     const bool typedPayloadParsed = AddTypedPayloadData(header, payload, payloadBytes, &data);
     data.AddBool("typedPayloadParsed", typedPayloadParsed);
+    data.AddUnsigned("driverRowMetadataContractVersion", 2);
+    data.AddUtf8("driverRowMetadataEncoding", "compact-v2");
+    data.AddUtf8(
+        "driverRowMetadataOmitted",
+        "repeated-capability/noise/ABI-contract-fields;full-contract-in-r0collector.started-and-capabilities");
+    data.AddUtf8(
+        "driverRowMetadataEvidencePolicy",
+        "dynamic-payload-path-lineage-status-sequence-loss-backpressure-and-coverage-fields-retained");
 
-    return data.Build();
+    return data.BuildFiltered([&](const std::string_view key) {
+        return key == "driverRowMetadataContractVersion" ||
+            key == "driverRowMetadataEncoding" ||
+            key == "driverRowMetadataOmitted" ||
+            key == "driverRowMetadataEvidencePolicy" ||
+            ShouldEmitCompactDriverField(header.Type, key);
+    });
 }
 
 } // namespace KSword::Sandbox::R0Collector
