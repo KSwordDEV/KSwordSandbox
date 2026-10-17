@@ -502,7 +502,14 @@ bool EmitDriverHealth(const UniqueHandle& device, const Options& options, EventW
 // masks instead of assuming a matching driver.
 // Return: true if the IOCTL succeeded, the reply was structurally valid, and
 // the event sink accepted the capabilities row.
-bool EmitDriverCapabilities(const UniqueHandle& device, const Options& options, EventWriter& writer) {
+bool EmitDriverCapabilities(
+    const UniqueHandle& device,
+    const Options& options,
+    EventWriter& writer,
+    ULONG* supportedProducerMask) {
+    if (supportedProducerMask != nullptr) {
+        *supportedProducerMask = 0;
+    }
     KSWORD_SANDBOX_CAPABILITIES_REPLY reply {};
     DWORD bytesReturned = 0;
     DWORD errorCode = ERROR_SUCCESS;
@@ -548,6 +555,11 @@ bool EmitDriverCapabilities(const UniqueHandle& device, const Options& options, 
             "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES",
             L"GET_CAPABILITIES returned an incompatible KSWORD_SANDBOX_CAPABILITIES_REPLY.",
             bytesReturned);
+    }
+
+    if (supportedProducerMask != nullptr) {
+        *supportedProducerMask = reply.SupportedProducerMask &
+            kAutomaticProducerEnableMask;
     }
 
     SandboxEventFields event;
@@ -663,16 +675,26 @@ bool EmitDriverNetworkStatus(const UniqueHandle& device, const Options& options,
 // Processing: Issues IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK only when
 // requested by the operator, then records requested/previous/effective masks.
 // Return: true if no mask was requested or the IOCTL/reply/sink are valid.
-bool EmitDriverSetProducerEnableMask(const UniqueHandle& device, const Options& options, EventWriter& writer) {
-    if (!options.enableMaskSpecified) {
-        return true;
-    }
+bool EmitDriverSetProducerEnableMask(
+    const UniqueHandle& device,
+    const Options& options,
+    const ULONG automaticProducerMask,
+    EventWriter& writer) {
+    const ULONG requestedEnableMask = options.enableMaskSpecified
+        ? options.enableMask
+        : (automaticProducerMask != 0 ? automaticProducerMask : kAutomaticProducerEnableMask);
 
     std::vector<unsigned char> buffer(sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY));
     auto* request = reinterpret_cast<PKSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST>(buffer.data());
     request->Version = KSWORD_SANDBOX_INTERFACE_VERSION;
     request->Size = sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST);
+    // Preserve the explicit operator value verbatim; when omitted, use the
+    // capabilities-negotiated normal producer set so file/registry rows are
+    // enabled before sample launch.
     request->EnableMask = options.enableMask;
+    if (!options.enableMaskSpecified) {
+        request->EnableMask = requestedEnableMask;
+    }
     request->Flags = 0;
 
     DWORD bytesReturned = 0;
@@ -731,7 +753,7 @@ bool EmitDriverSetProducerEnableMask(const UniqueHandle& device, const Options& 
     SandboxEventFields event;
     event.eventType = "r0collector.driverProducerMask";
     event.path = options.devicePath;
-    event.dataJson = BuildSetProducerEnableMaskData(reply, bytesReturned, options.enableMask);
+    event.dataJson = BuildSetProducerEnableMaskData(reply, bytesReturned, requestedEnableMask);
     return EmitEvent(writer, event);
 }
 

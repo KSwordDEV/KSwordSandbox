@@ -349,11 +349,12 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
         return kExitRuntimeFailure;
     }
 
-    if (!EmitDriverCapabilities(device, options, writer)) {
+    ULONG supportedProducerMask = 0;
+    if (!EmitDriverCapabilities(device, options, writer, &supportedProducerMask)) {
         return kExitRuntimeFailure;
     }
 
-    if (!EmitDriverSetProducerEnableMask(device, options, writer)) {
+    if (!EmitDriverSetProducerEnableMask(device, options, supportedProducerMask, writer)) {
         return kExitRuntimeFailure;
     }
 

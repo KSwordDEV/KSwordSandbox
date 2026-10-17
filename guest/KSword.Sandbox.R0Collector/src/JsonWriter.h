@@ -359,6 +359,10 @@ std::string BuildSandboxEventJsonLine(const SandboxEventFields& fields);
 // Return: true when future writes can proceed; false with an explanatory error.
 class EventWriter {
 public:
+    ~EventWriter() {
+        Flush();
+    }
+
     bool Open(const std::wstring& outputPath, std::wstring* error) {
         outputPath_ = outputPath;
         if (outputPath == L"-") {
@@ -385,8 +389,18 @@ public:
         }
 
         (*stream_) << line << '\n';
-        stream_->flush();
+        ++linesSinceFlush_;
+        if (linesSinceFlush_ >= kFlushInterval) {
+            Flush();
+        }
         return stream_->good();
+    }
+
+    void Flush() {
+        if (stream_ != nullptr) {
+            stream_->flush();
+            linesSinceFlush_ = 0;
+        }
     }
 
     const std::wstring& OutputPath() const {
@@ -397,6 +411,8 @@ private:
     std::wstring outputPath_;
     std::ofstream file_;
     std::ostream* stream_ = nullptr;
+    size_t linesSinceFlush_ = 0;
+    static constexpr size_t kFlushInterval = 256;
 };
 
 bool EmitEvent(EventWriter& writer, const SandboxEventFields& fields);

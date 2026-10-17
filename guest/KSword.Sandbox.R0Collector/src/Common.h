@@ -21,8 +21,15 @@ inline constexpr int kExitInvalidArguments = 64;
 inline constexpr int kExitOutputUnavailable = 65;
 inline constexpr int kExitDeviceUnavailable = 66;
 inline constexpr int kExitRuntimeFailure = 70;
-inline constexpr DWORD kReadEventsBufferBytes = 64U * 1024U;
-inline constexpr ULONG kReadEventsMaxEvents = 64U;
+// Keep one READ_EVENTS output large enough for the agent's 1024-event request.
+// The v1 record is currently 232 bytes at its maximum payload, so 512 KiB
+// leaves room for the fixed reply header and prevents the kernel from silently
+// capping a nominal 1024-event batch at the old 64 KiB buffer boundary.
+inline constexpr DWORD kReadEventsBufferBytes = 512U * 1024U;
+inline constexpr ULONG kReadEventsMaxEvents = 1024U;
+inline constexpr ULONG kAutomaticProducerEnableMask =
+    KSWORD_SANDBOX_PRODUCER_MASK_CURRENT &
+    ~KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS;
 inline constexpr size_t kMaxPayloadHexBytes = 256U;
 inline constexpr int kSyntheticStressSequenceStart = 1200;
 inline constexpr int kSyntheticSemanticSequenceStart = 1100;
