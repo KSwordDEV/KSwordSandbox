@@ -306,6 +306,10 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
             "A tree-unavailable row must remain a coverage failure even when process.start proves the sample launched.");
         RequireEqual(1, summary.FailureRows,
             "A missing process tree after launch must remain visible as a collection failure.");
+        RequireTrue(summary.State == "partial",
+            "A missing process tree must lower the collection state even when the driver drained cleanly.");
+        RequireTrue(summary.StateReasons.Contains("process-tree-unavailable"),
+            "A missing process tree must expose a stable collection-health reason.");
     }
 
     private static void AssertEtwSecurityCoverageCounters()

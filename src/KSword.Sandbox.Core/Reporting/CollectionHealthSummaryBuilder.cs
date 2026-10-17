@@ -128,6 +128,7 @@ public static class CollectionHealthSummaryBuilder
             etwFailureRows,
             pcapFailureRows,
             agentFailureRows,
+            processTreeUnavailableRows,
             collectorSuppressed,
             driverHealthRows.Count(IsDriverQualityWarning),
             expectedSuppressedRows,
@@ -146,6 +147,7 @@ public static class CollectionHealthSummaryBuilder
                 etwFailureRows,
                 pcapFailureRows,
                 agentFailureRows,
+                processTreeUnavailableRows,
                 collectorSuppressed,
                 driverHealthRows.Count(IsDriverQualityWarning)),
             StateReasons = stateReasons,
@@ -914,6 +916,7 @@ public static class CollectionHealthSummaryBuilder
         int etwFailureRows,
         int pcapFailureRows,
         int agentFailureRows,
+        int processTreeUnavailableRows,
         ulong suppressedEvents,
         int qualityWarningRows)
     {
@@ -928,6 +931,7 @@ public static class CollectionHealthSummaryBuilder
             driverLossRows > 0 ||
             malformedRows > 0 ||
             outputWriteFailureRows > 0;
+        primaryGap |= processTreeUnavailableRows > 0;
         if (primaryGap)
         {
             return "partial";
@@ -949,6 +953,7 @@ public static class CollectionHealthSummaryBuilder
         int etwFailureRows,
         int pcapFailureRows,
         int agentFailureRows,
+        int processTreeUnavailableRows,
         ulong suppressedEvents,
         int qualityWarningRows,
         int expectedSuppressedRows,
@@ -1004,6 +1009,11 @@ public static class CollectionHealthSummaryBuilder
         if (agentFailureRows > 0)
         {
             reasons.Add("agent-failure");
+        }
+
+        if (processTreeUnavailableRows > 0)
+        {
+            reasons.Add("process-tree-unavailable");
         }
 
         if (suppressedEvents > 0)
