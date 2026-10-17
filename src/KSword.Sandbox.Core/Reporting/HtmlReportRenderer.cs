@@ -894,7 +894,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             .ToList();
         var priorityKeys = priorityRows.Select(row => EventIdentityKey(row.Event)).ToHashSet(StringComparer.Ordinal);
         var fillerRows = rows
-            .Where(row => !priorityKeys.Contains(EventIdentityKey(row.Event)))
+            .Where(row => !priorityKeys.Contains(EventIdentityKey(row.Event)) && !string.Equals(row.Disposition, "unattributed", StringComparison.OrdinalIgnoreCase))
             .Take(Math.Max(0, inlineRows - priorityRows.Count))
             .ToList();
         var inlineRowsSelected = priorityRows.Concat(fillerRows).ToList();
@@ -913,10 +913,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         var severities = rows.Select(row => row.Severity).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(SeverityRank).ToList();
 
         html.AppendLine("<section id=\"event-explorer\" class=\"card\"><h2>Key event explorer</h2>");
-        html.AppendLine("<div class=\"section-note\"><strong>Review the signal first.</strong> Search or filter by event type, source, stage, severity, and sample-behavior status. Evidence disposition separates confirmed/probable sample links, unattributed observations, and collection diagnostics.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Review the signal first.</strong> Search or filter by event type, source, stage, severity, and sample-behavior status. Evidence disposition separates confirmed/probable sample links, unattributed observations, and collection diagnostics. Unattributed observations remain in raw evidence and appear when that disposition is selected.</div>");
         AppendCollectionCoverageBanner(html, report, explorerEvents);
         html.AppendLine("<div class=\"event-explorer-toolbar\">");
-        html.AppendLine("<label>Search <input type=\"search\" data-event-search placeholder=\"事件类型、路径、进程或目标\"></label>");
+        html.AppendLine("<label>Search <input type=\"search\" data-event-search placeholder=\"type, path, process, target\"></label>");
         AppendEventExplorerSelect(html, "Event type", "data-event-type", types);
         AppendEventExplorerSelect(html, "Source", "data-event-source", sources);
         AppendEventExplorerSelect(html, "Behavior family", "data-event-family", families);
@@ -10664,6 +10664,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Key event explorer", "关键事件筛选器"),
         ("Review the signal first.", "先查看信号。"),
         ("Evidence disposition separates confirmed/probable sample links, unattributed observations, and collection diagnostics.", "证据归因状态会区分已确认/可能关联的样本行为、未归因观察和采集诊断。"),
+        ("Unattributed observations remain in raw evidence and appear when that disposition is selected.", "未归因观察会保留在原始证据中，选择该归因状态后即可显示。"),
         ("Evidence coverage warning.", "证据覆盖警告。"),
         ("Collection quality has an unresolved gap; this does not by itself indicate malicious sample behavior.", "采集质量存在未解决缺口；这本身不代表样本存在恶意行为。"),
         ("diagnostic rows=", "诊断行数="),
@@ -10678,6 +10679,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Review collection health", "查看采集健康"),
         ("Review execution and collection diagnostics", "查看执行与采集诊断"),
         ("Disposition", "归因状态"),
+        ("placeholder=\"type, path, process, target\"", "placeholder=\"事件类型、路径、进程或目标\""),
         ("confirmed", "已确认"),
         ("probable", "可能关联"),
         ("observed", "已观察"),

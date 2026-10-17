@@ -113,6 +113,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "IsEventExplorerPriority", "Event explorer should promote process exits and collection gaps into the visible evidence rows.");
         RequireContains(rendererSource, "ProcessExitCodeRaw", "Process exit evidence should retain exit codes from normalized and ETW payload fields.");
         RequireContains(rendererSource, "AppendCollectionCoverageBanner", "Event explorer should keep collection gaps visible beside dynamic evidence.");
+        RequireContains(rendererSource, "!string.Equals(row.Disposition, \"unattributed\"", "Event explorer should keep unattributed observations out of the default signal table while retaining filter access.");
         RequireContains(rendererSource, "artifactevidencematrix", "Report renderer should keep internal artifact matrix fields out of event detail cards.");
         RequireContains(rendererSource, "collectionFailureRows", "Report focus should include collection-health failure rows in the runtime boundary.");
         RequireContains(rendererSource, "collectionLossRows", "Report focus should include collection-health loss rows in the runtime boundary.");
@@ -399,6 +400,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "data-event-overflow=\"true\"", "Event explorer should retain overflow rows in the DOM for filter reveal.");
         RequireContains(englishHtml, "data-event-disposition=\"confirmed\"", "Event explorer should expose confirmed attribution in row data.");
         RequireContains(englishHtml, "data-event-disposition=\"diagnostic\"", "Event explorer should expose collection diagnostics in row data.");
+        RequireContains(englishHtml, "data-event-disposition=\"unattributed\"", "Event explorer should retain unattributed rows for explicit filter reveal.");
         RequireContains(englishHtml, "process.exit", "Rendered event explorer should retain process exit evidence.");
         RequireContains(englishHtml, "exitCode=", "Rendered event explorer should show process exit code evidence.");
         RequireContains(englishHtml, "Evidence coverage warning.", "Rendered event explorer should visibly explain incomplete evidence coverage.");
@@ -423,6 +425,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "data-copy=\"Failed\"><span class=\"ui-status-value\">失败</span></td>", "Chinese report should localize the cover analysis status while preserving the original machine-readable value.");
         RequireContains(chineseVisibleText, "可按事件类型、来源、阶段、严重性和样本行为状态搜索或筛选。", "Chinese event explorer note should be fully localized.");
         RequireContains(chineseVisibleText, "证据归因状态会区分已确认/可能关联的样本行为、未归因观察和采集诊断。", "Chinese event explorer should explain evidence dispositions.");
+        RequireContains(chineseVisibleText, "未归因观察会保留在原始证据中，选择该归因状态后即可显示。", "Chinese event explorer should explain how to reveal unattributed rows.");
         RequireContains(chineseVisibleText, "证据覆盖警告。", "Chinese report should visibly explain incomplete evidence coverage.");
         RequireNotContains(chineseVisibleText, "type, path, process, target", "Chinese event explorer must not leak the English search placeholder.");
         RequireContains(chineseVisibleText, "命令/stdout/stderr/PowerShell 字段默认隐藏", "Chinese technical-field fold summary should be localized.");
@@ -902,6 +905,19 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                 ["remotePort"] = "443"
             }
         };
+        var unattributedNetworkEvent = new SandboxEvent
+        {
+            EventType = "network.environment.unknown",
+            Timestamp = timestamp.AddSeconds(3.5),
+            Source = "guest",
+            ProcessName = "svchost.exe",
+            Data =
+            {
+                ["remoteAddress"] = "198.51.100.20",
+                ["remotePort"] = "53",
+                ["sampleCorrelation"] = "unknown"
+            }
+        };
         var r0Event = new SandboxEvent
         {
             EventType = "driver.file.create",
@@ -999,7 +1015,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                 ["reason"] = "contract timeout evidence"
             }
         };
-        var events = new List<SandboxEvent> { launcherEvent, processEvent, childProcessEvent, processExitEvent, fileEvent, registryEvent, networkEvent, r0Event, r0NetworkStatusEvent, r0DiagnosticEvent, staticResourceEvent, vtEvent, failureEvent };
+        var events = new List<SandboxEvent> { launcherEvent, processEvent, childProcessEvent, processExitEvent, fileEvent, registryEvent, networkEvent, unattributedNetworkEvent, r0Event, r0NetworkStatusEvent, r0DiagnosticEvent, staticResourceEvent, vtEvent, failureEvent };
         for (var index = 0; index < 205; index++)
         {
             events.Add(new SandboxEvent
