@@ -196,11 +196,10 @@ public static class SampleCorrelationClassifier
                 true);
         }
 
-        // A PCAP packet has no owning PID.  Keep the ownerless row useful when
-        // the capture timestamp overlaps the submitted sample lifecycle and
-        // the decoded DNS/HTTP/TLS/flow target corroborates a static IOC.  This
-        // runs before stale nonbehavior flags so imported rows are not silently
-        // discarded, while raw compatibility/collector/WinRM rows remain out.
+        // A PCAP packet has no owning PID.  Keep the ownerless row eligible
+        // only when an independent ETW/R0/guest runtime row joins the same
+        // target to the submitted sample process.  Lifecycle/static-IOC
+        // overlap alone remains retained evidence, not sample behavior.
         if (IsNetworkEvidence(evt) && TryClassifyPcapCorrelation(evt, data, context, out var pcapDisposition))
         {
             return pcapDisposition;
@@ -463,13 +462,9 @@ public static class SampleCorrelationClassifier
             return true;
         }
 
-        // A DNS query that occurs during the sample's own lifecycle is useful
-        // evidence even when the sample's static strings do not contain the
-        // domain and no socket owner PID survived the capture.  Dropping this
-        // row into the environment bucket hides short-lived C2 lookups (for
-        // example a downloader resolving its gate before it opens a socket).
-        // Keep the disposition conservative: probable/uncertain DNS only;
-        // generic flows still require an owner PID or IOC corroboration.
+        // An ownerless DNS query is retained with an explicit uncertainty
+        // marker, but it can enter the probable lane only after the same
+        // target is independently joined to a sample-owned runtime row.
         if (IsPcapDnsEvidence(evt, data))
         {
             data["pcapCorrelationUncertainty"] = crossSourceSampleEvidence
