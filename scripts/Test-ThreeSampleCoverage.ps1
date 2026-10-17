@@ -161,7 +161,12 @@ foreach ($root in $jobRoots) {
     $etlDecodeRequired = Get-Boolean $metrics @('events.etw.etlDecodeRequired','etw.etlDecodeRequired','collectionHealth.etw.etlDecodeRequired')
     if ($null -eq $etlDecodeRequired) { $etlDecodeRequired = Test-TrueValue (Get-EventDataFlag $events @('etw_live.captured','etw_live.decode_failed') @('etlDecodeRequired')) }
     $protocolParserNotImplemented = Get-Boolean $metrics @('events.packetCapture.protocolParserNotImplemented','packet_capture.protocolParserNotImplemented')
-    if ($null -eq $protocolParserNotImplemented) { $protocolParserNotImplemented = Test-TrueValue (Get-EventDataFlag $events @('packet_capture.failed','packet_capture.summary','pcap.summary') @('protocolParserNotImplemented')) }
+    $protocolReason = Get-Value $metrics @('events.packetCapture.protocolSummaryReason','packet_capture.protocolSummaryReason')
+    if ($null -eq $protocolReason) { $protocolReason = Get-EventDataFlag $events @('packet_capture.failed','packet_capture.summary','pcap.summary') @('protocolSummaryReason') }
+    if ($null -eq $protocolParserNotImplemented) {
+        $protocolFlag = Get-EventDataFlag $events @('packet_capture.failed','packet_capture.summary','pcap.summary') @('protocolParserNotImplemented')
+        $protocolParserNotImplemented = (Test-TrueValue $protocolFlag) -or ([string]$protocolReason -ieq 'protocolParserNotImplemented')
+    }
     $sampleProcessExitErrors = @($events | Where-Object { (Test-SampleProcessExit $_ $sample) -and (Test-NonZeroExitCode (Get-ExitValue $_)) }).Count
     $treeEventCount = @($events | Where-Object { [string]$_.EventType -ieq 'process.tree_unavailable' }).Count
     if ($null -eq $treeUnavailable) { $treeUnavailable = [int64]$treeEventCount }

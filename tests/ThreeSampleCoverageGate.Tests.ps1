@@ -37,7 +37,7 @@ function New-Fixture {
         [pscustomobject]@{ EventType = 'driver.file'; Source = 'driver'; ProcessName = 'sample.exe'; ProcessId = 100; Data = [pscustomobject]@{ behaviorCounted = 'true'; sampleCorrelation = 'confirmed'; rawEventsPath = $rawPath; driverEventsPath = $(if ($MissingDriverPath) { Join-Path $guest 'missing-driver.jsonl' } else { $driverPath }) } },
         [pscustomobject]@{ EventType = 'etw_live.captured'; Source = 'etwLive'; ProcessName = 'EtwLiveTraceProbe'; Data = [pscustomobject]@{ parsedEventCount = $(if ($ZeroEtwParsed) { '0' } else { '2' }); etlDecodeRequired = 'false' } },
         [pscustomobject]@{ EventType = 'process.exit'; Source = 'guest'; ProcessName = 'sample'; Data = [pscustomobject]@{ behaviorCounted = 'true'; sampleCorrelation = 'confirmed'; status = $(if ($SampleExitFailure) { '0x80131700' } else { '0' }) } },
-        [pscustomobject]@{ EventType = 'packet_capture.summary'; Source = 'guest'; Data = [pscustomobject]@{ protocolParserNotImplemented = $(if ($ParserNotImplemented) { 'true' } else { 'false' }) } }
+        [pscustomobject]@{ EventType = 'packet_capture.summary'; Source = 'guest'; Data = [pscustomobject]@{ protocolSummaryReason = $(if ($ParserNotImplemented) { 'protocolParserNotImplemented' } else { 'parsed' }) } }
     )
     $metrics = [ordered]@{
         'events.total' = 4; 'events.raw' = 4; 'events.report' = 4
@@ -46,7 +46,6 @@ function New-Fixture {
         'events.dynamicAction.raw' = $dynamicRaw; 'events.dynamicAction.attributedRaw' = $dynamicAttributed; 'events.dynamicAction.rawUnknown' = $dynamicUnknown
         'events.dynamicAction.report' = $dynamicReport; 'events.dynamicAction.attributedReport' = $dynamicAttributedReport; 'events.dynamicAction.unattributedReport' = $dynamicUnknownReport; 'events.dynamicAction.attributedOmitted' = 0
         'events.etw.parsedEventCount' = $(if ($ZeroEtwParsed) { 0 } else { 2 }); 'events.etw.etlDecodeRequired' = $false
-        'events.packetCapture.protocolParserNotImplemented' = $ParserNotImplemented
         'collectionHealth.driver.lossRows' = 0; 'collectionHealth.driver.lostCount' = 0
         'collectionHealth.etw.eventsLost' = 0; 'collectionHealth.etw.eventsLostRows' = 0; 'collectionHealth.etw.decodeFailed' = 0
         'collectionHealth.losses' = 0; 'collectionHealth.failures' = 0
