@@ -312,11 +312,11 @@ int RunDriverHealthOnly(const UniqueHandle& device, const Options& options, Even
     }
 
     if (!EmitDriverHealth(device, options, writer)) {
-        return kExitRuntimeFailure;
+        return RuntimeFailureAfterOutputWrite(device, options, writer);
     }
 
     if (!EmitCollectorHeartbeat(writer, options, "healthComplete", 0, 0, 0, 0, 0, 0)) {
-        return kExitRuntimeFailure;
+        return RuntimeFailureAfterOutputWrite(device, options, writer);
     }
 
     JsonDataObjectBuilder data;
@@ -364,7 +364,9 @@ int RunDriverHealthOnly(const UniqueHandle& device, const Options& options, Even
     stoppedEvent.path = options.devicePath;
     stoppedEvent.dataJson = data.Build();
 
-    return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
+    return EmitEvent(writer, stoppedEvent)
+        ? kExitSuccess
+        : RuntimeFailureAfterOutputWrite(device, options, writer);
 }
 
 // Input: Open driver handle, collector options, and event sink.
@@ -653,7 +655,9 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     stoppedEvent.path = options.devicePath;
     stoppedEvent.dataJson = data.Build();
 
-    return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
+    return EmitEvent(writer, stoppedEvent)
+        ? kExitSuccess
+        : RuntimeFailureAfterOutputWrite(device, options, writer);
 }
 
 // Input: Windows Unicode process arguments.
@@ -816,7 +820,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
     openedData.AddUnsigned("highWatermark", 0);
     openedEvent.dataJson = openedData.Build();
     if (!EmitEvent(writer, openedEvent)) {
-        return kExitRuntimeFailure;
+        return RuntimeFailureAfterOutputWrite(device, options, writer);
     }
 
     if (options.healthOnly) {
