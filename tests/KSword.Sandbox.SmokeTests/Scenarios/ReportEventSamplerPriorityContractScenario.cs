@@ -112,6 +112,37 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
                 ["zhMessage"] = "静态导入网络相关 API。"
             }
         });
+        // ETW rows carry a verbose correlation envelope in live runs.  Keep
+        // the provider identity, decoded payload, and process context ahead of
+        // that envelope so a bounded report still explains the trace event.
+        events.Add(new SandboxEvent
+        {
+            EventType = "etw.kernel.event",
+            Timestamp = timestamp.AddSeconds(1.05),
+            Source = "etwLive",
+            Data =
+            {
+                ["behaviorCounted"] = "true",
+                ["sampleBehaviorCandidate"] = "true",
+                ["sampleCorrelation"] = "confirmed",
+                ["sampleCorrelationStatus"] = "correlated",
+                ["actorProcessId"] = "4242",
+                ["eventName"] = "Process",
+                ["opcode"] = "Start",
+                ["eventId"] = "1",
+                ["providerName"] = "MSNT_SystemTrace",
+                ["payload"] = "ProcessId=0x1092; ParentId=0x4; ImageFileName=sample.exe",
+                ["traceArtifactRelativePath"] = "etw-traces/sample.etl",
+                ["semanticEventClass"] = "process",
+                ["semanticEventTags"] = "etw,windows-kernel,process",
+                ["threadId"] = "9001",
+                ["parentProcessId"] = "4",
+                ["imageFileName"] = "sample.exe",
+                ["commandLine"] = "sample.exe --run",
+                ["exitStatus"] = "0",
+                ["unimportant"] = new string('x', 1024)
+            }
+        });
         events.Add(new SandboxEvent
         {
             EventType = "static.pe.resource",
@@ -446,6 +477,27 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(staticEvent, "moduleName", "wininet.dll");
         RequireData(staticEvent, "apiCount", "7");
         RequireData(staticEvent, "zhMessage", "静态导入网络相关 API。");
+
+        var etwEvent = RequireEvent(result.Events, "etw.kernel.event");
+        foreach (var (key, expected) in new[]
+        {
+            ("eventName", "Process"),
+            ("opcode", "Start"),
+            ("eventId", "1"),
+            ("providerName", "MSNT_SystemTrace"),
+            ("payload", "ProcessId=0x1092; ParentId=0x4; ImageFileName=sample.exe"),
+            ("traceArtifactRelativePath", "etw-traces/sample.etl"),
+            ("semanticEventClass", "process"),
+            ("semanticEventTags", "etw,windows-kernel,process"),
+            ("threadId", "9001"),
+            ("parentProcessId", "4"),
+            ("imageFileName", "sample.exe"),
+            ("commandLine", "sample.exe --run"),
+            ("exitStatus", "0")
+        })
+        {
+            RequireData(etwEvent, key, expected);
+        }
 
         var resourceEvent = RequireEvent(result.Events, "static.pe.resource");
         RequireData(resourceEvent, "resourceRole", "embedded-pe");

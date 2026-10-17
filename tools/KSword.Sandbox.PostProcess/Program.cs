@@ -109,18 +109,17 @@ internal static class PostProcessProgram
             var renderer = new HtmlReportRenderer();
             File.WriteAllText(jsonReportPath, JsonSerializer.Serialize(report, JsonOptions));
             LogMemory("report-json-written", report.Events.Count);
-            var bilingualDocuments = renderer.RenderBilingualReports(report, artifactIndex.Artifacts, artifactIndex.Collections);
-            LogMemory("after-bilingual-html", bilingualDocuments.Sum(document => document.Html.Length));
-            foreach (var document in bilingualDocuments)
-            {
-                File.WriteAllText(Path.Combine(jobRoot, document.FileName), document.Html);
-                if (document.FileName.EndsWith(".zh.html", StringComparison.OrdinalIgnoreCase))
-                {
-                    // report.html remains the documented Chinese compatibility
-                    // file while report.zh.html is the explicit localized link.
-                    File.WriteAllText(htmlReportPath, document.Html);
-                }
-            }
+            // Render the expensive evidence graph once.  Chinese localization
+            // is a protected text pass over the English document, matching
+            // SandboxJobService and avoiding a second full graph traversal.
+            var englishHtml = renderer.RenderEnglish(report, artifactIndex.Artifacts, artifactIndex.Collections);
+            LogMemory("after-english-html", englishHtml.Length);
+            var chineseHtml = renderer.LocalizeChineseFromEnglish(englishHtml, report);
+            LogMemory("after-chinese-localization", chineseHtml.Length);
+            File.WriteAllText(Path.Combine(jobRoot, "report.en.html"), englishHtml);
+            File.WriteAllText(Path.Combine(jobRoot, "report.zh.html"), chineseHtml);
+            // report.html remains the documented Chinese compatibility file.
+            File.WriteAllText(htmlReportPath, chineseHtml);
 
             var resultPath = Path.Combine(jobRoot, "postprocess-result.json");
             var result = new

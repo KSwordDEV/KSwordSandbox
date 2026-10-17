@@ -139,6 +139,16 @@ public static class ReportEventSampler
         "status",
         "captureState",
         "reason",
+        "queueDepth",
+        "remainingQueueDepth",
+        "drainQueueDepthAtStart",
+        "drainQueueDepthAtStop",
+        "drainQueueDrained",
+        "queueDrained",
+        "drainStoppedAtDeadline",
+        "drainStoppedAtDrainDeadline",
+        "totalEventsSuppressed",
+        "eventsSuppressed",
         "zhMessage",
         "zhHint"
     ];
