@@ -78,6 +78,9 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
             !RequireStep(vmware, "run-agent").PowerShell.Contains("& powershell.exe @fallbackArgs", StringComparison.Ordinal),
             "VMware remoting fallback must detach Guest Agent and return control to sync-live-output instead of waiting synchronously.");
         RequireStepContains(vmware, "run-agent", "live sync will wait for agent.exit");
+        RequireStepContains(vmware, "run-agent", "Stop-ScheduledTask -TaskName $taskName");
+        RequireStepContains(vmware, "run-agent", "$launchDeadline = (Get-Date).AddSeconds(30);");
+        RequireStepContains(vmware, "run-agent", "$fallbackDeadline=$launchDeadline");
         RequireStepContains(vmware, "check-sample-runtime", "mscoree\\.dll");
         RequireStepContains(vmware, "check-sample-runtime", "_CorExeMain");
         RequireStepContains(vmware, "check-sample-runtime", "v2\\.0\\.50727");
@@ -90,6 +93,13 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         var encodedAgentLaunch = DecodeEncodedAgentLaunch(RequireStep(vmware, "run-agent").PowerShell);
         SmokeAssert.True(encodedAgentLaunch.Contains("WriteAllText($pidMarkerTemp", StringComparison.Ordinal), "Guest launch must atomically publish the PID marker.");
         SmokeAssert.True(encodedAgentLaunch.Contains("WriteAllText($exitTemp", StringComparison.Ordinal), "Guest launch must atomically publish the exit marker.");
+        var mockVmware = builder.Build(
+            vmwareConfig with { Driver = vmwareConfig.Driver with { UseMockCollector = true } },
+            Guid.NewGuid(),
+            sample);
+        var mockLaunch = RequireStep(mockVmware, "run-agent").PowerShell;
+        SmokeAssert.True(mockLaunch.Contains("Start-Process -FilePath 'powershell.exe'", StringComparison.Ordinal), "Mock VMware launch should use the detached direct wrapper.");
+        SmokeAssert.True(!mockLaunch.Contains("$fallback.Id | Set-Content -LiteralPath $pidPath", StringComparison.Ordinal), "Live sync must observe the Agent wrapper PID, never the detached launcher PID.");
         RequireStepContains(vmware, "sync-live-output", "continuing so collect-output can preserve stdout/stderr");
         RequireStepContains(vmware, "sync-live-output", "$maxSyncSeconds = 210");
         RequireStepContains(vmware, "collect-output", "guest-agent-run-status.json");

@@ -338,6 +338,7 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
         Require(executor, "CreateCancellationBeforeCleanupStepResult", "Cleanup-boundary cancellation should not consume the cleanup step result slot.");
         Require(executor, "RunbookProgressFacts.IsCanceledStepResult(stepResult)", "Canceled child steps should produce the canceled aggregate state.");
         Require(executor, "cleanupMode ? CancellationToken.None : cancellationToken", "Cleanup should continue with a non-cancelable token after mutation.");
+        Require(executor, "A cancellation or provider error can occur while the", "A failure inside the first cleanup step should keep the remaining cleanup tail alive.");
         Require(executor, "AcquireLiveExecutionLease(runbook)", "Every provider should acquire the shared live lease before executing source steps.");
         Require(executor, "FileShare.None", "The live lease should provide cross-process exclusion.");
         Require(executor, "StepId = \"live-execution-lease\"", "Lease contention should produce an explicit provider-neutral preflight failure.");

@@ -105,6 +105,8 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
 
         AssertStateBoundaries();
         AssertExpectedProcessSnapshotMiss();
+        AssertProcessTreeUnavailableAfterStart();
+        AssertEtwSecurityCoverageCounters();
         AssertRequestedMaxEventsBatchCap();
         AssertExpectedDisabledProducerSuppression();
         AssertExpectedTimeoutTermination();
@@ -272,6 +274,79 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(0, summary.FailureRows, "An explicitly explained process snapshot miss must remain a diagnostic, not a collection failure.");
         RequireEqual(0, summary.ProcessTreeUnavailable, "A process snapshot miss must not become a process-tree-unavailable count.");
         RequireTrue(summary.State == "complete", "An explained process snapshot miss alone should not degrade collection health.");
+    }
+
+    private static void AssertProcessTreeUnavailableAfterStart()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        var processStart = new SandboxEvent
+        {
+            EventType = "process.start",
+            Source = "guest",
+            ProcessId = 7400,
+            Path = @"C:\samples\tree-gap.exe",
+            Timestamp = timestamp
+        };
+        var treeUnavailable = new SandboxEvent
+        {
+            EventType = "process.tree_unavailable",
+            Source = "guest",
+            ProcessId = 7400,
+            Path = @"C:\samples\tree-gap.exe",
+            Timestamp = timestamp.AddMilliseconds(1),
+            Data =
+            {
+                ["captureState"] = "missing",
+                ["collectionHealth"] = "true"
+            }
+        };
+
+        var summary = CollectionHealthSummaryBuilder.Build([processStart, treeUnavailable]);
+        RequireEqual(1, summary.ProcessTreeUnavailable,
+            "A tree-unavailable row must remain a coverage failure even when process.start proves the sample launched.");
+        RequireEqual(1, summary.FailureRows,
+            "A missing process tree after launch must remain visible as a collection failure.");
+    }
+
+    private static void AssertEtwSecurityCoverageCounters()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        var raw = new List<SandboxEvent>
+        {
+            new()
+            {
+                EventType = "etw_security.surface.readiness",
+                Source = "etwSecurityReadiness",
+                Timestamp = timestamp,
+                Data = { ["surfaceKey"] = "process-handle-access" }
+            },
+            new()
+            {
+                EventType = "security_eventlog.fallback_surface.readiness",
+                Source = "windowsEventLog",
+                Timestamp = timestamp.AddMilliseconds(1),
+                Data = { ["fallbackSurfaceKeys"] = "process-handle-access;token-adjustment" }
+            },
+            new()
+            {
+                EventType = "etw_live.captured",
+                Source = "etwLive",
+                Timestamp = timestamp.AddMilliseconds(2),
+                Data = { ["parsedEventCount"] = "2" }
+            }
+        };
+        var report = raw.Take(2).ToList();
+        var metrics = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        CollectionHealthSummaryBuilder.AddEtwSecurityCoverageMetrics(metrics, raw, report);
+        RequireEqual(2, metrics["events.etw.raw"], "ETW raw metric should include security readiness and live capture rows.");
+        RequireEqual(1, metrics["events.etw.report"], "ETW report metric should use the sampled report collection.");
+        RequireEqual(1, metrics["events.etw.omitted"], "ETW omitted metric should expose the ETW row omitted by sampling.");
+        RequireEqual(1, metrics["events.security.raw"], "Security raw metric should include Security Event Log readiness rows.");
+        RequireEqual(1, metrics["events.security.report"], "Security report metric should use the sampled report collection.");
+        RequireEqual(0, metrics["events.security.omitted"], "Security omitted metric should remain consistent with retained readiness rows.");
+        RequireEqual(2, metrics["events.etw.security.readiness.raw"], "ETW/Security readiness raw metric should include both readiness surfaces.");
+        RequireEqual(2, metrics["events.etw.security.readiness.report"], "ETW/Security readiness report metric should include both retained surfaces.");
+        RequireEqual(0, metrics["events.etw.security.readiness.omitted"], "ETW/Security readiness omitted metric should remain consistent with report rows.");
     }
 
     private static void AssertRequestedMaxEventsBatchCap()

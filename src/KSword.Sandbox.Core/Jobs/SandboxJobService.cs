@@ -2514,6 +2514,7 @@ public sealed partial class SandboxJobService
             metrics,
             CollectionHealthSummaryBuilder.Build(rawEvents ?? events, events));
         AddEtwCoverageMetrics(metrics, rawEvents ?? events);
+        CollectionHealthSummaryBuilder.AddEtwSecurityCoverageMetrics(metrics, rawEvents ?? events, events);
         if (importSummary is not null)
         {
             metrics["events.sources.total"] = importSummary.SourceCount;
@@ -2678,6 +2679,10 @@ public sealed partial class SandboxJobService
             0,
             metrics["events.dynamicAction.attributedRaw"] - metrics["events.dynamicAction.attributedReport"]);
         metrics["events.dynamicAction.unattributedReport"] = reportUnattributedDynamicActionCount;
+        // Keep a raw/report network lane independent from the sampled event
+        // list.  HTML coverage uses this when all environment/unknown rows
+        // spill out of report.Events and no import summary survives inline.
+        AddDynamicCategoryMetrics(metrics, "events.network", rawEvents, reportEvents, IsNetworkEvent);
         AddDynamicCategoryMetrics(metrics, "events.networkTcp", rawEvents, reportEvents, IsTcpEvent);
         AddDynamicCategoryMetrics(metrics, "events.persistence", rawEvents, reportEvents, IsPersistenceEvent);
         AddDynamicCategoryMetrics(metrics, "events.file", rawEvents, reportEvents, IsFileEvent);
@@ -2714,6 +2719,14 @@ public sealed partial class SandboxJobService
 
     private static bool IsTcpEvent(SandboxEvent evt) =>
         evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsNetworkEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("tls.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
         evt.EventType.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsPersistenceEvent(SandboxEvent evt) =>

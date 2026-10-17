@@ -330,8 +330,13 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                     primaryFailureResult = stepResult;
                     wasCanceled = RunbookProgressFacts.IsCanceledStepResult(stepResult);
 
-                    if (!IsCleanupStep(step) &&
-                        vmMutationAttempted &&
+                    // A cancellation or provider error can occur while the
+                    // first cleanup step itself is running (for example
+                    // VMware stop before snapshot restore).  Keep the
+                    // remaining cleanup tail alive in that case too; a
+                    // failed cleanup step must not become the reason that
+                    // restore/stop evidence is skipped altogether.
+                    if (vmMutationAttempted &&
                         HasRemainingCleanupSteps(runbook, index + 1))
                     {
                         cleanupMode = true;

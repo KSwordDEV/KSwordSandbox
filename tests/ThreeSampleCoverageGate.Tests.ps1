@@ -16,7 +16,8 @@ function New-Fixture {
         [switch]$ZeroEtwParsed,
         [switch]$ParserNotImplemented,
         [switch]$SampleExitFailure,
-        [switch]$BrokenDynamicDecomposition
+        [switch]$BrokenDynamicDecomposition,
+        [switch]$ProcessTreeUnavailable
     )
 
     $job = Join-Path $root $Name
@@ -39,6 +40,11 @@ function New-Fixture {
         [pscustomobject]@{ EventType = 'process.exit'; Source = 'guest'; ProcessName = 'sample'; Data = [pscustomobject]@{ behaviorCounted = 'true'; sampleCorrelation = 'confirmed'; status = $(if ($SampleExitFailure) { '0x80131700' } else { '0' }) } },
         [pscustomobject]@{ EventType = 'packet_capture.protocol_summary'; Source = 'guest'; Data = [pscustomobject]@{ protocolSummaryReason = $(if ($ParserNotImplemented) { 'protocolParserNotImplemented' } else { 'parsed' }) } }
     )
+    if ($ProcessTreeUnavailable) {
+        # Health and metric values intentionally remain zero so this fixture
+        # proves event rows cannot be masked by a stale summary.
+        $events += [pscustomobject]@{ EventType = 'process.tree_unavailable'; Source = 'guest'; ProcessName = 'sample'; ProcessId = 100; Data = [pscustomobject]@{} }
+    }
     $metrics = [ordered]@{
         'events.total' = 4; 'events.raw' = 4; 'events.report' = 4
         'events.r0.driver.raw' = 1; 'events.r0.driver.lostCount' = 0
@@ -79,6 +85,10 @@ try {
     $valid = New-Fixture 'valid'
     $result = Invoke-Gate $valid
     if ($result.ExitCode -ne 0) { throw "valid fixture unexpectedly failed: $($result.Output)" }
+
+    $treeUnavailable = New-Fixture 'tree-unavailable' -ProcessTreeUnavailable
+    $result = Invoke-Gate $treeUnavailable
+    if ($result.ExitCode -ne 2 -or $result.Output -notmatch 'process.tree_unavailable.*1') { throw "process.tree_unavailable event was masked by zero health: $($result.Output)" }
 
     $missingHealth = New-Fixture 'missing-health' -MissingHealth
     $result = Invoke-Gate $missingHealth

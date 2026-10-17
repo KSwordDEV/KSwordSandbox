@@ -278,6 +278,63 @@ public static class CollectionHealthSummaryBuilder
         metrics["events.collectionHealth.agent.failureRows"] = summary.AgentFailureRows;
     }
 
+    /// <summary>
+    /// Adds ETW and Windows Security coverage counters using the same raw and
+    /// sampled report collections. These lanes are independent from R0
+    /// producer rows, but they still need an explicit raw/report/omitted
+    /// boundary so a readiness row cannot disappear without being counted.
+    /// </summary>
+    public static void AddEtwSecurityCoverageMetrics(
+        IDictionary<string, int> metrics,
+        IReadOnlyCollection<SandboxEvent> rawEvents,
+        IReadOnlyCollection<SandboxEvent> reportEvents)
+    {
+        var rawEtw = rawEvents.Count(IsEtwCoverageRow);
+        var reportEtw = reportEvents.Count(IsEtwCoverageRow);
+        metrics["events.etw.raw"] = rawEtw;
+        metrics["events.etw.report"] = reportEtw;
+        metrics["events.etw.omitted"] = Math.Max(0, rawEtw - reportEtw);
+
+        var rawSecurity = rawEvents.Count(IsSecurityCoverageRow);
+        var reportSecurity = reportEvents.Count(IsSecurityCoverageRow);
+        metrics["events.security.raw"] = rawSecurity;
+        metrics["events.security.report"] = reportSecurity;
+        metrics["events.security.omitted"] = Math.Max(0, rawSecurity - reportSecurity);
+
+        var rawReadiness = rawEvents.Count(IsEtwSecurityReadinessRow);
+        var reportReadiness = reportEvents.Count(IsEtwSecurityReadinessRow);
+        metrics["events.etw.security.readiness.raw"] = rawReadiness;
+        metrics["events.etw.security.readiness.report"] = reportReadiness;
+        metrics["events.etw.security.readiness.omitted"] = Math.Max(0, rawReadiness - reportReadiness);
+    }
+
+    private static bool IsEtwCoverageRow(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        var source = Value(evt, "captureSource", "collectorSource", "source");
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            source = evt.Source ?? string.Empty;
+        }
+
+        return type.StartsWith("etw.", StringComparison.OrdinalIgnoreCase) ||
+            source.Contains("etw", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsEtwSecurityReadinessRow(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        return type.StartsWith("etw_security.", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(type, "security_eventlog.fallback_surface.readiness", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSecurityCoverageRow(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        return type.StartsWith("security.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("security_eventlog.", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsHealthRow(SandboxEvent evt)
     {
         if (IsRoutineR0ControlRow(evt))
@@ -660,18 +717,40 @@ public static class CollectionHealthSummaryBuilder
         }
 
         // After-run probes naturally observe a root after the executor has
-        // terminated it. If the same PID already produced a process.tree or
-        // process.snapshot row, the lineage was captured and this is an
-        // expected terminal visibility transition rather than a collection
-        // failure. Keep the unavailable row in raw evidence.
+        // terminated it. A process.start row alone only proves that the
+        // process launched; it does not prove that a process tree was ever
+        // captured. Likewise, Guest Agent emits a process.snapshot row with
+        // captureState=missing when the root vanished before the snapshot.
+        // Count those rows as a real coverage gap. Only a successful tree or
+        // snapshot row for the same PID/path can explain an unavailable row.
         return !raw.Any(other =>
             other.ProcessId == evt.ProcessId &&
             (string.Equals(other.EventType, "process.tree", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(other.EventType, "process.snapshot", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(other.EventType, "process.start", StringComparison.OrdinalIgnoreCase)) &&
+             string.Equals(other.EventType, "process.snapshot", StringComparison.OrdinalIgnoreCase)) &&
+            IsSuccessfulProcessTreeCapture(other) &&
             (string.IsNullOrWhiteSpace(evt.Path) || string.IsNullOrWhiteSpace(other.Path) ||
              string.Equals(evt.Path, other.Path, StringComparison.OrdinalIgnoreCase)) &&
             other.Timestamp <= evt.Timestamp);
+    }
+
+    private static bool IsSuccessfulProcessTreeCapture(SandboxEvent evt)
+    {
+        // Explicit missing/failed states are evidence of the same gap as the
+        // process.tree_unavailable marker, not successful lineage capture.
+        foreach (var key in new[] { "captureState", "snapshotState", "status", "treeNodeState" })
+        {
+            if (!evt.Data.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            if (TextEqualsAny(value, "missing", "unavailable", "failed", "failure", "error"))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsScheduledTaskCaptureFailed(SandboxEvent evt) =>

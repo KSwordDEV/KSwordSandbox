@@ -332,6 +332,8 @@ internal static class SmokeTestProgram
         Assert(runbook.Steps.All(step => step.Id != "check-guest-output-space"), "guest output capacity must remain an environment concern, not a generic runbook hard-stop");
         var prepareOutputStep = runbook.Steps.Single(step => step.Id == "prepare-guest-output");
         Assert(prepareOutputStep.PowerShell.Contains("driver-events.part-*.jsonl", StringComparison.Ordinal), "guest output cleanup should remove stale rotated R0 segments");
+        Assert(prepareOutputStep.PowerShell.Contains("agent.pid.tmp.*", StringComparison.Ordinal), "guest output cleanup should remove stale atomic PID marker temps");
+        Assert(prepareOutputStep.PowerShell.Contains("agent.exit.tmp.*", StringComparison.Ordinal), "guest output cleanup should remove stale atomic exit marker temps");
         Assert(prepareOutputStep.PowerShell.Contains("*.etl", StringComparison.Ordinal), "guest output cleanup should remove stale ETL traces");
         Assert(prepareOutputStep.PowerShell.Contains("*.pcap", StringComparison.Ordinal), "guest output cleanup should remove stale packet captures");
         Assert(prepareOutputStep.PowerShell.Contains("guest-output-preflight.json", StringComparison.Ordinal), "guest output cleanup should remove legacy capacity diagnostics so they cannot poison a later run");

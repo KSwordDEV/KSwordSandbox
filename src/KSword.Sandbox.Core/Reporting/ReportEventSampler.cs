@@ -140,6 +140,7 @@ public static class ReportEventSampler
 
     private enum ReportSamplingBucket
     {
+        CoverageEvidence,
         StrongSampleBehavior,
         FindingEvidence,
         DynamicActionEvidence,
@@ -153,6 +154,7 @@ public static class ReportEventSampler
 
     private static readonly ReportSamplingBucket[] ReportSamplingBucketPriority =
     [
+        ReportSamplingBucket.CoverageEvidence,
         ReportSamplingBucket.StrongSampleBehavior,
         ReportSamplingBucket.FindingEvidence,
         ReportSamplingBucket.DynamicActionEvidence,
@@ -461,6 +463,38 @@ public static class ReportEventSampler
         "imageFileName",
         "commandLine",
         "exitStatus"
+    ];
+
+    // Readiness rows explain the R0 fallback boundary (handle access, token
+    // privilege, remote-thread, and module-load surfaces). Keep the matrix
+    // fields ahead of the generic correlation envelope so sanitization never
+    // leaves an analyst with an unlabeled readiness row.
+    private static readonly string[] EtwSecurityReadinessPriorityDataKeys =
+    [
+        "surfaceKey",
+        "surfaceName",
+        "semanticTags",
+        "providerNames",
+        "providerManifestStatuses",
+        "eventIdMap",
+        "securityEventIds",
+        "kernelProcessEventFamilies",
+        "fallbackMatrixVersion",
+        "fallbackMatrixOwner",
+        "fallbackOwner",
+        "fallbackSurfaceKeys",
+        "fallbackSurfaceNames",
+        "fallbackSurfaceTags",
+        "fallbackEventIdMaps",
+        "fallbackKernelProcessEventFamilies",
+        "fallbackProviders",
+        "fallbackOwnersBySurface",
+        "fallbackR0CoverageGaps",
+        "r0CoverageGap",
+        "fallbackBehaviorBoundaries",
+        "behaviorBoundary",
+        "etwLiveCaptureEnabled",
+        "etwSessionStarted"
     ];
 
     private static readonly string[] R0DriverEventPriorityDataKeys =
@@ -1295,8 +1329,11 @@ public static class ReportEventSampler
         foreach (var bucket in ReportSamplingBucketPriority)
         {
             var isDynamicActionBucket = bucket == ReportSamplingBucket.DynamicActionEvidence;
+            var isCoverageEvidenceBucket = bucket == ReportSamplingBucket.CoverageEvidence;
             var bucketQuota = isDynamicActionBucket
                 ? dynamicActionQuota
+                : isCoverageEvidenceBucket
+                ? Math.Max(1, options.MaxHighValueEventsPerType)
                 : bucket == ReportSamplingBucket.Diagnostics
                 ? diagnosticQuota
                 : options.MaxInlineEvents;
@@ -1318,7 +1355,7 @@ public static class ReportEventSampler
 
             foreach (var candidate in bucketCandidates)
             {
-                if ((!isDynamicActionBucket && boundedSelectedCount >= options.MaxInlineEvents) ||
+                if ((!isDynamicActionBucket && !isCoverageEvidenceBucket && boundedSelectedCount >= options.MaxInlineEvents) ||
                     selectedForBucket >= bucketQuota)
                 {
                     break;
@@ -1339,7 +1376,7 @@ public static class ReportEventSampler
                 {
                     dynamicActionSelectedCount++;
                 }
-                else
+                else if (!isCoverageEvidenceBucket)
                 {
                     boundedSelectedCount++;
                 }
@@ -1388,8 +1425,15 @@ public static class ReportEventSampler
                 ReportSamplingBucket.FindingEvidence or
                 ReportSamplingBucket.DynamicActionEvidence or
                 ReportSamplingBucket.ProbableSampleEvidence);
+        // Dynamic action rows can also be promoted to FindingEvidence (for
+        // example process.start/exit and explicit failure rows).  Count by
+        // the shared dynamic predicate after selection so the marker's
+        // dynamic selected/omitted totals reconcile with raw telemetry even
+        // when those rows went through the higher-priority evidence lane.
+        var selectedDynamicActionTotal = inlineCandidates.Count(candidate =>
+            selectedIndexes.Contains(candidate.Index) && IsDynamicActionEvidenceEvent(candidate.Event));
         var dynamicActionOmittedCount = omittedCandidates.Count(candidate =>
-            candidate.Bucket == ReportSamplingBucket.DynamicActionEvidence);
+            IsDynamicActionEvidenceEvent(candidate.Event));
 
         return new ReportSamplingSelection(
             inlineCandidates
@@ -1402,7 +1446,7 @@ public static class ReportEventSampler
             omittedTypeCounts,
             omittedBehaviorCandidateCount,
             omittedHighSignalCount,
-            dynamicActionSelectedCount,
+            selectedDynamicActionTotal,
             dynamicActionOmittedCount);
     }
 
@@ -1443,8 +1487,18 @@ public static class ReportEventSampler
             return ReportSamplingBucket.GeneralBehaviorEvidence;
         }
 
-        if (string.Equals(evt.EventType, "artifact.import_summary", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(evt.EventType, "artifact.import_rejected", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(eventType, "artifact.import_summary", StringComparison.OrdinalIgnoreCase) &&
+            evt.Data.Keys.Any(key => string.Equals(key, "artifactEvidenceMatrix", StringComparison.OrdinalIgnoreCase)))
+        {
+            // The matrix is a compact coverage fact, not a sample-action
+            // row. Reserve one summary row before behavior/quota buckets so
+            // a large action burst cannot make HTML claim the matrix was not
+            // reported when no artifact index fallback exists.
+            return ReportSamplingBucket.CoverageEvidence;
+        }
+
+        if (string.Equals(eventType, "artifact.import_summary", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(eventType, "artifact.import_rejected", StringComparison.OrdinalIgnoreCase))
         {
             return ReportSamplingBucket.FindingEvidence;
         }
@@ -1606,6 +1660,11 @@ public static class ReportEventSampler
         ReportSamplingBucket bucket,
         ReportEventSamplingOptions options)
     {
+        if (bucket == ReportSamplingBucket.CoverageEvidence)
+        {
+            return 1;
+        }
+
         if (bucket == ReportSamplingBucket.DynamicActionEvidence)
         {
             // Dynamic action evidence already has a dedicated hard total
@@ -1687,7 +1746,7 @@ public static class ReportEventSampler
     /// builders.  Keeping one predicate prevents the coverage marker and the
     /// events.dynamicAction.* metrics from counting different R0/ETW rows.
     /// </summary>
-    internal static bool IsDynamicActionEventForMetrics(SandboxEvent evt) =>
+    public static bool IsDynamicActionEventForMetrics(SandboxEvent evt) =>
         IsDynamicActionEvidenceEvent(evt);
 
     private static int DynamicActionPriority(SandboxEvent evt)
@@ -2564,7 +2623,16 @@ public static class ReportEventSampler
             }
         }
 
-        if (evt.EventType.EndsWith(".runbook.executed", StringComparison.OrdinalIgnoreCase) &&
+        if ((evt.EventType ?? string.Empty).StartsWith("etw_security.", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "security_eventlog.fallback_surface.readiness", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var key in EtwSecurityReadinessPriorityDataKeys)
+            {
+                yield return key;
+            }
+        }
+
+        if ((evt.EventType ?? string.Empty).EndsWith(".runbook.executed", StringComparison.OrdinalIgnoreCase) &&
             TextEqualsAny(DataValue(evt.Data, "success"), "false", "0", "no", "failed"))
         {
             foreach (var key in OperationalFailurePriorityDataKeys)
@@ -2797,7 +2865,8 @@ public static class ReportEventSampler
                 EventDataBoolTrue(evt, "readinessOnly", "statusOnly", "coverageGap", "auditPolicyDisabled") ||
                 eventType.Contains("surface", StringComparison.OrdinalIgnoreCase) ||
                 eventType.Contains("provider", StringComparison.OrdinalIgnoreCase) ||
-                eventType.Contains("coverage", StringComparison.OrdinalIgnoreCase);
+                eventType.Contains("coverage", StringComparison.OrdinalIgnoreCase) ||
+                eventType.Contains("readiness", StringComparison.OrdinalIgnoreCase);
         }
 
         if (!eventType.StartsWith("security_eventlog.", StringComparison.OrdinalIgnoreCase))

@@ -436,6 +436,41 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         };
         var result = ReportEventSampler.SampleForReport(events, priorityOptions);
 
+        // Artifact evidence matrices are compact coverage facts. Keep one
+        // import summary ahead of a large behavior burst so the HTML matrix
+        // remains reportable even when the inline action quota is exhausted.
+        var matrixRetentionInput = Enumerable.Range(0, 12)
+            .Select(index => new SandboxEvent
+            {
+                EventType = "custom.behavior",
+                Timestamp = timestamp.AddSeconds(60).AddMilliseconds(index),
+                Source = "guest",
+                Data = { ["behaviorCounted"] = "true", ["sampleBehaviorCandidate"] = "true" }
+            })
+            .Concat(new[]
+            {
+                new SandboxEvent
+                {
+                    EventType = "artifact.import_summary",
+                    Timestamp = timestamp.AddSeconds(61),
+                    Source = "host",
+                    Data =
+                    {
+                        ["artifactEvidenceMatrix"] = "dropped-files=1:ready:4096;screenshots=0:missing:0"
+                    }
+                }
+            })
+            .ToList();
+        var matrixRetention = ReportEventSampler.SampleForReport(
+            matrixRetentionInput,
+            new ReportEventSamplingOptions { MaxInlineEvents = 1, MaxDiagnosticEvents = 0 });
+        SmokeAssert.True(
+            matrixRetention.Events.Any(evt =>
+                string.Equals(evt.EventType, "artifact.import_summary", StringComparison.OrdinalIgnoreCase) &&
+                evt.Data.TryGetValue("artifactEvidenceMatrix", out var matrix) &&
+                matrix.Contains("dropped-files=1:ready:4096", StringComparison.Ordinal)),
+            "Artifact evidence matrix summary must survive an exhausted behavior quota.");
+
         SmokeAssert.True(result.WasSampled, "Noisy input should be sampled.");
         SmokeAssert.True(result.Events.Any(evt => string.Equals(evt.EventType, "report.events.sampled", StringComparison.OrdinalIgnoreCase)), "Sampling marker should be present.");
         SmokeAssert.True(result.ExcludedEventCount == 2, $"Agent lifecycle rows should be excluded from the inline report policy; got {result.ExcludedEventCount}.");
@@ -684,6 +719,48 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(boundedDynamicMarker, "markerOverheadEventCount", "1");
         SmokeAssert.True(boundedDynamic.SelectedRawEventCount == 5,
             "Dynamic evidence selection must obey MaxDynamicActionEvents.");
+
+        // Process lifecycle rows are promoted to FindingEvidence before the
+        // dedicated dynamic lane.  Marker counts must still reconcile them as
+        // dynamic actions when that higher-priority lane reaches its quota.
+        var mixedLifecycleDynamic = ReportEventSampler.SampleForReport(
+        [
+            new SandboxEvent
+            {
+                EventType = "process.start",
+                Timestamp = timestamp.AddSeconds(31),
+                Source = "guest",
+                ProcessId = 901,
+                Data = { ["behaviorCounted"] = "true", ["sampleCorrelation"] = "confirmed" }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.exit",
+                Timestamp = timestamp.AddSeconds(32),
+                Source = "guest",
+                ProcessId = 901,
+                Data = { ["behaviorCounted"] = "true", ["sampleCorrelation"] = "confirmed" }
+            },
+            new SandboxEvent
+            {
+                EventType = "file.write",
+                Timestamp = timestamp.AddSeconds(33),
+                Source = "guest",
+                Data = { ["behaviorCounted"] = "true", ["sampleCorrelation"] = "confirmed" }
+            }
+        ],
+        new ReportEventSamplingOptions
+        {
+            MaxInlineEvents = 1,
+            MaxDynamicActionEvents = 1,
+            MaxDiagnosticEvents = 0
+        });
+        var mixedLifecycleMarker = RequireEvent(mixedLifecycleDynamic.Events, "report.events.sampled");
+        var mixedLifecycleSelected = int.Parse(mixedLifecycleMarker.Data["selectedDynamicActionCount"]);
+        var mixedLifecycleOmitted = int.Parse(mixedLifecycleMarker.Data["dynamicActionOmittedCount"]);
+        var mixedLifecycleRaw = int.Parse(mixedLifecycleMarker.Data["rawDynamicActionCount"]);
+        SmokeAssert.True(mixedLifecycleSelected + mixedLifecycleOmitted == mixedLifecycleRaw,
+            "Dynamic marker counts must reconcile process lifecycle rows promoted through FindingEvidence.");
 
         // Unknown/environment dynamic rows can arrive before the submitted
         // sample's confirmed actions. They must not consume the dedicated

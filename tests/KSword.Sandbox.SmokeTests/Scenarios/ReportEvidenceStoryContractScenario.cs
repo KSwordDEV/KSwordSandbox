@@ -105,6 +105,42 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(snapshotOnlyHtml, "environment network observed; no sample attribution", "Netstat snapshot rows should count as observed environment network.");
         RequireContains(snapshotOnlyHtml, "Observed rows: 58", "Netstat snapshot rowCount should survive report coverage rendering.");
 
+        // If every environment/unknown network row spills out of the inline
+        // sample and there is no import summary, raw/report metrics still
+        // define the populated network lane.  HTML must keep it visible as
+        // unattributed evidence instead of saying the channel was uncollected.
+        var metricOnlyReport = BuildReport() with
+        {
+            Events =
+            [
+                new SandboxEvent
+                {
+                    EventType = "report.events.sampled",
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Source = "host",
+                    Data =
+                    {
+                        ["rawEventCount"] = "12",
+                        ["selectedRawEventCount"] = "1",
+                        ["omittedEventCount"] = "11"
+                    }
+                }
+            ],
+            Metrics = new Dictionary<string, int>
+            {
+                ["events.network.raw"] = 12,
+                ["events.network.report"] = 0,
+                ["events.network.attributedRaw"] = 0,
+                ["events.network.attributedReport"] = 0,
+                ["events.raw"] = 12,
+                ["events.report"] = 1,
+                ["events.omittedFromReport"] = 11
+            }
+        };
+        var metricOnlyHtml = renderer.RenderEnglish(metricOnlyReport, []);
+        RequireContains(metricOnlyHtml, "environment network observed; no sample attribution", "Raw network metrics should preserve an omitted environment/unknown lane.");
+        RequireContains(metricOnlyHtml, "Observed rows: 12", "Raw network metrics should preserve the observed network count.");
+
         RequireContains(html, "Stable relationship lanes", "Behavior graph should expose stable relationship lanes before dense edges.");
         RequireContains(html, "Process relation path", "Process cards should expose visible relationship paths.");
         RequireContains(html, "Artifact lane health", "Artifact status cards should expose lane health summaries.");

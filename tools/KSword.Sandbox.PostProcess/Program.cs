@@ -1035,6 +1035,15 @@ internal static class PostProcessProgram
             ["rawEvents"] = rawEvents.Count,
             ["reportEvents"] = reportEvents.Count,
             ["omittedReportEvents"] = omittedReportEvents,
+            // Keep the post-process report on the same metric contract as the
+            // live regeneration path.  The legacy aliases above remain for
+            // older consumers, while these names let report.json and HTML
+            // compare raw/source coverage without guessing which count was
+            // sampled.
+            ["events.total"] = rawEvents.Count,
+            ["events.raw"] = rawEvents.Count,
+            ["events.report"] = reportEvents.Count,
+            ["events.omittedFromReport"] = omittedReportEvents,
             ["findings"] = findings.Count,
             ["highFindings"] = findings.Count(finding => string.Equals(finding.Severity, "high", StringComparison.OrdinalIgnoreCase)),
             ["mediumFindings"] = findings.Count(finding => string.Equals(finding.Severity, "medium", StringComparison.OrdinalIgnoreCase)),
@@ -1043,7 +1052,7 @@ internal static class PostProcessProgram
             ["processEvents"] = rawEvents.Count(evt => evt.EventType.Contains("process", StringComparison.OrdinalIgnoreCase)),
             ["fileEvents"] = rawEvents.Count(evt => evt.EventType.Contains("file", StringComparison.OrdinalIgnoreCase)),
             ["registryEvents"] = rawEvents.Count(evt => evt.EventType.Contains("registry", StringComparison.OrdinalIgnoreCase)),
-            ["networkEvents"] = rawEvents.Count(evt => evt.EventType.Contains("network", StringComparison.OrdinalIgnoreCase) || evt.EventType.Contains("tcp", StringComparison.OrdinalIgnoreCase)),
+            ["networkEvents"] = rawEvents.Count(IsNetworkEvent),
             ["staticTags"] = staticAnalysis?.Tags.Count ?? 0
         };
         var rawDynamicActionCount = rawEvents.Count(IsDynamicActionEvent);
@@ -1052,21 +1061,39 @@ internal static class PostProcessProgram
         metrics["dynamicActionReportEvents"] = reportDynamicActionCount;
         metrics["dynamicActionOmitted"] = Math.Max(0, rawDynamicActionCount - reportDynamicActionCount);
         metrics["dynamicActionEvents"] = reportDynamicActionCount;
-        metrics["networkTcpRawEvents"] = rawEvents.Count(evt => evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase));
-        metrics["networkTcpEvents"] = reportEvents.Count(evt => evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase));
-        metrics["persistenceRawEvents"] = rawEvents.Count(evt =>
-            evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase));
-        metrics["persistenceEvents"] = reportEvents.Count(evt =>
-            evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase));
+        AddDynamicCategoryMetrics(metrics, "events.network", rawEvents, reportEvents, IsNetworkEvent);
+        metrics["networkTcpRawEvents"] = rawEvents.Count(IsTcpEvent);
+        metrics["networkTcpEvents"] = reportEvents.Count(IsTcpEvent);
+        metrics["persistenceRawEvents"] = rawEvents.Count(IsPersistenceEvent);
+        metrics["persistenceEvents"] = reportEvents.Count(IsPersistenceEvent);
         AddR0DriverCoverageMetrics(metrics, reportEvents, rawEvents);
         CollectionHealthSummaryBuilder.AddMetrics(
             metrics,
             CollectionHealthSummaryBuilder.Build(rawEvents, reportEvents));
+        CollectionHealthSummaryBuilder.AddEtwSecurityCoverageMetrics(metrics, rawEvents, reportEvents);
         return metrics;
+    }
+
+    private static void AddDynamicCategoryMetrics(
+        Dictionary<string, int> metrics,
+        string metricPrefix,
+        IReadOnlyCollection<SandboxEvent> rawEvents,
+        IReadOnlyCollection<SandboxEvent> reportEvents,
+        Func<SandboxEvent, bool> predicate)
+    {
+        var rawCount = rawEvents.Count(predicate);
+        var reportCount = reportEvents.Count(predicate);
+        var rawUnattributed = rawEvents.Count(evt => predicate(evt) && !IsSampleAttributedDynamicActionEvent(evt));
+        var reportUnattributed = reportEvents.Count(evt => predicate(evt) && !IsSampleAttributedDynamicActionEvent(evt));
+        metrics[$"{metricPrefix}.raw"] = rawCount;
+        metrics[$"{metricPrefix}.report"] = reportCount;
+        metrics[$"{metricPrefix}.omitted"] = Math.Max(0, rawCount - reportCount);
+        metrics[$"{metricPrefix}.rawUnknown"] = rawUnattributed;
+        metrics[$"{metricPrefix}.attributedRaw"] = rawCount - rawUnattributed;
+        metrics[$"{metricPrefix}.attributedReport"] = reportCount - reportUnattributed;
+        metrics[$"{metricPrefix}.attributedOmitted"] = Math.Max(
+            0,
+            metrics[$"{metricPrefix}.attributedRaw"] - metrics[$"{metricPrefix}.attributedReport"]);
     }
 
     private static void AddR0DriverCoverageMetrics(
@@ -1076,9 +1103,20 @@ internal static class PostProcessProgram
     {
         var rawDriverRows = rawEvents.Where(IsR0DriverTelemetryRow).ToList();
         var reportDriverRows = reportEvents.Where(IsR0DriverTelemetryRow).ToList();
+        var rawAttributedDriverRows = rawDriverRows.Count(CollectionHealthSummaryBuilder.IsSampleAttributedR0DriverTelemetryRow);
+        var reportAttributedDriverRows = reportDriverRows.Count(CollectionHealthSummaryBuilder.IsSampleAttributedR0DriverTelemetryRow);
         metrics["events.r0.driver.raw"] = rawDriverRows.Count;
         metrics["events.r0.driver.report"] = reportDriverRows.Count;
         metrics["events.r0.driver.omitted"] = Math.Max(0, rawDriverRows.Count - reportDriverRows.Count);
+        metrics["events.r0.driver.rawUnknown"] = rawDriverRows.Count - rawAttributedDriverRows;
+        metrics["events.r0.driver.reportUnknown"] = reportDriverRows.Count - reportAttributedDriverRows;
+        metrics["events.r0.driver.attributedRaw"] = rawAttributedDriverRows;
+        metrics["events.r0.driver.attributedReport"] = reportAttributedDriverRows;
+        metrics["events.r0.driver.attributedOmitted"] = Math.Max(0, rawAttributedDriverRows - reportAttributedDriverRows);
+        metrics["events.r0.driver.unknownOmitted"] = Math.Max(
+            0,
+            (rawDriverRows.Count - rawAttributedDriverRows) -
+            (reportDriverRows.Count - reportAttributedDriverRows));
         metrics["events.r0.driver.lossObserved"] = rawEvents.Count(IsR0LossEvidenceEvent);
         metrics["events.r0.driver.backpressureObserved"] = rawEvents.Count(IsR0BackpressureEvidenceEvent);
         metrics["events.r0.driver.drainStoppedAtDeadline"] = rawEvents.Count(evt => EventDataBoolTrue(evt, "drainStoppedAtDeadline"));
@@ -1135,29 +1173,50 @@ internal static class PostProcessProgram
     private static int ToMetricInt(ulong value) => value > int.MaxValue ? int.MaxValue : (int)value;
 
     private static string R0DriverCategory(SandboxEvent evt)
-    {
-        var type = evt.EventType;
-        var suffix = type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ? type["driver.".Length..] : type;
-        var dot = suffix.IndexOf('.', StringComparison.Ordinal);
-        var category = (dot >= 0 ? suffix[..dot] : suffix).ToLowerInvariant();
-        return category switch
-        {
-            "process" => "process",
-            "image" => "image",
-            "file" => "file",
-            "registry" => "registry",
-            "network" => "network",
-            "load" => "load",
-            _ => "other"
-        };
-    }
+        => CollectionHealthSummaryBuilder.GetR0DriverCategory(evt);
 
     private static bool IsDynamicActionEvent(SandboxEvent evt) =>
+        ReportEventSampler.IsDynamicActionEventForMetrics(evt);
+
+    private static bool IsNetworkEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("tls.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTcpEvent(SandboxEvent evt) =>
         evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase);
+        evt.EventType.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPersistenceEvent(SandboxEvent evt) =>
+        IsDynamicActionEvent(evt) &&
+        (evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
+         evt.EventType.StartsWith("service.", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSampleAttributedDynamicActionEvent(SandboxEvent evt)
+    {
+        if (EventDataTruthy(evt, "behaviorCounted", "sampleBehaviorCandidate", "strongSampleCorrelation"))
+        {
+            return true;
+        }
+
+        return EventDataEqualsAny(evt, "sampleCorrelation", "confirmed", "probable", "candidate") ||
+            EventDataEqualsAny(evt, "sampleCorrelationStatus", "correlated", "confirmed", "probable", "candidate") ||
+            EventDataEqualsAny(evt, "evidenceDisposition", "behavior-candidate", "sample-attributed");
+    }
+
+    private static bool EventDataEqualsAny(SandboxEvent evt, string key, params string[] values) =>
+        evt.Data.TryGetValue(key, out var value) &&
+        values.Any(expected => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase));
+
+    private static bool EventDataTruthy(SandboxEvent evt, params string[] keys) =>
+        keys.Any(key => evt.Data.TryGetValue(key, out var value) &&
+            value is not null && (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1"));
 
     private sealed class Options
     {

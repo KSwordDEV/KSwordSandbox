@@ -122,7 +122,10 @@ foreach ($root in $jobRoots) {
     $etwLost = Get-Count $health @('EtwEventsLost'); if ($null -eq $etwLost) { $etwLost = Get-Count $metrics @('collectionHealth.etw.eventsLost','events.collectionHealth.etw.eventsLost') }
     $etwLostRows = Get-Count $health @('EtwEventsLostRows'); if ($null -eq $etwLostRows) { $etwLostRows = Get-Count $metrics @('collectionHealth.etw.eventsLostRows','events.collectionHealth.etw.eventsLostRows') }
     $driverLossRows = Get-Count $health @('DriverLossRows'); if ($null -eq $driverLossRows) { $driverLossRows = Get-Count $metrics @('collectionHealth.driver.lossRows','events.collectionHealth.driver.lossRows') }
-    $treeUnavailable = Get-Count $health @('ProcessTreeUnavailable'); if ($null -eq $treeUnavailable) { $treeUnavailable = Get-Count $metrics @('collectionHealth.process.treeUnavailable','events.collectionHealth.process.treeUnavailable') }
+    # Keep the health summary, metric, and event views independent.  A stale
+    # zero in CollectionHealth must not mask process.tree_unavailable rows.
+    $treeHealth = Get-Count $health @('ProcessTreeUnavailable')
+    $treeMetric = Get-Count $metrics @('collectionHealth.process.treeUnavailable','events.collectionHealth.process.treeUnavailable')
     $scheduledTaskFailures = Get-Count $health @('ScheduledTaskCaptureFailed'); if ($null -eq $scheduledTaskFailures) { $scheduledTaskFailures = Get-Count $metrics @('collectionHealth.scheduledTask.captureFailed','events.collectionHealth.scheduledTask.captureFailed') }
     $pktmonFailures = Get-Count $health @('PktmonStopFailed'); if ($null -eq $pktmonFailures) { $pktmonFailures = Get-Count $metrics @('collectionHealth.pktmon.stopFailed','events.collectionHealth.pktmon.stopFailed') }
     $etwDecodeFailures = Get-Count $health @('EtwDecodeFailed'); if ($null -eq $etwDecodeFailures) { $etwDecodeFailures = Get-Count $metrics @('collectionHealth.etw.decodeFailed','events.collectionHealth.etw.decodeFailed') }
@@ -165,7 +168,13 @@ foreach ($root in $jobRoots) {
     }
     $sampleProcessExitErrors = @($events | Where-Object { (Test-SampleProcessExit $_ $sample) -and (Test-NonZeroExitCode (Get-ExitValue $_)) }).Count
     $treeEventCount = @($events | Where-Object { [string]$_.EventType -ieq 'process.tree_unavailable' }).Count
-    if ($null -eq $treeUnavailable) { $treeUnavailable = [int64]$treeEventCount }
+    $treeUnavailable = $null
+    foreach ($treeCandidate in @($treeHealth, $treeMetric, $treeEventCount)) {
+        if ($null -eq $treeCandidate) { continue }
+        if ($null -eq $treeUnavailable -or [int64]$treeCandidate -gt [int64]$treeUnavailable) {
+            $treeUnavailable = [int64]$treeCandidate
+        }
+    }
     $reasonsValue = Get-Value $health @('StateReasons')
     $reasons = @(@($reasonsValue) | ForEach-Object { [string]$_ } | Where-Object { $_ })
     $gate = 'PASS'; $why = [System.Collections.Generic.List[string]]::new()

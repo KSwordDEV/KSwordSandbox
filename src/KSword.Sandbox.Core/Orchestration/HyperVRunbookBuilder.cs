@@ -1512,7 +1512,7 @@ public sealed class HyperVRunbookBuilder
             // parts, ETL/PCAP captures, and artifact trees behind.  Remove
             // every known output lane before launching the Agent so old data
             // can never be mistaken for this run's evidence.
-            $"Invoke-Command -Session $session -ScriptBlock {{ param($root) New-Item -ItemType Directory -Force -Path $root | Out-Null; $patterns = @('events.json','events.json.failure.json','driver-events.jsonl','driver-events.part-*.jsonl','*.jsonl','*.etl','*.etl.zip','*.pcap','*.pcapng','*.dmp','*.bmp','*.png','*.jpg','*.jpeg','agent.pid','agent.exit','agent.stdout.log','agent.stderr.log','guest-agent-run-status.json','agent-summary.json','guest-output-preflight.json'); foreach ($pattern in $patterns) {{ Get-ChildItem -LiteralPath $root -Filter $pattern -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue }}; foreach ($directoryName in @('artifacts','screenshots','memory-dumps','packet-captures','etl','pcap')) {{ $directory = Join-Path $root $directoryName; if (Test-Path -LiteralPath $directory -PathType Container) {{ Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue }} }} }} -ArgumentList {Q(guestOut)} -ErrorAction Stop;",
+            $"Invoke-Command -Session $session -ScriptBlock {{ param($root) New-Item -ItemType Directory -Force -Path $root | Out-Null; $patterns = @('events.json','events.json.failure.json','driver-events.jsonl','driver-events.part-*.jsonl','*.jsonl','*.etl','*.etl.zip','*.pcap','*.pcapng','*.dmp','*.bmp','*.png','*.jpg','*.jpeg','agent.pid','agent.pid.tmp.*','agent.exit','agent.exit.tmp.*','agent.stdout.log','agent.stdout.log.tmp.*','agent.stderr.log','agent.stderr.log.tmp.*','guest-agent-run-status.json','agent-summary.json','guest-output-preflight.json'); foreach ($pattern in $patterns) {{ Get-ChildItem -LiteralPath $root -Filter $pattern -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue }}; foreach ($directoryName in @('artifacts','screenshots','memory-dumps','packet-captures','etl','pcap')) {{ $directory = Join-Path $root $directoryName; if (Test-Path -LiteralPath $directory -PathType Container) {{ Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue }} }} }} -ArgumentList {Q(guestOut)} -ErrorAction Stop;",
             "}",
             "finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
         });
@@ -1723,10 +1723,12 @@ public sealed class HyperVRunbookBuilder
                 "$agentStablePath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.exe'; $runtimePath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.runtimeconfig.json'; $depsPath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.deps.json'; $agentStableTemp = \"$agentStablePath.refresh\"; $runtimeTemp = \"$runtimePath.refresh\"; $depsTemp = \"$depsPath.refresh\"; [IO.File]::WriteAllBytes($agentStableTemp, [Convert]::FromBase64String($agentExeBase64)); [IO.File]::WriteAllBytes($runtimeTemp, [Convert]::FromBase64String($runtimeConfigBase64)); [IO.File]::WriteAllBytes($depsTemp, [Convert]::FromBase64String($depsBase64)); Move-Item -LiteralPath $agentStableTemp -Destination $agentStablePath -Force; Move-Item -LiteralPath $runtimeTemp -Destination $runtimePath -Force; Move-Item -LiteralPath $depsTemp -Destination $depsPath -Force;",
                 "$stablePayloadChecks = 0; for ($payloadAttempt = 0; $payloadAttempt -lt 20 -and $stablePayloadChecks -lt 3; $payloadAttempt++) { Start-Sleep -Milliseconds 500; $agentBytes = [IO.File]::ReadAllBytes($agentStablePath); $runtimeBytes = [IO.File]::ReadAllBytes($runtimePath); $depsBytes = [IO.File]::ReadAllBytes($depsPath); if ($agentBytes.Length -gt 0 -and $runtimeBytes.Length -gt 0 -and $depsBytes.Length -gt 0 -and $runtimeBytes[0] -eq 0x7B -and $depsBytes[0] -eq 0x7B) { $stablePayloadChecks++; } else { $stablePayloadChecks = 0; [IO.File]::WriteAllBytes($agentStableTemp, [Convert]::FromBase64String($agentExeBase64)); [IO.File]::WriteAllBytes($runtimeTemp, [Convert]::FromBase64String($runtimeConfigBase64)); [IO.File]::WriteAllBytes($depsTemp, [Convert]::FromBase64String($depsBase64)); Move-Item -LiteralPath $agentStableTemp -Destination $agentStablePath -Force; Move-Item -LiteralPath $runtimeTemp -Destination $runtimePath -Force; Move-Item -LiteralPath $depsTemp -Destination $depsPath -Force; } }; if ($stablePayloadChecks -lt 3) { throw 'Guest Agent stable payload did not remain valid before launch.' };",
                 "$fallbackArgs = @('-NoLogo', '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand);",
-                // Launch detached and publish its PID immediately so live
-                // output sync overlaps the sample instead of starting after
-                // the Guest Agent has already exited.
-                "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $fallbackArgs -WorkingDirectory $workingDirectory -PassThru; $fallback.Id | Set-Content -LiteralPath $pidPath -Encoding ASCII;",
+                // Launch detached and let the encoded wrapper publish its own
+                // PID marker.  The Start-Process PID is only the launcher;
+                // writing it here races the wrapper and can make live sync
+                // stop as soon as the launcher exits while the Agent is still
+                // collecting.
+                "$fallback = Start-Process -FilePath 'powershell.exe' -ArgumentList $fallbackArgs -WorkingDirectory $workingDirectory -PassThru;",
                 "$deadline = (Get-Date).AddSeconds(30);",
                 "do { Start-Sleep -Milliseconds 250 } while (-not (Test-Path -LiteralPath $pidPath -PathType Leaf) -and (Get-Date) -lt $deadline);",
                 "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw \"Guest Agent process did not create its pid marker: $pidPath\" };",
@@ -1754,23 +1756,30 @@ public sealed class HyperVRunbookBuilder
             "$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $actionArguments -WorkingDirectory $workingDirectory;",
             "$principal = New-ScheduledTaskPrincipal -UserId $guestUserName -LogonType Interactive -RunLevel Highest;",
             "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 24);",
+            "$launchDeadline = (Get-Date).AddSeconds(30);",
             "try {",
             "Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null;",
             "Start-ScheduledTask -TaskName $taskName -ErrorAction Stop;",
-            "$deadline = (Get-Date).AddSeconds(30);",
+            "$deadline = $launchDeadline;",
             "do { Start-Sleep -Milliseconds 250 } while (-not (Test-Path -LiteralPath $pidPath -PathType Leaf) -and (Get-Date) -lt $deadline);",
             "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue; throw \"Interactive Guest Agent task did not create its pid marker. LastTaskResult=$($info.LastTaskResult).\" };",
             "}",
             "catch {",
+            // Stop and unregister the interactive task before falling back.
+            // Without this boundary a task that was slow to create its PID
+            // marker could continue and race the S4U task into a second
+            // Guest Agent/sample launch.
+            "try { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue } catch {};",
             "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue;",
             "Write-Warning 'Interactive desktop is unavailable; starting Guest Agent in the remoting session.';",
+            "$existingOutputRoot = Split-Path -Parent $pidPath; $existingPidFile = Test-Path -LiteralPath $pidPath -PathType Leaf; $existingPid = 0; $existingPidText = if ($existingPidFile) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '' }; [void][int]::TryParse($existingPidText, [ref]$existingPid); $existingProcess = if ($existingPid -gt 0) { Get-Process -Id $existingPid -ErrorAction SilentlyContinue } else { $null }; $existingEvents = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'events.json') -PathType Leaf; $existingExit = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'agent.exit') -PathType Leaf; if ($existingPidFile -or $existingEvents -or $existingExit -or $null -ne $existingProcess) { Write-Host 'KSWORDBOX_AGENT_MARKERS_PRESENT'; return; }",
             // A WinRM child process can be placed in the remoting job and be
             // terminated when this step returns.  A local S4U scheduled task
             // gives the fallback an independent lifetime while remaining
             // noninteractive; sync-live-output still owns the bounded wait
             // and exit-marker validation.
             "Register-ScheduledTask -TaskName $taskName -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $actionArguments -WorkingDirectory $workingDirectory) -Principal (New-ScheduledTaskPrincipal -UserId $guestUserName -LogonType S4U -RunLevel Highest) -Settings $settings -Force | Out-Null; Start-ScheduledTask -TaskName $taskName -ErrorAction Stop;",
-            "$fallbackDeadline=(Get-Date).AddSeconds(30); do { Start-Sleep -Milliseconds 250 } while (-not (Test-Path -LiteralPath $pidPath -PathType Leaf) -and (Get-Date) -lt $fallbackDeadline);",
+            "$fallbackDeadline=$launchDeadline; do { Start-Sleep -Milliseconds 250 } while (-not (Test-Path -LiteralPath $pidPath -PathType Leaf) -and (Get-Date) -lt $fallbackDeadline);",
             "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw \"S4U fallback did not create pid marker: $pidPath\" };",
             "Write-Host \"Guest Agent S4U fallback started; live sync will wait for agent.exit.\";",
             "} ",

@@ -1,4 +1,6 @@
 using KSword.Sandbox.Core.Guest;
+using KSword.Sandbox.Core.Reporting;
+using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.SmokeTests.Assertions;
 using KSword.Sandbox.SmokeTests.Framework;
 
@@ -44,6 +46,33 @@ internal sealed class EtwSecurityCoverageContractScenario : ISmokeTestScenario
         SmokeAssert.True(securityProbe.Contains("zeroRowInterpretation", StringComparison.Ordinal) &&
             securityProbe.Contains("auditPolicyCoverageState", StringComparison.Ordinal),
             "Security query summaries must distinguish zero rows from disabled or unknown audit coverage.");
+
+        var readinessSummary = new SandboxEvent
+        {
+            EventType = "etw_security.readiness.summary",
+            Source = "etwSecurityReadiness",
+            Timestamp = DateTimeOffset.UtcNow,
+            Data =
+            {
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true",
+                ["readinessKind"] = "etw-security-r0-gap-map",
+                ["surfaceKey"] = "token-adjustment",
+                ["r0CoverageGap"] = "R0 does not decode token adjustment semantics.",
+                ["fallbackSurfaceKeys"] = "process-handle-access;token-adjustment;thread-remote-thread;module-load"
+            }
+        };
+        var sampled = ReportEventSampler.SampleForReport(
+            [readinessSummary],
+            new ReportEventSamplingOptions { MaxInlineEvents = 1, MaxDiagnosticEvents = 0 });
+        SmokeAssert.True(
+            sampled.Events.Any(evt => evt.EventType == "etw_security.readiness.summary"),
+            "ETW Security readiness summary must remain in report sampling even with no diagnostic quota.");
+        var retained = sampled.Events.Single(evt => evt.EventType == "etw_security.readiness.summary");
+        SmokeAssert.True(
+            retained.Data.TryGetValue("surfaceKey", out var surfaceKey) && surfaceKey == "token-adjustment" &&
+            retained.Data.ContainsKey("r0CoverageGap") && retained.Data.ContainsKey("fallbackSurfaceKeys"),
+            "ETW Security readiness matrix fields must survive report sanitization alongside the summary row.");
 
         return Task.FromResult(new SmokeTestResult
         {
