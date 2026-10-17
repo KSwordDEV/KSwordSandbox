@@ -871,7 +871,10 @@ html[lang="en"] .localized-evidence-field{display:none}
                 html.AppendLine($"<tr class=\"event-explorer-row\" data-event-row data-event-overflow=\"{(overflow ? "true" : "false")}\" data-type=\"{A(evt.EventType)}\" data-source=\"{A(evt.Source)}\" data-family=\"{A(row.Family)}\" data-stage=\"{A(row.Stage)}\" data-severity=\"{A(row.Severity)}\" data-sample=\"{(row.SampleBehavior ? "true" : "false")}\" data-search=\"{A(search)}\">");
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
                 html.AppendLine($"<td><code>{E(evt.EventType)}</code></td><td>{E(string.IsNullOrWhiteSpace(evt.Source) ? "unknown" : evt.Source)}</td><td><span class=\"chip chip-info\">{E(row.Stage)}</span></td><td><span class=\"chip chip-{E(NormalizeSeverity(row.Severity))}\">{E(row.Severity)}</span></td><td>{(row.SampleBehavior ? "<span class=\"chip chip-medium\">Yes</span>" : "<span class=\"chip chip-info\">No</span>")}</td>");
-                html.AppendLine($"<td><details class=\"event-explorer-details\"><summary>{E(evt.ProcessName ?? target ?? "Open evidence")}</summary><div class=\"event-explorer-detail\"><div class=\"muted\">{E(DisplayEventTarget(evt, target))}</div>{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyButton("Copy event", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span></div></details></td>");
+                var detail = overflow
+                    ? "<div class=\"muted\">Detailed fields remain in the raw event JSON; use the compact row to identify this event.</div>"
+                    : $"<div class=\"muted\">{E(DisplayEventTarget(evt, target))}</div>{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyButton("Copy event", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>";
+                html.AppendLine($"<td><details class=\"event-explorer-details\"><summary>{E(evt.ProcessName ?? target ?? "Open evidence")}</summary><div class=\"event-explorer-detail\">{detail}</div></details></td>");
                 html.AppendLine("</tr>");
             }
 
@@ -10423,6 +10426,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("visible evidence rows; ", "可见证据行；"),
         ("more evidence rows are available in the report.", "报告中还有更多证据行。"),
         ("more evidence rows are available in the report and can be revealed by filtering.", "报告中还有更多证据行。可通过筛选显示。"),
+        ("Detailed fields remain in the raw event JSON; use the compact row to identify this event.", "详细字段保留在原始事件 JSON 中；可先用紧凑行定位该事件。"),
         (" report-only rows; ", " 报告专用行；"),
         (" lifecycle rows folded in Raw normalized events.", " 生命周期行已折叠在原始规范化事件中。"),
         (" matching rows; filters apply to the visible evidence table.", " 个匹配行；筛选器作用于可见证据表。"),
