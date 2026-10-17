@@ -267,6 +267,51 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                     success: null,
                     message: heartbeatMessage),
                 cleanupMode ? CancellationToken.None : cancellationToken).ConfigureAwait(false);
+
+            // VMware WinRM can tear down the remoting XML stream while the
+            // guest Agent has already been scheduled.  PowerShell exits with
+            // code 2 and emits a misleading EndRootElement/connection-closed
+            // CLIXML error in that case.  Retry this one launch step once; the
+            // generated guest command is idempotent and preserves an existing
+            // pid/events/exit marker, so a retry never starts a second sample.
+            if (!cleanupMode &&
+                ShouldRetryVmwareRunAgent(runbook, step, stepResult) &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                PublishProgress(
+                    runbook,
+                    options,
+                    SandboxRunbookProgressStates.Running,
+                    startedAtUtc,
+                    attemptTimer.Elapsed,
+                    liveResults,
+                    index,
+                    success: null,
+                    message: "VMware WinRM connection was interrupted during Guest Agent launch; reconnecting once and preserving any guest markers before retrying.");
+
+                // Keep the short reconnect backoff non-cancelable so a cancel
+                // request is converted into the normal canceled step result
+                // below and still reaches mandatory VM cleanup.
+                await Task.Delay(TimeSpan.FromSeconds(3), CancellationToken.None).ConfigureAwait(false);
+                var retryResult = await ExecutePowerShellStepAsync(
+                    step,
+                    index,
+                    runbook.Steps.Count,
+                    options,
+                    heartbeatMessage => PublishProgress(
+                        runbook,
+                        options,
+                        SandboxRunbookProgressStates.Running,
+                        startedAtUtc,
+                        attemptTimer.Elapsed,
+                        liveResults,
+                        index,
+                        success: null,
+                        message: heartbeatMessage),
+                    cancellationToken).ConfigureAwait(false);
+
+                stepResult = MergeTransientVmwareRetryResult(stepResult, retryResult);
+            }
             liveResults.Add(stepResult);
 
             if (!stepResult.Success)
@@ -749,6 +794,109 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     private static bool IsCleanupStepId(string? stepId)
     {
         return RunbookProgressFacts.IsCleanupStepId(stepId);
+    }
+
+    /// <summary>
+    /// Recognizes the narrow VMware run-agent failure that is safe to retry.
+    /// Inputs are the source runbook step and one captured PowerShell result;
+    /// processing requires exit code 2 plus both a remoting/network signal and
+    /// the malformed CLIXML EndRootElement signal; the returned value prevents
+    /// unrelated guest failures from being rerun.
+    /// </summary>
+    private static bool ShouldRetryVmwareRunAgent(
+        SandboxRunbook runbook,
+        SandboxRunbookStep step,
+        SandboxRunbookStepExecutionResult result)
+    {
+        if (runbook.Provider is not VirtualizationProvider.VMware ||
+            !string.Equals(step.Id, "run-agent", StringComparison.OrdinalIgnoreCase) ||
+            result.Success ||
+            result.ExitCode is not 2)
+        {
+            return false;
+        }
+
+        // The generated guest command emits this marker when a previous launch
+        // already created pid/events/exit evidence.  In that case the launch
+        // itself must not be attempted again; sync/collect will preserve it.
+        if (ContainsGuestMarkerPreservation(result))
+        {
+            return false;
+        }
+
+        // The malformed remoting stream is emitted on PowerShell stderr. Keep
+        // classification scoped to stderr so ordinary guest stdout mentioning
+        // WinRM/CLIXML cannot trigger a second launch.
+        var text = result.StandardError ?? string.Empty;
+        var networkSignal = ContainsAny(text,
+            "网络连接已中断",
+            "网络连接被中止",
+            "network connection was interrupted",
+            "network connection was aborted",
+            "connection was closed",
+            "WinRM",
+            "WSMan",
+            "PSSession");
+        var malformedXmlSignal = ContainsAny(text,
+            "EndRootElement",
+            "CLIXML",
+            "invalid XML",
+            "无效的 XML");
+        return networkSignal && malformedXmlSignal;
+    }
+
+    /// <summary>
+    /// Merges a first transient VMware failure into the retry result.
+    /// Inputs are the first and second attempt; processing keeps the retry's
+    /// success/exit state while retaining bounded first-attempt streams and a
+    /// clear diagnostic message; the returned result occupies one runbook slot.
+    /// </summary>
+    private static SandboxRunbookStepExecutionResult MergeTransientVmwareRetryResult(
+        SandboxRunbookStepExecutionResult first,
+        SandboxRunbookStepExecutionResult retry)
+    {
+        var firstOutput = BoundDiagnostic(first.StandardOutput);
+        var firstError = BoundDiagnostic(first.StandardError);
+        var retryOutput = BoundDiagnostic(retry.StandardOutput);
+        var retryError = BoundDiagnostic(retry.StandardError);
+        var firstDiagnostic = $"First VMware WinRM attempt (exit {first.ExitCode?.ToString() ?? "unknown"}) retained below.\n" +
+            $"stdout:\n{firstOutput}\nstderr:\n{firstError}";
+        var retryDiagnostic = $"Retry attempt (exit {retry.ExitCode?.ToString() ?? "unknown"}) output:\n" +
+            $"stdout:\n{retryOutput}\nstderr:\n{retryError}";
+        var mergedMessage = retry.Success
+            ? "Transient VMware WinRM interruption was recovered by one reconnect retry; first-attempt stdout/stderr were retained in this step diagnostic."
+            : $"VMware WinRM reconnect retry failed; first-attempt stdout/stderr were retained in this step diagnostic. {retry.Message ?? "Guest Agent launch did not complete."}";
+
+        return retry with
+        {
+            StandardOutput = firstDiagnostic + "\n" + retryDiagnostic,
+            StandardError = firstError + "\n" + retryError,
+            Duration = first.Duration + retry.Duration,
+            Message = mergedMessage
+        };
+    }
+
+    private static bool ContainsGuestMarkerPreservation(SandboxRunbookStepExecutionResult result)
+    {
+        var text = string.Concat(result.StandardError, "\n", result.StandardOutput);
+        return text.Contains("KSWORDBOX_AGENT_MARKERS_PRESENT", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("Guest Agent markers already exist", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ContainsAny(string value, params string[] terms)
+    {
+        return terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string BoundDiagnostic(string? value)
+    {
+        const int maxLength = 32 * 1024;
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+        {
+            return value ?? string.Empty;
+        }
+
+        return value[..maxLength] + "\n[diagnostic truncated]";
     }
 
     /// <summary>
