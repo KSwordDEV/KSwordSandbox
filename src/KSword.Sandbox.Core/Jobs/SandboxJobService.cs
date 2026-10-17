@@ -2511,6 +2511,18 @@ public sealed partial class SandboxJobService
             ["static.interestingStrings"] = staticAnalysis.InterestingStrings.Count
         };
 
+        // `events.report` includes the synthetic sampling marker when one is
+        // present. Keep an explicit raw-inline count and account for policy
+        // exclusions (for example routine agent lifecycle rows) even when no
+        // quota marker was needed. This makes raw = inline + quota omitted +
+        // policy excluded reconcile for small/lifecycle-only reports.
+        var reportInlineRows = events.Count(evt =>
+            !string.Equals(evt.EventType, "report.events.sampled", StringComparison.OrdinalIgnoreCase));
+        metrics["events.reportRaw"] = reportInlineRows;
+        metrics["events.policyExcludedFromReport"] = Math.Max(
+            0,
+            totalEvents - reportInlineRows - Math.Max(0, omittedReportEvents));
+
         AddDynamicCoverageMetrics(metrics, events, rawEvents ?? events, rawEventCount, omittedReportEvents);
         AddR0DriverCoverageMetrics(metrics, events, rawEvents ?? events);
         CollectionHealthSummaryBuilder.AddMetrics(
@@ -2687,6 +2699,10 @@ public sealed partial class SandboxJobService
         // spill out of report.Events and no import summary survives inline.
         AddDynamicCategoryMetrics(metrics, "events.network", rawEvents, reportEvents, IsNetworkEvent);
         AddDynamicCategoryMetrics(metrics, "events.networkTcp", rawEvents, reportEvents, IsTcpEvent);
+        AddDynamicCategoryMetrics(metrics, "events.process", rawEvents, reportEvents, IsProcessEvent);
+        AddDynamicCategoryMetrics(metrics, "events.thread", rawEvents, reportEvents, IsThreadEvent);
+        AddDynamicCategoryMetrics(metrics, "events.module", rawEvents, reportEvents, IsModuleEvent);
+        AddDynamicCategoryMetrics(metrics, "events.security", rawEvents, reportEvents, IsSecurityEvent);
         AddDynamicCategoryMetrics(metrics, "events.persistence", rawEvents, reportEvents, IsPersistenceEvent);
         AddDynamicCategoryMetrics(metrics, "events.file", rawEvents, reportEvents, IsFileEvent);
         if (rawEventCount.HasValue)
@@ -2723,6 +2739,22 @@ public sealed partial class SandboxJobService
     private static bool IsTcpEvent(SandboxEvent evt) =>
         evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
         evt.EventType.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsProcessEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsThreadEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("thread.", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsModuleEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("image.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("module.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("load.", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSecurityEvent(SandboxEvent evt) =>
+        evt.EventType.StartsWith("security.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("security_eventlog.", StringComparison.OrdinalIgnoreCase) ||
+        evt.EventType.StartsWith("etw_security.", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsNetworkEvent(SandboxEvent evt) =>
         evt.EventType.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
