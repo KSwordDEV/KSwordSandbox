@@ -49,6 +49,31 @@ public sealed record ReportEventSamplingResult
     public int ExcludedEventCount { get; init; }
 
     /// <summary>
+    /// Counts rows intentionally left out of the inline report by event type.
+    /// Lifecycle rows excluded by policy are not included here; callers can
+    /// use ExcludedEventCount to distinguish policy exclusion from quota
+    /// omission.  The map is retained for the sampling marker so an operator
+    /// can see which source family accounts for the coverage gap.
+    /// </summary>
+    public IReadOnlyDictionary<string, int> OmittedEventTypeCounts { get; init; } =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Number of omitted rows carrying an explicit sample/behavior candidate
+    /// marker.  A non-zero value means report quota omitted potential sample
+    /// behavior and must remain visible in the report coverage warning.
+    /// </summary>
+    public int OmittedBehaviorCandidateCount { get; init; }
+
+    /// <summary>
+    /// Number of omitted rows classified as high-signal evidence by the
+    /// sampler.  This should remain zero for a healthy report; it is separate
+    /// from raw volume omission so a report cannot call a high-signal gap mere
+    /// noise.
+    /// </summary>
+    public int OmittedHighSignalCount { get; init; }
+
+    /// <summary>
     /// Number of behavior or diagnostic rows omitted by the bounded inline
     /// quota. Policy-excluded lifecycle rows are not counted as sampled rows.
     /// </summary>
@@ -1062,7 +1087,10 @@ public static class ReportEventSampler
             Events = selected,
             RawEventCount = orderedEvents.Count,
             SelectedRawEventCount = selected.Count,
-            ExcludedEventCount = selection.ExcludedEventCount
+            ExcludedEventCount = selection.ExcludedEventCount,
+            OmittedEventTypeCounts = selection.OmittedEventTypeCounts,
+            OmittedBehaviorCandidateCount = selection.OmittedBehaviorCandidateCount,
+            OmittedHighSignalCount = selection.OmittedHighSignalCount
         };
 
         if (result.WasSampled)
@@ -1132,7 +1160,10 @@ public static class ReportEventSampler
 
     private sealed record ReportSamplingSelection(
         IReadOnlyList<SandboxEvent> Events,
-        int ExcludedEventCount);
+        int ExcludedEventCount,
+        IReadOnlyDictionary<string, int> OmittedEventTypeCounts,
+        int OmittedBehaviorCandidateCount,
+        int OmittedHighSignalCount);
 
     private static ReportSamplingSelection SelectEvents(
         IReadOnlyList<SandboxEvent> orderedEvents,
@@ -1147,7 +1178,12 @@ public static class ReportEventSampler
         var excludedEventCount = orderedEvents.Count - inlineCandidates.Count;
         if (inlineCandidates.Count == 0)
         {
-            return new ReportSamplingSelection([], excludedEventCount);
+            return new ReportSamplingSelection(
+                [],
+                excludedEventCount,
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+                0,
+                0);
         }
 
         var diagnosticQuota = Math.Max(0, Math.Min(options.MaxDiagnosticEvents, options.MaxInlineEvents));
@@ -1196,13 +1232,30 @@ public static class ReportEventSampler
         // were one noisy type, keep the report intentionally smaller. Raw JSONL
         // remains the authority; avoiding a fill pass prevents driver.file or
         // registry noise from overwhelming user-facing reports.
+        var omittedCandidates = inlineCandidates
+            .Where(candidate => !selectedIndexes.Contains(candidate.Index))
+            .ToList();
+        var omittedTypeCounts = omittedCandidates
+            .GroupBy(candidate => NormalizeEventType(candidate.Event.EventType), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        var omittedBehaviorCandidateCount = omittedCandidates.Count(candidate =>
+            EventDataBoolTrue(candidate.Event, "behaviorCounted", "countsAsBehavior", "countedAsBehavior", "sampleBehaviorCandidate", "sample_behavior_candidate"));
+        var omittedHighSignalCount = omittedCandidates.Count(candidate =>
+            candidate.Bucket is ReportSamplingBucket.StrongSampleBehavior or
+                ReportSamplingBucket.FindingEvidence or
+                ReportSamplingBucket.DynamicActionEvidence or
+                ReportSamplingBucket.ProbableSampleEvidence);
+
         return new ReportSamplingSelection(
             inlineCandidates
                 .Where(candidate => selectedIndexes.Contains(candidate.Index))
                 .OrderBy(static candidate => candidate.Index)
                 .Select(static candidate => candidate.Event)
                 .ToList(),
-            excludedEventCount);
+            excludedEventCount,
+            omittedTypeCounts,
+            omittedBehaviorCandidateCount,
+            omittedHighSignalCount);
     }
 
     private static HashSet<string> BuildFindingEvidenceKeys(IEnumerable<BehaviorFinding>? findings)
@@ -1459,8 +1512,17 @@ public static class ReportEventSampler
             return false;
         }
 
+        // Keep the typed producer classes whose payloads are understood by
+        // the report/rule pipeline.  A generic driver.* prefix also covers
+        // collector telemetry and synthetic stress rows; treating those as
+        // complete dynamic behavior made a 60k-row diagnostic stream bypass
+        // the report quota and hide the actual coverage boundary.
         if (EventDataBoolTrue(evt, "stress") ||
-            !(type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+            !(type.StartsWith("driver.process", StringComparison.OrdinalIgnoreCase) ||
+              type.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase) ||
+              type.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase) ||
+              type.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase) ||
+              type.StartsWith("driver.load", StringComparison.OrdinalIgnoreCase) ||
               type.StartsWith("image.", StringComparison.OrdinalIgnoreCase)))
         {
             return false;
@@ -1863,7 +1925,10 @@ public static class ReportEventSampler
             ["maxHighValueEventsPerType"] = options.MaxHighValueEventsPerType.ToString(),
             ["maxDiagnosticEvents"] = options.MaxDiagnosticEvents.ToString(),
             ["dynamicActionEventsAlwaysRetained"] = "true",
-            ["maxInlineEventsExcludesDynamicActions"] = "true"
+            ["maxInlineEventsExcludesDynamicActions"] = "true",
+            ["omittedBehaviorCandidateCount"] = result.OmittedBehaviorCandidateCount.ToString(),
+            ["omittedHighSignalCount"] = result.OmittedHighSignalCount.ToString(),
+            ["omittedEventTypeCounts"] = FormatOmittedEventTypeCounts(result.OmittedEventTypeCounts)
         };
 
         var wmiFailures = orderedEvents
@@ -1980,6 +2045,22 @@ public static class ReportEventSampler
 
     private static IEnumerable<string> BuildPriorityDataKeys(SandboxEvent evt)
     {
+        if (IsReportSamplingMarkerEvent(evt))
+        {
+            foreach (var key in new[]
+            {
+                "rawEventCount", "selectedRawEventCount", "excludedEventCount",
+                "reportEventCount", "omittedEventCount", "omittedBehaviorCandidateCount",
+                "omittedHighSignalCount", "omittedEventTypeCounts", "maxInlineEvents",
+                "maxEventsPerType", "maxHighValueEventsPerType", "maxDiagnosticEvents",
+                "dynamicActionEventsAlwaysRetained", "maxInlineEventsExcludesDynamicActions",
+                "rawEventsPath", "driverEventsPath"
+            })
+            {
+                yield return key;
+            }
+        }
+
         // Exit and launch diagnostics drive the runtime verdict. Keep the
         // actual code/reason even when the event also carries verbose helper
         // metadata; otherwise CLR/AV/timeout outcomes are silently erased.
@@ -2179,6 +2260,25 @@ public static class ReportEventSampler
         {
             yield return key;
         }
+    }
+
+    private static string FormatOmittedEventTypeCounts(IReadOnlyDictionary<string, int> counts)
+    {
+        if (counts.Count == 0)
+        {
+            return "none";
+        }
+
+        // Keep the marker compact and deterministic. The full raw event files
+        // remain authoritative; this is a coverage summary, not a replacement
+        // for the source rows.
+        return string.Join(
+            "; ",
+            counts
+                .OrderByDescending(pair => pair.Value)
+                .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Take(12)
+                .Select(pair => $"{pair.Key}={pair.Value}"));
     }
 
     private static IEnumerable<string> NetworkKindPriorityKeys(string eventType, string eventKind, string serviceHint)

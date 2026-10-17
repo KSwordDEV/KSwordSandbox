@@ -588,6 +588,62 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(guestImportEvent, "guestImportMarker", "true");
         RequireData(guestImportEvent, "terminalStatus", "Completed");
 
+        // Coverage marker must distinguish quota omission from lifecycle
+        // exclusion and identify the source family that was omitted. A
+        // high-signal typed driver row remains visible even when unrelated
+        // diagnostic volume consumes the bounded report quota.
+        var omissionInput = Enumerable.Range(0, 64)
+            .Select(index => new SandboxEvent
+            {
+                EventType = "collector.background_diagnostic",
+                Timestamp = timestamp.AddSeconds(20).AddMilliseconds(index),
+                Source = "host",
+                Data = { ["diagnosticEvent"] = "true" }
+            })
+            .Concat(new[]
+            {
+                new SandboxEvent
+                {
+                    EventType = "driver.file",
+                    Timestamp = timestamp.AddSeconds(21),
+                    Source = "driver",
+                    Path = @"\\Device\\HarddiskVolume3\\Users\\Public\\drop.exe",
+                    Data =
+                    {
+                        ["behaviorCounted"] = "true",
+                        ["sampleBehaviorCandidate"] = "true",
+                        ["operationName"] = "write",
+                        ["fileOperationName"] = "write",
+                        ["r0CoverageState"] = "covered"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "driver.telemetry",
+                    Timestamp = timestamp.AddSeconds(22),
+                    Source = "driver",
+                    Data =
+                    {
+                        ["behaviorCounted"] = "true"
+                    }
+                }
+            })
+            .ToList();
+        var omission = ReportEventSampler.SampleForReport(
+            omissionInput,
+            new ReportEventSamplingOptions { MaxInlineEvents = 4, MaxDiagnosticEvents = 0 });
+        var omissionMarker = RequireEvent(omission.Events, "report.events.sampled");
+        SmokeAssert.True(omission.Events.Any(evt => string.Equals(evt.EventType, "driver.file", StringComparison.OrdinalIgnoreCase)),
+            "High-signal typed driver rows must remain visible when diagnostics are sampled.");
+        RequireData(omissionMarker, "omittedEventCount", "65");
+        RequireData(omissionMarker, "omittedBehaviorCandidateCount", "1");
+        RequireData(omissionMarker, "omittedHighSignalCount", "0");
+        SmokeAssert.True(
+            omissionMarker.Data.TryGetValue("omittedEventTypeCounts", out var omittedTypes) &&
+            omittedTypes.Contains("collector.background_diagnostic=64", StringComparison.Ordinal) &&
+            omittedTypes.Contains("driver.telemetry=1", StringComparison.Ordinal),
+            "Sampling marker should identify the omitted event family and count.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
