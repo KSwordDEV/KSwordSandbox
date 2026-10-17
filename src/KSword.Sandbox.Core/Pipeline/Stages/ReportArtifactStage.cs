@@ -32,11 +32,11 @@ public sealed class ReportArtifactStage : IAnalysisPipelineStage
         Directory.CreateDirectory(jobRoot);
         File.WriteAllText(Path.Combine(jobRoot, "report.json"), JsonSerializer.Serialize(context.Report, JsonOptions));
         var currentIndex = artifactIndexBuilder.Build(context.JobId, jobRoot, context.Config.ArtifactCollection);
-        File.WriteAllText(Path.Combine(jobRoot, "report.html"), renderer.RenderChinese(context.Report, currentIndex.Artifacts, currentIndex.Collections));
-        foreach (var document in renderer.RenderBilingualReports(context.Report, currentIndex.Artifacts, currentIndex.Collections))
-        {
-            File.WriteAllText(Path.Combine(jobRoot, document.FileName), document.Html);
-        }
+        var chineseHtml = renderer.RenderChinese(context.Report, currentIndex.Artifacts, currentIndex.Collections);
+        File.WriteAllText(Path.Combine(jobRoot, "report.html"), chineseHtml);
+        File.WriteAllText(Path.Combine(jobRoot, "report.zh.html"), chineseHtml);
+        var englishHtml = renderer.RenderEnglish(context.Report, currentIndex.Artifacts, currentIndex.Collections);
+        File.WriteAllText(Path.Combine(jobRoot, "report.en.html"), englishHtml);
 
         artifactIndexBuilder.WriteIndex(context.JobId, jobRoot, context.Config.ArtifactCollection);
         return Task.CompletedTask;

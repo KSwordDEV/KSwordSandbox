@@ -9742,11 +9742,22 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Replace(".", string.Empty, StringComparison.Ordinal)
             .ToLowerInvariant();
         if (normalized is "omitteddatapairs" or "omittedfields" ||
+            normalized.StartsWith("metadata", StringComparison.Ordinal) ||
+            normalized.StartsWith("runtime", StringComparison.Ordinal) ||
             normalized.Contains("samplecorrelation", StringComparison.Ordinal) ||
             normalized.Contains("samplebehaviorcandidate", StringComparison.Ordinal) ||
             normalized.Contains("sampleconclusion", StringComparison.Ordinal) ||
             normalized.Contains("behaviorcounted", StringComparison.Ordinal) ||
             normalized.Contains("behaviorcountingpolicy", StringComparison.Ordinal) ||
+            normalized.Contains("actorcommandline", StringComparison.Ordinal) ||
+            normalized.Contains("actorprocessimagepath", StringComparison.Ordinal) ||
+            normalized.Contains("collectorpath", StringComparison.Ordinal) ||
+            normalized.Contains("collectorcommand", StringComparison.Ordinal) ||
+            normalized.Contains("driverdevice", StringComparison.Ordinal) ||
+            normalized.Contains("outputpath", StringComparison.Ordinal) ||
+            normalized.Contains("guestfullpath", StringComparison.Ordinal) ||
+            normalized.Contains("hostfullpath", StringComparison.Ordinal) ||
+            normalized is "fullpath" or "processimagepath" ||
             normalized.Contains("notsamplebehavior", StringComparison.Ordinal) ||
             normalized.Contains("nonbehavior", StringComparison.Ordinal) ||
             normalized.Contains("strongsamplecorrelation", StringComparison.Ordinal) ||
@@ -10006,6 +10017,12 @@ html[lang="en"] .localized-evidence-field{display:none}
         html = Regex.Replace(html, "(?<=\\d) artifacts\\b", " 个证据文件", RegexOptions.CultureInvariant);
         html = Regex.Replace(html, "(?<=\\d) captures\\b", " 个截图", RegexOptions.CultureInvariant);
         html = Regex.Replace(html, "(?<=\\d) dumps\\b", " 个转储", RegexOptions.CultureInvariant);
+
+        // The broad standalone "No" replacement above can split the empty
+        // state into "否 matching ...". Normalize the complete sentence last
+        // so the user never sees the mixed-language prompt.
+        html = html.Replace("否 matching evidence 行. Clear a filter or open 原始规范化事件.", "没有匹配的证据行。请清除筛选条件或打开原始规范化事件。", StringComparison.Ordinal);
+        html = html.Replace("否 matching evidence rows. Clear a filter or open Raw normalized events.", "没有匹配的证据行。请清除筛选条件或打开原始规范化事件。", StringComparison.Ordinal);
 
         return html;
     }
@@ -13165,7 +13182,6 @@ html[lang="en"] .localized-evidence-field{display:none}
         builder.AppendLine($"name={artifact.Name}");
         builder.AppendLine($"relativePath={artifact.RelativePath}");
         builder.AppendLine($"safeLink={artifact.SafeLink}");
-        builder.AppendLine($"fullPath={artifact.FullPath}");
         builder.AppendLine($"mimeType={artifact.MimeType}");
         builder.AppendLine($"sizeBytes={artifact.SizeBytes}");
         builder.AppendLine($"sha256={ArtifactSha256(artifact)}");
@@ -13174,12 +13190,28 @@ html[lang="en"] .localized-evidence-field{display:none}
             builder.AppendLine($"hash.{hash.Key}={hash.Value}");
         }
 
-        foreach (var pair in (artifact.Metadata ?? []).OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (var pair in (artifact.Metadata ?? [])
+            .Where(pair => IsPublicArtifactMetadataKey(pair.Key))
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
         {
             builder.AppendLine($"metadata.{pair.Key}={pair.Value}");
         }
 
         return builder.ToString();
+    }
+
+    private static bool IsPublicArtifactMetadataKey(string key)
+    {
+        var normalized = key.Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace(".", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+        return normalized is "duplicategroupcount" or "duplicategroupkey" or
+            "unsafeguestartifactpath" or "rejectionreason" or "artifactexists" or
+            "capturestate" or "capturephase" or "protocolsummarystatus" or
+            "protocolsummaryreason" or "parserpacketlimithit" or
+            "parserprotocolrowlimithit" or "parserflowlimithit" or
+            "linelimithit" or "eventcount" or "bytecount";
     }
 
     private static string ArtifactDisplayName(ArtifactDescriptor artifact)
@@ -13199,9 +13231,12 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static string? TryReadTextArtifactPreview(ArtifactDescriptor artifact)
     {
-        if (artifact.Kind is not (ArtifactKind.DriverEventsJsonLines or ArtifactKind.ArtifactManifest or ArtifactKind.GuestEventsJson))
+        // Raw driver/events/manifests contain collector paths, ABI counters,
+        // correlation policy, and other internal fields. Keep a safe preview
+        // label and the indexed download link, but never inline raw payload.
+        if (artifact.Kind is ArtifactKind.DriverEventsJsonLines or ArtifactKind.ArtifactManifest or ArtifactKind.GuestEventsJson)
         {
-            return null;
+            return $"完整原始内容已隐藏；请通过证据文件链接打开 {ArtifactDisplayName(artifact)}。";
         }
 
         if (string.IsNullOrWhiteSpace(artifact.FullPath) || !File.Exists(artifact.FullPath))

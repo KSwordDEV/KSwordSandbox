@@ -924,11 +924,14 @@ public sealed partial class SandboxJobService
     private void WriteHtmlReports(string jobRoot, AnalysisReport report, ArtifactCollectionConfig artifactCollection)
     {
         var artifactIndex = artifactIndexBuilder.Build(report.JobId, jobRoot, artifactCollection);
-        File.WriteAllText(Path.Combine(jobRoot, "report.html"), reportRenderer.RenderChinese(report, artifactIndex.Artifacts, artifactIndex.Collections));
-        foreach (var document in reportRenderer.RenderBilingualReports(report, artifactIndex.Artifacts, artifactIndex.Collections))
-        {
-            File.WriteAllText(Path.Combine(jobRoot, document.FileName), document.Html);
-        }
+        // Render each locale once. Rendering Chinese three times can leave the
+        // explicit bilingual files at the earlier planning snapshot when a
+        // large R0 report is still being materialized.
+        var chineseHtml = reportRenderer.RenderChinese(report, artifactIndex.Artifacts, artifactIndex.Collections);
+        File.WriteAllText(Path.Combine(jobRoot, "report.html"), chineseHtml);
+        File.WriteAllText(Path.Combine(jobRoot, "report.zh.html"), chineseHtml);
+        var englishHtml = reportRenderer.RenderEnglish(report, artifactIndex.Artifacts, artifactIndex.Collections);
+        File.WriteAllText(Path.Combine(jobRoot, "report.en.html"), englishHtml);
 
         artifactIndexBuilder.WriteIndex(report.JobId, jobRoot, artifactCollection);
     }

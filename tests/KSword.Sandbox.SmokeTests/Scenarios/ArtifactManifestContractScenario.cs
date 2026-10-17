@@ -1662,7 +1662,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         AssertContainsAny(html, ["Screenshot preview", "截图预览"], "HTML report should render screenshot evidence preview.");
         AssertContainsAny(html, ["Driver JSONL preview", "驱动 JSONL 预览"], "HTML report should render driver-events evidence preview.");
         AssertContainsAny(html, ["Manifest preview", "清单预览"], "HTML report should render artifact manifest evidence preview.");
-        SmokeAssert.True(html.Contains("metadata.guestFullPath", StringComparison.Ordinal), "HTML report should expand original guest artifact paths.");
+        SmokeAssert.True(!html.Contains("metadata.guestFullPath", StringComparison.Ordinal), "HTML report should keep internal artifact metadata out of the analyst-facing view.");
     }
 
     private static void AssertContainsAny(string content, IReadOnlyCollection<string> expectedValues, string message)
