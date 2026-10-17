@@ -89,11 +89,16 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "NT Kernel Logger", "ETW live probe must use the Windows system logger name for the kernel provider.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "tracerpt.exe", "ETW live probe must invoke the built-in Windows tracerpt decoder instead of reporting raw ETL as parsed.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "ParseTracerptXml", "ETW live probe must parse tracerpt XML into normalized rows.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "ParseTracerptCsv", "ETW live probe must retain a CSV fallback parser.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "FilterRowsToSampleTree(rows, context)", "ETW XML/CSV rows must share sample-tree attribution filtering.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "timestampClockOffsetSeconds", "ETW rows must expose clock-offset normalization when a root anchor is available.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "CancellationToken.None", "ETW stop must clean up the logger even when the probe timeout token is cancelled.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "RenderingInfo", "ETW XML decoder must read RenderingInfo provider/event names used by kernel ETL.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "process.start", "ETW decoder must normalize kernel process start rows.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "registry.etw", "ETW decoder must preserve registry rows as normalized evidence.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "fileio", "ETW kernel capture must request file I/O flags.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "decodedArtifactRelativePath", "ETW captured rows must expose the decoded XML artifact selector.");
+        AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "ProbesForPhase", "After-run probes must stop bounded ETW/PCAP lanes before slow inventories.");
         var etwText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Collection", "EtwLiveTraceProbe.cs");
         SmokeAssert.True(
             !etwText.Contains("AddIfNotEmpty(data, \"rootProcessId\", context.RootProcessId", StringComparison.Ordinal),
