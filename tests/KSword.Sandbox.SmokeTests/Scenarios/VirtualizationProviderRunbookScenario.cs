@@ -3,6 +3,8 @@ using KSword.Sandbox.Core.Configuration;
 using KSword.Sandbox.Core.Orchestration;
 using KSword.Sandbox.SmokeTests.Assertions;
 using KSword.Sandbox.SmokeTests.Framework;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace KSword.Sandbox.SmokeTests.Scenarios;
 
@@ -63,6 +65,20 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         RequireStepContains(vmware, "open-vm-desktop", "target-associated VMware console window");
         RequireStepContains(vmware, "stop-vm-before-restore", "did not reach stopped state after vmrun stop within 60 seconds");
         RequireStepContains(vmware, "start-vm", "did not reach running state after vmrun start within 60 seconds");
+        // A failed guest process must still flow through live-sync and final
+        // collection so stdout/stderr/exit evidence is available to diagnose
+        // the real failure.  This is a synthetic runbook contract; it never
+        // starts VMware or executes a sample.
+        RequireStepContains(vmware, "run-agent", "continuing to collect guest diagnostics");
+        var encodedAgentLaunch = DecodeEncodedAgentLaunch(RequireStep(vmware, "run-agent").PowerShell);
+        SmokeAssert.True(encodedAgentLaunch.Contains("WriteAllText($pidMarkerTemp", StringComparison.Ordinal), "Guest launch must atomically publish the PID marker.");
+        SmokeAssert.True(encodedAgentLaunch.Contains("WriteAllText($exitTemp", StringComparison.Ordinal), "Guest launch must atomically publish the exit marker.");
+        RequireStepContains(vmware, "sync-live-output", "continuing so collect-output can preserve stdout/stderr");
+        RequireStepContains(vmware, "collect-output", "guest-agent-run-status.json");
+        RequireStepContains(vmware, "collect-output", "invalid-zero-filled-marker");
+        SmokeAssert.True(
+            !RequireStep(vmware, "run-agent").PowerShell.Contains("Guest Agent fallback PowerShell exited with code $fallbackExitCode.\" }", StringComparison.Ordinal),
+            "run-agent must not abort before diagnostic collection on fallback Agent failure.");
         RequireAnyStepContains(vmware, "$guestRemotingAddress = '192.0.2.20'");
         RequireAnyStepContains(vmware, "New-PSSession -ComputerName $guestRemotingAddress");
         RequireAnyStepContains(vmware, "-Port 5985");
@@ -551,6 +567,29 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         SmokeAssert.True(
             runbook.Steps.Any(step => step.PowerShell.Contains(expected, StringComparison.Ordinal)),
             $"{runbook.Provider} runbook should contain '{expected}'.");
+    }
+
+    private static string DecodeEncodedAgentLaunch(string command)
+    {
+        var matches = Regex.Matches(command, "(?<payload>[A-Za-z0-9+/]{100,}={0,2})");
+        foreach (Match match in matches.Reverse())
+        {
+            try
+            {
+                var decoded = Encoding.Unicode.GetString(Convert.FromBase64String(match.Groups["payload"].Value));
+                if (decoded.Contains("Guest Agent", StringComparison.Ordinal) || decoded.Contains("agent.exit", StringComparison.Ordinal))
+                {
+                    return decoded;
+                }
+            }
+            catch (FormatException)
+            {
+                // The runbook contains other opaque values in some providers;
+                // continue until the launch command decodes successfully.
+            }
+        }
+
+        throw new InvalidOperationException("VMware run-agent step did not contain a decodable Guest Agent launch command.");
     }
 
     private static void RequireBuildFailure(

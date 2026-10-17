@@ -1554,7 +1554,16 @@ public sealed class HyperVRunbookBuilder
         string agentTaskName)
     {
         var agentCommand = BuildGuestAgentInvocation(config, jobId, agentPath, guestSample, guestOut, driverEventsPath, agentExitPath, config.Driver.UseMockCollector);
-        var interactiveCommand = $"$PID | Set-Content -LiteralPath {Q(agentPidPath)} -Encoding ASCII; {agentCommand}";
+        // Publish the PID marker atomically.  Copy-Item -FromSession can observe
+        // a marker while Set-Content is still writing it; a torn/zero-filled
+        // marker then makes the later collection step lose the real failure.
+        var interactiveCommand = string.Join(" ", new[]
+        {
+            $"$pidMarkerTemp = {Q(agentPidPath)} + '.tmp.' + [string]$PID;",
+            $"[IO.File]::WriteAllText($pidMarkerTemp, [string]$PID, [Text.Encoding]::ASCII);",
+            $"Move-Item -LiteralPath $pidMarkerTemp -Destination {Q(agentPidPath)} -Force;",
+            agentCommand
+        });
         var encodedCommand = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(interactiveCommand));
         if (config.Driver.UseMockCollector)
         {
@@ -1616,7 +1625,12 @@ public sealed class HyperVRunbookBuilder
             // the live-sync step observes it, leaving only the pid marker and
             // no guest events. The encoded command publishes its own PID and
             // exit marker, so the synchronous call preserves the real result.
-            "& powershell.exe @fallbackArgs; $fallbackExitCode = $LASTEXITCODE; if ($fallbackExitCode -ne 0) { throw \"Guest Agent fallback PowerShell exited with code $fallbackExitCode.\" }",
+            // The fallback is intentionally synchronous so the remoting
+            // session owns the process, but a non-zero Agent exit must not stop
+            // the next live-sync/collect steps.  Those steps copy the complete
+            // guest diagnostics and make the final step fail with the real
+            // exit code and artifact paths.
+            "& powershell.exe @fallbackArgs; $fallbackExitCode = $LASTEXITCODE; if ($fallbackExitCode -ne 0) { Write-Warning \"Guest Agent fallback PowerShell exited with code $fallbackExitCode; continuing to collect guest diagnostics.\" }",
             "} ",
             $"}} -ArgumentList {Q(agentTaskName)}, {Q(config.Guest.UserName)}, {Q(guestRoot)}, {Q(agentPidPath)}, {Q(encodedCommand)} -ErrorAction Stop;",
             "}",
@@ -1659,9 +1673,14 @@ public sealed class HyperVRunbookBuilder
             : "& " + Q(agentPath) + " " + string.Join(' ', arguments);
         return string.Join("; ", new[]
         {
-            $"$exitCode = 1; try {{ {executableInvocation} 1> {Q(agentStdoutPath)} 2> {Q(agentStderrPath)}; $exitCode = if ($global:LASTEXITCODE -is [int]) {{ [int]$global:LASTEXITCODE }} else {{ 1 }} }} catch {{ $_ | Out-File -LiteralPath {Q(agentStderrPath)} -Encoding utf8; $exitCode = 1 }}",
-            $"if ($exitCode -eq 0 -and -not (Test-Path -LiteralPath {Q(agentEventsPath)} -PathType Leaf)) {{ 'Guest Agent exited 0 but did not write events.json.' | Add-Content -LiteralPath {Q(agentStderrPath)} -Encoding utf8; $exitCode = 1 }}",
-            $"Set-Content -Path {Q(agentExitPath)} -Value $exitCode -Encoding ASCII",
+            // Write output and exit markers through per-process temporary files
+            // and rename them into place.  This prevents host copy/live-sync
+            // from importing zero-filled or partially written markers.
+            $"$stdoutTemp = {Q(agentStdoutPath)} + '.tmp.' + [string]$PID; $stderrTemp = {Q(agentStderrPath)} + '.tmp.' + [string]$PID; $exitTemp = {Q(agentExitPath)} + '.tmp.' + [string]$PID; Remove-Item -LiteralPath $stdoutTemp,$stderrTemp,$exitTemp -Force -ErrorAction SilentlyContinue;",
+            $"$exitCode = 1; try {{ {executableInvocation} 1> $stdoutTemp 2> $stderrTemp; $exitCode = if ($global:LASTEXITCODE -is [int]) {{ [int]$global:LASTEXITCODE }} else {{ 1 }} }} catch {{ $_ | Out-File -LiteralPath $stderrTemp -Encoding utf8; $exitCode = 1 }}",
+            $"if ($exitCode -eq 0 -and -not (Test-Path -LiteralPath {Q(agentEventsPath)} -PathType Leaf)) {{ 'Guest Agent exited 0 but did not write events.json.' | Add-Content -LiteralPath $stderrTemp -Encoding utf8; $exitCode = 1 }}",
+            $"if (-not (Test-Path -LiteralPath $stdoutTemp -PathType Leaf)) {{ [IO.File]::WriteAllText($stdoutTemp, [string]::Empty, [Text.Encoding]::UTF8) }}; if (-not (Test-Path -LiteralPath $stderrTemp -PathType Leaf)) {{ [IO.File]::WriteAllText($stderrTemp, [string]::Empty, [Text.Encoding]::UTF8) }};",
+            $"Move-Item -LiteralPath $stdoutTemp -Destination {Q(agentStdoutPath)} -Force; Move-Item -LiteralPath $stderrTemp -Destination {Q(agentStderrPath)} -Force; [IO.File]::WriteAllText($exitTemp, [string]$exitCode, [Text.Encoding]::ASCII); Move-Item -LiteralPath $exitTemp -Destination {Q(agentExitPath)} -Force;",
             "exit $exitCode"
         });
     }
@@ -1796,15 +1815,17 @@ public sealed class HyperVRunbookBuilder
             "$processUnknown = [bool]$processState.QueryFailed;",
             "$outputsReady = [bool]$outputState.Ready;",
             "if ((Get-Date) -ge $nextHeartbeat) { Write-Host \"Guest Agent sync state: running=$running, processUnknown=$processUnknown, outputsReady=$outputsReady, missing=$($outputState.Missing), suppressed copy warning count: $copyWarningCount\"; $nextHeartbeat = (Get-Date).AddSeconds(15) };",
-            "if (-not ($outputsReady -and -not $running -and -not $processUnknown)) { Start-Sleep -Seconds 2 }",
-            "} while (-not ($outputsReady -and -not $running -and -not $processUnknown) -and (Get-Date) -lt $deadline);",
+            // A crashed Agent may never create events.json/summary.  Once its
+            // PID is gone, stop polling and copy whatever evidence exists so
+            // the final collect step can preserve and classify the failure.
+            "if ($running -or $processUnknown) { Start-Sleep -Seconds 2 }",
+            "} while (($running -or $processUnknown) -and (Get-Date) -lt $deadline);",
             "try { Copy-Item -FromSession $session -Path (Join-Path $guestOut '*') -Destination $hostOut -Recurse -Force -ErrorAction Stop } catch { $copyContext = if ([string]::IsNullOrWhiteSpace($firstCopyWarning)) { '' } else { \" First periodic copy warning: $firstCopyWarning\" }; throw \"Final live output copy failed from '$guestOut' to '$hostOut': $($_.Exception.Message).$copyContext\" };",
-            "if (-not ($outputsReady -and -not $running -and -not $processUnknown)) { $missing = if ([string]::IsNullOrWhiteSpace([string]$outputState.Missing)) { 'unknown' } else { [string]$outputState.Missing }; if ($hasSyncDeadline) { throw \"Guest Agent did not reach terminal output state before the live-sync deadline ($maxSyncSeconds seconds). running=$running, processUnknown=$processUnknown, missing=$missing. Suppressed copy warning count: $copyWarningCount\" } else { throw \"Guest Agent did not reach terminal output state. running=$running, processUnknown=$processUnknown, missing=$missing\" } }",
+            "if ($running -or $processUnknown) { $missing = if ([string]::IsNullOrWhiteSpace([string]$outputState.Missing)) { 'unknown' } else { [string]$outputState.Missing }; if ($hasSyncDeadline) { throw \"Guest Agent did not stop before the live-sync deadline ($maxSyncSeconds seconds). running=$running, processUnknown=$processUnknown, missing=$missing. Suppressed copy warning count: $copyWarningCount\" } else { throw \"Guest Agent did not stop during live sync. running=$running, processUnknown=$processUnknown, missing=$missing\" } }",
             "$exitText = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-Content -LiteralPath $path -Raw).Trim() } else { '' } } -ArgumentList $exitPath -ErrorAction Stop;",
-            "if ([string]::IsNullOrWhiteSpace([string]$exitText)) { throw \"Guest Agent exit marker is missing after terminal output state: $exitPath\" };",
-            "$exitCode = 0;",
-            "if (-not [int]::TryParse([string]$exitText, [ref]$exitCode)) { throw \"Guest Agent exit marker was not an integer: '$exitText' ($exitPath)\" };",
-            "if ($exitCode -ne 0) { throw \"Guest Agent exited with code $exitCode. Check collected agent stdout/stderr and events.json under $hostOut.\" };",
+            // Do not fail here on a non-zero/invalid marker: collect-output
+            // must run once more to copy logs and record marker bytes.
+            "if ([string]::IsNullOrWhiteSpace([string]$exitText)) { Write-Warning \"Guest Agent exit marker is missing or empty after process termination: $exitPath\" } else { $exitCode = 0; if (-not [int]::TryParse([string]$exitText, [ref]$exitCode)) { Write-Warning \"Guest Agent exit marker is not an integer; collect-output will preserve its raw bytes: $exitPath\" } elseif ($exitCode -ne 0) { Write-Warning \"Guest Agent exited with code $exitCode; continuing so collect-output can preserve stdout/stderr.\" } }",
             "if ($copyWarningCount -gt 0) { Write-Warning \"Live output sync suppressed $copyWarningCount periodic copy warning(s); final copy succeeded. First warning: $firstCopyWarning\" }",
             "}",
             "finally {",
@@ -1843,11 +1864,15 @@ public sealed class HyperVRunbookBuilder
             "if (-not [bool]$guestOutputExists) { throw \"Guest output directory does not exist in the VM: $guestOut\" };",
             "Copy-Item -FromSession $session -Path (Join-Path $guestOut '*') -Destination $hostOut -Recurse -Force -ErrorAction Stop;",
             "$hostGuestOut = $hostOut;",
-            "foreach ($requiredName in @('events.json', 'agent-summary.json', 'agent.pid', 'agent.exit')) {",
-            "$requiredPath = @(Get-ChildItem -LiteralPath $hostOut -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $requiredName } | Select-Object -First 1).FullName;",
-            "if ([string]::IsNullOrWhiteSpace([string]$requiredPath)) { throw \"Final guest output copy completed but required artifact is missing: $requiredName under $hostOut\" }",
-            "};",
-            "Write-Host \"Final guest output collected under $hostGuestOut.\"",
+            "$requiredNames = @('events.json', 'agent-summary.json', 'agent.pid', 'agent.exit');",
+            "$missingNames = @($requiredNames | ForEach-Object { $candidate = [string]$_; if (@(Get-ChildItem -LiteralPath $hostOut -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $candidate }).Count -eq 0) { $candidate } });",
+            "$exitLocalPath = Join-Path $hostOut 'agent.exit'; $exitBytes = if (Test-Path -LiteralPath $exitLocalPath -PathType Leaf) { [IO.File]::ReadAllBytes($exitLocalPath) } else { [byte[]]@() };",
+            "$zeroByteCount = @($exitBytes | Where-Object { $_ -eq 0 }).Count; $exitHex = if ($exitBytes.Length -gt 0) { [BitConverter]::ToString($exitBytes) } else { '' }; $exitRawText = if ($exitBytes.Length -gt 0) { [Text.Encoding]::ASCII.GetString($exitBytes) } else { '' }; $exitText = $exitRawText.Trim([char]0, [char]9, [char]10, [char]13, [char]32); $parsedExitCode = 0; $exitIsInteger = [int]::TryParse($exitText, [ref]$parsedExitCode);",
+            "$stdoutLocalPath = Join-Path $hostOut 'agent.stdout.log'; $stderrLocalPath = Join-Path $hostOut 'agent.stderr.log'; $stdoutBytes = if (Test-Path -LiteralPath $stdoutLocalPath -PathType Leaf) { (Get-Item -LiteralPath $stdoutLocalPath).Length } else { 0 }; $stderrBytes = if (Test-Path -LiteralPath $stderrLocalPath -PathType Leaf) { (Get-Item -LiteralPath $stderrLocalPath).Length } else { 0 };",
+            "$statusState = if ($zeroByteCount -gt 0 -and $zeroByteCount -eq $exitBytes.Length -and $exitBytes.Length -gt 0) { 'invalid-zero-filled-marker' } elseif (-not $exitIsInteger) { 'invalid-exit-marker' } elseif ($parsedExitCode -ne 0) { 'agent-failed' } elseif ($missingNames.Count -gt 0) { 'incomplete-output' } else { 'completed' };",
+            "$status = [ordered]@{ state = $statusState; exitCode = if ($exitIsInteger) { $parsedExitCode } else { $null }; exitText = $exitText; exitByteLength = $exitBytes.Length; exitZeroByteCount = $zeroByteCount; exitHex = $exitHex; missingArtifacts = @($missingNames); stdoutBytes = $stdoutBytes; stderrBytes = $stderrBytes; capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }; $status | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $hostOut 'guest-agent-run-status.json') -Encoding UTF8;",
+            "Write-Host \"Final guest output collected under $hostGuestOut. Guest Agent status=$statusState, exit=$exitText, missing=$($missingNames -join ',').\";",
+            "if ($missingNames.Count -gt 0 -or -not $exitIsInteger -or $parsedExitCode -ne 0) { throw \"Guest Agent output collected but run failed: status=$statusState, exit=$exitText, missing=$($missingNames -join ','). Raw diagnostics: $stdoutLocalPath; $stderrLocalPath; $exitLocalPath\" }",
             "}",
             "finally { if ($session) { try { Remove-PSSession $session -ErrorAction Stop } catch { Write-Warning \"Guest PowerShell session cleanup failed after final output collection; primary step status is preserved: $($_.Exception.Message)\" } } }"
         });
