@@ -343,6 +343,7 @@ internal static class SmokeTestProgram
         Assert(liveSyncStep.PowerShell.Contains("segmentCleanupWarningCount", StringComparison.Ordinal), "live sync should preserve segment cleanup diagnostics");
         Assert(liveSyncStep.PowerShell.Contains("$hostLength -eq [int64]$segment.Length", StringComparison.Ordinal), "live sync should delete a guest segment only after an exact-length host copy");
         Assert(liveSyncStep.PowerShell.Contains("Remove-Item -LiteralPath (Join-Path $root $name)", StringComparison.Ordinal), "live sync should release closed guest R0 segments after host verification");
+        Assert(liveSyncStep.PowerShell.Contains("if (-not ($running -or $processUnknown))", StringComparison.Ordinal), "final R0 segment cleanup must never run while the Guest Agent may still be writing");
         Assert(runbook.Steps.Any(step => step.Id == "collect-output"), "runbook should keep a final guest output collection step");
         Assert(File.Exists(job.JsonReportPath), "json report should exist");
         Assert(File.Exists(job.HtmlReportPath), "html report should exist");
