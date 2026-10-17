@@ -13232,42 +13232,13 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static string RenderArtifactIndexEvidence(ArtifactDescriptor artifact)
     {
-        var fields = new List<(string Label, string Value)>
-        {
-            ("selector", FirstNonEmpty(
-                MetadataValue(artifact.Metadata, "downloadSelector"),
-                artifact.RelativePath,
-                artifact.ImportPath,
-                "-")),
-            ("href", FirstNonEmpty(
-                ArtifactHref(artifact),
-                MetadataValue(artifact.Metadata, "downloadSafeLink", "safeLink"),
-                "-")),
-            ("importPath", FirstNonEmpty(artifact.ImportPath, MetadataValue(artifact.Metadata, "importPath"), "-"))
-        };
-
-        AddArtifactIndexField(fields, "duplicate", DuplicateArtifactLabel(artifact));
-        AddArtifactIndexField(fields, "rejection", ArtifactRejectionLabel(artifact));
-
         var copy = ArtifactIndexEvidenceLine(artifact);
         var html = new StringBuilder();
-        html.Append("<div class=\"relationship-tags artifact-index-fields\">");
-        foreach (var field in fields.Where(field => !string.IsNullOrWhiteSpace(field.Value)))
-        {
-            html.Append($"<span class=\"chip chip-info copyable\" data-copy=\"{A(field.Label + "=" + field.Value)}\">{E(field.Label)}={E(field.Value)}</span>");
-        }
-
-        html.Append("</div>");
-        html.Append($"<details class=\"flat-details\"><summary>Download selector / duplicate / rejection diagnostics</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        // Selector/import/rejection fields are troubleshooting metadata. Keep
+        // them in one collapsed block so the row defaults to a readable name,
+        // hash, and safe action.
+        html.Append($"<details class=\"flat-details artifact-index-fields\"><summary>Download selector / duplicate / rejection diagnostics</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
         return html.ToString();
-    }
-
-    private static void AddArtifactIndexField(List<(string Label, string Value)> fields, string label, string? value)
-    {
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            fields.Add((label, value));
-        }
     }
 
     private static bool HasDownloadSelectorEvidence(ArtifactDescriptor artifact)
