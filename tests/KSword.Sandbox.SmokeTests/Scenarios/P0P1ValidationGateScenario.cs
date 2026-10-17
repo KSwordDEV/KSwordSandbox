@@ -115,6 +115,10 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         RequireContains(jobService, "RegenerateReport", "Guest import must regenerate report.json/report.html after import.");
         RequireContains(jobService, "EnumerateLiveEventFiles", "Live endpoint must read events.json and JSONL artifacts without importing.");
         RequireContains(postProcess, "driver.events.deferred", "PostProcess must treat the deferred control marker as non-payload so the sibling driver JSONL is still merged.");
+        RequireContains(postProcess, "EnumerateCanonicalDriverJsonlPaths", "PostProcess must discover canonical driver JSONL recursively for legacy nested guest layouts.");
+        RequireContains(postProcess, "NetworkArtifactEventImporter", "PostProcess must use the same guest network-artifact importer as the live job import path.");
+        RequireContains(postProcess, "ImportGuestArtifacts(guestRoot, includeCanonicalDriverJsonl: false)", "PostProcess must retain normalized PCAP/sidecar rows when rebuilding a report.");
+        RequireContains(postProcess, "network.import.failed", "PostProcess must preserve network-artifact parser failures as host diagnostics instead of silently dropping the network lane.");
 
         RequireContains(agentProgram, "--driver-events", "Guest Agent must accept the driver JSONL path.");
         RequireContains(agentProgram, "DriverJsonLinesReader", "Guest Agent must keep a dedicated driver JSONL read path.");

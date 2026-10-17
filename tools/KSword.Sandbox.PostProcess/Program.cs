@@ -3,6 +3,7 @@ using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Core.Configuration;
 using KSword.Sandbox.Core.Correlation;
 using KSword.Sandbox.Core.Artifacts;
+using KSword.Sandbox.Core.Network;
 using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Core.Samples;
@@ -47,6 +48,7 @@ internal static class PostProcessProgram
                 .Select(NormalizeEvent)
                 .ToList();
             var guestEvents = LoadEventsWithSiblingDriverJsonl(eventsPath);
+            LogMemory("guest-events-loaded", guestEvents.Count);
             var hostEvents = BuildHostPostProcessEvents(jobId, jobRoot, eventsPath, guestEvents.Count);
             var allEvents = hostEvents
                 .Concat(staticEvents)
@@ -54,11 +56,14 @@ internal static class PostProcessProgram
                 .OrderBy(evt => evt.Timestamp)
                 .ToList();
             allEvents = SampleCorrelationClassifier.Apply(allEvents, sample.FullPath);
+            LogMemory("correlation-applied", allEvents.Count);
             var rulesPath = Path.Combine(repoRoot, config.Paths.RulesDirectory, "behavior-rules.json");
             var rawFindings = new RuleEngine(RuleEngine.LoadRuleSet(rulesPath)).Classify(allEvents);
+            LogMemory("rules-classified", rawFindings.Sum(finding => finding.Evidence.Count));
             var findings = ReportEventSampler.SanitizeFindings(rawFindings);
             var driverEventsPath = Path.Combine(Path.GetDirectoryName(eventsPath) ?? string.Empty, "driver-events.jsonl");
             var sampling = ReportEventSampler.SampleForReport(allEvents, jobRoot: jobRoot, eventsPath: eventsPath, driverEventsPath: driverEventsPath, findings: rawFindings);
+            LogMemory("report-sampled", sampling.Events.Count);
             var reportEvents = sampling.Events;
             var omittedReportEvents = sampling.OmittedEventCount;
 
@@ -93,6 +98,7 @@ internal static class PostProcessProgram
             var artifactIndexBuilder = new HostArtifactIndexBuilder();
             var artifactIndex = artifactIndexBuilder.Build(jobId, jobRoot, config.ArtifactCollection);
             artifactIndexBuilder.WriteIndex(jobId, jobRoot, config.ArtifactCollection);
+            LogMemory("artifact-index-built", artifactIndex.Artifacts.Count);
 
             var jsonReportPath = Path.Combine(jobRoot, "report.json");
             var htmlReportPath = Path.Combine(jobRoot, "report.html");
@@ -100,6 +106,7 @@ internal static class PostProcessProgram
             var htmlEnReportPath = Path.Combine(jobRoot, "report.en.html");
             var renderer = new HtmlReportRenderer();
             File.WriteAllText(jsonReportPath, JsonSerializer.Serialize(report, JsonOptions));
+            LogMemory("report-json-written", report.Events.Count);
             File.WriteAllText(htmlReportPath, renderer.RenderChinese(report, artifactIndex.Artifacts, artifactIndex.Collections));
             foreach (var document in renderer.RenderBilingualReports(report, artifactIndex.Artifacts, artifactIndex.Collections))
             {
@@ -148,6 +155,12 @@ internal static class PostProcessProgram
             Console.Error.WriteLine(ex);
             return 1;
         }
+    }
+
+    private static void LogMemory(string stage, int count)
+    {
+        var process = System.Diagnostics.Process.GetCurrentProcess();
+        Console.Error.WriteLine($"[postprocess-memory] stage={stage} count={count} workingSet={process.WorkingSet64} private={process.PrivateMemorySize64} managed={GC.GetTotalMemory(false)}");
     }
 
     private static Options ParseOptions(string[] args)
@@ -602,14 +615,115 @@ internal static class PostProcessProgram
 
     private static List<SandboxEvent> LoadEventsWithSiblingDriverJsonl(string eventsPath)
     {
-        var events = LoadEvents(eventsPath);
-        var driverJsonl = Path.Combine(Path.GetDirectoryName(eventsPath) ?? string.Empty, "driver-events.jsonl");
-        if (File.Exists(driverJsonl) && !events.Any(IsDriverPayloadEvent))
+        var events = LoadEvents(eventsPath).Select(NormalizeEvent).ToList();
+        var eventKeys = events.Select(EventKey).ToHashSet(StringComparer.Ordinal);
+        var searchRoot = Path.GetDirectoryName(eventsPath);
+        foreach (var driverJsonl in EnumerateCanonicalDriverJsonlPaths(eventsPath, searchRoot))
         {
-            events.AddRange(LoadJsonLines(driverJsonl));
+            // The primary events.json may contain a small compatibility driver
+            // row or the deferred control marker.  Either case must not stop
+            // us from importing the complete sibling stream.  Add by stable
+            // identity so rerunning PostProcess remains idempotent.
+            foreach (var driverEvent in LoadJsonLines(driverJsonl))
+            {
+                AddEventIfNew(events, eventKeys, driverEvent);
+            }
+        }
+
+        var guestRoot = Path.GetDirectoryName(eventsPath);
+        if (!string.IsNullOrWhiteSpace(guestRoot) && Directory.Exists(guestRoot))
+        {
+            try
+            {
+                // Keep PostProcess on the same guest-artifact network import
+                // path as SandboxJobService.  This preserves normalized
+                // PCAP protocol rows, raw compatibility rows, sidecars, and
+                // parser diagnostics when a report is rebuilt offline.
+                foreach (var networkEvent in new NetworkArtifactEventImporter()
+                    .ImportGuestArtifacts(guestRoot, includeCanonicalDriverJsonl: false))
+                {
+                    AddEventIfNew(events, eventKeys, networkEvent);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
+            {
+                events.Add(CreateNetworkImportFailureEvent(guestRoot, ex));
+            }
         }
 
         return events.Select(NormalizeEvent).ToList();
+    }
+
+    private static IReadOnlyList<string> EnumerateCanonicalDriverJsonlPaths(string eventsPath, string? searchRoot)
+    {
+        if (string.IsNullOrWhiteSpace(searchRoot) || !Directory.Exists(searchRoot))
+        {
+            return [];
+        }
+
+        var primaryPath = Path.GetFullPath(eventsPath);
+        try
+        {
+            return Directory.EnumerateFiles(searchRoot, "driver-events.jsonl", SearchOption.AllDirectories)
+                .Select(Path.GetFullPath)
+                .Where(path => !string.Equals(path, primaryPath, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
+        {
+            return [];
+        }
+    }
+
+    private static void AddEventIfNew(List<SandboxEvent> events, HashSet<string> eventKeys, SandboxEvent evt)
+    {
+        var normalized = NormalizeEvent(evt);
+        if (eventKeys.Add(EventKey(normalized)))
+        {
+            events.Add(normalized);
+        }
+    }
+
+    private static string EventKey(SandboxEvent evt)
+    {
+        var data = string.Join(
+            ";",
+            evt.Data
+                .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(pair => $"{pair.Key}={pair.Value}"));
+        return string.Join(
+            "|",
+            evt.EventType,
+            evt.Source,
+            evt.Timestamp.ToString("O"),
+            evt.ProcessId?.ToString() ?? string.Empty,
+            evt.Path ?? string.Empty,
+            evt.CommandLine ?? string.Empty,
+            data);
+    }
+
+    private static SandboxEvent CreateNetworkImportFailureEvent(string guestRoot, Exception ex)
+    {
+        return new SandboxEvent
+        {
+            EventType = "network.import.failed",
+            Timestamp = DateTimeOffset.UtcNow,
+            Source = "host",
+            Path = guestRoot,
+            Data = CreateHostOperationalEventData(
+                "network-import-failed",
+                "network-import-failure-is-host-diagnostic-not-sample-behavior",
+                "PostProcess could not import one or more guest network artifacts; the report retains this diagnostic instead of silently dropping the lane.",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["guestOutputRoot"] = guestRoot,
+                    ["exceptionType"] = ex.GetType().Name,
+                    ["message"] = ex.Message,
+                    ["importer"] = nameof(NetworkArtifactEventImporter)
+                })
+        };
     }
 
     private static List<SandboxEvent> LoadEvents(string path)
@@ -657,17 +771,41 @@ internal static class PostProcessProgram
     private static List<SandboxEvent> LoadJsonLines(string path)
     {
         var events = new List<SandboxEvent>();
+        var lineNumber = 0;
         foreach (var line in File.ReadLines(path))
         {
+            lineNumber++;
             if (string.IsNullOrWhiteSpace(line))
             {
                 continue;
             }
 
-            var evt = JsonSerializer.Deserialize<SandboxEvent>(line, JsonOptions);
-            if (evt is not null)
+            try
             {
-                events.Add(evt);
+                var evt = JsonSerializer.Deserialize<SandboxEvent>(line, JsonOptions);
+                if (evt is not null)
+                {
+                    events.Add(evt);
+                }
+            }
+            catch (JsonException)
+            {
+                events.Add(new SandboxEvent
+                {
+                    EventType = "driver.parse_error",
+                    Source = "host",
+                    Path = path,
+                    Data = CreateHostOperationalEventData(
+                        "driver-jsonl-parse-error",
+                        "driver-jsonl-parse-error-is-host-diagnostic-not-sample-behavior",
+                        "PostProcess could not parse one driver JSONL row; the malformed line remains visible as a collection diagnostic.",
+                        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["lineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["jsonlPath"] = path,
+                            ["jsonlLineSelector"] = $"{path}#L{lineNumber}"
+                        })
+                });
             }
         }
 
@@ -843,6 +981,12 @@ internal static class PostProcessProgram
         metrics["events.r0.driver.recordsProcessed"] = ToMetricInt(processed);
         metrics["events.r0.driver.eventsEmitted"] = ToMetricInt(emitted);
         metrics["events.r0.driver.lossRateBasisPoints"] = processed == 0 ? 0 : lostCount >= processed ? 10000 : ToMetricInt(lostCount * 10000UL / processed);
+        var health = CollectionHealthSummaryBuilder.Build(rawEvents, reportEvents);
+        metrics["events.r0.driver.queueDepth"] = health.DriverQueueDepth;
+        metrics["events.r0.driver.remainingUnread"] = health.DriverRemainingUnread;
+        metrics["events.r0.driver.drainStoppedAtDeadlineRows"] = health.DriverDrainStoppedAtDeadlineRows;
+        metrics["events.r0.driver.eventsSuppressed"] = health.DriverEventsSuppressed;
+        metrics["events.r0.driver.qualityWarningRows"] = health.DriverQualityWarningRows;
         foreach (var category in new[] { "process", "image", "file", "registry", "network", "load", "other" })
         {
             metrics[$"events.r0.driver.{category}.raw"] = rawDriverRows.Count(evt => R0DriverCategory(evt) == category);
@@ -851,9 +995,9 @@ internal static class PostProcessProgram
     }
 
     private static bool IsR0DriverTelemetryRow(SandboxEvent evt) =>
-        string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
-        evt.EventType.StartsWith("image.", StringComparison.OrdinalIgnoreCase);
+        string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase) &&
+        evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) &&
+        !evt.EventType.Equals("driver.events.deferred", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsR0LossEvidenceEvent(SandboxEvent evt) =>
         EventDataBoolTrue(evt, "lost", "lossObserved", "sequenceGapObserved") ||
