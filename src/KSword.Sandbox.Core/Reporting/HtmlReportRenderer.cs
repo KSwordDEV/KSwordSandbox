@@ -1010,11 +1010,21 @@ html[lang="en"] .localized-evidence-field{display:none}
         _ => "info"
     };
 
-    private static bool IsEventExplorerPriority(SandboxEvent evt) =>
-        (TextEqualsAny(evt.EventType, "process.exit") && !string.Equals(EventExplorerDisposition(evt), "unattributed", StringComparison.OrdinalIgnoreCase)) ||
-        IsReportCollectionDiagnosticEvent(evt) ||
-        IsOperationalFailureEvent(evt) ||
-        IsNonZeroSampleExitEvent(evt);
+    private static bool IsEventExplorerPriority(SandboxEvent evt)
+    {
+        // Keep environment/unknown observations out of the default signal
+        // table even when they look operationally important. They remain in
+        // the raw evidence and can be revealed with the disposition filter.
+        if (string.Equals(EventExplorerDisposition(evt), "unattributed", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return TextEqualsAny(evt.EventType, "process.exit") ||
+            IsReportCollectionDiagnosticEvent(evt) ||
+            IsOperationalFailureEvent(evt) ||
+            IsNonZeroSampleExitEvent(evt);
+    }
 
     private static void AppendCollectionCoverageBanner(
         StringBuilder html,

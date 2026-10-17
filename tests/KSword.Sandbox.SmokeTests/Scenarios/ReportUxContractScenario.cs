@@ -114,6 +114,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "ProcessExitCodeRaw", "Process exit evidence should retain exit codes from normalized and ETW payload fields.");
         RequireContains(rendererSource, "AppendCollectionCoverageBanner", "Event explorer should keep collection gaps visible beside dynamic evidence.");
         RequireContains(rendererSource, "IsReportCollectionDiagnosticEvent", "Collection helper failures such as WMI probes should remain visible as diagnostics.");
+        RequireContains(rendererSource, "environment/unknown observations out of the default signal", "Event explorer should keep unattributed environment failures out of the default signal table.");
         RequireContains(rendererSource, "!string.Equals(row.Disposition, \"unattributed\"", "Event explorer should keep unattributed observations out of the default signal table while retaining filter access.");
         RequireContains(rendererSource, "artifactevidencematrix", "Report renderer should keep internal artifact matrix fields out of event detail cards.");
         RequireContains(rendererSource, "collectionFailureRows", "Report focus should include collection-health failure rows in the runtime boundary.");
