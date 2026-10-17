@@ -1719,7 +1719,22 @@ public static class ReportEventSampler
                 type.Equals("process.exit", StringComparison.OrdinalIgnoreCase) ||
                 type.Equals("process.new", StringComparison.OrdinalIgnoreCase) ||
                 type.Equals("process.tree", StringComparison.OrdinalIgnoreCase) ||
-                type.Equals("process.tree_unavailable", StringComparison.OrdinalIgnoreCase);
+                type.Equals("process.tree_unavailable", StringComparison.OrdinalIgnoreCase) ||
+                // ETW tracerpt fallback rows use process.event when the
+                // provider/task name cannot be mapped to start/exit. Keep the
+                // typed row in the dynamic lane instead of spending the tiny
+                // diagnostic quota and silently dropping kernel activity.
+                type.Equals("process.event", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // ETW fallback emits thread.start/exit/event for kernel thread
+        // activity. These are runtime evidence rows even when they do not
+        // carry sample correlation, so they need the same bounded dynamic
+        // budget as process/image rows.
+        if (type.StartsWith("thread.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("module.", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
         }
 
         return type.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
@@ -1858,7 +1873,62 @@ public static class ReportEventSampler
             return true;
         }
 
+        // Unknown attribution is still actionable evidence when the R0 row
+        // carries an explicit mutation/drop marker.  Correlation deliberately
+        // keeps these rows out of the behavior conclusion until an
+        // independent source joins them; routing them to the diagnostic lane
+        // here made a burst of unknown dropped-file rows disappear behind the
+        // tiny diagnostic quota.  Preserve the row in the dynamic evidence
+        // lane while retaining its unknown/nonbehavior fields.
+        if (IsUnknownAttribution(evt) && IsHighSignalR0Mutation(evt))
+        {
+            return true;
+        }
+
         return !EventDataBoolTrue(evt, "nonbehavior", "metadataOnly");
+    }
+
+    private static bool IsUnknownAttribution(SandboxEvent evt)
+    {
+        return EventDataEqualsAny(evt, "sampleCorrelation", "unknown", "uncorrelated", "unattributed") ||
+            EventDataEqualsAny(evt, "sampleCorrelationStatus", "unknown", "uncorrelated", "unattributed");
+    }
+
+    private static bool IsHighSignalR0Mutation(SandboxEvent evt)
+    {
+        return EventDataBoolTrue(
+                evt,
+                "droppedFileCandidate",
+                "persistenceCandidate",
+                "servicePersistenceCandidate",
+                "startupRegistryCandidate",
+                "writeIntent",
+                "fileWrite",
+                "deleteIntent",
+                "renameIntent",
+                "injectionCandidate",
+                "remoteThread",
+                "remoteInjection") ||
+            TextContainsAny(
+                DataValue(evt.Data, "operationName"),
+                "write",
+                "setinfo",
+                "rename",
+                "delete",
+                "createkey",
+                "setvalue") ||
+            TextContainsAny(
+                DataValue(evt.Data, "fileOperationName"),
+                "write",
+                "setinfo",
+                "rename",
+                "delete") ||
+            TextContainsAny(
+                DataValue(evt.Data, "registryOperationName"),
+                "set",
+                "create",
+                "delete",
+                "rename");
     }
 
     /// <summary>
