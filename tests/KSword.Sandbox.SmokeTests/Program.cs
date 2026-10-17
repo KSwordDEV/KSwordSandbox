@@ -329,6 +329,18 @@ internal static class SmokeTestProgram
         Assert(stagePayloadStep.PowerShell.Contains(config.Paths.GuestPayloadRoot, StringComparison.Ordinal), "runbook should use configured host guest payload root");
         Assert(stagePayloadStep.PowerShell.Contains("KSword.Sandbox.Agent.exe", StringComparison.Ordinal), "runbook should validate guest agent path");
         Assert(stagePayloadStep.PowerShell.Contains("KSword.Sandbox.R0Collector.exe", StringComparison.Ordinal), "runbook should validate R0Collector path when driver is enabled");
+        var outputPreflightStep = runbook.Steps.Single(step => step.Id == "check-guest-output-space");
+        Assert(!outputPreflightStep.MutatesVmState, "guest output capacity preflight must be marked read-only");
+        Assert(outputPreflightStep.PowerShell.Contains("ksword.guest-output-preflight.v1", StringComparison.Ordinal), "guest output preflight should persist a versioned diagnostic schema");
+        Assert(outputPreflightStep.PowerShell.Contains("availableFreeBytes", StringComparison.Ordinal), "guest output preflight should record available bytes");
+        Assert(outputPreflightStep.PowerShell.Contains("requiredFreeBytes", StringComparison.Ordinal), "guest output preflight should record the shared reserve");
+        Assert(outputPreflightStep.PowerShell.Contains("insufficient-space", StringComparison.Ordinal), "guest output preflight should classify low space explicitly");
+        Assert(outputPreflightStep.PowerShell.Contains("Guest output volume has insufficient free space", StringComparison.Ordinal), "guest output preflight should hard-fail before run-agent when the reserve is unavailable");
+        var prepareOutputStep = runbook.Steps.Single(step => step.Id == "prepare-guest-output");
+        Assert(prepareOutputStep.PowerShell.Contains("driver-events.part-*.jsonl", StringComparison.Ordinal), "guest output cleanup should remove stale rotated R0 segments");
+        Assert(prepareOutputStep.PowerShell.Contains("*.etl", StringComparison.Ordinal), "guest output cleanup should remove stale ETL traces");
+        Assert(prepareOutputStep.PowerShell.Contains("*.pcap", StringComparison.Ordinal), "guest output cleanup should remove stale packet captures");
+        Assert(prepareOutputStep.PowerShell.Contains("memory-dumps", StringComparison.Ordinal), "guest output cleanup should remove stale artifact directories");
         var runAgentStep = runbook.Steps.Single(step => step.Id == "run-agent");
         var decodedGuestAgentCommand = DecodeEncodedPowerShellCommands(runAgentStep.PowerShell);
         Assert(decodedGuestAgentCommand.Contains("--driver-events", StringComparison.Ordinal), "runbook should pass driver events path in the encoded guest command");
