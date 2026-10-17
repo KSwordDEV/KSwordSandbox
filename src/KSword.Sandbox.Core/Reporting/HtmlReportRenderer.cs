@@ -10823,7 +10823,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             return true;
         }
 
-        return normalized is "reportlane" or "triagelevel" or "rulescope" or "rulekey" or "evidenceorigin" or "behaviorscope" or "collectionhealth";
+        return normalized is "reportlane" or "triagelevel" or "rulescope" or "rulekey" or "evidenceorigin" or "behaviorscope" or "collectionhealth" or "collectionname";
     }
 
     private static bool ShouldOmitEventField(SandboxEvent evt, string key)
@@ -10952,6 +10952,126 @@ html[lang="en"] .localized-evidence-field{display:none}
         html = NormalizeChineseRestoredChrome(html);
         html = LocalizeChineseFilterOptions(html);
         html = LocalizeChineseVisibleEventTokens(html);
+        html = LocalizeChineseVisibleEvidenceValues(html);
+
+        return html;
+    }
+
+    /// <summary>
+    /// Localizes a small set of collector tokens that are useful in raw
+    /// evidence but too implementation-specific for the visible Chinese
+    /// report. Inputs are already-rendered Chinese HTML; processing changes
+    /// text nodes only and leaves data-copy payloads byte-for-byte intact.
+    /// </summary>
+    private static string LocalizeChineseVisibleEvidenceValues(string html)
+    {
+        foreach (var (field, rawValue, display) in new (string Field, string RawValue, string Display)[]
+        {
+            ("reason", "sourceFileMissing", "源文件已不存在"),
+            ("capturePhase", "after-run", "运行后采集"),
+            ("phase", "after-run", "运行后"),
+            ("captureState", "skipped", "已跳过"),
+            ("status", "skipped", "已跳过"),
+            ("status", "not-run", "未运行"),
+            ("collectionName", "dropped-files", "落地文件"),
+            ("collectionName", "screenshots", "截图"),
+            ("collectionName", "memory-dumps", "内存转储"),
+            ("collectionName", "packet-captures", "抓包"),
+            ("collectionName", "driver-events", "驱动事件")
+        })
+        {
+            html = Regex.Replace(
+                html,
+                $"(<code\\b[^>]*\\bdata-copy=\\\"{Regex.Escape(field)}={Regex.Escape(rawValue)}\\\"[^>]*>)[^<]*(</code>)",
+                $"$1{display}$2",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        foreach (var (raw, display) in new (string Raw, string Display)[]
+        {
+            ("reason=sourceFileMissing", "原因=源文件已不存在"),
+            ("capturePhase=after-run", "采集阶段=运行后"),
+            ("phase=after-run", "阶段=运行后"),
+            ("captureState=skipped", "采集状态=已跳过"),
+            ("status=skipped", "状态=已跳过"),
+            ("status=not-run", "状态=未运行"),
+            ("collectionName=dropped-files", "证据通道=落地文件"),
+            ("collectionName=screenshots", "证据通道=截图"),
+            ("collectionName=memory-dumps", "证据通道=内存转储"),
+            ("collectionName=packet-captures", "证据通道=抓包"),
+            ("collectionName=driver-events", "证据通道=驱动事件")
+        })
+        {
+            html = Regex.Replace(
+                html,
+                $"(?<=>){Regex.Escape(raw)}(?=<|\\r?$)",
+                display,
+                RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        }
+
+        // Evidence expansion cards use preformatted text, where field lines
+        // begin after a newline rather than an element boundary. Restrict the
+        // replacements to pre contents so HTML attributes and copy payloads
+        // remain unchanged.
+        html = Regex.Replace(
+            html,
+            "(<pre\\b[^>]*>)(.*?)(</pre>)",
+            match =>
+            {
+                var body = match.Groups[2].Value;
+                body = Regex.Replace(body, @"(?im)^collectionName=(dropped-files|screenshots|memory-dumps|packet-captures|driver-events)\\s*$", m =>
+                {
+                    var label = m.Groups[1].Value.ToLowerInvariant() switch
+                    {
+                        "dropped-files" => "落地文件",
+                        "screenshots" => "截图",
+                        "memory-dumps" => "内存转储",
+                        "packet-captures" => "抓包",
+                        _ => "驱动事件"
+                    };
+                    return $"证据通道={label}";
+                }, RegexOptions.CultureInvariant);
+                body = body.Replace("reason=sourceFileMissing", "原因=源文件已不存在", StringComparison.OrdinalIgnoreCase)
+                    .Replace("capturePhase=after-run", "采集阶段=运行后", StringComparison.OrdinalIgnoreCase)
+                    .Replace("phase=after-run", "阶段=运行后", StringComparison.OrdinalIgnoreCase)
+                    .Replace("captureState=skipped", "采集状态=已跳过", StringComparison.OrdinalIgnoreCase)
+                    .Replace("status=skipped", "状态=已跳过", StringComparison.OrdinalIgnoreCase)
+                    .Replace("status=not-run", "状态=未运行", StringComparison.OrdinalIgnoreCase);
+                return match.Groups[1].Value + body + match.Groups[3].Value;
+            },
+            RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+        foreach (var (raw, display) in new (string Raw, string Display)[]
+        {
+            ("not-run", "未运行"),
+            ("observed-empty", "已观察但为空"),
+            ("captured", "已采集"),
+            ("partial", "部分采集"),
+            ("disabled", "已禁用"),
+            ("failed", "失败"),
+            ("skipped", "已跳过")
+        })
+        {
+            html = html.Replace($"<span class=\"badge badge-info\">{raw}</span>", $"<span class=\"badge badge-info\">{display}</span>", StringComparison.OrdinalIgnoreCase);
+            html = html.Replace($"<span class=\"badge badge-medium\">{raw}</span>", $"<span class=\"badge badge-medium\">{display}</span>", StringComparison.OrdinalIgnoreCase);
+            html = html.Replace($"<span class=\"badge badge-high\">{raw}</span>", $"<span class=\"badge badge-high\">{display}</span>", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Keep machine-readable copy attributes intact while removing any
+        // remaining collectionName line that belongs to a visible evidence
+        // block outside the bounded <pre>/<code> cases above.
+        var copyAttributes = new List<string>();
+        html = Regex.Replace(html, "\\bdata-copy=\"[^\"]*\"", match =>
+        {
+            var token = $"__KSWORD_ZH_COPY_ATTRIBUTE_{copyAttributes.Count}__";
+            copyAttributes.Add(match.Value);
+            return token;
+        }, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        html = html.Replace("collectionName=", "证据通道=", StringComparison.OrdinalIgnoreCase);
+        for (var index = 0; index < copyAttributes.Count; index++)
+        {
+            html = html.Replace($"__KSWORD_ZH_COPY_ATTRIBUTE_{index}__", copyAttributes[index], StringComparison.Ordinal);
+        }
 
         return html;
     }

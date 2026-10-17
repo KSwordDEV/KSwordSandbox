@@ -447,6 +447,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(chineseVisibleText, "隐藏技术字段", "Chinese event evidence must use compact field labels instead of the technical-field prompt.");
         RequireNotContains(chineseVisibleText, "Additional detail", "Chinese event evidence must localize the generic technical-field fallback label.");
         RequireContains(chineseHtml, "附加详情：", "Chinese event evidence should expose a localized generic technical-field label.");
+        RequireContains(chineseHtml, "data-copy=\"reason=sourceFileMissing\">源文件已不存在</code>", "Chinese event evidence should localize source-missing diagnostics while preserving the copy payload.");
+        RequireContains(chineseHtml, "data-copy=\"capturePhase=after-run\">运行后采集</code>", "Chinese event evidence should localize capture phases while preserving the copy payload.");
+        RequireContains(chineseHtml, "data-copy=\"status=skipped\">已跳过</code>", "Chinese event evidence should localize raw status values while preserving the copy payload.");
+        RequireNotContains(chineseVisibleText, "collectionName=", "Chinese report chrome must not expose collectionName implementation fields.");
         RequireNotContains(chineseVisibleText, "复制行为证据", "Chinese event evidence copy buttons should use the compact 复制 label.");
         RequireNotContains(chineseVisibleText, "证据字段", "Chinese event evidence must not expose an evidence-field count or heading.");
         RequireNotContains(chineseVisibleText, "Additional internal or technical fields hidden", "Chinese event evidence must not expose internal-field counts.");
@@ -1098,7 +1102,23 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                 ["reason"] = "probe unavailable"
             }
         };
-        var events = new List<SandboxEvent> { launcherEvent, processEvent, childProcessEvent, processExitEvent, fileEvent, registryEvent, networkEvent, unattributedNetworkEvent, r0Event, r0NetworkStatusEvent, r0DiagnosticEvent, staticResourceEvent, vtEvent, failureEvent, wmiFailureEvent };
+        var droppedFileSkippedEvent = new SandboxEvent
+        {
+            EventType = "artifact.dropped_file.skipped",
+            Timestamp = timestamp.AddSeconds(5.6),
+            Source = "guest",
+            ProcessName = "contract-sample.exe",
+            ProcessId = 4242,
+            Data =
+            {
+                ["capturePhase"] = "after-run",
+                ["captureState"] = "skipped",
+                ["collectionName"] = "dropped-files",
+                ["reason"] = "sourceFileMissing",
+                ["status"] = "skipped"
+            }
+        };
+        var events = new List<SandboxEvent> { launcherEvent, processEvent, childProcessEvent, processExitEvent, fileEvent, registryEvent, networkEvent, unattributedNetworkEvent, r0Event, r0NetworkStatusEvent, r0DiagnosticEvent, staticResourceEvent, vtEvent, failureEvent, wmiFailureEvent, droppedFileSkippedEvent };
         for (var index = 0; index < 205; index++)
         {
             events.Add(new SandboxEvent
