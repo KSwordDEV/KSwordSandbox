@@ -994,27 +994,8 @@ internal static class PostProcessProgram
         }
     }
 
-    private static bool IsR0DriverTelemetryRow(SandboxEvent evt)
-    {
-        if (!evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.Equals("driver.events.deferred", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return R0DataValue(evt, "schema").Equals("ksword.sandbox.r0.event", StringComparison.OrdinalIgnoreCase) &&
-            R0DataValue(evt, "eventOrigin").Contains("kernel-driver", StringComparison.OrdinalIgnoreCase) &&
-            new[] { "driver", "process", "image", "file", "registry", "network" }
-                .Contains(R0DataValue(evt, "producerCategory"), StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static string R0DataValue(SandboxEvent evt, string key) =>
-        evt.Data.TryGetValue(key, out var value) ? value : string.Empty;
+    private static bool IsR0DriverTelemetryRow(SandboxEvent evt) =>
+        CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow(evt);
 
     private static bool IsR0LossEvidenceEvent(SandboxEvent evt) =>
         EventDataBoolTrue(evt, "lost", "lossObserved", "sequenceGapObserved") ||
