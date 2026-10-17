@@ -1804,8 +1804,13 @@ public sealed class HyperVRunbookBuilder
         string agentTaskName)
     {
         var hasSyncDeadline = !config.Analysis.DurationUnlimited && config.Analysis.DefaultDurationSeconds > 0;
+        var drainGraceSeconds = config.Driver.Enabled
+            ? (int)Math.Ceiling(config.Driver.R0CollectorDrainGraceMs / 1000d)
+            : 0;
         var maxSyncSeconds = hasSyncDeadline
-            ? Math.Max(config.Analysis.DefaultDurationSeconds + 60, 90)
+            ? Math.Max(
+                config.Analysis.DefaultDurationSeconds + 60,
+                config.Analysis.DefaultDurationSeconds + drainGraceSeconds + 60)
             : 0;
         var command = string.Join(" ", new[]
         {

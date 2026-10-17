@@ -50,6 +50,7 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
                 VmType = "ws",
                 GuestRemoting = new GuestRemotingConfig { Address = "192.0.2.20", Port = 5985 }
             },
+            Driver = new DriverConfig { Enabled = true },
             Guest = CreateRemoteGuestConfig("192.0.2.99")
         };
         var vmware = builder.Build(vmwareConfig, jobId, sample);
@@ -76,6 +77,7 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         SmokeAssert.True(encodedAgentLaunch.Contains("WriteAllText($pidMarkerTemp", StringComparison.Ordinal), "Guest launch must atomically publish the PID marker.");
         SmokeAssert.True(encodedAgentLaunch.Contains("WriteAllText($exitTemp", StringComparison.Ordinal), "Guest launch must atomically publish the exit marker.");
         RequireStepContains(vmware, "sync-live-output", "continuing so collect-output can preserve stdout/stderr");
+        RequireStepContains(vmware, "sync-live-output", "$maxSyncSeconds = 210");
         RequireStepContains(vmware, "collect-output", "guest-agent-run-status.json");
         RequireStepContains(vmware, "collect-output", "invalid-zero-filled-marker");
         SmokeAssert.True(
