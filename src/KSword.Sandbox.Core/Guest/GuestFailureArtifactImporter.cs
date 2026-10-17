@@ -29,6 +29,7 @@ public static class GuestFailureArtifactImporter
         var statusPath = FindNewest(root, "guest-agent-run-status.json");
         var stderrPath = FindNewest(root, "agent.stderr.log");
         var exitPath = FindNewest(root, "agent.exit");
+        var pidPath = FindNewest(root, "agent.pid");
         var eventsPath = FindNewest(root, "events.json");
         var summaryPath = FindNewest(root, "agent-summary.json");
         var rows = new List<SandboxEvent>();
@@ -38,7 +39,7 @@ public static class GuestFailureArtifactImporter
         var parsedExit = TryParseExit(exitText, out var exitCode);
         var stderr = ReadText(stderrPath);
         var missing = status?.MissingArtifacts ?? [];
-        var hasAgentMarker = statusPath is not null || stderrPath is not null || exitPath is not null || summaryPath is not null;
+        var hasAgentMarker = statusPath is not null || stderrPath is not null || exitPath is not null || pidPath is not null || summaryPath is not null;
         // Offline fixtures and older externally-produced events.json files do
         // not necessarily carry the Agent marker set. Do not invent a missing
         // summary failure for those already-complete event streams.
@@ -85,6 +86,7 @@ public static class GuestFailureArtifactImporter
         if (statusPath is not null) values["statusPath"] = statusPath;
         if (stderrPath is not null) values["stderrPath"] = stderrPath;
         if (exitPath is not null) values["exitPath"] = exitPath;
+        if (pidPath is not null) values["pidPath"] = pidPath;
         if (parsedExit) values["exitCode"] = exitCode.ToString(CultureInfo.InvariantCulture);
         if (status is not null)
         {
