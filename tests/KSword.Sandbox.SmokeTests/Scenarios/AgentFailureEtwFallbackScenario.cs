@@ -52,6 +52,8 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
 
         var summary = CollectionHealthSummaryBuilder.Build([.. failures, .. etwRows]);
         SmokeAssert.True(summary.AgentFailureRows > 0, "Structured Agent failure must enter CollectionHealth.");
+        var sampled = ReportEventSampler.SampleForReport(failures);
+        SmokeAssert.True(sampled.Events.Any(evt => evt.EventType == "agent.run.failed"), "Agent failure must survive report sampling ahead of the diagnostic quota.");
 
         return Task.FromResult(new SmokeTestResult
         {
