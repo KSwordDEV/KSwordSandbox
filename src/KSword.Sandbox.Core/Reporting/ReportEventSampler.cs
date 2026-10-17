@@ -1631,6 +1631,14 @@ public static class ReportEventSampler
                 !type.Contains("snapshot", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Shares the report sampler's dynamic-action predicate with report metric
+    /// builders.  Keeping one predicate prevents the coverage marker and the
+    /// events.dynamicAction.* metrics from counting different R0/ETW rows.
+    /// </summary>
+    internal static bool IsDynamicActionEventForMetrics(SandboxEvent evt) =>
+        IsDynamicActionEvidenceEvent(evt);
+
     private static int DynamicActionPriority(SandboxEvent evt)
     {
         if (IsStrongSampleBehaviorEvent(evt))

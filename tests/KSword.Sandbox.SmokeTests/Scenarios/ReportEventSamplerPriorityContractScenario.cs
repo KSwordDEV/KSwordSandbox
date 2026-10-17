@@ -122,6 +122,7 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
             Source = "etwLive",
             Data =
             {
+                ["captureSource"] = "etw-live-tracerpt",
                 ["behaviorCounted"] = "true",
                 ["sampleBehaviorCandidate"] = "true",
                 ["sampleCorrelation"] = "confirmed",
@@ -480,6 +481,7 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         var etwEvent = RequireEvent(result.Events, "etw.kernel.event");
         foreach (var (key, expected) in new[]
         {
+            ("captureSource", "etw-live-tracerpt"),
             ("eventName", "Process"),
             ("opcode", "Start"),
             ("eventId", "1"),

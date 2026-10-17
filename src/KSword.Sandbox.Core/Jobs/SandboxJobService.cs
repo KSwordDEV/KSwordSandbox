@@ -2709,57 +2709,8 @@ public sealed partial class SandboxJobService
             metrics[$"{metricPrefix}.attributedRaw"] - metrics[$"{metricPrefix}.attributedReport"]);
     }
 
-    private static bool IsDynamicActionEvent(SandboxEvent evt)
-    {
-        var type = evt.EventType ?? string.Empty;
-        if (type.Contains(".snapshot", StringComparison.OrdinalIgnoreCase) ||
-            type.Contains(".observed", StringComparison.OrdinalIgnoreCase) ||
-            type.Contains(".diff", StringComparison.OrdinalIgnoreCase) ||
-            type.Contains(".summary", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (EventDataEqualsAny(evt, "captureSource", "etw-live-tracerpt"))
-        {
-            return true;
-        }
-
-        // The Guest Agent keeps R0 rows that belong to the submitted process
-        // tree. Count typed driver activity alongside user-mode normalized
-        // rows, but exclude explicit collector/synthetic noise from coverage
-        // metrics and report omission accounting.
-        if (IsDriverSampleActivityEvent(evt))
-        {
-            return true;
-        }
-
-        if (type.StartsWith("process.", StringComparison.OrdinalIgnoreCase))
-        {
-            return type.Equals("process.start", StringComparison.OrdinalIgnoreCase) ||
-                type.Equals("process.exit", StringComparison.OrdinalIgnoreCase) ||
-                type.Equals("process.new", StringComparison.OrdinalIgnoreCase) ||
-                type.Equals("process.tree", StringComparison.OrdinalIgnoreCase) ||
-                type.Equals("process.tree_unavailable", StringComparison.OrdinalIgnoreCase);
-        }
-
-        return type.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("tls.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("pcap.dns", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("pcap.http", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("pcap.tls", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("pcap.flow", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("eventlog.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("security.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("etw.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("service.", StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool IsDynamicActionEvent(SandboxEvent evt) =>
+        ReportEventSampler.IsDynamicActionEventForMetrics(evt);
 
     private static bool IsTcpEvent(SandboxEvent evt) =>
         evt.EventType.StartsWith("network.tcp", StringComparison.OrdinalIgnoreCase) ||
@@ -2776,34 +2727,6 @@ public sealed partial class SandboxJobService
     private static bool IsFileEvent(SandboxEvent evt) =>
         evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
         evt.EventType.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsDriverSampleActivityEvent(SandboxEvent evt)
-    {
-        var type = evt.EventType ?? string.Empty;
-        if ((evt.ProcessName?.Contains("r0collector", StringComparison.OrdinalIgnoreCase) ?? false) ||
-            EventDataTruthy(evt, "selfProcess", "collectorSelfNoise", "collectorNoise", "selfNoise"))
-        {
-            return false;
-        }
-
-        if (EventDataTruthy(evt, "stress") ||
-            !CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow(evt) ||
-            R0DriverCategory(evt) is "other")
-        {
-            return false;
-        }
-
-        return !EventDataTruthy(
-            evt,
-            "noise",
-            "nonbehavior",
-            "collectionNoise",
-            "collectorNoise",
-            "collectorSelfNoise",
-            "selfNoise",
-            "metadataOnly",
-            "collectionDiagnostic");
-    }
 
     private static bool IsSampleAttributedDynamicActionEvent(SandboxEvent evt)
     {

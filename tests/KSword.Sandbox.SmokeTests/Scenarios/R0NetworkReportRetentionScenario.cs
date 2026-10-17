@@ -91,6 +91,14 @@ internal sealed class R0NetworkReportRetentionScenario : ISmokeTestScenario
                 evt.Data.TryGetValue("collectorNoise", out var noise) && noise == "true"),
             "Explicit collector noise must remain excluded from the retained network evidence lane.");
 
+        var samplingMarker = result.Events.Single(evt =>
+            string.Equals(evt.EventType, "report.events.sampled", StringComparison.OrdinalIgnoreCase));
+        SmokeAssert.True(
+            samplingMarker.Data.TryGetValue("rawDynamicActionCount", out var rawDynamic) && rawDynamic == "2" &&
+            samplingMarker.Data.TryGetValue("selectedDynamicActionCount", out var selectedDynamic) && selectedDynamic == "2" &&
+            samplingMarker.Data.TryGetValue("dynamicActionPolicyExcludedCount", out var policyExcluded) && policyExcluded == "0",
+            "Sampling marker must prove both concrete R0 network rows reached the report dynamic lane.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
