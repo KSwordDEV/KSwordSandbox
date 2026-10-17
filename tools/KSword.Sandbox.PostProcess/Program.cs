@@ -83,7 +83,8 @@ internal static class PostProcessProgram
                 StaticAnalysis = staticAnalysis,
                 Events = reportEvents,
                 Findings = findings,
-                Metrics = BuildMetrics(allEvents, reportEvents, omittedReportEvents, findings, staticAnalysis)
+                Metrics = BuildMetrics(allEvents, reportEvents, omittedReportEvents, findings, staticAnalysis),
+                CollectionHealth = CollectionHealthSummaryBuilder.Build(allEvents, reportEvents)
             };
 
             // Keep post-process regeneration on the same artifact-index path
@@ -806,6 +807,9 @@ internal static class PostProcessProgram
             evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase));
         AddR0DriverCoverageMetrics(metrics, reportEvents, rawEvents);
+        CollectionHealthSummaryBuilder.AddMetrics(
+            metrics,
+            CollectionHealthSummaryBuilder.Build(rawEvents, reportEvents));
         return metrics;
     }
 
@@ -821,6 +825,8 @@ internal static class PostProcessProgram
         metrics["events.r0.driver.omitted"] = Math.Max(0, rawDriverRows.Count - reportDriverRows.Count);
         metrics["events.r0.driver.lossObserved"] = rawEvents.Count(IsR0LossEvidenceEvent);
         metrics["events.r0.driver.backpressureObserved"] = rawEvents.Count(IsR0BackpressureEvidenceEvent);
+        metrics["events.r0.driver.drainStoppedAtDeadline"] = rawEvents.Count(evt => EventDataBoolTrue(evt, "drainStoppedAtDeadline"));
+        metrics["events.r0.driver.drainStoppedAtBatchLimit"] = rawEvents.Count(evt => EventDataBoolTrue(evt, "drainStoppedAtBatchLimit"));
         var readSummaries = rawEvents.Where(evt => evt.EventType.Equals("r0collector.driverReadEvents", StringComparison.OrdinalIgnoreCase)).ToList();
         var lostCount = MaxDataUnsigned(rawEvents, "lostCount", "eventsDropped", "TotalEventsDropped");
         var processed = SumDataUnsigned(readSummaries, "recordsProcessed");

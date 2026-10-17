@@ -192,6 +192,43 @@ public sealed record BehaviorFinding
 }
 
 /// <summary>
+/// Summarizes collection quality and capture failures without promoting them
+/// to sample behavior. Inputs are normalized raw events; processing keeps
+/// both failure rows and cumulative loss counters so report consumers can
+/// distinguish a failed probe from the amount of telemetry that was lost.
+/// </summary>
+public sealed record CollectionHealthSummary
+{
+    public int RawRows { get; init; }
+
+    public int ReportRows { get; init; }
+
+    public int OmittedRows { get; init; }
+
+    public int TotalRows { get; init; }
+
+    public int FailureRows { get; init; }
+
+    public int LossRows { get; init; }
+
+    public int EtwEventsLostRows { get; init; }
+
+    public int EtwEventsLost { get; init; }
+
+    public int DriverLossRows { get; init; }
+
+    public int DriverLostCount { get; init; }
+
+    public int ProcessTreeUnavailable { get; init; }
+
+    public int ScheduledTaskCaptureFailed { get; init; }
+
+    public int PktmonStopFailed { get; init; }
+
+    public int EtwDecodeFailed { get; init; }
+}
+
+/// <summary>
 /// Contains the final report model for one analysis job.
 /// Inputs are job metadata, normalized events, and behavior findings;
 /// processing calculates simple counts; the record is returned to the report
@@ -243,6 +280,8 @@ public sealed record AnalysisReport
     public List<BehaviorFinding> Findings { get; init; } = [];
 
     public Dictionary<string, int> Metrics { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public CollectionHealthSummary CollectionHealth { get; init; } = new();
 }
 
 /// <summary>

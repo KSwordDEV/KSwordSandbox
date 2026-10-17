@@ -58,12 +58,20 @@ public sealed class PcapArtifactEventImporter
         try
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            // Read one sentinel packet so an input with exactly MaxPackets is
-            // not reported as truncated, while an additional packet produces
-            // an explicit bounded-loss metric instead of being silently lost.
-            var boundedPackets = ReadPackets(stream, path).Take(MaxPackets + 1).ToList();
-            var packetLimitHit = boundedPackets.Count > MaxPackets;
-            var packets = boundedPackets.Take(MaxPackets).ToList();
+            // Stop the packet iterator exactly at the cap.  Checking the
+            // stream position after the last accepted packet detects an
+            // additional record without parsing a potentially malformed
+            // sentinel packet and discarding all earlier evidence.
+            var packets = new List<PcapPacket>(MaxPackets);
+            using (var packetEnumerator = ReadPackets(stream, path).GetEnumerator())
+            {
+                while (packets.Count < MaxPackets && packetEnumerator.MoveNext())
+                {
+                    packets.Add(packetEnumerator.Current);
+                }
+            }
+
+            var packetLimitHit = packets.Count >= MaxPackets && stream.CanSeek && stream.Position < stream.Length;
             var events = BuildEvents(path, packets, source, packetLimitHit).ToList();
             var sidecarEvents = includeSidecars ? ImportSidecarEvents(path, source).ToList() : [];
             var allImportedEvents = events.Concat(sidecarEvents).ToList();

@@ -42,7 +42,7 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
             "KSword.Sandbox.Core",
             "Network",
             "NetworkSidecarEventImporter.cs"));
-        SmokeAssert.True(pcapImporterSource.Contains("Take(MaxPackets + 1)", StringComparison.Ordinal), "PCAP parser must probe a sentinel packet so the exact packet limit is not misreported.");
+        SmokeAssert.True(pcapImporterSource.Contains("stream.Position < stream.Length", StringComparison.Ordinal), "PCAP parser must probe the stream boundary without parsing an over-limit sentinel packet.");
         SmokeAssert.True(pcapImporterSource.Contains("parserDroppedPacketCount", StringComparison.Ordinal), "PCAP parser must expose bounded packet loss metrics.");
         SmokeAssert.True(pcapImporterSource.Contains("protocolEventLimitHit", StringComparison.Ordinal), "PCAP protocol event caps must expose a precise loss boundary.");
         SmokeAssert.True(sidecarImporterSource.Contains("MaxFlattenedDataFields", StringComparison.Ordinal), "Sidecar parser must reserve space for its field-limit marker.");
