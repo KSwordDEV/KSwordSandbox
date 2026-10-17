@@ -35,7 +35,9 @@ Create and exit events use `KswSandboxEventTypeProcess` with
 - `CreatingProcessId`: current process ID that caused the create callback, then
   replayed on exit from the bounded lineage cache when available.
 - `Status`: create status or exit status when safe to query.
-- `ImagePath` and `CommandLine`: bounded UTF-16 prefixes for Ex create events.
+- `ImagePath`: bounded UTF-16 suffix for Ex create events when truncation is
+  required, preserving the executable basename. `CommandLine` remains a
+  bounded prefix so the executable/verb at the start is retained.
 - Flags distinguish Ex versus legacy callbacks, present strings, truncation, and
   status presence.  Create failures set
   `KSWORD_SANDBOX_PROCESS_EVENT_FLAG_OPERATION_FAILED`, and Ex callbacks mark
@@ -56,7 +58,9 @@ with `PsRemoveLoadImageNotifyRoutine` during driver unload.  Events use
 - `ProcessId`: process ID supplied by the image-load callback.  Kernel image
   loads may report a system or zero process context depending on Windows.
 - `ImageBase` and `ImageSize`: numeric image mapping metadata from `PIMAGE_INFO`.
-- `ImagePath`: bounded UTF-16 prefix of `FullImageName` when supplied.
+- `ImagePath`: bounded UTF-16 suffix of `FullImageName` when supplied, keeping
+  the final module/path component when the kernel path is longer than the
+  compact payload.
 - Flags identify path presence, path truncation, system-mode images,
   image-properties presence, images mapped to all PIDs, and extended image-info
   presence.
@@ -110,6 +114,8 @@ String handling rules:
   present, then rounded down to a full `WCHAR` count.
 - `KswCopyUnicodePrefix` copies at most the fixed payload capacity minus one
   terminator and reports the byte count without the trailing NUL.
+- `KswCopyUnicodeSuffix` uses the same bound while retaining the final path
+  component for long image/file paths.
 - Missing strings leave the corresponding present flag unset; long strings set
   the matching truncation flag.
 

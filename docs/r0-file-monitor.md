@@ -54,7 +54,8 @@ Path capture order:
 The producer marks path provenance with compatible flag bits:
 
 - `KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_PRESENT`: `PathLengthBytes` and `Path`
-  contain a bounded UTF-16 path prefix.
+  contain a bounded UTF-16 path; long paths retain a suffix so the final file
+  name remains available for behavior correlation.
 - `KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_TRUNCATED`: the source name exceeded the
   fixed payload buffer.
 - `KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_NORMALIZED`: the path came from FltMgr
