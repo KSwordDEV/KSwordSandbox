@@ -1374,7 +1374,14 @@ public sealed class HyperVRunbookBuilder
             "$session = $null;",
             BuildGuestSessionAssignment(config, provider, targetVmName),
             "try {",
-            $"Invoke-Command -Session $session -ScriptBlock {{ New-Item -ItemType Directory -Force -Path {Q(guestAgentDirectory)}, {Q(guestCollectorDirectory)}, {Q(guestDriverDirectory)}, {Q($"{guestRoot}\\incoming")}, {Q($"{guestRoot}\\out")} | Out-Null }};",
+            // A long-lived disposable guest can retain large ETW/PCAP/R0
+            // outputs from an earlier run. Clear only the sandbox-owned
+            // input/output roots before staging so a later events.json write
+            // cannot fail with ERROR_DISK_FULL while old evidence is left in
+            // the VM. The preinstalled self-contained Agent runtime is left
+            // intact because staging refreshes only its executable/runtime
+            // contract files on this VM. Host-side copies are already durable.
+            $"Invoke-Command -Session $session -ScriptBlock {{ New-Item -ItemType Directory -Force -Path {Q(guestAgentDirectory)}, {Q(guestCollectorDirectory)}, {Q(guestDriverDirectory)} | Out-Null; foreach ($path in @({Q($"{guestRoot}\\incoming")}, {Q($"{guestRoot}\\out")})) {{ if (Test-Path -LiteralPath $path) {{ Get-ChildItem -LiteralPath $path -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }}; New-Item -ItemType Directory -Force -Path $path | Out-Null }} }};",
             "if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot 'agent'))) { throw \"Guest Agent payload folder was not found: $(Join-Path $payloadRoot 'agent')\" }",
             "$agentRuntimeConfig = Join-Path $payloadRoot 'agent\\KSword.Sandbox.Agent.runtimeconfig.json';",
             "$agentDeps = Join-Path $payloadRoot 'agent\\KSword.Sandbox.Agent.deps.json';",
