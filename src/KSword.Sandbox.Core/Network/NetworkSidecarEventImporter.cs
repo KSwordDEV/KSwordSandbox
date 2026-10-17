@@ -224,7 +224,22 @@ public sealed class NetworkSidecarEventImporter
             fileName.Contains("conn", StringComparison.OrdinalIgnoreCase) ||
             fileName.Contains("flow", StringComparison.OrdinalIgnoreCase) ||
             fileName.Contains("network", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(fileName, "driver-events.jsonl", StringComparison.OrdinalIgnoreCase);
+            IsCanonicalOrRotatedDriverEventsFileName(fileName);
+    }
+
+    private static bool IsCanonicalOrRotatedDriverEventsFileName(string fileName)
+    {
+        if (string.Equals(fileName, "driver-events.jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (!fileName.StartsWith("driver-events.part-", StringComparison.OrdinalIgnoreCase) ||
+            !fileName.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        var number = fileName["driver-events.part-".Length..^".jsonl".Length];
+        return number.Length == 6 && number.All(static ch => ch is >= '0' and <= '9');
     }
 
     private static void TryImportJsonLine(

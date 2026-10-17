@@ -288,7 +288,18 @@ public sealed class NetworkArtifactEventImporter
 
     private static bool IsCanonicalDriverEventsPath(string path)
     {
-        return string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase);
+        var fileName = Path.GetFileName(path);
+        if (string.Equals(fileName, "driver-events.jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (!fileName.StartsWith("driver-events.part-", StringComparison.OrdinalIgnoreCase) ||
+            !fileName.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        var number = fileName["driver-events.part-".Length..^".jsonl".Length];
+        return number.Length == 6 && number.All(static ch => ch is >= '0' and <= '9');
     }
 
     private static IEnumerable<string> SafeEnumerateFiles(string root, Func<string, bool> predicate)
