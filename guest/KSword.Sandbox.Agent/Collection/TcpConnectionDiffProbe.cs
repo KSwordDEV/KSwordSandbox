@@ -283,6 +283,13 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
                 ["transportProtocol"] = "TCP",
                 ["localEndpoint"] = connection.Local,
                 ["remoteEndpoint"] = connection.Remote,
+                ["flowKey"] = BuildFlowKey("TCP", connection.Local, connection.Remote),
+                ["flowKeyVersion"] = "1",
+                ["flowKeySource"] = "directional-source-destination-endpoints",
+                ["flowKeyScope"] = "transport-5tuple-lite",
+                ["pcapFlowKeyCandidate"] = BuildFlowKey("TCP", connection.Local, connection.Remote),
+                ["pcapCorrelationKey"] = BuildFlowKey("TCP", connection.Local, connection.Remote),
+                ["pcapCorrelationKeySource"] = "flowKey",
                 ["processIdSource"] = connection.OwningProcessId is > 0
                     ? connection.ProcessIdSource
                     : owningProcessId is > 0 ? "netstat-endpoint-join" : "unavailable",
@@ -290,13 +297,29 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
             }
         };
 
+        var ownerSource = connection.OwningProcessId is > 0
+            ? connection.ProcessIdSource
+            : owningProcessId is > 0 ? "netstat-endpoint-join" : "unavailable";
+        evt.Data["ownerPidPresent"] = owningProcessId is > 0 ? "true" : "false";
+        evt.Data["ownerPidSource"] = ownerSource;
+
         if (owningProcessId is not null)
         {
+            evt.Data["ownerPid"] = owningProcessId.Value.ToString(CultureInfo.InvariantCulture);
             evt.Data["owningProcessId"] = owningProcessId.Value.ToString(CultureInfo.InvariantCulture);
             evt.Data["processId"] = owningProcessId.Value.ToString(CultureInfo.InvariantCulture);
         }
 
         return evt;
+    }
+
+    private static string BuildFlowKey(string protocol, string sourceEndpoint, string destinationEndpoint)
+    {
+        return string.Join(
+            "|",
+            protocol.Trim().ToLowerInvariant(),
+            sourceEndpoint.Trim(),
+            destinationEndpoint.Trim());
     }
 
     /// <summary>

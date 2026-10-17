@@ -1297,7 +1297,10 @@ public static class SampleCorrelationClassifier
             var isNetstat = evt.EventType.StartsWith("network.netstat", StringComparison.OrdinalIgnoreCase);
             var isR0Network = evt.EventType.Equals("driver.network", StringComparison.OrdinalIgnoreCase) ||
                 evt.EventType.StartsWith("driver.network.", StringComparison.OrdinalIgnoreCase);
-            if (!isNetstat && !isR0Network)
+            var isGuestTcpOwner = string.Equals(evt.Source, "guest", StringComparison.OrdinalIgnoreCase) &&
+                (evt.EventType.Equals("network.tcp", StringComparison.OrdinalIgnoreCase) ||
+                 evt.EventType.Equals("network.tcp.closed", StringComparison.OrdinalIgnoreCase));
+            if (!isNetstat && !isR0Network && !isGuestTcpOwner)
             {
                 continue;
             }
@@ -1313,13 +1316,13 @@ public static class SampleCorrelationClassifier
             AddEndpointOwner(map, Value(evt.Data, "transport"), Value(evt.Data, "localEndpoint"), pid.Value);
             AddEndpointOwner(map, Value(evt.Data, "protocol"), Value(evt.Data, "localEndpoint"), pid.Value);
 
-            // WFP/R0 rows are the authoritative owner source for short-lived
-            // connections, while PCAP protocol rows deliberately have no PID.
-            // Preserve both the flow key and either endpoint so a later PCAP
-            // row can join the concrete R0 owner before IOC/time-window
-            // heuristics run.  This closes the common ``R0 has PID, PCAP does
-            // not'' attribution gap without promoting an ownerless row.
-            if (isR0Network)
+            // WFP/R0 and Guest owner-table rows are authoritative owner
+            // sources for short-lived connections, while PCAP protocol rows
+            // deliberately have no PID. Preserve both the exact flow key and
+            // endpoint aliases so a later PCAP row can join a concrete owner
+            // without relying on timestamp overlap. A conflicting owner
+            // invalidates the key and stays unknown rather than guessing.
+            if (isR0Network || isGuestTcpOwner)
             {
                 foreach (var flow in new[]
                 {
@@ -1363,8 +1366,25 @@ public static class SampleCorrelationClassifier
         var key = EndpointKey(protocol, local);
         if (!string.IsNullOrWhiteSpace(key))
         {
-            map[key] = pid;
+            AddUniqueOwner(map, key, pid);
         }
+    }
+
+    private static void AddUniqueOwner(IDictionary<string, int> map, string key, int pid)
+    {
+        if (map.TryGetValue(key, out var existing))
+        {
+            if (existing != pid)
+            {
+                // The same endpoint/flow was observed under more than one
+                // owner. Remove it so later joins remain explicitly unknown.
+                map.Remove(key);
+            }
+
+            return;
+        }
+
+        map[key] = pid;
     }
 
     private static bool TryGetJoinedNetworkOwnerPid(
@@ -1439,7 +1459,7 @@ public static class SampleCorrelationClassifier
         var key = NetworkFlowOwnerKey(flowKey);
         if (!string.IsNullOrWhiteSpace(key))
         {
-            map[key] = pid;
+            AddUniqueOwner(map, key, pid);
         }
     }
 
