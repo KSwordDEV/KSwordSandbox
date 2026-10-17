@@ -23,19 +23,19 @@
  *          telemetry and bounded for a disposable analysis VM's non-paged pool.
  * Logic  : keeping the array inside the IoCreateDevice extension places it in
  *          non-paged kernel memory and avoids dynamic allocation in callbacks.
- *          At the current 232-byte event record size, 65536 slots consume about
- *          14.5 MiB of non-paged memory. This deliberate burst buffer prevents
- *          short, high-volume samples from overflowing the ring while the
- *          user-mode collector is draining it. The guard rails below still
- *          prevent accidental, materially larger lab builds.
+ *          At the current 232-byte event record size, the 1M-slot experiment
+ *          consumes about 232 MiB of non-paged memory. This deliberately large
+ *          burst buffer is for a high-memory disposable analysis VM only; the
+ *          guard rails below keep this experiment explicit and prevent larger
+ *          accidental builds.
  * Return : not applicable.
  */
 #if !defined(KSWORD_SANDBOX_EVENT_RING_CAPACITY)
-#define KSWORD_SANDBOX_EVENT_RING_CAPACITY 65536UL
+#define KSWORD_SANDBOX_EVENT_RING_CAPACITY 1048576UL
 #endif
 
 #define KSWORD_SANDBOX_EVENT_RING_CAPACITY_MINIMUM 64UL
-#define KSWORD_SANDBOX_EVENT_RING_CAPACITY_MAXIMUM 65536UL
+#define KSWORD_SANDBOX_EVENT_RING_CAPACITY_MAXIMUM 1048576UL
 #define KSWORD_SANDBOX_EVENT_RING_BACKPRESSURE_PERCENT 75UL
 #define KSWORD_SANDBOX_EVENT_RING_BACKPRESSURE_THRESHOLD \
     ((KSWORD_SANDBOX_EVENT_RING_CAPACITY * \
