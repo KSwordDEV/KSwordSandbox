@@ -30,6 +30,24 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        var pcapImporterSource = File.ReadAllText(Path.Combine(
+            context.RepositoryRoot,
+            "src",
+            "KSword.Sandbox.Core",
+            "Network",
+            "PcapArtifactEventImporter.cs"));
+        var sidecarImporterSource = File.ReadAllText(Path.Combine(
+            context.RepositoryRoot,
+            "src",
+            "KSword.Sandbox.Core",
+            "Network",
+            "NetworkSidecarEventImporter.cs"));
+        SmokeAssert.True(pcapImporterSource.Contains("Take(MaxPackets + 1)", StringComparison.Ordinal), "PCAP parser must probe a sentinel packet so the exact packet limit is not misreported.");
+        SmokeAssert.True(pcapImporterSource.Contains("parserDroppedPacketCount", StringComparison.Ordinal), "PCAP parser must expose bounded packet loss metrics.");
+        SmokeAssert.True(pcapImporterSource.Contains("protocolEventLimitHit", StringComparison.Ordinal), "PCAP protocol event caps must expose a precise loss boundary.");
+        SmokeAssert.True(sidecarImporterSource.Contains("MaxFlattenedDataFields", StringComparison.Ordinal), "Sidecar parser must reserve space for its field-limit marker.");
+        SmokeAssert.True(sidecarImporterSource.Contains("reader.ReadLine() is not null", StringComparison.Ordinal), "Sidecar line limits must probe a sentinel line at the exact boundary.");
+
         await AssertDirectPcapImportAsync(context, cancellationToken);
         await AssertSidecarOnlyNetworkImportAsync(context, cancellationToken);
         await AssertJobImportPcapMergeAsync(context, cancellationToken);

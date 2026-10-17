@@ -28,6 +28,9 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
     private readonly INetworkStateSnapshotProvider networkStateSnapshotProvider;
     private Dictionary<string, TcpConnectionSnapshot> baseline = new(StringComparer.OrdinalIgnoreCase);
     private NetworkStateSnapshot baselineNetworkState = NetworkStateSnapshot.Empty;
+    private int duringRunPollCount;
+    private int duringRunOpenedCount;
+    private int duringRunClosedCount;
 
     public TcpConnectionDiffProbe()
         : this(new TcpConnectionSnapshotProvider(), new NetworkStateSnapshotProvider())
@@ -76,6 +79,9 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
         {
             baseline = snapshotProvider.Capture();
             baselineNetworkState = await networkStateSnapshotProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
+            duringRunPollCount = 0;
+            duringRunOpenedCount = 0;
+            duringRunClosedCount = 0;
 
             var baselineEvents = new List<SandboxEvent>
             {
@@ -105,22 +111,35 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
             : NetworkStateSnapshot.Empty;
         var events = new List<SandboxEvent>();
 
-        foreach (var (key, connection) in current.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        var opened = current
+            .Where(pair => !baseline.ContainsKey(pair.Key))
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var closed = baseline
+            .Where(pair => !current.ContainsKey(pair.Key))
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        AddBoundedTcpDeltaEvents(
+            events,
+            "network.tcp",
+            "opened",
+            opened,
+            phase,
+            phase == ProbePhase.AfterRun ? currentNetworkState : null,
+            cancellationToken);
+        AddBoundedTcpDeltaEvents(
+            events,
+            "network.tcp.closed",
+            "closed",
+            closed,
+            phase,
+            phase == ProbePhase.AfterRun ? currentNetworkState : null,
+            cancellationToken);
+        if (phase == ProbePhase.DuringRun)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!baseline.ContainsKey(key))
-            {
-                events.Add(CreateTcpEvent("network.tcp", "opened", connection, phase == ProbePhase.AfterRun ? currentNetworkState : null));
-            }
-        }
-
-        foreach (var (key, connection) in baseline.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!current.ContainsKey(key))
-            {
-                events.Add(CreateTcpEvent("network.tcp.closed", "closed", connection, phase == ProbePhase.AfterRun ? currentNetworkState : null));
-            }
+            duringRunPollCount++;
+            duringRunOpenedCount += opened.Count;
+            duringRunClosedCount += closed.Count;
         }
 
         // A connection can be opened and closed while the sample is alive.
@@ -154,8 +173,64 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
         events.AddRange(CreateListenerDeltaEvents("network.tcp.listener", baselineNetworkState.TcpListeners, currentNetworkState.TcpListeners, phase));
         events.AddRange(CreateListenerDeltaEvents("network.udp.listener", baselineNetworkState.UdpListeners, currentNetworkState.UdpListeners, phase));
         events.AddRange(WithPhase(currentNetworkState.Diagnostics, phase));
+        events.Add(CreateTcpEdgePollSummaryEvent(phase));
 
         return events;
+    }
+
+    private void AddBoundedTcpDeltaEvents(
+        List<SandboxEvent> events,
+        string eventType,
+        string change,
+        IReadOnlyList<KeyValuePair<string, TcpConnectionSnapshot>> candidates,
+        ProbePhase phase,
+        NetworkStateSnapshot? networkState,
+        CancellationToken cancellationToken)
+    {
+        var emitted = 0;
+        foreach (var pair in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (emitted >= MaxDeltaEventsPerKind)
+            {
+                events.Add(CreateTruncatedEvent(
+                    $"{eventType}.truncated",
+                    change,
+                    phase,
+                    candidates.Count,
+                    emitted));
+                break;
+            }
+
+            events.Add(CreateTcpEvent(eventType, change, pair.Value, networkState));
+            emitted++;
+        }
+    }
+
+    private SandboxEvent CreateTcpEdgePollSummaryEvent(ProbePhase phase)
+    {
+        return new SandboxEvent
+        {
+            EventType = "network.tcp.edge_poll.summary",
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["captureSource"] = "tcp-table-snapshot",
+                ["edgePollIntervalMilliseconds"] = "250",
+                ["pollCount"] = duringRunPollCount.ToString(CultureInfo.InvariantCulture),
+                ["openedEdgeCount"] = duringRunOpenedCount.ToString(CultureInfo.InvariantCulture),
+                ["closedEdgeCount"] = duringRunClosedCount.ToString(CultureInfo.InvariantCulture),
+                ["shortLivedCoverage"] = "bounded-poll-plus-exit-edge",
+                ["shortLivedLossPossible"] = "true",
+                ["lossReason"] = "connection-opened-and-closed-between-snapshots",
+                ["lossMetricState"] = "possible-unmeasured",
+                ["lossCountKnown"] = "false",
+                ["collectionHealth"] = "true",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true"
+            }
+        };
     }
 
     /// <summary>
@@ -900,7 +975,13 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
                 ["phase"] = ToPhaseLabel(phase),
                 ["change"] = change,
                 ["totalCount"] = totalCount.ToString(CultureInfo.InvariantCulture),
-                ["emittedCount"] = emittedCount.ToString(CultureInfo.InvariantCulture)
+                ["emittedCount"] = emittedCount.ToString(CultureInfo.InvariantCulture),
+                ["droppedCount"] = Math.Max(0, totalCount - emittedCount).ToString(CultureInfo.InvariantCulture),
+                ["truncated"] = "true",
+                ["collectionHealth"] = "true",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["lossReason"] = "bounded-delta-cap"
             }
         };
     }

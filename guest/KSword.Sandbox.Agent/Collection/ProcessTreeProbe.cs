@@ -62,6 +62,9 @@ internal sealed class ProcessTreeProbe : IGuestProbe
     private readonly HashSet<string> scheduledTaskWatchRoots = new(StringComparer.OrdinalIgnoreCase);
     private readonly object scheduledTaskWatcherGate = new();
     private long droppedScheduledTaskWatcherChanges;
+    private int duringRunPollCount;
+    private int duringRunEmptySnapshotCount;
+    private int duringRunObservedNewProcessCount;
     private Dictionary<int, ProcessTreeSnapshot> baselineByPid = [];
     private SystemChangeSnapshot baselineSystemState = SystemChangeSnapshot.Empty;
 
@@ -130,6 +133,9 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             emittedMissingProcessKeys.Clear();
             emittedRootUnavailableKeys.Clear();
             emittedRootSummaryKeys.Clear();
+            duringRunPollCount = 0;
+            duringRunEmptySnapshotCount = 0;
+            duringRunObservedNewProcessCount = 0;
             RememberVisibleProcesses(current, phase, capturedAtUtc);
             baselineByPid = current;
             baselineSystemState = await systemChangeSnapshotProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
@@ -154,6 +160,14 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         }
         else if (phase is ProbePhase.AfterStart or ProbePhase.DuringRun or ProbePhase.AfterRun)
         {
+            if (phase == ProbePhase.DuringRun)
+            {
+                duringRunPollCount++;
+                if (current.Count == 0)
+                {
+                    duringRunEmptySnapshotCount++;
+                }
+            }
             TrackRootProcess(context, current, phase, capturedAtUtc);
             RememberVisibleProcesses(current, phase, capturedAtUtc);
             // DuringRun is a high-frequency edge poll. Keep only new/tree
@@ -187,6 +201,10 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 }
 
                 monitoredProcessKeys.Add(process.Key);
+                if (phase == ProbePhase.DuringRun)
+                {
+                    duringRunObservedNewProcessCount++;
+                }
                 rootTreeMetadata.TryGetValue(process.ProcessId, out var metadata);
                 events.Add(CreateProcessSnapshotEvent(
                     "process.new",
@@ -238,6 +256,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 // flight; drain once more after it completes and then stop
                 // the watchers so no post-analysis host changes leak in.
                 events.AddRange(DrainScheduledTaskWatcherEvents(phase, context, DateTimeOffset.UtcNow));
+                events.Add(CreateProcessEdgePollSummaryEvent(phase));
                 DisposeScheduledTaskWatchers();
             }
         }
@@ -1420,6 +1439,39 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         evt.Data["processTreeCopyText"] = copyText;
         evt.Data["copyText"] = copyText;
         return evt;
+    }
+
+    /// <summary>
+    /// Creates one collection-health row for the in-flight process edge
+    /// sweep.  Toolhelp snapshots are intentionally cheap and bounded, but a
+    /// child that starts and exits between two 250 ms polls cannot be recovered
+    /// from snapshots alone; the boundary is recorded instead of silently
+    /// presenting the sweep as complete.
+    /// </summary>
+    private SandboxEvent CreateProcessEdgePollSummaryEvent(ProbePhase phase)
+    {
+        return new SandboxEvent
+        {
+            EventType = "process.edge_poll.summary",
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["captureSource"] = "toolhelp-snapshot",
+                ["edgePollIntervalMilliseconds"] = "250",
+                ["pollCount"] = duringRunPollCount.ToString(CultureInfo.InvariantCulture),
+                ["emptySnapshotCount"] = duringRunEmptySnapshotCount.ToString(CultureInfo.InvariantCulture),
+                ["observedNewProcessCount"] = duringRunObservedNewProcessCount.ToString(CultureInfo.InvariantCulture),
+                ["shortLivedProcessCoverage"] = "bounded-poll-plus-exit-edge",
+                ["shortLivedProcessLossPossible"] = "true",
+                ["lossReason"] = "process-started-and-exited-between-snapshots",
+                ["lossMetricState"] = "possible-unmeasured",
+                ["lossCountKnown"] = "false",
+                ["collectionHealth"] = "true",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true"
+            }
+        };
     }
 
     /// <summary>

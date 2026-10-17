@@ -70,7 +70,12 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "IsLikelyPersistenceFilePath", "Deletion edges for existing persistence files must remain observable without a full profile snapshot.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "CaptureFast", "Process tree probe must use a low-latency edge capture during the run.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "Toolhelp-only edge sweep", "Fast process capture must avoid the slow CIM path during in-flight polling.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "process.edge_poll.summary", "Process edge polling must emit an explicit bounded-loss health summary.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "process-started-and-exited-between-snapshots", "Process polling must disclose the short-lived edge loss boundary.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.tcp.closed", "TCP diff probe must emit closed connection deltas.");
+        AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "AddBoundedTcpDeltaEvents", "TCP opened/closed deltas must enforce the per-kind cap.");
+        AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.tcp.edge_poll.summary", "TCP edge polling must emit an explicit bounded-loss health summary.");
+        AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "droppedCount", "TCP delta truncation must expose the dropped count.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "dns.cache.added", "Network probe must emit DNS cache deltas.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.hosts.snapshot", "Network probe must emit hosts file snapshots.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.hosts.added", "Network probe must emit hosts file deltas.");

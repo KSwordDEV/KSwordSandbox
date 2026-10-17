@@ -58,8 +58,13 @@ public sealed class PcapArtifactEventImporter
         try
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            var packets = ReadPackets(stream, path).Take(MaxPackets).ToList();
-            var events = BuildEvents(path, packets, source).ToList();
+            // Read one sentinel packet so an input with exactly MaxPackets is
+            // not reported as truncated, while an additional packet produces
+            // an explicit bounded-loss metric instead of being silently lost.
+            var boundedPackets = ReadPackets(stream, path).Take(MaxPackets + 1).ToList();
+            var packetLimitHit = boundedPackets.Count > MaxPackets;
+            var packets = boundedPackets.Take(MaxPackets).ToList();
+            var events = BuildEvents(path, packets, source, packetLimitHit).ToList();
             var sidecarEvents = includeSidecars ? ImportSidecarEvents(path, source).ToList() : [];
             var allImportedEvents = events.Concat(sidecarEvents).ToList();
             return
@@ -81,7 +86,8 @@ public sealed class PcapArtifactEventImporter
                         ["parserMaxPayloadBytes"] = MaxPayloadBytes.ToString(CultureInfo.InvariantCulture),
                         ["parserMaxProtocolEvents"] = MaxProtocolEvents.ToString(CultureInfo.InvariantCulture),
                         ["parserMaxFlowEvents"] = MaxFlowEvents.ToString(CultureInfo.InvariantCulture),
-                        ["parserPacketLimitHit"] = (packets.Count >= MaxPackets).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                        ["parserPacketLimitHit"] = packetLimitHit.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                        ["parserDroppedPacketCount"] = packetLimitHit ? "1+" : "0",
                          ["protocolSummaryAvailable"] = "true",
                          ["protocolSummaryState"] = allImportedEvents.Any(evt => IsBehaviorCounted(evt) && IsPcapProtocolEvent(evt)) ? "parsed" : "parsed-empty",
                          ["protocolSummaryStatus"] = "ok",
@@ -320,7 +326,11 @@ public sealed class PcapArtifactEventImporter
         }
     }
 
-    private static IReadOnlyList<SandboxEvent> BuildEvents(string path, IReadOnlyList<PcapPacket> packets, NetworkArtifactSource source)
+    private static IReadOnlyList<SandboxEvent> BuildEvents(
+        string path,
+        IReadOnlyList<PcapPacket> packets,
+        NetworkArtifactSource source,
+        bool packetLimitHit)
     {
         var events = new List<SandboxEvent>();
         var flows = new Dictionary<string, FlowSummary>(StringComparer.OrdinalIgnoreCase);
@@ -330,6 +340,7 @@ public sealed class PcapArtifactEventImporter
         var ipFamilyCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var protocolHealthCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var protocolEvents = 0;
+        var protocolEventLimitHit = false;
         var parsedPackets = 0;
         var bytes = 0L;
         foreach (var packet in packets)
@@ -355,12 +366,15 @@ public sealed class PcapArtifactEventImporter
             }
 
             flow.Observe(decoded);
+            var packetProtocolEvents = BuildProtocolEvents(path, decoded, source).ToList();
             if (protocolEvents >= MaxProtocolEvents)
             {
+                protocolEventLimitHit |= packetProtocolEvents.Count > 0;
                 continue;
             }
 
-            foreach (var protocolEvent in BuildProtocolEvents(path, decoded, source))
+            var emittedFromPacket = 0;
+            foreach (var protocolEvent in packetProtocolEvents)
             {
                 if (protocolEvent.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase))
                 {
@@ -378,8 +392,10 @@ public sealed class PcapArtifactEventImporter
                 }
 
                 protocolEvents++;
+                emittedFromPacket++;
                 if (protocolEvents >= MaxProtocolEvents)
                 {
+                    protocolEventLimitHit |= packetProtocolEvents.Count > emittedFromPacket;
                     break;
                 }
             }
@@ -412,9 +428,12 @@ public sealed class PcapArtifactEventImporter
             ["parserMaxPayloadBytes"] = MaxPayloadBytes.ToString(CultureInfo.InvariantCulture),
             ["parserMaxProtocolEvents"] = MaxProtocolEvents.ToString(CultureInfo.InvariantCulture),
             ["parserMaxFlowEvents"] = MaxFlowEvents.ToString(CultureInfo.InvariantCulture),
-            ["parserPacketLimitHit"] = (packets.Count >= MaxPackets).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
-            ["parserProtocolEventLimitHit"] = (protocolEvents >= MaxProtocolEvents).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["parserPacketLimitHit"] = packetLimitHit.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["parserDroppedPacketCount"] = packetLimitHit ? "1+" : "0",
+            ["parserProtocolEventLimitHit"] = protocolEventLimitHit.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["parserDroppedProtocolEventCount"] = protocolEventLimitHit ? "1+" : "0",
             ["parserFlowEventLimitHit"] = (flows.Count > MaxFlowEvents).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["parserDroppedFlowCount"] = Math.Max(0, flows.Count - MaxFlowEvents).ToString(CultureInfo.InvariantCulture),
             ["pcapSourceDiagnostic"] = "native parser used; tshark not required",
             ["packetCount"] = packets.Count.ToString(CultureInfo.InvariantCulture),
             ["parsedPacketCount"] = parsedPackets.ToString(CultureInfo.InvariantCulture),

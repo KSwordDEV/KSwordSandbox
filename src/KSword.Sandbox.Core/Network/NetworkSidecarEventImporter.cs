@@ -18,6 +18,9 @@ public sealed class NetworkSidecarEventImporter
 {
     private const int MaxLines = 4096;
     private const int MaxFlattenedFields = 512;
+    // Keep one slot available for the explicit parserFieldLimitHit marker so
+    // a bounded row never grows beyond MaxFlattenedFields at the boundary.
+    private const int MaxFlattenedDataFields = MaxFlattenedFields - 1;
     private const int MaxJsonDepth = 16;
     private const int MaxLinePreviewChars = 160;
 
@@ -111,7 +114,11 @@ public sealed class NetworkSidecarEventImporter
                 }
             }
 
-            lineLimitHit = lineNumber >= MaxLines && !reader.EndOfStream;
+            // Probe one sentinel line instead of relying on EndOfStream after
+            // the bounded loop.  StreamReader may have buffered a trailing
+            // newline, which previously made the exact MaxLines boundary
+            // report inconsistently.
+            lineLimitHit = lineNumber >= MaxLines && reader.ReadLine() is not null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
         {
@@ -1193,10 +1200,9 @@ public sealed class NetworkSidecarEventImporter
             return;
         }
 
-        if (fields.Count >= MaxFlattenedFields)
+        if (fields.Count >= MaxFlattenedDataFields)
         {
-            coverage.FieldLimitHit = true;
-            fields["parserFieldLimitHit"] = "true";
+            MarkFieldLimit(fields, coverage);
             return;
         }
 
@@ -1205,10 +1211,9 @@ public sealed class NetworkSidecarEventImporter
             case JsonValueKind.Object:
                 foreach (var property in element.EnumerateObject())
                 {
-                    if (fields.Count >= MaxFlattenedFields)
+                    if (fields.Count >= MaxFlattenedDataFields)
                     {
-                        coverage.FieldLimitHit = true;
-                        fields["parserFieldLimitHit"] = "true";
+                        MarkFieldLimit(fields, coverage);
                         break;
                     }
 
@@ -1261,10 +1266,9 @@ public sealed class NetworkSidecarEventImporter
         var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match match in KeyValueTokenRegex.Matches(line))
         {
-            if (fields.Count >= MaxFlattenedFields)
+            if (fields.Count >= MaxFlattenedDataFields)
             {
-                coverage.FieldLimitHit = true;
-                fields["parserFieldLimitHit"] = "true";
+                MarkFieldLimit(fields, coverage);
                 break;
             }
 
@@ -1281,6 +1285,15 @@ public sealed class NetworkSidecarEventImporter
         }
 
         return fields;
+    }
+
+    private static void MarkFieldLimit(Dictionary<string, string> fields, SidecarParserCoverage coverage)
+    {
+        coverage.FieldLimitHit = true;
+        if (fields.Count < MaxFlattenedFields)
+        {
+            fields["parserFieldLimitHit"] = "true";
+        }
     }
 
     private static void AddLooseLogHints(string line, Dictionary<string, string> fields)
