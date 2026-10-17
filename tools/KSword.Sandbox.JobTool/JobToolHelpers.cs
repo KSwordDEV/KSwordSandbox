@@ -400,7 +400,7 @@ internal static partial class ProgramMain
             return candidates;
         }
 
-        foreach (var path in Directory.EnumerateFiles(jobRoot, "events.json", SearchOption.AllDirectories)
+        foreach (var path in EnumerateFilesSafely(jobRoot, "events.json")
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             AddCandidatePath(candidates, path);
@@ -414,9 +414,13 @@ internal static partial class ProgramMain
             return candidates;
         }
 
-        foreach (var path in Directory.EnumerateFiles(jobRoot, "*.jsonl", SearchOption.AllDirectories)
-            .Where(path => !Path.GetFileName(path).Equals("driver-events.jsonl", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        // A guest output may contain only the R0 stream (for example when
+        // Agent serialization failed). Prefer its canonical stream and the
+        // collector's numbered parts before considering arbitrary JSONL.
+        foreach (var path in EnumerateFilesSafely(jobRoot, "driver-events*.jsonl")
+            .Where(path => IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
+            .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             AddCandidatePath(candidates, path);
         }
@@ -426,10 +430,16 @@ internal static partial class ProgramMain
             return candidates;
         }
 
-        foreach (var path in Directory.EnumerateFiles(jobRoot, "driver-events.jsonl", SearchOption.AllDirectories)
+        foreach (var path in EnumerateFilesSafely(jobRoot, "*.jsonl")
+            .Where(path => !Path.GetFileName(path).Equals("driver-events.jsonl", StringComparison.OrdinalIgnoreCase))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             AddCandidatePath(candidates, path);
+        }
+
+        if (candidates.Count > 0)
+        {
+            return candidates;
         }
 
         return candidates;
@@ -458,13 +468,30 @@ internal static partial class ProgramMain
 
         // R0Collector rotates high-volume output into numbered siblings. Merge
         // closed numbered parts first, then the active canonical stream.
-        return Directory.EnumerateFiles(directory, "driver-events*.jsonl", SearchOption.AllDirectories)
+        return EnumerateFilesSafely(directory, "driver-events*.jsonl")
             .Where(path => !SamePath(path, fullPrimary))
             .Where(path => IsCanonicalOrRotatedDriverJsonl(Path.GetFileName(path)))
             .OrderBy(path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
             .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(Path.GetFullPath)
             .ToList();
+    }
+
+    private static IEnumerable<string> EnumerateFilesSafely(string root, string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            return [];
+        }
+
+        try
+        {
+            return Directory.EnumerateFiles(root, pattern, SearchOption.AllDirectories).ToArray();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
+        {
+            return [];
+        }
     }
 
     private static bool IsCanonicalOrRotatedDriverJsonl(string? fileName)
@@ -509,8 +536,8 @@ internal static partial class ProgramMain
             ? $"使用显式 --events 主来源：{selected}"
             : $"确定性选择 events 主来源：{selected}";
         var driverText = mergedDrivers.Count == 0
-            ? "未发现同目录 driver-events.jsonl / no sibling driver-events.jsonl"
-            : $"自动合并 {mergedDrivers.Count} 个 driver-events.jsonl 来源 / merged {mergedDrivers.Count} driver-events.jsonl source(s): {string.Join(", ", mergedDrivers)}";
+            ? "未发现 driver-events.jsonl 或轮换分片 / no canonical driver-events.jsonl or rotated parts found"
+            : $"自动合并 {mergedDrivers.Count} 个 driver-events.jsonl 来源 / merged {mergedDrivers.Count} canonical driver source(s): {string.Join(", ", mergedDrivers)}";
         return $"{selectedText}；{driverText}。/ {selectedText}; {driverText}.";
     }
 

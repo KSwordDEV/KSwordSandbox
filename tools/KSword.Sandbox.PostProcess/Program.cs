@@ -684,8 +684,13 @@ internal static class PostProcessProgram
                 events.Add(CreateNetworkImportFailureEvent(guestRoot, ex));
             }
 
+            // Keep ETW XML as a fallback only when the primary/sibling stream
+            // has no decoded semantic rows. The shared helper also preserves
+            // an explicit diagnostic when the Agent reports
+            // parsedEventCount=0, avoiding a second full-machine import on
+            // report rebuild while retaining the real collection gap.
             foreach (var diagnostic in GuestFailureArtifactImporter.Import(guestRoot)
-                .Concat(EtwTraceXmlEventImporter.Import(guestRoot)))
+                .Concat(EtwTraceXmlEventImporter.ImportFallbackAndCoverage(events, guestRoot)))
             {
                 AddEventIfNew(events, eventKeys, diagnostic);
             }

@@ -14,6 +14,179 @@ public static class EtwTraceXmlEventImporter
 {
     private const long MaxXmlBytes = 128L * 1024 * 1024;
     private const int MaxRowsPerTrace = 100_000;
+
+    /// <summary>
+    /// Returns whether the guest stream already contains semantic ETW rows.
+    /// The same predicate is used by live import and offline PostProcess so
+    /// ETW XML is a fallback only; rebuilding a report must not append a
+    /// second full-machine trace after the Agent has already decoded rows.
+    /// </summary>
+    public static bool HasDecodedRows(IReadOnlyCollection<SandboxEvent> events)
+    {
+        if (events is null || events.Count == 0)
+        {
+            return false;
+        }
+
+        if (events.Any(evt =>
+                evt.Source.Equals("etwLive", StringComparison.OrdinalIgnoreCase) &&
+                evt.Data.TryGetValue("captureSource", out var captureSource) &&
+                captureSource.Equals("etw-live-tracerpt", StringComparison.OrdinalIgnoreCase) &&
+                evt.Data.TryGetValue("rawDecoded", out var rawDecoded) &&
+                rawDecoded.Equals("true", StringComparison.OrdinalIgnoreCase) &&
+                !evt.EventType.StartsWith("etw_live.", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        // Older Agent builds emitted only the summary marker.  Preserve that
+        // compatibility path while requiring a positive semantic row count.
+        return events.Any(evt =>
+        {
+            if (!evt.EventType.Equals("etw_live.captured", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return evt.Data.TryGetValue("semanticRowsAvailable", out var rowsAvailable) &&
+                rowsAvailable.Equals("true", StringComparison.OrdinalIgnoreCase) &&
+                evt.Data.TryGetValue("parsedEventCount", out var countText) &&
+                long.TryParse(countText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) &&
+                count > 0;
+        });
+    }
+
+    /// <summary>
+    /// Imports ETW XML only when the supplied events do not already contain
+    /// decoded semantic rows, then adds one explicit diagnostic for every
+    /// captured ETW summary that reports zero parsed rows. A zero parsed count
+    /// is a collection gap even when an ETL file exists or XML fallback happens
+    /// to yield a few rows, and must never be treated as a clean capture.
+    /// </summary>
+    public static IReadOnlyList<SandboxEvent> ImportFallbackAndCoverage(
+        IReadOnlyCollection<SandboxEvent> existingEvents,
+        string? guestOutputRoot)
+    {
+        var imported = new List<SandboxEvent>();
+        if (!HasDecodedRows(existingEvents))
+        {
+            imported.AddRange(Import(guestOutputRoot));
+        }
+
+        var existingZeroDiagnostics = existingEvents
+            .Where(IsZeroParsedDiagnostic)
+            .Select(evt => DiagnosticPath(evt))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var summary in existingEvents.Where(IsCapturedSummary))
+        {
+            if (!TryGetZeroParsedCount(summary, out var count, out var reason))
+            {
+                continue;
+            }
+
+            var path = FirstValue(summary, "traceArtifactPath", "etlPath", "artifactPath") ??
+                guestOutputRoot ?? string.Empty;
+            if (!existingZeroDiagnostics.Add(path))
+            {
+                continue;
+            }
+
+            imported.Add(CreateZeroParsedDiagnostic(summary, path, count, reason));
+        }
+
+        return imported;
+    }
+
+    private static bool IsCapturedSummary(SandboxEvent evt) =>
+        evt.EventType.Equals("etw_live.captured", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsZeroParsedDiagnostic(SandboxEvent evt) =>
+        evt.EventType.Equals("etw_live.decode_failed", StringComparison.OrdinalIgnoreCase) &&
+        evt.Data.TryGetValue("failureType", out var failureType) &&
+        failureType.Equals("etwParsedEventCountZero", StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryGetZeroParsedCount(SandboxEvent evt, out long count, out string reason)
+    {
+        count = 0;
+        reason = "parsedEventCount=0";
+        if (evt.Data.TryGetValue("parsedEventCount", out var countText) &&
+            long.TryParse(countText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            count = parsed;
+            return parsed <= 0;
+        }
+
+        // Some older probe builds did not write parsedEventCount when the
+        // decoder failed. Their explicit decode-required marker is equivalent
+        // evidence, so retain a diagnostic with a stable zero-count alias.
+        if (evt.Data.TryGetValue("etlDecodeRequired", out var required) &&
+            required.Equals("true", StringComparison.OrdinalIgnoreCase) &&
+            evt.Data.TryGetValue("semanticRowsAvailable", out var rows) &&
+            rows.Equals("false", StringComparison.OrdinalIgnoreCase))
+        {
+            reason = "etlDecodeRequired=true;semanticRowsAvailable=false";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static SandboxEvent CreateZeroParsedDiagnostic(SandboxEvent summary, string path, long count, string reason)
+    {
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["captureSource"] = "etw-live-tracerpt",
+            ["collectionHealth"] = "true",
+            ["captureState"] = "failed",
+            ["status"] = "failed",
+            ["failureType"] = "etwParsedEventCountZero",
+            ["parsedEventCount"] = count.ToString(CultureInfo.InvariantCulture),
+            ["decodedEventCount"] = count.ToString(CultureInfo.InvariantCulture),
+            ["diagnosticReason"] = reason,
+            ["etlDecodeRequired"] = FirstValue(summary, "etlDecodeRequired") ?? "true",
+            ["semanticRowsAvailable"] = "false",
+            ["sampleCorrelation"] = "unattributed",
+            ["behaviorCounted"] = "false",
+            ["nonbehavior"] = "true",
+            ["notSampleBehavior"] = "true",
+            ["eventKind"] = "diagnostic",
+            ["evidenceRole"] = "collection-diagnostic",
+            ["sourceComponent"] = "etw-live-tracerpt",
+            ["zhMessage"] = "ETW 原始 ETL 已保存，但解析行为行数量为 0；动态证据不可判定。",
+            ["zhHint"] = "不能把 ETL 原始文件当作已解析行为；请修复 tracerpt 解码或解析输出。"
+        };
+        var decodedPath = FirstValue(summary, "decodedArtifactPath", "decodedArtifactRelativePath");
+        if (!string.IsNullOrWhiteSpace(decodedPath))
+        {
+            data["decodedArtifactPath"] = decodedPath;
+        }
+
+        return new SandboxEvent
+        {
+            EventType = "etw_live.decode_failed",
+            Timestamp = summary.Timestamp,
+            Source = "etwLive",
+            Path = path,
+            Data = data
+        };
+    }
+
+    private static string? DiagnosticPath(SandboxEvent evt) =>
+        evt.Path ?? FirstValue(evt, "traceArtifactPath", "etlPath", "artifactPath");
+
+    private static string? FirstValue(SandboxEvent evt, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (evt.Data.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
     public static IReadOnlyList<SandboxEvent> Import(string? guestOutputRoot)
     {
         if (string.IsNullOrWhiteSpace(guestOutputRoot) || !Directory.Exists(guestOutputRoot)) return [];

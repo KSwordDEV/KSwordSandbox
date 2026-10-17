@@ -92,6 +92,57 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
         var hexUnload = etwRows.Single(evt => evt.EventType == "image.unload");
         SmokeAssert.True(hexUnload.ProcessId == 16 && hexUnload.ParentProcessId is null, "ETW fallback must parse hexadecimal process IDs from tracerpt XML.");
 
+        // A captured ETL with parsedEventCount=0 is a collection gap even if
+        // the raw XML fallback happens to contain rows. The shared import path
+        // must emit one explicit health diagnostic, while a successfully
+        // decoded stream must suppress XML fallback to avoid duplicate rows.
+        var zeroSummary = new SandboxEvent
+        {
+            EventType = "etw_live.captured",
+            Source = "etwLive",
+            Path = Path.Combine(etw, "sample.etl"),
+            Data =
+            {
+                ["captureSource"] = "etw-live-tracerpt",
+                ["parsedEventCount"] = "0",
+                ["decodedEventCount"] = "0",
+                ["semanticRowsAvailable"] = "false",
+                ["etlDecodeRequired"] = "true",
+                ["traceArtifactPath"] = Path.Combine(etw, "sample.etl")
+            }
+        };
+        var zeroFallback = EtwTraceXmlEventImporter.ImportFallbackAndCoverage([zeroSummary], root);
+        SmokeAssert.True(zeroFallback.Any(evt =>
+                evt.EventType == "etw_live.decode_failed" &&
+                evt.Data.TryGetValue("failureType", out var failureType) &&
+                failureType == "etwParsedEventCountZero"),
+            "ETW parsedEventCount=0 must remain an explicit collection diagnostic.");
+
+        var decodedSummary = new SandboxEvent
+        {
+            EventType = "etw_live.captured",
+            Source = "etwLive",
+            Data =
+            {
+                ["captureSource"] = "etw-live-tracerpt",
+                ["semanticRowsAvailable"] = "true",
+                ["parsedEventCount"] = "1"
+            }
+        };
+        var decodedRow = new SandboxEvent
+        {
+            EventType = "process.start",
+            Source = "etwLive",
+            Data =
+            {
+                ["captureSource"] = "etw-live-tracerpt",
+                ["rawDecoded"] = "true"
+            }
+        };
+        var noDuplicateFallback = EtwTraceXmlEventImporter.ImportFallbackAndCoverage([decodedSummary, decodedRow], root);
+        SmokeAssert.True(noDuplicateFallback.Count == 0,
+            "ETW XML fallback must not run after decoded semantic rows already exist.");
+
         var r0 = new SandboxEvent
         {
             EventType = "driver.file.created",
