@@ -10199,6 +10199,15 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         var replacements = new (string English, string Chinese)[]
         {
+            // A few operator cards combine localized labels with values that
+            // were already normalized by the broad chrome dictionary.  Keep
+            // the final visible sentence fully Chinese without touching the
+            // copyable/raw evidence payloads protected above.
+            ("Environment 网络 行 were observed without 样本归因; review them separately from a 缺失 网络 采集.", "观察到未归因于样本的环境网络行；请将其与网络采集缺失分别审阅。"),
+            ("Relationship cards require an observed DNS/HTTP/TLS/流 target; 行 without a target remain in raw evidence and do not create placeholder endpoint cards.", "关系卡必须有已观察到的 DNS/HTTP/TLS/流量目标；没有目标的行会保留在原始证据中，不会创建占位端点卡片。"),
+            ("矩阵通道 summarize dropped files, screenshots, memory dumps, and packet captures before the artifact table. Counts come from 规范化证据矩阵行 when present and fall back to the artifact index, so 缺失 lanes stay explicit without expanding raw 行.", "矩阵通道会在证据文件表之前汇总落地文件、截图、内存转储和抓包。计数优先来自规范化证据矩阵行；缺失时回退到证据文件索引，因此缺失通道会保持显式可见，而不是展开原始行。"),
+            ("Deleted startup inventory 行 can indicate cleanup or rollback behavior.", "已删除的启动项清单行可能表示清理或回滚行为。"),
+            ("Startup values pointing at Temp/AppData/Public/Downloads/ProgramData or script/executable payloads.", "指向 Temp/AppData/Public/Downloads/ProgramData 或脚本/可执行载荷的启动项值。"),
             ("Default report.html uses Simplified Chinese; report.en.html keeps English operator chrome.", "默认 report.html 使用简体中文；report.en.html 保留英文操作界面。"),
             ("No JavaScript required for report navigation: native details, table scrolling, safe", "报告导航不依赖 JavaScript：原生 details、表格滚动、安全"),
             ("artifact links and the print stylesheet remain usable.", "证据文件链接和打印样式仍可使用。"),
@@ -10248,6 +10257,16 @@ html[lang="en"] .localized-evidence-field{display:none}
         html = Regex.Replace(html, "(?<=\\d) artifacts\\b", " 个证据文件", RegexOptions.CultureInvariant);
         html = Regex.Replace(html, "(?<=\\d) captures\\b", " 个截图", RegexOptions.CultureInvariant);
         html = Regex.Replace(html, "(?<=\\d) dumps\\b", " 个转储", RegexOptions.CultureInvariant);
+        html = Regex.Replace(
+            html,
+            @"Ready lanes: (\d+); bounded lane cards summarize collection state before dense artifacts\.",
+            "就绪通道：$1；有界通道卡片会在密集证据前汇总采集状态。",
+            RegexOptions.CultureInvariant);
+        html = Regex.Replace(
+            html,
+            @"Total bytes represented by matrix lanes: ([0-9.]+\s*[A-Za-z]+)\.",
+            "矩阵通道代表的总字节数：$1。",
+            RegexOptions.CultureInvariant);
 
         // The broad standalone "No" replacement above can split the empty
         // state into "否 matching ...". Normalize the complete sentence last
@@ -10466,6 +10485,9 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("more evidence rows are available in the report.", "报告中还有更多证据行。"),
         ("more evidence rows are available in the report and can be revealed by filtering.", "报告中还有更多证据行。可通过筛选显示。"),
         ("Overflow rows use compact representatives; raw JSON/JSONL retains every event.", "溢出行使用紧凑代表项；原始 JSON/JSONL 保留每一条事件。"),
+        ("R0 driver rows (raw)", "R0 驱动行（原始）"),
+        ("R0 driver rows (report)", "R0 驱动行（报告）"),
+        ("R0 driver rows omitted", "R0 驱动省略行"),
         ("R0 driver coverage.", "R0 驱动覆盖。"),
         ("Raw/report rows by class (raw/report): ", "各类别原始/报告行数："),
         ("Collector loss markers: ", "采集器丢失标记："),
@@ -10479,6 +10501,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Environment network rows were observed without sample attribution; review them separately from a missing network collection.", "观察到未归因于样本的环境网络行；请将其与网络采集缺失分别审阅。"),
         ("Relationship cards require an observed DNS/HTTP/TLS/flow target; rows without a target remain in raw evidence and do not create placeholder endpoint cards.", "关系卡必须有已观察到的 DNS/HTTP/TLS/流量目标；没有目标的行会保留在原始证据中，不会创建占位端点卡片。"),
         ("Matrix lanes summarize dropped files, screenshots, memory dumps, and packet captures before the artifact table. Counts come from normalized evidence-matrix rows when present and fall back to the artifact index, so missing lanes stay explicit without expanding raw rows.", "矩阵通道会在证据文件表之前汇总落地文件、截图、内存转储和抓包。计数优先来自规范化证据矩阵行；缺失时回退到证据文件索引，因此缺失通道会保持显式可见，而不是展开原始行。"),
+        ("Startup rows", "启动项行"),
+        ("Created/modified", "新建/修改"),
+        ("Deleted", "已删除"),
+        ("User-writable targets", "用户可写目标"),
         ("Detailed fields remain in the raw event JSON; use the compact row to identify this event.", "详细字段保留在原始事件 JSON 中；可先用紧凑行定位该事件。"),
         ("Large report view", "大型报告视图"),
         ("Large report rendering boundary.", "大型报告渲染边界。"),
