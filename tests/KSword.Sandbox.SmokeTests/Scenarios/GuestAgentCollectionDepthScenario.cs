@@ -100,6 +100,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "registry.etw", "ETW decoder must preserve registry rows as normalized evidence.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "fileio", "ETW kernel capture must request file I/O flags.");
         AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "decodedArtifactRelativePath", "ETW captured rows must expose the decoded XML artifact selector.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "decodedRawEventCount", "ETW captured rows must disclose the full tracerpt population before sample-tree filtering.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "observationWindowEventCount", "ETW captured rows must disclose the observation-window boundary.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "filteredEventCount", "ETW captured rows must disclose rows excluded by sample-tree attribution.");
+        AssertFileContains(Path.Combine(collectionRoot, "EtwLiveTraceProbe.cs"), "filteredEventCountStatus", "ETW captured rows must label whether decoder rows were excluded or no rows were produced.");
         AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "ProbesForPhase", "After-run probes must stop bounded ETW/PCAP lanes before slow inventories.");
         var etwText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Collection", "EtwLiveTraceProbe.cs");
         AssertEtwXmlPayloadParserContract();

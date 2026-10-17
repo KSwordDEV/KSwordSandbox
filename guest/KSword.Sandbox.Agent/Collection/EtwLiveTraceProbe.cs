@@ -197,6 +197,19 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         evt.Data["decodeCommandTimedOut"] = (decode.CommandResult?.TimedOut ?? false).ToString(CultureInfo.InvariantCulture);
         evt.Data["parsedEventCount"] = decode.Rows.Count.ToString(CultureInfo.InvariantCulture);
         evt.Data["decodedEventCount"] = decode.Rows.Count.ToString(CultureInfo.InvariantCulture);
+        // Keep the full decoder population and every attribution boundary
+        // visible.  `parsedEventCount` is intentionally the sample-tree
+        // count used by the report, while these fields prove how many rows
+        // tracerpt produced and how many were excluded by the observation
+        // window or PID/lineage filter.  A low report count must never look
+        // like a clean ETW trace when the decoder saw a much larger stream.
+        evt.Data["decodedRawEventCount"] = decode.Stats.RawEventCount.ToString(CultureInfo.InvariantCulture);
+        evt.Data["observationWindowEventCount"] = decode.Stats.ObservationWindowEventCount.ToString(CultureInfo.InvariantCulture);
+        evt.Data["sampleTreeEventCount"] = decode.Stats.SampleTreeEventCount.ToString(CultureInfo.InvariantCulture);
+        evt.Data["filteredEventCount"] = decode.Stats.FilteredEventCount.ToString(CultureInfo.InvariantCulture);
+        evt.Data["filteredEventCountStatus"] = decode.Stats.RawEventCount == 0
+            ? "decoder-produced-no-rows"
+            : decode.Stats.FilteredEventCount > 0 ? "rows-excluded-by-sample-tree-filter" : "no-rows-excluded";
         evt.Data["sampleTreeFilter"] = "process-id-lineage-and-observation-window";
         evt.Data["rootProcessId"] = context.RootProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         evt.Data["decodedEventTypes"] = string.Join(",", decode.Rows
@@ -232,6 +245,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
     {
         var xmlPath = Path.ChangeExtension(session.EtlPath, ".xml");
         var csvPath = Path.ChangeExtension(session.EtlPath, ".csv");
+        var lastStats = EtwDecodeStats.Empty;
         try
         {
             if (File.Exists(xmlPath))
@@ -252,11 +266,15 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             {
                 try
                 {
-                    var rows = ParseTracerptXml(xmlPath, session, context);
-                    if (rows.Count > 0)
+                    var parsed = ParseTracerptXml(xmlPath, session, context);
+                    if (parsed.Rows.Count > 0)
                     {
-                        return new EtwDecodeResult(true, xmlPath, "xml", rows, string.Empty, xmlResult);
+                        return new EtwDecodeResult(true, xmlPath, "xml", parsed.Rows, parsed.Stats, string.Empty, xmlResult);
                     }
+
+                    // Retain the XML population counts if the fallback CSV
+                    // decoder also fails to produce sample rows.
+                    lastStats = parsed.Stats;
                 }
                 catch (Exception ex) when (ex is FormatException or System.Xml.XmlException or IOException)
                 {
@@ -274,11 +292,13 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             {
                 try
                 {
-                    var rows = ParseTracerptCsv(csvPath, session, context);
-                    if (rows.Count > 0)
+                    var parsed = ParseTracerptCsv(csvPath, session, context);
+                    if (parsed.Rows.Count > 0)
                     {
-                        return new EtwDecodeResult(true, csvPath, "csv", rows, string.Empty, csvResult);
+                        return new EtwDecodeResult(true, csvPath, "csv", parsed.Rows, parsed.Stats, string.Empty, csvResult);
                     }
+
+                    lastStats = parsed.Stats;
                 }
                 catch (Exception ex) when (ex is FormatException or IOException)
                 {
@@ -290,15 +310,15 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             var reason = !xmlResult.Succeeded && !csvResult.Succeeded
                 ? "tracerptXmlAndCsvFailed"
                 : "decodedXmlAndCsvHaveNoSampleRows";
-            return new EtwDecodeResult(false, File.Exists(xmlPath) ? xmlPath : csvPath, "", [], reason, csvResult.Succeeded ? csvResult : xmlResult);
+            return new EtwDecodeResult(false, File.Exists(xmlPath) ? xmlPath : csvPath, "", [], lastStats, reason, csvResult.Succeeded ? csvResult : xmlResult);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or FormatException or System.Xml.XmlException)
         {
-            return new EtwDecodeResult(false, File.Exists(xmlPath) ? xmlPath : csvPath, "", [], "decoderException:" + ex.GetType().Name, null);
+            return new EtwDecodeResult(false, File.Exists(xmlPath) ? xmlPath : csvPath, "", [], EtwDecodeStats.Empty, "decoderException:" + ex.GetType().Name, null);
         }
     }
 
-    private static IReadOnlyList<SandboxEvent> ParseTracerptXml(
+    private static EtwParsedRows ParseTracerptXml(
         string xmlPath,
         EtwTraceSession session,
         GuestProbeContext context)
@@ -418,7 +438,8 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             });
         }
 
-        return FilterRowsToSampleTree(rows, context);
+        var filteredRows = FilterRowsToSampleTree(rows, context);
+        return new EtwParsedRows(filteredRows, BuildFilterStats(rows, filteredRows, context));
     }
 
     private static List<SandboxEvent> FilterRowsToSampleTree(
@@ -466,6 +487,26 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
                           ((row.ProcessId is int pid && processIds.Contains(pid)) ||
                            (row.ParentProcessId is int parent && processIds.Contains(parent))))
             .ToList();
+    }
+
+    private static EtwDecodeStats BuildFilterStats(
+        IReadOnlyList<SandboxEvent> rows,
+        IReadOnlyList<SandboxEvent> filteredRows,
+        GuestProbeContext context)
+    {
+        var normalizedRows = NormalizeTimestampClock(rows, context);
+        var observationStart = context.RootProcessStartTimeUtc is DateTime start
+            ? new DateTimeOffset(DateTime.SpecifyKind(start, DateTimeKind.Utc)).Subtract(TimeSpan.FromSeconds(5))
+            : (DateTimeOffset?)null;
+        var observationCount = observationStart.HasValue
+            ? normalizedRows.Count(row => row.Timestamp >= observationStart.Value)
+            : normalizedRows.Count;
+
+        return new EtwDecodeStats(
+            RawEventCount: rows.Count,
+            ObservationWindowEventCount: observationCount,
+            SampleTreeEventCount: filteredRows.Count,
+            FilteredEventCount: Math.Max(0, rows.Count - filteredRows.Count));
     }
 
     private static IReadOnlyList<SandboxEvent> NormalizeTimestampClock(
@@ -601,7 +642,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
     private static string FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
-    private static IReadOnlyList<SandboxEvent> ParseTracerptCsv(
+    private static EtwParsedRows ParseTracerptCsv(
         string csvPath,
         EtwTraceSession session,
         GuestProbeContext context)
@@ -610,13 +651,13 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         using var enumerator = lines.GetEnumerator();
         if (!enumerator.MoveNext())
         {
-            return [];
+            return new EtwParsedRows([], EtwDecodeStats.Empty);
         }
 
         var header = ParseCsvLine(enumerator.Current);
         if (!LooksLikeTracerptHeader(header))
         {
-            return [];
+            return new EtwParsedRows([], EtwDecodeStats.Empty);
         }
 
         var columns = header
@@ -686,7 +727,8 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             });
         }
 
-        return FilterRowsToSampleTree(rows, context);
+        var filteredRows = FilterRowsToSampleTree(rows, context);
+        return new EtwParsedRows(filteredRows, BuildFilterStats(rows, filteredRows, context));
     }
 
     private static SandboxEvent CreateDecodeFailureEvent(
@@ -1113,11 +1155,25 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
 
     private sealed record EtwTraceSession(string SessionName, string EtlPath, DateTimeOffset StartedAtUtc);
 
+    private sealed record EtwParsedRows(
+        IReadOnlyList<SandboxEvent> Rows,
+        EtwDecodeStats Stats);
+
+    private sealed record EtwDecodeStats(
+        int RawEventCount,
+        int ObservationWindowEventCount,
+        int SampleTreeEventCount,
+        int FilteredEventCount)
+    {
+        public static EtwDecodeStats Empty { get; } = new(0, 0, 0, 0);
+    }
+
     private sealed record EtwDecodeResult(
         bool Succeeded,
         string DecodedPath,
         string DecodeFormat,
         IReadOnlyList<SandboxEvent> Rows,
+        EtwDecodeStats Stats,
         string FailureReason,
         BoundedCommandResult? CommandResult);
 }
