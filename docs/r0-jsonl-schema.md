@@ -508,6 +508,10 @@ driver-category rows.
 - `--max-output-bytes` (alias `--output-max-bytes`) bounds each JSONL segment;
   the collector rotates to `driver-events.part-000001.jsonl` and records
   `maxOutputBytes`/`rotatedSegmentCount` in lifecycle and output-failure rows.
+- `--min-free-output-bytes` (alias `--output-free-reserve-bytes`) keeps a
+  guest-disk reserve. When the preflight fails, the sidecar uses
+  `failureType=outputSpaceInsufficient`, records available/required bytes, and
+  marks `captureState=partial` before the collector exits.
 - `--health` opens the live device, emits health, and exits without poll/read
   drain so readiness checks do not consume queued telemetry.
 - `--diagnose` / `--readiness` opens the live device only after output is ready,

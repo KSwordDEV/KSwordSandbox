@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include <system_error>
 
 namespace KSword::Sandbox::R0Collector {
 
@@ -15,11 +16,12 @@ namespace KSword::Sandbox::R0Collector {
 // sidecar.  The sidecar is deliberately separate from the JSONL stream so a
 // disk-full or interrupted write can still leave structured evidence.
 // Return: true when the primary sink is ready.
-bool EventWriter::Open(const std::wstring& outputPath, std::wstring* error, const unsigned long long maxOutputBytes) {
+bool EventWriter::Open(const std::wstring& outputPath, std::wstring* error, const unsigned long long maxOutputBytes, const unsigned long long minFreeOutputBytes) {
     outputPath_ = outputPath;
     currentOutputPath_ = outputPath;
     failurePath_ = outputPath == L"-" ? std::wstring{} : outputPath + L".failure.json";
     maxOutputBytes_ = maxOutputBytes;
+    minFreeOutputBytes_ = minFreeOutputBytes;
     std::ios::sync_with_stdio(false);
     if (outputPath == L"-") {
         stream_ = &std::cout;
@@ -43,8 +45,43 @@ bool EventWriter::OpenSegment(std::wstring* error) {
         return false;
     }
     currentOutputBytes_ = 0;
+    lastSpaceCheckBytes_ = 0;
     stream_ = &file_;
     return true;
+}
+
+bool EventWriter::HasOutputSpace(const unsigned long long lineBytes) {
+    if (outputPath_ == L"-" || minFreeOutputBytes_ == 0) {
+        return true;
+    }
+
+    // Re-check at most once per MiB; this keeps high-volume collection cheap
+    // while bounding growth beyond the reserve to one buffered chunk.
+    if (currentOutputBytes_ != 0 && currentOutputBytes_ - lastSpaceCheckBytes_ < 1ULL * 1024ULL * 1024ULL) {
+        return true;
+    }
+
+    std::error_code error;
+    const auto parent = std::filesystem::path(currentOutputPath_).parent_path();
+    const auto space = std::filesystem::space(parent.empty() ? std::filesystem::path(L".") : parent, error);
+    if (error) {
+        return true; // preserve existing write diagnostics if the probe is unavailable
+    }
+
+    lastSpaceCheckBytes_ = currentOutputBytes_;
+    const auto required = minFreeOutputBytes_ + lineBytes;
+    if (space.available < required) {
+        RecordSpaceFailure(space.available, required);
+        return false;
+    }
+    return true;
+}
+
+void EventWriter::RecordSpaceFailure(const unsigned long long availableBytes, const unsigned long long requiredBytes) {
+    failure_.availableFreeBytes = availableBytes;
+    failure_.requiredFreeBytes = requiredBytes;
+    failure_.spaceCheckAvailable = true;
+    RecordFailure("space", "Output disk free space is below the configured safety reserve.");
 }
 
 bool EventWriter::Rotate(std::wstring* error) {
@@ -85,6 +122,9 @@ bool EventWriter::WriteLine(const std::string& line) {
     ++failure_.linesAttempted;
     ++failure_.lineNumber;
     failure_.lineBytes = static_cast<unsigned long long>(line.size()) + 1ULL;
+    if (!HasOutputSpace(failure_.lineBytes)) {
+        return false;
+    }
     if (maxOutputBytes_ > 0 && currentOutputBytes_ > 0 &&
         currentOutputBytes_ + failure_.lineBytes > maxOutputBytes_) {
         std::wstring rotateError;
@@ -164,12 +204,14 @@ void EventWriter::RecordFailure(const char* stage, const std::string& message) {
 }
 
 std::string EventWriter::BuildFailureDiagnosticJson() const {
-    const bool writeFailure = failure_.stage != "open";
+    const bool spaceFailure = failure_.stage == "space";
+    const bool writeFailure = failure_.stage != "open" && !spaceFailure;
     std::string json = "{\"schema\":\"ksword.sandbox.r0.output-failure\",\"failureType\":";
-    json += JsonStringFromUtf8(writeFailure ? "outputWriteFailure" : "outputOpenFailure");
+    json += JsonStringFromUtf8(spaceFailure ? "outputSpaceInsufficient" : (writeFailure ? "outputWriteFailure" : "outputOpenFailure"));
     json += ",\"outputPath\":" + JsonStringFromWide(outputPath_);
     json += ",\"currentOutputPath\":" + JsonStringFromWide(currentOutputPath_);
     json += ",\"maxOutputBytes\":" + std::to_string(maxOutputBytes_);
+    json += ",\"minFreeOutputBytes\":" + std::to_string(minFreeOutputBytes_);
     json += ",\"rotatedSegmentCount\":" + std::to_string(rotatedSegmentCount_);
     json += ",\"failurePath\":" + JsonStringFromWide(failurePath_);
     json += ",\"stage\":" + JsonStringFromUtf8(failure_.stage);
@@ -187,7 +229,11 @@ std::string EventWriter::BuildFailureDiagnosticJson() const {
     json += ",\"queueDepthAtStopKnown\":" + std::string(failure_.queueDepthAtStopKnown ? "true" : "false");
     json += ",\"queueDepthAtStopUnknown\":" + std::string(failure_.queueDepthAtStopKnown ? "false" : "true");
     json += ",\"queueDepthAtStop\":" + std::to_string(failure_.queueDepthAtStop);
-    json += ",\"exitCode\":" + std::to_string(failure_.exitCode) + ",\"captureState\":\"failed\"}";
+    json += ",\"spaceCheckAvailable\":" + std::string(failure_.spaceCheckAvailable ? "true" : "false");
+    json += ",\"availableFreeBytes\":" + std::to_string(failure_.availableFreeBytes);
+    json += ",\"requiredFreeBytes\":" + std::to_string(failure_.requiredFreeBytes);
+    json += ",\"exitCode\":" + std::to_string(failure_.exitCode) +
+        ",\"captureState\":\"" + std::string(spaceFailure ? "partial" : "failed") + "\"}";
     return json;
 }
 

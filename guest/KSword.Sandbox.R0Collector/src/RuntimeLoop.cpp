@@ -66,6 +66,7 @@ std::string BuildConfigData(const Options& options) {
     data.AddWide("serviceName", options.serviceName);
     data.AddWide("outputPath", options.outputPath);
     data.AddUnsigned("maxOutputBytes", options.maxOutputBytes);
+    data.AddUnsigned("minFreeOutputBytes", options.minFreeOutputBytes);
     data.AddSigned("durationSeconds", options.durationSeconds);
     data.AddSigned("drainGraceMs", options.drainGraceMs);
     data.AddSigned("pollIntervalMs", options.pollIntervalMs);
@@ -686,7 +687,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
 
     EventWriter writer;
     std::wstring outputError;
-    if (!writer.Open(options.outputPath, &outputError, options.maxOutputBytes)) {
+    if (!writer.Open(options.outputPath, &outputError, options.maxOutputBytes, options.minFreeOutputBytes)) {
         SandboxEventFields outputEvent;
         outputEvent.eventType = "r0collector.outputUnavailable";
         outputEvent.path = options.outputPath;

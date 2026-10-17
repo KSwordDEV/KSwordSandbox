@@ -56,6 +56,9 @@ Options:
   segment at this byte limit. Default `268435456`; `0` disables rotation.
   Parts are named `driver-events.part-000001.jsonl` and are merged by host
   import in order. 中文：高容量 JSONL 自动分片，避免单文件写满导致丢失。
+- `--min-free-output-bytes <n>` (alias `--output-free-reserve-bytes`): stop
+  before the output volume falls below this reserve. Default `536870912`;
+  `0` disables the check. 中文：保留来宾磁盘空间，失败会标记 partial。
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in milliseconds.
   中文：轮询间隔，单位毫秒。
 - `--diagnose`, `--readiness`, `--readiness-check`: emit live non-mutating

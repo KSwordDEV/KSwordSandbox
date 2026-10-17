@@ -206,6 +206,21 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
                 return false;
             }
             options->maxOutputBytes = parsed;
+        } else if (arg == L"--min-free-output-bytes" || arg == L"--output-free-reserve-bytes") {
+            if (!readValue(arg, &value)) {
+                return false;
+            }
+            errno = 0;
+            wchar_t* end = nullptr;
+            const auto parsed = std::wcstoull(value.c_str(), &end, 10);
+            if (errno == ERANGE || end == value.c_str() || *end != L'\0' || parsed > (1ULL << 40)) {
+                if (error != nullptr) {
+                    *error = arg + L" must be an unsigned byte count between 0 and 1 TiB. / " +
+                        arg + L" must be between 0 and 1 TiB.";
+                }
+                return false;
+            }
+            options->minFreeOutputBytes = parsed;
         } else if (arg == L"--poll-interval" || arg == L"--poll-interval-ms" || arg == L"--poll-ms" || arg == L"-p") {
             if (!readValue(arg, &value)) {
                 return false;
@@ -305,6 +320,7 @@ void PrintUsage(const wchar_t* programName) {
         << L"      --drain-grace-ms <ms>   After a timed window, drain queued events for at most this grace period (default: 120000) / \u6709\u754c\u91c7\u96c6\u7ed3\u675f\u540e\u7ee7\u7eed drain \u7684\u6700\u5927\u5bbd\u9650\n"
         << L"  -p, --poll-ms <ms>           Poll interval in milliseconds (default: 10) / \u8f6e\u95f4\u9694\uff08\u6beb\u79d2\uff09\n"
         << L"      --max-output-bytes <n>  Rotate JSONL before this many bytes (0 disables; default: 268435456) / JSONL output rotation limit\n"
+        << L"      --min-free-output-bytes <n>  Stop before available output space falls below this reserve (default: 536870912)\n"
         << L"      --poll-interval-ms <ms>  Alias for --poll-ms / --poll-ms \u522b\u540d\n"
         << L"      --diagnose               Emit service/device/ABI/READ_EVENTS readiness diagnostics / \u53d1\u51fa\u670d\u52a1/\u8bbe\u5907/ABI/READ_EVENTS \u5c31\u7eea\u8bca\u65ad\n"
         << L"      --readiness              Alias for --diagnose / --diagnose \u522b\u540d\n"

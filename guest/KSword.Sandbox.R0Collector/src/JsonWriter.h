@@ -400,7 +400,7 @@ class EventWriter {
 public:
     ~EventWriter() { Flush(); }
 
-    bool Open(const std::wstring& outputPath, std::wstring* error, unsigned long long maxOutputBytes = 0);
+    bool Open(const std::wstring& outputPath, std::wstring* error, unsigned long long maxOutputBytes = 0, unsigned long long minFreeOutputBytes = 0);
     bool WriteLine(const std::string& line);
     bool Flush();
 
@@ -437,6 +437,9 @@ private:
         bool finalStatusAvailable = false;
         bool queueDepthAtStopKnown = false;
         unsigned long long queueDepthAtStop = 0;
+        unsigned long long availableFreeBytes = 0;
+        unsigned long long requiredFreeBytes = 0;
+        bool spaceCheckAvailable = false;
     };
 
     void RecordFailure(const char* stage, const std::string& message);
@@ -444,6 +447,8 @@ private:
     std::string BuildFailureDiagnosticJson() const;
     bool OpenSegment(std::wstring* error);
     bool Rotate(std::wstring* error);
+    bool HasOutputSpace(unsigned long long lineBytes);
+    void RecordSpaceFailure(unsigned long long availableBytes, unsigned long long requiredBytes);
 
     std::wstring outputPath_;
     std::wstring currentOutputPath_;
@@ -454,7 +459,9 @@ private:
     size_t linesSinceFlush_ = 0;
     FailureState failure_;
     unsigned long long maxOutputBytes_ = 0;
+    unsigned long long minFreeOutputBytes_ = 0;
     unsigned long long currentOutputBytes_ = 0;
+    unsigned long long lastSpaceCheckBytes_ = 0;
     unsigned long long outputSegmentIndex_ = 0;
     unsigned long long rotatedSegmentCount_ = 0;
     static constexpr size_t kFlushInterval = 8192;

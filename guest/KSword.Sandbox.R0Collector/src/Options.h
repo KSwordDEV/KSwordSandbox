@@ -22,6 +22,8 @@ struct Options {
     // Rotate high-volume JSONL before the file system/CRT write boundary.
     // Zero disables rotation for low-level diagnostics.
     unsigned long long maxOutputBytes = 256ULL * 1024ULL * 1024ULL;
+    // Keep enough guest disk for final events/summary and failure sidecars.
+    unsigned long long minFreeOutputBytes = 512ULL * 1024ULL * 1024ULL;
     // Keep the live ring drain responsive during guest boot and sample launch.
     // The producer queue is finite; a 500 ms default lets file/registry
     // startup bursts overwrite records before the first drain. Operators can

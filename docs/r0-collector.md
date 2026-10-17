@@ -405,6 +405,9 @@ KSword.Sandbox.R0Collector.exe `
 - `--max-output-bytes <n>` / `--output-max-bytes <n>`：JSONL 达到该字节上限后按事件行
   轮转到 `driver-events.part-000001.jsonl` 等分片；默认 `268435456`，`0` 表示禁用。每个
   分片保持完整 JSON 行，宿主导入会按顺序合并所有分片；轮转失败仍写入 failure sidecar。
+- `--min-free-output-bytes <n>` / `--output-free-reserve-bytes <n>`：写入前检查输出盘可用
+  空间；低于该保留值时停止写入并记录 `outputSpaceInsufficient`、可用/所需字节和
+  `captureState=partial`，默认保留 `536870912` 字节，`0` 表示禁用预检。
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`：poll interval（毫秒）。
 - `--diagnose`, `--readiness`, `--readiness-check`：运行 live 但 non-mutating 的 readiness
   diagnostic pass。Collector 会查询 `--service-name` 的 SCM state、打开 device、检查
