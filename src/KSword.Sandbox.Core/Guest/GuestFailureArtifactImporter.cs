@@ -49,7 +49,10 @@ public static class GuestFailureArtifactImporter
             (parsedExit && exitCode != 0) ||
             (!string.IsNullOrWhiteSpace(exitText) && !parsedExit) ||
             missing.Count > 0 ||
-            (!string.IsNullOrWhiteSpace(stderr) && statusPath is null);
+            // Preserve any Agent stderr as a structured runtime diagnostic.
+            // Even when the exit marker says 0, stderr means the collector
+            // reported an issue that must remain visible to operators.
+            !string.IsNullOrWhiteSpace(stderr);
         if (!failed)
         {
             return rows;
