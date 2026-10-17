@@ -75,6 +75,9 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         RequireStepContains(vmware, "run-agent", "New-ScheduledTaskPrincipal -UserId $guestUserName -LogonType S4U -RunLevel Highest");
         RequireStepContains(vmware, "run-agent", "Start-ScheduledTask -TaskName $taskName -ErrorAction Stop");
         SmokeAssert.True(
+            RequireStep(vmware, "run-agent").PowerShell.Contains(", 'SandboxUser', 'C:\\KSwordSandbox'", StringComparison.Ordinal),
+            "Scheduled Task principals must receive a task-resolvable local account name, not the .\\ credential alias.");
+        SmokeAssert.True(
             !RequireStep(vmware, "run-agent").PowerShell.Contains("& powershell.exe @fallbackArgs", StringComparison.Ordinal),
             "VMware remoting fallback must detach Guest Agent and return control to sync-live-output instead of waiting synchronously.");
         RequireStepContains(vmware, "run-agent", "live sync will wait for agent.exit");

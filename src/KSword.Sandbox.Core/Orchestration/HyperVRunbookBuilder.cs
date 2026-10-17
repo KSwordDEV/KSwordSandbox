@@ -1217,7 +1217,7 @@ public sealed class HyperVRunbookBuilder
     private static string BuildGuestCredentialPreamble(SandboxConfig config)
     {
         var secretName = config.Guest.PasswordSecretName;
-        var guestUserName = NormalizeGuestUserName(config.Guest.UserName);
+        var guestUserName = NormalizeGuestCredentialUserName(config.Guest.UserName);
 
         return string.Join(" ", new[]
         {
@@ -1235,13 +1235,14 @@ public sealed class HyperVRunbookBuilder
     }
 
     /// <summary>
-    /// Normalizes a guest account name for both remoting credentials and
-    /// Scheduled Task principals. Inputs are the configured account name;
-    /// processing qualifies a bare local account as <c>.\User</c> while
-    /// preserving domain, UPN, and already-qualified names; the value is
-    /// returned for use in every guest launch path.
+    /// Normalizes a guest account name for remoting credentials. Inputs are
+    /// the configured account name; processing qualifies a bare local account
+    /// as <c>.\User</c> while preserving domain, UPN, and already-qualified
+    /// names. Scheduled Task principals use a separate machine-local form
+    /// because Task Scheduler does not resolve the <c>.\</c> alias reliably
+    /// over WinRM.
     /// </summary>
-    private static string NormalizeGuestUserName(string userName)
+    private static string NormalizeGuestCredentialUserName(string userName)
     {
         var normalized = userName.Trim();
         if (!normalized.Contains('\\', StringComparison.Ordinal) &&
@@ -1249,6 +1250,17 @@ public sealed class HyperVRunbookBuilder
             !normalized.StartsWith(".\\", StringComparison.Ordinal))
         {
             normalized = ".\\" + normalized;
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeGuestScheduledTaskUserName(string userName)
+    {
+        var normalized = userName.Trim();
+        if (normalized.StartsWith(".\\", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
         }
 
         return normalized;
@@ -1808,7 +1820,7 @@ public sealed class HyperVRunbookBuilder
             "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw \"S4U fallback did not create pid marker: $pidPath\" };",
             "Write-Host \"Guest Agent S4U fallback started; live sync will wait for agent.exit.\";",
             "} ",
-            $"}} -ArgumentList {Q(agentTaskName)}, {Q(NormalizeGuestUserName(config.Guest.UserName))}, {Q(guestRoot)}, {Q(agentPidPath)}, {Q(encodedCommand)} -ErrorAction Stop;",
+            $"}} -ArgumentList {Q(agentTaskName)}, {Q(NormalizeGuestScheduledTaskUserName(config.Guest.UserName))}, {Q(guestRoot)}, {Q(agentPidPath)}, {Q(encodedCommand)} -ErrorAction Stop;",
             "}",
             "finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
         });

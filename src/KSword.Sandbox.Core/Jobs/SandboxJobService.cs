@@ -2568,10 +2568,27 @@ public sealed partial class SandboxJobService
         metrics["events.r0.driver.omitted"] = Math.Max(0, rawDriverRows.Count - reportDriverRows.Count);
         metrics["events.r0.driver.rawUnknown"] = rawDriverRows.Count - rawAttributedDriverRows;
         metrics["events.r0.driver.reportUnknown"] = reportDriverRows.Count - reportAttributedDriverRows;
+        // Keep unresolved attribution separate from rows the classifier has
+        // explicitly identified as environment/collector noise.  A healthy
+        // run commonly contains many known self-noise rows; folding them into
+        // `rawUnknown` made coverage look like an attribution failure.
+        var rawEnvironmentRows = rawDriverRows.Count(evt =>
+            !CollectionHealthSummaryBuilder.IsSampleAttributedR0DriverTelemetryRow(evt) &&
+            IsKnownEnvironmentalR0Row(evt));
+        var reportEnvironmentRows = reportDriverRows.Count(evt =>
+            !CollectionHealthSummaryBuilder.IsSampleAttributedR0DriverTelemetryRow(evt) &&
+            IsKnownEnvironmentalR0Row(evt));
+        var rawUnknownUnresolved = Math.Max(0, rawDriverRows.Count - rawAttributedDriverRows - rawEnvironmentRows);
+        var reportUnknownUnresolved = Math.Max(0, reportDriverRows.Count - reportAttributedDriverRows - reportEnvironmentRows);
+        metrics["events.r0.driver.rawEnvironment"] = rawEnvironmentRows;
+        metrics["events.r0.driver.reportEnvironment"] = reportEnvironmentRows;
+        metrics["events.r0.driver.rawUnknownUnresolved"] = rawUnknownUnresolved;
+        metrics["events.r0.driver.reportUnknownUnresolved"] = reportUnknownUnresolved;
         metrics["events.r0.driver.attributedRaw"] = rawAttributedDriverRows;
         metrics["events.r0.driver.attributedReport"] = reportAttributedDriverRows;
         metrics["events.r0.driver.attributedOmitted"] = Math.Max(0, rawAttributedDriverRows - reportAttributedDriverRows);
         metrics["events.r0.driver.unknownOmitted"] = Math.Max(0, (rawDriverRows.Count - rawAttributedDriverRows) - (reportDriverRows.Count - reportAttributedDriverRows));
+        metrics["events.r0.driver.unknownUnresolvedOmitted"] = Math.Max(0, rawUnknownUnresolved - reportUnknownUnresolved);
         metrics["events.r0.driver.lossObserved"] = rawEvents.Count(IsR0LossEvidenceEvent);
         metrics["events.r0.driver.backpressureObserved"] = rawEvents.Count(IsR0BackpressureEvidenceEvent);
         metrics["events.r0.driver.drainStoppedAtDeadline"] = rawEvents.Count(evt => EventDataBoolTrue(evt, "drainStoppedAtDeadline"));
@@ -2622,6 +2639,25 @@ public sealed partial class SandboxJobService
 
     private static bool IsR0DriverTelemetryRow(SandboxEvent evt) =>
         CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow(evt);
+
+    private static bool IsKnownEnvironmentalR0Row(SandboxEvent evt)
+    {
+        if (EventDataEqualsAny(evt, "sampleCorrelation", "environment") ||
+            EventDataEqualsAny(evt, "sampleCorrelationStatus", "environment"))
+        {
+            return true;
+        }
+
+        return EventDataTruthy(
+            evt,
+            "collectorSelfNoise",
+            "collectorNoise",
+            "collectionNoise",
+            "selfNoise",
+            "selfProcess",
+            "nonbehavior",
+            "notSampleBehavior");
+    }
 
     private static bool IsR0LossEvidenceEvent(SandboxEvent evt)
     {
