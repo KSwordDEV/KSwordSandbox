@@ -1561,9 +1561,11 @@ public sealed partial class SandboxJobService
         var events = new List<SandboxEvent>();
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         using var reader = new StreamReader(stream);
+        var lineNumber = 0;
         string? line;
         while ((line = reader.ReadLine()) is not null)
         {
+            lineNumber++;
             if (string.IsNullOrWhiteSpace(line))
             {
                 continue;
@@ -1590,7 +1592,11 @@ public sealed partial class SandboxJobService
                         "Host could not parse one driver JSONL row; this diagnostic is not sample behavior.",
                         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
-                        ["line"] = line
+                            ["line"] = line,
+                            ["lineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["jsonlPath"] = path,
+                            ["jsonlLineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["jsonlLineSelector"] = $"{path}#L{lineNumber}"
                     })
                 });
             }
@@ -1828,6 +1834,17 @@ public sealed partial class SandboxJobService
     /// </summary>
     private static string EventKey(SandboxEvent evt)
     {
+        if (evt.EventType.Equals("driver.parse_error", StringComparison.OrdinalIgnoreCase))
+        {
+            var jsonlPath = evt.Data.TryGetValue("jsonlPath", out var path) && !string.IsNullOrWhiteSpace(path)
+                ? path
+                : evt.Path ?? string.Empty;
+            var line = evt.Data.TryGetValue("jsonlLineNumber", out var lineNumber) && !string.IsNullOrWhiteSpace(lineNumber)
+                ? lineNumber
+                : evt.Data.TryGetValue("lineNumber", out var fallbackLine) ? fallbackLine : string.Empty;
+            return string.Join("|", "driver.parse_error", jsonlPath, line);
+        }
+
         var data = string.Join(
             ";",
             evt.Data
