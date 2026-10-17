@@ -35,6 +35,7 @@ internal sealed class R0FileMonitorContractScenario : ISmokeTestScenario
         RequireContains(fileFilter, "FLT_FILE_NAME_NORMALIZED", "File paths should prefer FltMgr-normalized names.");
         RequireContains(fileFilter, "FLT_FILE_NAME_QUERY_ALWAYS_ALLOW_CACHE_LOOKUP", "File paths should have a safe cache-only normalized lookup fallback.");
         RequireContains(fileFilter, "KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_TRUNCATED", "Path truncation should be flagged.");
+        RequireContains(fileFilter, "KswCopyUnicodeSuffix", "Long file paths should retain the final file name when truncated.");
         RequireContains(fileFilter, "KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_NORMALIZED", "Normalized path provenance should be flagged.");
         RequireContains(fileFilter, "KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_FALLBACK", "Fallback path provenance should be flagged.");
         RequireContains(fileFilter, "KswShouldSuppressFilePayload", "Sandbox self-path events should be filtered before queueing.");
