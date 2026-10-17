@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using KSword.Sandbox.Abstractions;
 
@@ -11,6 +13,132 @@ namespace KSword.Sandbox.Agent.Output;
 internal sealed class DriverJsonLinesReader
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>
+    /// Compact metadata collected without materializing driver rows.  The raw
+    /// JSONL remains the authoritative evidence stream; this summary is safe to
+    /// embed in events.json when a large stream must be deferred to the host.
+    /// </summary>
+    internal readonly record struct StreamSummary(
+        long ByteCount,
+        long LineCount,
+        long NonEmptyLineCount,
+        long MalformedLineCount,
+        long LossRowCount,
+        long LostEventCount,
+        string? RowContract,
+        int MaxLineBytes,
+        bool ReadCompleted);
+
+    /// <summary>
+    /// Scans a driver JSONL stream one line at a time and returns bounded
+    /// diagnostics.  Inputs are a path; processing never stores row payloads,
+    /// so a high-volume stream cannot double guest memory or disk usage.
+    /// </summary>
+    public StreamSummary Summarize(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return default;
+        }
+
+        long byteCount = 0;
+        long lineCount = 0;
+        long nonEmptyLineCount = 0;
+        long malformedLineCount = 0;
+        long lossRowCount = 0;
+        long lostEventCount = 0;
+        string? rowContract = null;
+        var maxLineBytes = 0;
+        var readCompleted = false;
+
+        try
+        {
+            foreach (var line in File.ReadLines(path, Encoding.UTF8))
+            {
+                lineCount++;
+                var lineBytes = Encoding.UTF8.GetByteCount(line) + 1;
+                byteCount += lineBytes;
+                maxLineBytes = Math.Max(maxLineBytes, lineBytes);
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                nonEmptyLineCount++;
+                try
+                {
+                    using var document = JsonDocument.Parse(line);
+                    var root = document.RootElement;
+                    if (TryGetProperty(root, "data", out var data) && data.ValueKind == JsonValueKind.Object)
+                    {
+                        var contract = GetStringProperty(data, "driverRowMetadataEncoding") ??
+                            GetStringProperty(data, "driverRowContract") ??
+                            GetStringProperty(data, "compactContract");
+                        if (!string.IsNullOrWhiteSpace(contract))
+                        {
+                            rowContract ??= contract;
+                        }
+
+                        var loss = GetLongProperty(data, "lostCount") ?? GetLongProperty(data, "lossCount") ??
+                            GetLongProperty(data, "droppedCount");
+                        if (loss is > 0)
+                        {
+                            lossRowCount++;
+                            lostEventCount = Math.Max(lostEventCount, loss.Value);
+                        }
+
+                        var lossText = GetStringProperty(data, "loss");
+                        if (!string.IsNullOrWhiteSpace(lossText) &&
+                            !string.Equals(lossText, "none", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(lossText, "0", StringComparison.OrdinalIgnoreCase))
+                        {
+                            lossRowCount++;
+                        }
+                    }
+                }
+                catch (JsonException)
+                {
+                    malformedLineCount++;
+                }
+            }
+            readCompleted = true;
+        }
+        catch (IOException)
+        {
+            // The caller still has the path and file size; preserve the rows
+            // already measured instead of turning a large stream into failure.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Same contract as a partial read: raw evidence is retained and
+            // the marker makes the measured prefix explicit.
+        }
+
+        try
+        {
+            // FileInfo is the exact durable byte count, including CRLF bytes
+            // that ReadLines removes before the bounded scan.
+            byteCount = new FileInfo(path).Length;
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        return new StreamSummary(
+            byteCount,
+            lineCount,
+            nonEmptyLineCount,
+            malformedLineCount,
+            lossRowCount,
+            lostEventCount,
+            rowContract,
+            maxLineBytes,
+            readCompleted);
+    }
 
     /// <summary>
     /// Reads all driver events from a JSONL file when present.
@@ -419,6 +547,24 @@ internal sealed class DriverJsonLinesReader
 
         var text = JsonElementToString(property);
         return int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static long? GetLongProperty(JsonElement root, string name)
+    {
+        if (!TryGetProperty(root, name, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var numericValue))
+        {
+            return numericValue;
+        }
+
+        var text = JsonElementToString(property);
+        return long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
             ? parsed
             : null;
     }

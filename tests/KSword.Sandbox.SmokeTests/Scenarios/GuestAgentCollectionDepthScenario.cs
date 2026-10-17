@@ -23,6 +23,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         var frameworkDoc = ReadRepositoryText(context, "docs", "guest-agent-framework.md");
         var artifactsDoc = ReadRepositoryText(context, "docs", "artifacts.md");
         var programText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Program.cs");
+        var driverReader = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Output", "DriverJsonLinesReader.cs");
         var phaseText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Collection", "ProbePhase.cs");
         var guestWriterText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Output", "GuestArtifactWriter.cs");
         var probeRunnerText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Collection", "GuestProbeRunner.cs");
@@ -332,6 +333,14 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("flags.Contains(\"packet-capture\")", StringComparison.Ordinal), "Packet capture must require an explicit flag.");
         SmokeAssert.True(programText.Contains("R0CollectorEnableMask", StringComparison.Ordinal), "Agent options must carry the requested R0 producer mask.");
         SmokeAssert.True(programText.Contains("--enable-mask", StringComparison.Ordinal), "Agent must forward the requested producer mask to R0Collector.");
+        SmokeAssert.True(programText.Contains("DriverEventsInlineThresholdBytes", StringComparison.Ordinal), "Guest agent must bound inline duplication of large driver JSONL streams.");
+        SmokeAssert.True(programText.Contains("ShouldDeferDriverEvents", StringComparison.Ordinal), "Guest agent must defer high-volume driver JSONL to host-side merge.");
+        SmokeAssert.True(programText.Contains("driver.events.deferred", StringComparison.Ordinal), "Deferred driver streams must leave an explicit compact marker in events.json.");
+        SmokeAssert.True(programText.Contains("rawJsonlLineCount", StringComparison.Ordinal), "Deferred driver markers must retain raw JSONL line counts.");
+        SmokeAssert.True(programText.Contains("rawJsonlLostEventCount", StringComparison.Ordinal), "Deferred driver markers must retain raw loss counters.");
+        SmokeAssert.True(programText.Contains("hostMergeRequired", StringComparison.Ordinal), "Deferred driver markers must require host-side JSONL merge.");
+        SmokeAssert.True(driverReader.Contains("StreamSummary", StringComparison.Ordinal), "Driver reader must expose a bounded streaming summary contract.");
+        SmokeAssert.True(driverReader.Contains("Summarize", StringComparison.Ordinal), "Driver reader must summarize large JSONL without materializing rows.");
 
         SmokeAssert.True(guestAgentDoc.Contains("process.tree", StringComparison.Ordinal), "Guest agent doc must document process.tree.");
         SmokeAssert.True(guestAgentDoc.Contains("network.tcp.closed", StringComparison.Ordinal), "Guest agent doc must document TCP closed deltas.");

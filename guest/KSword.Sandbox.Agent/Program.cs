@@ -51,6 +51,12 @@ internal static class AgentProgram
 
     internal const int DefaultR0CollectorMaxReadBatches = 0;
 
+    // A large R0 JSONL stream is already retained as a sibling artifact and
+    // will be merged by the host.  Re-serializing every row into events.json
+    // would temporarily require a second copy on the guest volume and was the
+    // direct cause of disk-full failures on high-volume samples.
+    internal const long DriverEventsInlineThresholdBytes = 64L * 1024L * 1024L;
+
     // Preserve every eligible driver row by default.  Sampling remains an
     // explicit operator knob for high-volume runs; the old implicit stride of
     // 16 discarded 93.75% of rows before they reached the JSONL artifact.
@@ -333,9 +339,20 @@ internal static class AgentProgram
             await StopR0CollectorAsync(r0Collector, events);
         }
 
-        var driverEvents = ReadDriverEvents(options.DriverEventsPath, executionProcessId);
+        var driverEventsDeferred = ShouldDeferDriverEvents(options.DriverEventsPath);
+        var driverEvents = driverEventsDeferred
+            ? Array.Empty<SandboxEvent>()
+            : ReadDriverEvents(options.DriverEventsPath, executionProcessId);
         events.AddRange(driverEvents);
-        if (!string.IsNullOrWhiteSpace(options.DriverEventsPath) && driverEvents.Count > 0)
+        if (driverEventsDeferred)
+        {
+            var summary = new DriverJsonLinesReader().Summarize(options.DriverEventsPath);
+            events.Add(CreateDeferredDriverEventsMarker(
+                options,
+                executionProcessId,
+                summary));
+        }
+        else if (!string.IsNullOrWhiteSpace(options.DriverEventsPath) && driverEvents.Count > 0)
         {
             events.Add(new SandboxEvent
             {
@@ -358,6 +375,84 @@ internal static class AgentProgram
         }
         events.Add(new SandboxEvent { EventType = "agent.stop", Source = "guest", Path = options.OutputDirectory });
         return events;
+    }
+
+    /// <summary>
+    /// Decides whether a driver stream should be merged by the host instead of
+    /// duplicated into guest events.json.  Inputs are an optional JSONL path;
+    /// processing uses a stable byte threshold and returns false for missing
+    /// or small streams so existing compact smoke contracts remain unchanged.
+    /// </summary>
+    private static bool ShouldDeferDriverEvents(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            return File.Exists(path) && new FileInfo(path).Length > DriverEventsInlineThresholdBytes;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Creates the compact marker emitted when a large driver JSONL remains on
+    /// disk for host-side merge.  Inputs are agent options, root PID, and a
+    /// streaming summary; processing keeps paths, row counts, loss indicators,
+    /// and compact contract metadata visible without copying payload rows.
+    /// </summary>
+    private static SandboxEvent CreateDeferredDriverEventsMarker(
+        AgentOptions options,
+        int? rootProcessId,
+        DriverJsonLinesReader.StreamSummary summary)
+    {
+        var path = options.DriverEventsPath ?? string.Empty;
+        var relativePath = TryGetOutputRelativePath(options.OutputDirectory, path);
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["rootProcessId"] = rootProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            ["driverEventsPath"] = path,
+            ["rawJsonlRetainedOnDisk"] = "true",
+            ["deferredToHost"] = "true",
+            ["hostMergeRequired"] = "true",
+            ["mergePolicy"] = "host-loads-sibling-driver-jsonl",
+            ["inlineThresholdBytes"] = DriverEventsInlineThresholdBytes.ToString(CultureInfo.InvariantCulture),
+            ["rawJsonlByteCount"] = summary.ByteCount.ToString(CultureInfo.InvariantCulture),
+            ["rawJsonlLineCount"] = summary.LineCount.ToString(CultureInfo.InvariantCulture),
+            ["rawJsonlNonEmptyLineCount"] = summary.NonEmptyLineCount.ToString(CultureInfo.InvariantCulture),
+            ["rawJsonlMalformedLineCount"] = summary.MalformedLineCount.ToString(CultureInfo.InvariantCulture),
+            ["rawJsonlLossRowCount"] = summary.LossRowCount.ToString(CultureInfo.InvariantCulture),
+            ["rawJsonlLostEventCount"] = summary.LostEventCount.ToString(CultureInfo.InvariantCulture),
+            ["rawJsonlMaxLineBytes"] = summary.MaxLineBytes.ToString(CultureInfo.InvariantCulture),
+            ["rawJsonlReadStatus"] = summary.ReadCompleted ? "stream-summary-complete" : "stream-summary-partial",
+            ["filterPolicy"] = "large-driver-stream-deferred; host merges every raw row",
+            ["behaviorCounted"] = "false",
+            ["nonbehavior"] = "true",
+            ["collectionNoise"] = "true",
+            ["zhMessage"] = "R0 JSONL 体积较大，保留原始文件并交由宿主合并；events.json 仅写入紧凑摘要，避免来宾磁盘被重复副本占满。",
+            ["zhHint"] = "报告导入会读取同目录 driver-events.jsonl；请使用原始 JSONL 核对完整行、丢失计数和 compact 合同。"
+        };
+        AddDataIfNotEmpty(data, "driverEventsRelativePath", relativePath);
+        AddDataIfNotEmpty(data, "jsonlRelativePath", relativePath);
+        AddDataIfNotEmpty(data, "artifactRelativePath", relativePath);
+        AddDataIfNotEmpty(data, "driverRowMetadataEncoding", summary.RowContract);
+
+        return new SandboxEvent
+        {
+            EventType = "driver.events.deferred",
+            Source = "guest",
+            Path = path,
+            Data = data
+        };
     }
 
     /// <summary>
