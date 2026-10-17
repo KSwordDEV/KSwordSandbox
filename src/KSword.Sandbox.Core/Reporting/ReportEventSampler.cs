@@ -1301,10 +1301,11 @@ public static class ReportEventSampler
             return true;
         }
 
-        // R0 rows are already filtered to the submitted process tree by the
-        // Guest Agent. Keep typed process/file/registry/network activity in
-        // the dynamic evidence lane, while dropping explicit collector or
-        // synthetic stress noise so the report remains bounded and useful.
+        // R0 rows retain every driver-originated class in the Guest Agent;
+        // keep all typed driver activity in the dynamic evidence lane while
+        // dropping explicit collector or synthetic stress noise.  This keeps
+        // image/load and future driver producers visible instead of silently
+        // reducing the report to process/file/registry/network rows.
         if (IsDriverSampleActivityEvent(evt))
         {
             return true;
@@ -1341,11 +1342,15 @@ public static class ReportEventSampler
     private static bool IsDriverSampleActivityEvent(SandboxEvent evt)
     {
         var type = NormalizeEventType(evt.EventType);
+        if ((evt.ProcessName?.Contains("r0collector", StringComparison.OrdinalIgnoreCase) ?? false) ||
+            EventDataBoolTrue(evt, "selfProcess", "collectorSelfNoise", "collectorNoise", "selfNoise"))
+        {
+            return false;
+        }
+
         if (EventDataBoolTrue(evt, "stress") ||
-            !(type.StartsWith("driver.process", StringComparison.OrdinalIgnoreCase) ||
-              type.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase) ||
-              type.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase) ||
-              type.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase)))
+            !(type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+              type.StartsWith("image.", StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }

@@ -2072,6 +2072,7 @@ public sealed partial class SandboxJobService
         };
 
         AddDynamicCoverageMetrics(metrics, events, rawEvents ?? events, rawEventCount, omittedReportEvents);
+        AddR0DriverCoverageMetrics(metrics, events, rawEvents ?? events);
 
         foreach (var group in findings.GroupBy(finding => finding.Severity))
         {
@@ -2079,6 +2080,110 @@ public sealed partial class SandboxJobService
         }
 
         return metrics;
+    }
+
+    /// <summary>
+    /// Records R0 driver-row coverage and queue quality in report metrics.
+    /// Inputs are report and raw event collections; processing counts every
+    /// driver producer class plus explicit loss/backpressure evidence so a
+    /// report can distinguish inline sampling from collector loss.
+    /// </summary>
+    private static void AddR0DriverCoverageMetrics(
+        Dictionary<string, int> metrics,
+        IReadOnlyCollection<SandboxEvent> reportEvents,
+        IReadOnlyCollection<SandboxEvent> rawEvents)
+    {
+        var rawDriverRows = rawEvents.Where(IsR0DriverTelemetryRow).ToList();
+        var reportDriverRows = reportEvents.Where(IsR0DriverTelemetryRow).ToList();
+        metrics["events.r0.driver.raw"] = rawDriverRows.Count;
+        metrics["events.r0.driver.report"] = reportDriverRows.Count;
+        metrics["events.r0.driver.omitted"] = Math.Max(0, rawDriverRows.Count - reportDriverRows.Count);
+        metrics["events.r0.driver.lossObserved"] = rawEvents.Count(IsR0LossEvidenceEvent);
+        metrics["events.r0.driver.backpressureObserved"] = rawEvents.Count(IsR0BackpressureEvidenceEvent);
+        var readSummaries = rawEvents.Where(evt => evt.EventType.Equals("r0collector.driverReadEvents", StringComparison.OrdinalIgnoreCase)).ToList();
+        var lostCount = MaxDataUnsigned(rawEvents, "lostCount", "eventsDropped", "TotalEventsDropped");
+        var processed = SumDataUnsigned(readSummaries, "recordsProcessed");
+        var emitted = SumDataUnsigned(readSummaries, "eventsEmitted");
+        metrics["events.r0.driver.lostCount"] = ToMetricInt(lostCount);
+        metrics["events.r0.driver.recordsProcessed"] = ToMetricInt(processed);
+        metrics["events.r0.driver.eventsEmitted"] = ToMetricInt(emitted);
+        metrics["events.r0.driver.lossRateBasisPoints"] = processed == 0
+            ? 0
+            : lostCount >= processed
+                ? 10000
+                : ToMetricInt(lostCount * 10000UL / processed);
+
+        foreach (var category in new[] { "process", "image", "file", "registry", "network", "load", "other" })
+        {
+            metrics[$"events.r0.driver.{category}.raw"] = rawDriverRows.Count(evt => R0DriverCategory(evt) == category);
+            metrics[$"events.r0.driver.{category}.report"] = reportDriverRows.Count(evt => R0DriverCategory(evt) == category);
+        }
+    }
+
+    private static bool IsR0DriverTelemetryRow(SandboxEvent evt)
+    {
+        return string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("image.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsR0LossEvidenceEvent(SandboxEvent evt)
+    {
+        return EventDataBoolTrue(evt, "lost", "lossObserved", "sequenceGapObserved") ||
+            evt.EventType.Equals("r0collector.driverReadEvents", StringComparison.OrdinalIgnoreCase) &&
+            EventDataPositive(evt, "lostCount", "sequenceGapEstimate");
+    }
+
+    private static bool IsR0BackpressureEvidenceEvent(SandboxEvent evt)
+    {
+        return EventDataBoolTrue(evt, "backpressure", "backpressureObserved") ||
+            evt.EventType.Equals("r0collector.driverReadEvents", StringComparison.OrdinalIgnoreCase) &&
+            EventDataPositive(evt, "highWatermark", "collectorSkippedEvents", "skipped");
+    }
+
+    private static bool EventDataBoolTrue(SandboxEvent evt, params string[] keys)
+    {
+        return keys.Any(key => evt.Data.TryGetValue(key, out var value) &&
+            (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) || value == "1"));
+    }
+
+    private static bool EventDataPositive(SandboxEvent evt, params string[] keys)
+    {
+        return keys.Any(key => evt.Data.TryGetValue(key, out var value) &&
+            ulong.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var number) && number > 0);
+    }
+
+    private static ulong MaxDataUnsigned(IEnumerable<SandboxEvent> events, params string[] keys)
+    {
+        return events.SelectMany(evt => keys.Select(key => evt.Data.TryGetValue(key, out var value) &&
+            ulong.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var number) ? number : 0UL)).DefaultIfEmpty().Max();
+    }
+
+    private static ulong SumDataUnsigned(IEnumerable<SandboxEvent> events, string key)
+    {
+        return events.Select(evt => evt.Data.TryGetValue(key, out var value) &&
+            ulong.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var number) ? number : 0UL)
+            .Aggregate(0UL, (total, value) => ulong.MaxValue - total < value ? ulong.MaxValue : total + value);
+    }
+
+    private static int ToMetricInt(ulong value) => value > int.MaxValue ? int.MaxValue : (int)value;
+
+    private static string R0DriverCategory(SandboxEvent evt)
+    {
+        var type = evt.EventType;
+        var suffix = type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ? type["driver.".Length..] : type;
+        var dot = suffix.IndexOf('.', StringComparison.Ordinal);
+        var category = (dot >= 0 ? suffix[..dot] : suffix).ToLowerInvariant();
+        return category switch
+        {
+            "process" => "process",
+            "image" => "image",
+            "file" => "file",
+            "registry" => "registry",
+            "network" => "network",
+            "load" => "load",
+            _ => "other"
+        };
     }
 
     private static void AddDynamicCoverageMetrics(
@@ -2210,6 +2315,12 @@ public sealed partial class SandboxJobService
     private static bool IsDriverSampleActivityEvent(SandboxEvent evt)
     {
         var type = evt.EventType ?? string.Empty;
+        if ((evt.ProcessName?.Contains("r0collector", StringComparison.OrdinalIgnoreCase) ?? false) ||
+            EventDataTruthy(evt, "selfProcess", "collectorSelfNoise", "collectorNoise", "selfNoise"))
+        {
+            return false;
+        }
+
         if (EventDataTruthy(evt, "stress") ||
             !(type.StartsWith("driver.process", StringComparison.OrdinalIgnoreCase) ||
               type.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase) ||

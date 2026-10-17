@@ -421,11 +421,12 @@ KSword.Sandbox.R0Collector.exe `
   the default is `10` ms so boot and sample-launch bursts are drained before
   the fixed kernel ring overwrites records. Operators can increase it for
   low-rate or stress-only runs.
-- Guest Agent 的默认 sidecar 参数面向 MVP live 稳定性：`--max-events 1024`、
+- Guest Agent 的默认 sidecar 参数面向完整性：`--max-events 1024`、
   `--max-read-batches 0`（不因固定批次上限提前停读）以及
-  `--driver-event-sample-stride 16`。这会持续 drain R0 ring 以降低 backpressure，
-  但只写出采样后的 JSONL 行；完整处理数量仍在 `driverRecordsProcessed`、
-  `collectorSkippedEvents`、`lostCount`、`highWatermark` 和 producer mask 字段中可审计。
+  `--driver-event-sample-stride 1`。这会持续 drain R0 ring 并写出每条 eligible
+  JSONL 行，避免隐式采样造成大面积丢行；如需降低输出量，操作者可显式传入更大的
+  stride。完整处理数量仍在 `driverRecordsProcessed`、`collectorSkippedEvents`、
+  `lostCount`、`highWatermark` 和 producer mask 字段中可审计。
 - `--abi-self-check`: emit an ABI/event-quality contract row and exit without
   opening `\\.\KSwordSandboxDriver`. The collector does not open the driver
   device and does not call `DeviceIoControl` in this mode.

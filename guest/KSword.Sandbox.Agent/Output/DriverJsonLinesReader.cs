@@ -180,7 +180,17 @@ internal sealed class DriverJsonLinesReader
                 var parent = ResolveDataPid(evt.Data, "parentProcessId", "parentPid", "parentId", "rootProcessId") ?? evt.ParentProcessId;
                 var isCollector = evt.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(evt.Source, "r0collector", StringComparison.OrdinalIgnoreCase);
-                var belongsToTree = isCollector ||
+                // Driver JSONL is the authoritative R0 stream.  A large
+                // fraction of valid driver rows has no sample PID (for
+                // example image/load, registry and system network rows), so
+                // requiring process-tree attribution here silently discarded
+                // otherwise auditable telemetry.  Keep every driver-origin
+                // row in events.json; report sampling still separates noise
+                // from sample behavior and the raw JSONL remains available.
+                var isDriverRow = string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase) ||
+                    evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+                    evt.EventType.StartsWith("image.", StringComparison.OrdinalIgnoreCase);
+                var belongsToTree = isCollector || isDriverRow ||
                     (evt.ProcessId is int pid && processIds.Contains(pid)) ||
                     (parent is int parentPid && processIds.Contains(parentPid));
                 if (belongsToTree)

@@ -510,10 +510,11 @@ html[lang="en"] .localized-evidence-field{display:none}
     private static void AppendCover(StringBuilder html, AnalysisReport report)
     {
         var verdict = DetermineVerdict(report);
+        var triageVerdict = ToTriageVerdict(verdict.Label);
         html.AppendLine("<header id=\"cover\">");
         html.AppendLine("<h1>KSword Sandbox Report</h1>");
         html.AppendLine($"<p class=\"muted\">Job {E(report.JobId.ToString())} generated at {E(report.GeneratedAt.ToString("u"))}</p>");
-        html.AppendLine($"<p><span class=\"badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</span></p>");
+        html.AppendLine($"<p><span class=\"badge badge-{E(verdict.Css)} triage-verdict\">{E(triageVerdict)}</span> <span class=\"badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</span></p>");
         html.AppendLine("<table><tbody>");
         Row(html, "Sample", report.Sample.FileName);
         Row(html, "SHA-256", report.Sample.Sha256);
@@ -549,6 +550,24 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         html.AppendLine("</tbody></table>");
         html.AppendLine("</header>");
+    }
+
+    private static string ToTriageVerdict(string detailedLabel)
+    {
+        if (detailedLabel is "Critical risk" or "High risk")
+        {
+            return "Threat";
+        }
+
+        if (detailedLabel is "Suspicious" or "Execution blocked / runtime indeterminate" or
+            "Analysis failed" or "Static analysis only" or
+            "Execution complete / runtime evidence incomplete" or
+            "Evidence unavailable / runtime indeterminate")
+        {
+            return "Suspicious";
+        }
+
+        return "Not detected";
     }
 
     /// <summary>
@@ -694,7 +713,32 @@ html[lang="en"] .localized-evidence-field{display:none}
         Metric(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString(), "risk-medium");
         Metric(html, "Registry events", report.Events.Count(IsSampleBehaviorRegistryEvent).ToString(), "risk-medium");
         Metric(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString(), "risk-info");
+        var r0DriverRaw = ReportMetric(report, "events.r0.driver.raw");
+        var r0DriverReport = ReportMetric(report, "events.r0.driver.report");
+        var r0DriverOmitted = ReportMetric(report, "events.r0.driver.omitted");
+        Metric(html, "R0 driver rows (raw)", r0DriverRaw.ToString(CultureInfo.InvariantCulture), "risk-info");
+        Metric(html, "R0 driver rows (report)", r0DriverReport.ToString(CultureInfo.InvariantCulture), "risk-info");
+        Metric(html, "R0 driver rows omitted", r0DriverOmitted.ToString(CultureInfo.InvariantCulture), r0DriverOmitted > 0 ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
+        if (r0DriverRaw > 0)
+        {
+            var driverClassSummary = string.Join(
+                "; ",
+                new[] { "process", "image", "file", "registry", "network", "load", "other" }
+                    .Select(category => string.Concat(
+                        category,
+                        "=",
+                        ReportMetric(report, $"events.r0.driver.{category}.raw"),
+                        "/",
+                        ReportMetric(report, $"events.r0.driver.{category}.report"))));
+            var loss = ReportMetric(report, "events.r0.driver.lossObserved");
+            var backpressure = ReportMetric(report, "events.r0.driver.backpressureObserved");
+            var lostCount = ReportMetric(report, "events.r0.driver.lostCount");
+            var processed = ReportMetric(report, "events.r0.driver.recordsProcessed");
+            var lossRateBasisPoints = ReportMetric(report, "events.r0.driver.lossRateBasisPoints");
+            var lossRate = $"{lossRateBasisPoints / 100}.{lossRateBasisPoints % 100:00}%";
+            html.AppendLine($"<div class=\"section-note\"><strong>R0 driver coverage.</strong> Raw/report rows by class (raw/report): {E(driverClassSummary)}. Collector loss markers: {E(loss.ToString(CultureInfo.InvariantCulture))}; lost count: {E(lostCount.ToString(CultureInfo.InvariantCulture))}/{E(processed.ToString(CultureInfo.InvariantCulture))} processed ({E(lossRate)}); backpressure markers: {E(backpressure.ToString(CultureInfo.InvariantCulture))}. Raw driver-events.jsonl remains the complete source artifact.</div>");
+        }
         if (HasExecutionBlockedVerdict(report))
         {
             html.AppendLine("<div class=\"section-note failure-note\"><strong>Execution boundary:</strong> sample execution was blocked or ended before complete runtime behavior, so the runtime verdict is indeterminate. Static findings remain static-only evidence and do not establish execution.</div>");
@@ -10105,6 +10149,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Critical risk", "严重风险"),
         ("High risk", "高风险"),
         ("Suspicious", "可疑行为"),
+        ("Threat", "威胁"),
+        ("Not detected", "未检出"),
         (">Queued<", ">已排队<"),
         (">Planning<", ">规划中<"),
         (">Planned<", ">已规划<"),

@@ -51,7 +51,10 @@ internal static class AgentProgram
 
     internal const int DefaultR0CollectorMaxReadBatches = 0;
 
-    internal const int DefaultR0CollectorDriverEventSampleStride = 16;
+    // Preserve every eligible driver row by default.  Sampling remains an
+    // explicit operator knob for high-volume runs; the old implicit stride of
+    // 16 discarded 93.75% of rows before they reached the JSONL artifact.
+    internal const int DefaultR0CollectorDriverEventSampleStride = 1;
 
     /// <summary>
     /// Main async entry point for the guest collector.
@@ -344,12 +347,12 @@ internal static class AgentProgram
                     ["rootProcessId"] = executionProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
                     ["retainedEventCount"] = driverEvents.Count.ToString(CultureInfo.InvariantCulture),
                     ["rawJsonlRetainedOnDisk"] = "true",
-                    ["filterPolicy"] = "sample-process-tree-plus-collector-lifecycle",
+                    ["filterPolicy"] = "all-driver-rows-plus-collector-lifecycle; guest rows use sample-process-tree attribution",
                     ["behaviorCounted"] = "false",
                     ["nonbehavior"] = "true",
                     ["collectionNoise"] = "true",
-                    ["zhMessage"] = "R0 原始 JSONL 已保留；报告事件只内联样本进程树和采集器生命周期行。",
-                    ["zhHint"] = "未归属于样本进程树的系统 R0 行仍可从 driver-events.jsonl 下载复核。"
+                    ["zhMessage"] = "R0 原始 JSONL 已保留；所有 driver 行和采集器生命周期行均导入，Guest 行继续按样本进程树归属。",
+                    ["zhHint"] = "如需降低报告体积，请显式设置采样步长；原始 driver-events.jsonl 始终是完整证据边界。"
                 }
             });
         }
