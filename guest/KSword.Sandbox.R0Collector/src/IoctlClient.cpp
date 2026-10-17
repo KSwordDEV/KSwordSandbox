@@ -671,10 +671,13 @@ bool EmitDriverNetworkStatus(const UniqueHandle& device, const Options& options,
     return EmitEvent(writer, event);
 }
 
-// Input: Open driver handle and collector options carrying --enable-mask.
-// Processing: Issues IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK only when
-// requested by the operator, then records requested/previous/effective masks.
-// Return: true if no mask was requested or the IOCTL/reply/sink are valid.
+// Input: Open driver handle, collector options, and the capabilities-derived
+// normal producer mask.
+// Processing: Issues IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK with the
+// explicit operator mask when present, otherwise enables normal advertised
+// producers before draining and records requested/previous/effective masks.
+// Return: true when the IOCTL is unavailable as an optional compatibility path,
+// or when its reply and JSONL sink are valid.
 bool EmitDriverSetProducerEnableMask(
     const UniqueHandle& device,
     const Options& options,

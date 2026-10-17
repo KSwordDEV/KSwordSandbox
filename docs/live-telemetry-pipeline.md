@@ -38,6 +38,15 @@ subscription。
 但只有强样本 PID/路径关联的行才允许 `behaviorCounted=true`；未关联或仅会话相关的
 Security rows 必须作为上下文/非行为处理。
 
+启用 `--etw-live` 时，live Kernel ETW 使用 `NT Kernel Logger` 的
+`process|thread|img` mask；file/registry 全机流不进入默认 ETL，分别由有界文件/注册表
+probe 覆盖。`tracerpt` 优先输出 XML，XML 无可用行时回退 CSV；两种 parser 都使用真实
+PID/parent PID 建立样本 root/child 闭包，并在 root 启动时间前 5 秒丢弃行。缺失 root PID
+时保留 ETL 供诊断但不把整机 trace 当作样本行为。旧 CSV 的无时区时间按 guest 本地时区
+转 UTC；root process.start 可用时会记录并应用 `timestampClockOffsetSeconds`。AfterRun
+先停止 ETW/PCAP，再查询较慢的 EventLog 和快照；stop 即使遇到 probe 取消也执行有界清理，
+避免 logger 残留污染后续作业。
+
 ## 可见文案与术语约定 / Visible wording
 
 页面文案中文优先，英文只作为接口名、排障参照或 `data-en` 备选：

@@ -126,12 +126,16 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         }
 
         var session = activeSession;
-        activeSession = null;
+        // A probe timeout must never leave the reserved kernel logger active.
+        // The runner may cancel this token while it is enforcing the probe
+        // budget; use a bounded, non-cancelable stop so a late decode cannot
+        // turn the rest of the guest run into an unbounded full-machine trace.
         var result = await BoundedProcessRunner.RunAsync(
             LogmanExecutable,
             ["stop", session.SessionName, "-ets"],
             CommandTimeout,
-            cancellationToken).ConfigureAwait(false);
+            CancellationToken.None).ConfigureAwait(false);
+        activeSession = null;
         if (!result.Succeeded)
         {
             return [CreateFailureEvent(
@@ -154,7 +158,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             return [CreateFailureEvent("etlEmptyAfterStop", "after-run", context, session, result, info)];
         }
 
-        var decode = await DecodeAsync(session, context, cancellationToken).ConfigureAwait(false);
+        var decode = await DecodeAsync(session, context, CancellationToken.None).ConfigureAwait(false);
         var evt = CreateBaseEvent("etw_live.captured", "after-run", context, session);
         evt.Data["captureState"] = "captured";
         evt.Data["status"] = "captured";
@@ -169,10 +173,13 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         evt.Data["etlDecodeRequired"] = decode.Succeeded ? "false" : "true";
         evt.Data["decodeAttempted"] = "true";
         evt.Data["decodeTool"] = TracerptExecutable;
+        evt.Data["decodeFormat"] = decode.DecodeFormat;
         evt.Data["decodeCommandExitCode"] = FormatExitCode(decode.CommandResult?.ExitCode);
         evt.Data["decodeCommandTimedOut"] = (decode.CommandResult?.TimedOut ?? false).ToString(CultureInfo.InvariantCulture);
         evt.Data["parsedEventCount"] = decode.Rows.Count.ToString(CultureInfo.InvariantCulture);
         evt.Data["decodedEventCount"] = decode.Rows.Count.ToString(CultureInfo.InvariantCulture);
+        evt.Data["sampleTreeFilter"] = "process-id-lineage-and-observation-window";
+        evt.Data["rootProcessId"] = context.RootProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         evt.Data["decodedEventTypes"] = string.Join(",", decode.Rows
             .Select(static row => row.EventType)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -205,45 +212,70 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
         CancellationToken cancellationToken)
     {
         var xmlPath = Path.ChangeExtension(session.EtlPath, ".xml");
+        var csvPath = Path.ChangeExtension(session.EtlPath, ".csv");
         try
         {
             if (File.Exists(xmlPath))
             {
                 File.Delete(xmlPath);
             }
+            if (File.Exists(csvPath))
+            {
+                File.Delete(csvPath);
+            }
 
-            var result = await BoundedProcessRunner.RunAsync(
+            var xmlResult = await BoundedProcessRunner.RunAsync(
                 TracerptExecutable,
                 [session.EtlPath, "-o", xmlPath, "-of", "XML", "-y", "-lr"],
                 DecodeTimeout,
                 cancellationToken).ConfigureAwait(false);
-            if (!result.Succeeded)
+            if (xmlResult.Succeeded && File.Exists(xmlPath) && new FileInfo(xmlPath).Length > 0)
             {
-                return new EtwDecodeResult(false, xmlPath, [], "tracerptFailed", result);
+                try
+                {
+                    var rows = ParseTracerptXml(xmlPath, session, context);
+                    if (rows.Count > 0)
+                    {
+                        return new EtwDecodeResult(true, xmlPath, "xml", rows, string.Empty, xmlResult);
+                    }
+                }
+                catch (Exception ex) when (ex is FormatException or System.Xml.XmlException or IOException)
+                {
+                    // Fall through to CSV. Older tracerpt builds can emit a
+                    // partial XML document even when CSV output is usable.
+                }
             }
 
-            if (!File.Exists(xmlPath))
+            var csvResult = await BoundedProcessRunner.RunAsync(
+                TracerptExecutable,
+                [session.EtlPath, "-o", csvPath, "-of", "CSV", "-y", "-lr"],
+                DecodeTimeout,
+                cancellationToken).ConfigureAwait(false);
+            if (csvResult.Succeeded && File.Exists(csvPath) && new FileInfo(csvPath).Length > 0)
             {
-                return new EtwDecodeResult(false, xmlPath, [], "decodedXmlMissing", result);
+                try
+                {
+                    var rows = ParseTracerptCsv(csvPath, session, context);
+                    if (rows.Count > 0)
+                    {
+                        return new EtwDecodeResult(true, csvPath, "csv", rows, string.Empty, csvResult);
+                    }
+                }
+                catch (Exception ex) when (ex is FormatException or IOException)
+                {
+                    // Keep the explicit decode failure below with both command
+                    // diagnostics; the ETL remains the authoritative artifact.
+                }
             }
 
-            var info = new FileInfo(xmlPath);
-            if (info.Length <= 0)
-            {
-                return new EtwDecodeResult(false, xmlPath, [], "decodedXmlEmpty", result);
-            }
-
-            var rows = ParseTracerptXml(xmlPath, session, context);
-            if (rows.Count == 0)
-            {
-                return new EtwDecodeResult(false, xmlPath, [], "decodedXmlHasNoEventRows", result);
-            }
-
-            return new EtwDecodeResult(true, xmlPath, rows, string.Empty, result);
+            var reason = !xmlResult.Succeeded && !csvResult.Succeeded
+                ? "tracerptXmlAndCsvFailed"
+                : "decodedXmlAndCsvHaveNoSampleRows";
+            return new EtwDecodeResult(false, File.Exists(xmlPath) ? xmlPath : csvPath, "", [], reason, csvResult.Succeeded ? csvResult : xmlResult);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or FormatException or System.Xml.XmlException)
         {
-            return new EtwDecodeResult(false, xmlPath, [], "decoderException:" + ex.GetType().Name, null);
+            return new EtwDecodeResult(false, File.Exists(xmlPath) ? xmlPath : csvPath, "", [], "decoderException:" + ex.GetType().Name, null);
         }
     }
 
@@ -324,24 +356,39 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             });
         }
 
-        return FilterRowsToSampleTree(rows, context.RootProcessId);
+        return FilterRowsToSampleTree(rows, context);
     }
 
     private static List<SandboxEvent> FilterRowsToSampleTree(
         IReadOnlyList<SandboxEvent> rows,
-        int? rootProcessId)
+        GuestProbeContext context)
     {
-        if (rootProcessId is not int root || root <= 0)
+        if (rows.Count == 0)
         {
-            return rows.ToList();
+            return [];
         }
 
+        var normalizedRows = NormalizeTimestampClock(rows, context);
+        if (context.RootProcessId is not int root || root <= 0)
+        {
+            // A failed sample launch has no trustworthy lineage anchor. Keep
+            // the raw ETL on disk, but never promote an entire machine trace
+            // to sample behavior just because no PID was available.
+            return [];
+        }
+
+        var observationStart = context.RootProcessStartTimeUtc is DateTime start
+            ? new DateTimeOffset(DateTime.SpecifyKind(start, DateTimeKind.Utc)).Subtract(TimeSpan.FromSeconds(5))
+            : (DateTimeOffset?)null;
+        var observedRows = observationStart.HasValue
+            ? normalizedRows.Where(row => row.Timestamp >= observationStart.Value).ToList()
+            : normalizedRows;
         var processIds = new HashSet<int> { root };
         var changed = true;
         while (changed)
         {
             changed = false;
-            foreach (var row in rows)
+            foreach (var row in observedRows)
             {
                 if (row.ProcessId is int pid && pid > 0 &&
                     row.ParentProcessId is int parent && processIds.Contains(parent) &&
@@ -352,10 +399,52 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             }
         }
 
-        return rows
-            .Where(row => (row.ProcessId is int pid && processIds.Contains(pid)) ||
-                          (row.ParentProcessId is int parent && processIds.Contains(parent)))
+        return observedRows
+            .Where(row =>
+                          ((row.ProcessId is int pid && processIds.Contains(pid)) ||
+                           (row.ParentProcessId is int parent && processIds.Contains(parent))))
             .ToList();
+    }
+
+    private static IReadOnlyList<SandboxEvent> NormalizeTimestampClock(
+        IReadOnlyList<SandboxEvent> rows,
+        GuestProbeContext context)
+    {
+        if (context.RootProcessId is not int root ||
+            context.RootProcessStartTimeUtc is not DateTime rootStart)
+        {
+            return rows;
+        }
+
+        var expected = new DateTimeOffset(DateTime.SpecifyKind(rootStart, DateTimeKind.Utc));
+        var anchor = rows
+            .Where(row => row.ProcessId == root && string.Equals(row.EventType, "process.start", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(row => Math.Abs((row.Timestamp - expected).TotalSeconds))
+            .FirstOrDefault();
+        if (anchor is null)
+        {
+            return rows;
+        }
+
+        var offset = expected - anchor.Timestamp;
+        if (Math.Abs(offset.TotalSeconds) < 5 || Math.Abs(offset.TotalHours) > 24)
+        {
+            return rows;
+        }
+
+        // tracerpt CSV on older guests may emit local wall time without an
+        // offset while Process.Start reports UTC. Align the whole trace from
+        // the root process edge before lineage and observation-window checks.
+        var normalized = rows.ToList();
+        for (var index = 0; index < normalized.Count; index++)
+        {
+            var row = normalized[index];
+            normalized[index] = row with { Timestamp = row.Timestamp + offset };
+            row.Data["timestampClockOffsetSeconds"] = offset.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+            row.Data["timestampClockNormalization"] = "root-process-start-anchor";
+        }
+
+        return normalized;
     }
 
     private static Dictionary<string, string> CreateDecodedData(
@@ -470,12 +559,12 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             }
 
             var eventType = MapEventType(eventName, provider);
-            var processId = ParseProcessId(GetField(fields, columns, "processid", "pid"));
-            var parentProcessId = ParseProcessId(GetField(fields, columns, "parentprocessid", "parentpid"));
+            var processId = ParseProcessId(GetField(fields, columns, "processid", "processpid", "pid"));
+            var parentProcessId = ParseProcessId(GetField(fields, columns, "parentprocessid", "parentprocesspid", "parentpid", "parentid"));
             var threadId = GetField(fields, columns, "threadid", "tid");
             var timestamp = ParseTimestamp(GetField(fields, columns, "timestamp", "timestamputc", "time")) ?? DateTimeOffset.UtcNow;
             var image = GetField(fields, columns, "imagename", "image", "processname", "process");
-            var path = GetField(fields, columns, "filename", "file", "path", "imagepath");
+            var path = GetField(fields, columns, "filename", "file", "path", "imagepath", "keyname", "keypath", "objectname");
             var opcode = GetField(fields, columns, "opcode", "operation");
             var payload = BuildPayload(fields, columns, "payload", "data", "userdata");
             var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -513,7 +602,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             });
         }
 
-        return rows;
+        return FilterRowsToSampleTree(rows, context);
     }
 
     private static SandboxEvent CreateDecodeFailureEvent(
@@ -633,10 +722,15 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             return null;
         }
 
+        var trimmed = value.Trim();
+        var hasExplicitOffset = trimmed.EndsWith("Z", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.LastIndexOf('+') > 9 || trimmed.LastIndexOf('-') > 9;
+        var styles = DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AdjustToUniversal |
+                     (hasExplicitOffset ? DateTimeStyles.None : DateTimeStyles.AssumeLocal);
         return DateTimeOffset.TryParse(
-            value.Trim(),
+            trimmed,
             CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            styles,
             out var timestamp)
             ? timestamp
             : null;
@@ -830,7 +924,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             ["capturePolicy"] = "explicit-opt-in-etw-kernel-trace",
             ["captureTool"] = LogmanExecutable,
             ["captureToolMode"] = "windows-logman-kernel-etw",
-            ["traceProviders"] = "Windows Kernel Trace(flags=process|thread|image-load|file-io|registry)",
+            ["traceProviders"] = "Windows Kernel Trace(flags=process|thread|image-load); file/registry lanes require scoped probes or filtered fallback decode",
             ["etwLiveCaptureEnabled"] = "true",
             ["etwSessionStarted"] = string.Equals(eventType, "etw_live.started", StringComparison.OrdinalIgnoreCase) ? "true" : "false",
             ["nonbehavior"] = "true",
@@ -908,6 +1002,7 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
     private sealed record EtwDecodeResult(
         bool Succeeded,
         string DecodedPath,
+        string DecodeFormat,
         IReadOnlyList<SandboxEvent> Rows,
         string FailureReason,
         BoundedCommandResult? CommandResult);

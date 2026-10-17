@@ -62,7 +62,11 @@ internal sealed class GuestProbeRunner
         var completedCount = 0;
         var failedCount = 0;
         var timedOutCount = 0;
-        foreach (var probe in probes)
+        // Stop ETW and packet capture before snapshot/EventLog probes. Their
+        // stop commands define the requested observation boundary; allowing a
+        // slow post-run inventory to run first keeps the kernel logger alive
+        // and admits unrelated full-machine noise after the sample window.
+        foreach (var probe in ProbesForPhase(phase))
         {
             var elapsed = Stopwatch.StartNew();
             try
@@ -162,6 +166,20 @@ internal sealed class GuestProbeRunner
                 events.Count));
         }
         return events;
+    }
+
+    private IEnumerable<IGuestProbe> ProbesForPhase(ProbePhase phase)
+    {
+        if (phase != ProbePhase.AfterRun)
+        {
+            return probes;
+        }
+
+        return probes
+            .Select((probe, ordinal) => (probe, ordinal))
+            .OrderBy(item => item.probe is EtwLiveTraceProbe ? 0 : item.probe is PacketCaptureProbe ? 1 : 2)
+            .ThenBy(item => item.ordinal)
+            .Select(item => item.probe);
     }
 
     private async Task<IReadOnlyList<SandboxEvent>> CollectDuringRunParallelAsync(

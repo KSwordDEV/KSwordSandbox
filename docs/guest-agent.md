@@ -75,14 +75,23 @@ PCAPNG。缺少工具或权限不足会记录为非致命 `packet_capture.*` 事
 ```
 
 启用后，Agent 在 `before-start` 使用 `logman.exe` 创建 Windows 要求的
-`NT Kernel Logger` 系统会话（process/thread/image-load/file-io/registry flags），在 `after-run` 停止会话并校验
-`etw-traces/*.etl`。随后使用 Windows 自带的 `tracerpt.exe` 将 ETL 解码为
-`etw-traces/*.xml`，读取 `RenderingInfo`、进程/线程/镜像/文件/注册表字段并写入标准化行为行。
+`NT Kernel Logger` 系统会话，mask 只打开 `process|thread|img`，避免把全机
+file/registry 基线写入样本证据；文件和注册表仍由有界 guest probe 采集，fallback
+解码行也会按样本进程树归因。Agent 在 `after-run` 先停止 ETW/PCAP，再运行较慢的
+EventLog、快照和截图探针，并校验 `etw-traces/*.etl`。随后优先用 Windows 自带的
+`tracerpt.exe` 将 ETL 解码为 `etw-traces/*.xml`，XML 无行或不完整时回退到同一 ETL
+的 `etw-traces/*.csv`；两种格式都读取 `RenderingInfo`/payload 的进程、线程、镜像、
+文件、注册表字段并写入标准化行为行。
 `etw_live.captured` 会同时记录 `parsedEventCount`、`decodedArtifactRelativePath` 和解码状态；只有真实解析到事件行时才标记
 `semanticRowsAvailable=true`。tracerpt 不可用、失败或 XML 没有事件时会额外写出
 `etw_live.decode_failed`，原始 ETL 仍保留，不能把未解析 ETL 伪装成行为命中。
 缺少管理员权限、`logman.exe`、会话启动/停止失败或空 ETL 会写 `etw_live.failed`；默认关闭
 则写 `etw_live.disabled`，报告因此能区分“未启用”“启动失败”和“已捕获待解析”。
+解码行必须带真实 PID，先建立 root/child PID 闭包，再丢弃无 PID 或不在闭包中的全机行；
+root 启动时间前 5 秒的行也会被排除，避免 PID 复用污染。旧版 CSV 若没有时区，按 guest
+本地时区转换为 UTC；若 root `process.start` 能作为锚点，则对整条 trace 应用可审计的
+`timestampClockOffsetSeconds` 校正。ETW stop 使用独立的有界清理命令，即使 probe 超时也
+不会把 `NT Kernel Logger` 留在 guest 中继续制造噪声。
 
 主要 JSON 和证据输出写到 `--out` 下：
 
@@ -95,7 +104,8 @@ PCAPNG。缺少工具或权限不足会记录为非致命 `packet_capture.*` 事
   `--network-capture` 且转换成功时，由 Windows `pktmon` 生成的可选抓包。
 - `etw-traces/*.etl` - 显式传入 `--etw-live`、`--etw` 或 `--kernel-etw` 且
   `logman` 会话停止并通过完整性校验时保存的 Kernel ETW 原始追踪。
-- `etw-traces/*.xml` - 使用 Windows `tracerpt.exe` 从同一 ETL 真实解码的 XML；其
+- `etw-traces/*.xml` 或 `etw-traces/*.csv` - 使用 Windows `tracerpt.exe` 从同一 ETL 真实解码的
+  XML，必要时回退到 CSV；其
   `RenderingInfo` 与 `EventData` 被转换为 `process.start/exit`、`thread.*`、`image.load`、
   `file.etw.io`、`registry.etw` 和未分类 `etw.kernel.event` 行。
 - `artifacts/dropped-files/**` - 显式传入 `--collect-dropped-files` 或
