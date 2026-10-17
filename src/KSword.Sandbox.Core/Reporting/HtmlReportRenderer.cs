@@ -871,11 +871,15 @@ html[lang="en"] .localized-evidence-field{display:none}
             {
                 var row = rows[rowIndex];
                 var evt = row.Event;
-                var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
                 var target = ExtractReadableEventTarget(evt);
                 var search = string.Join(" ", evt.EventType, evt.Source, evt.ProcessName, evt.Path, target, row.Family, row.Stage, row.Severity);
-                var plain = EventToBoundedPlainText(evt, maxDataPairs: 24, maxValueLength: 220);
                 var overflow = rowIndex >= inlineRows;
+                var relatedArtifacts = overflow
+                    ? Array.Empty<ArtifactDescriptor>()
+                    : FindRelatedArtifacts(evt, artifactLookup, artifacts);
+                var plain = overflow
+                    ? string.Empty
+                    : EventToBoundedPlainText(evt, maxDataPairs: 24, maxValueLength: 220);
                 html.AppendLine($"<tr class=\"event-explorer-row\" data-event-row data-event-overflow=\"{(overflow ? "true" : "false")}\" data-type=\"{A(evt.EventType)}\" data-source=\"{A(evt.Source)}\" data-family=\"{A(row.Family)}\" data-stage=\"{A(row.Stage)}\" data-severity=\"{A(row.Severity)}\" data-sample=\"{(row.SampleBehavior ? "true" : "false")}\" data-search=\"{A(search)}\">");
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
                 html.AppendLine($"<td><code>{E(evt.EventType)}</code></td><td>{E(string.IsNullOrWhiteSpace(evt.Source) ? "unknown" : evt.Source)}</td><td><span class=\"chip chip-info\">{E(row.Stage)}</span></td><td><span class=\"chip chip-{E(NormalizeSeverity(row.Severity))}\">{E(row.Severity)}</span></td><td>{(row.SampleBehavior ? "<span class=\"chip chip-medium\">Yes</span>" : "<span class=\"chip chip-info\">No</span>")}</td>");
