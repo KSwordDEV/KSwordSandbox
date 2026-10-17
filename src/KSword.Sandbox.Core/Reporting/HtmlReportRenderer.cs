@@ -979,7 +979,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static string EventExplorerDisposition(SandboxEvent evt)
     {
-        if (IsCollectionDiagnosticFailure(evt) || IsCollectionHealthEvent(evt))
+        if (IsReportCollectionDiagnosticEvent(evt) || IsCollectionHealthEvent(evt))
         {
             return "diagnostic";
         }
@@ -1012,7 +1012,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static bool IsEventExplorerPriority(SandboxEvent evt) =>
         (TextEqualsAny(evt.EventType, "process.exit") && !string.Equals(EventExplorerDisposition(evt), "unattributed", StringComparison.OrdinalIgnoreCase)) ||
-        IsCollectionDiagnosticFailure(evt) ||
+        IsReportCollectionDiagnosticEvent(evt) ||
         IsOperationalFailureEvent(evt) ||
         IsNonZeroSampleExitEvent(evt);
 
@@ -1022,7 +1022,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         IReadOnlyCollection<SandboxEvent> explorerEvents)
     {
         var health = report.CollectionHealth;
-        var diagnosticRows = explorerEvents.Count(IsCollectionDiagnosticFailure);
+        var diagnosticRows = explorerEvents.Count(IsReportCollectionDiagnosticEvent);
         var healthAlert = health.FailureRows > 0 ||
             health.LossRows > 0 ||
             health.DriverLostCount > 0 ||
@@ -1063,7 +1063,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         var eventType = evt.EventType ?? string.Empty;
         if (eventType.StartsWith("static.", StringComparison.OrdinalIgnoreCase)) return "static";
-        if (IsCollectionDiagnosticFailure(evt)) return "collection";
+        if (IsReportCollectionDiagnosticEvent(evt)) return "collection";
         if (IsFailureEvent(evt)) return "failure";
         if (IsCollectionHealthEvent(evt) || IsR0CollectionHealthEvent(evt)) return "collection";
         if (eventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase)) return "execution";
@@ -1082,7 +1082,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             .OrderBy(SeverityRank)
             .FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(matching)) return matching;
-        if (IsCollectionDiagnosticFailure(evt)) return "info";
+        if (IsReportCollectionDiagnosticEvent(evt)) return "info";
         if (IsNonZeroSampleExitEvent(evt)) return "info";
         if (IsOperationalFailureEvent(evt)) return "high";
         if (IsSampleBehaviorEvent(evt)) return "medium";
@@ -8106,7 +8106,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static bool IsEventExplorerEvent(SandboxEvent evt)
     {
-        if (IsCollectionDiagnosticFailure(evt))
+        if (IsReportCollectionDiagnosticEvent(evt))
         {
             return true;
         }
@@ -8149,6 +8149,10 @@ html[lang="en"] .localized-evidence-field{display:none}
             type.StartsWith("security_eventlog.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("etw_security.", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsReportCollectionDiagnosticEvent(SandboxEvent evt) =>
+        IsCollectionDiagnosticFailure(evt) ||
+        IsWmiInventoryProbeFailureEvent(evt);
 
     private static bool IsDynamicProcessActionEvent(SandboxEvent evt)
     {
@@ -10151,7 +10155,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         var normalized = key.ToLowerInvariant();
         return normalized is not ("zhmessage" or "zhhint" or "capturestate" or "collectionhealth") ||
-            IsCollectionDiagnosticFailure(evt);
+            IsReportCollectionDiagnosticEvent(evt);
     }
 
     /// <summary>
@@ -10219,7 +10223,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static bool ShouldOmitEventField(SandboxEvent evt, string key)
     {
-        if (IsCollectionDiagnosticFailure(evt))
+        if (IsReportCollectionDiagnosticEvent(evt))
         {
             return false;
         }

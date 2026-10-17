@@ -113,6 +113,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "IsEventExplorerPriority", "Event explorer should promote process exits and collection gaps into the visible evidence rows.");
         RequireContains(rendererSource, "ProcessExitCodeRaw", "Process exit evidence should retain exit codes from normalized and ETW payload fields.");
         RequireContains(rendererSource, "AppendCollectionCoverageBanner", "Event explorer should keep collection gaps visible beside dynamic evidence.");
+        RequireContains(rendererSource, "IsReportCollectionDiagnosticEvent", "Collection helper failures such as WMI probes should remain visible as diagnostics.");
         RequireContains(rendererSource, "!string.Equals(row.Disposition, \"unattributed\"", "Event explorer should keep unattributed observations out of the default signal table while retaining filter access.");
         RequireContains(rendererSource, "artifactevidencematrix", "Report renderer should keep internal artifact matrix fields out of event detail cards.");
         RequireContains(rendererSource, "collectionFailureRows", "Report focus should include collection-health failure rows in the runtime boundary.");
@@ -1016,7 +1017,18 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                 ["reason"] = "contract timeout evidence"
             }
         };
-        var events = new List<SandboxEvent> { launcherEvent, processEvent, childProcessEvent, processExitEvent, fileEvent, registryEvent, networkEvent, unattributedNetworkEvent, r0Event, r0NetworkStatusEvent, r0DiagnosticEvent, staticResourceEvent, vtEvent, failureEvent };
+        var wmiFailureEvent = new SandboxEvent
+        {
+            EventType = "startup_item.wmi.capture_failed",
+            Timestamp = timestamp.AddSeconds(5.5),
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = "after-run",
+                ["reason"] = "probe unavailable"
+            }
+        };
+        var events = new List<SandboxEvent> { launcherEvent, processEvent, childProcessEvent, processExitEvent, fileEvent, registryEvent, networkEvent, unattributedNetworkEvent, r0Event, r0NetworkStatusEvent, r0DiagnosticEvent, staticResourceEvent, vtEvent, failureEvent, wmiFailureEvent };
         for (var index = 0; index < 205; index++)
         {
             events.Add(new SandboxEvent
