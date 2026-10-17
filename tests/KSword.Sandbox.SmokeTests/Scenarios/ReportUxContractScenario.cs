@@ -313,6 +313,36 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
     }
 
     /// <summary>
+    /// Removes collapsed native details from rendered HTML so the smoke
+    /// contract can inspect the default-visible report text. Inputs are HTML;
+    /// processing repeatedly removes innermost details blocks; return is the
+    /// resulting collapsed text projection.
+    /// </summary>
+    private static string RemoveCollapsedDetails(string html)
+    {
+        var collapsed = html;
+        var pattern = new Regex("<details\\b[^>]*>(?:(?!<details\\b).)*?</details>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+        string next;
+        do
+        {
+            next = pattern.Replace(collapsed, string.Empty);
+            if (string.Equals(next, collapsed, StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            collapsed = next;
+        }
+        while (true);
+
+        return Regex.Replace(
+            collapsed,
+            "\\s+[A-Za-z_:][-A-Za-z0-9_:.]*=\"[^\"]*\"",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+    }
+
+    /// <summary>
     /// Requires one fragment to appear before another. Inputs are rendered HTML
     /// and two stable fragments; processing compares ordinal positions; return
     /// value is none.
@@ -362,7 +392,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Clean baseline", "Rendered report covers should identify the effective clean baseline.");
         RequireContains(englishHtml, "per-job-overlay", "Rendered report covers should show QEMU overlay baseline semantics.");
         RequireContains(englishHtml, "QEMU base disk", "Rendered QEMU report covers should identify the effective base disk.");
-        RequireContains(englishHtml, @"D:\VMs\contract.qcow2", "Rendered QEMU report covers should show the persisted base-disk path.");
+        RequireContains(englishHtml, "contract.qcow2", "Rendered QEMU report should retain the base-disk file name in collapsed technical evidence.");
         RequireContains(englishHtml, "QEMU disk format", "Rendered QEMU report covers should identify the base-disk format.");
         RequireContains(englishHtml, "qcow2", "Rendered QEMU report covers should show the persisted base-disk format.");
         RequireContains(chineseHtml, "目标虚拟机", "Chinese report covers should localize the provider VM label.");
@@ -433,7 +463,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "No raw source artifacts were indexed; report.json remains the sampled normalized report view, not proof that no additional raw telemetry existed.", "Rendered raw source hints should explain missing raw artifacts without overstating report.json completeness.");
         RequireContains(englishHtml, "class=\"artifact-btn artifact-open\" href=\"artifacts/contract-drop.bin\"", "Rendered artifact links should expose a safe Open button.");
         RequireContains(englishHtml, "class=\"artifact-btn download\" href=\"artifacts/contract-drop.bin\" download=\"contract-drop.bin\"", "Rendered artifact links should expose a safe Download button.");
-        RequireContains(englishHtml, "Host/local path (copy only)", "Rendered artifact full paths should be copy-only text evidence.");
+        RequireContains(englishHtml, "Host/local path hidden by default", "Rendered artifact full paths should be collapsed technical evidence.");
         RequireNotContains(englishHtml, "href=\"D:\\", "Rendered HTML must not expose local absolute Windows paths as href values.");
         RequireNotContains(englishHtml, "href=\"C:\\", "Rendered HTML must not expose guest/local absolute Windows paths as href values.");
         RequireNotContains(englishHtml, "file://", "Rendered HTML must not expose file:// artifact hrefs.");
@@ -546,6 +576,16 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "网络与 PCAP 证据", "Chinese HTML should localize network/PCAP story evidence.");
         RequireContains(chineseHtml, "原始证据高度限制", "Chinese HTML should localize raw evidence height guidance.");
         RequireContains(chineseHtml, "默认 report.html 使用简体中文", "Chinese HTML should localize the bilingual default-report hint.");
+
+        var collapsedVisibleEnglish = RemoveCollapsedDetails(englishHtml);
+        var collapsedVisibleChinese = RemoveCollapsedDetails(chineseHtml);
+        foreach (var sensitivePath in new[] { @"D:\VMs\contract.qcow2", @"D:\Jobs\11111111222233334444555555555555", @"C:\Samples\contract-sample.exe", @"C:\KSwordSandbox\out" })
+        {
+            RequireNotContains(collapsedVisibleEnglish, sensitivePath, $"Collapsed English report must not expose host path {sensitivePath}.");
+            RequireNotContains(collapsedVisibleChinese, sensitivePath, $"Collapsed Chinese report must not expose host path {sensitivePath}.");
+        }
+        RequireContains(chineseHtml, "技术路径默认隐藏", "Chinese report should label collapsed host paths in pure Chinese.");
+        RequireContains(chineseHtml, "主机/本地路径默认隐藏", "Chinese artifact rows should collapse host paths behind a Chinese summary.");
         RequireContains(chineseHtml, "报告导航", "Chinese HTML should localize the left report navigation label.");
         RequireContains(chineseHtml, ">章节<", "Chinese HTML should localize the mobile sections toggle.");
         RequireContains(chineseHtml, "overflow:auto", "Chinese localization must preserve valid overflow CSS declarations.");

@@ -5670,21 +5670,10 @@ html[lang="en"] .localized-evidence-field{display:none}
     /// </summary>
     private static string ResolveReportJsonHint(AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        foreach (var artifact in artifacts)
-        {
-            if (string.IsNullOrWhiteSpace(artifact.FullPath))
-            {
-                continue;
-            }
-
-            var reportRoot = TryResolveReportRoot(report.JobId, artifact.FullPath);
-            if (!string.IsNullOrWhiteSpace(reportRoot))
-            {
-                return Path.Combine(reportRoot, "report.json");
-            }
-        }
-
-        return $"same directory as report.html/report.en.html/report.zh.html; job folder {report.JobId:N}";
+        // The report root is useful for resolving safe links internally, but
+        // must never be rendered as an absolute host path. Keep this hint
+        // stable and report-relative regardless of the storage location.
+        return $"same report folder; job folder {report.JobId:N}; report.json";
     }
 
     /// <summary>
@@ -5696,13 +5685,9 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         var parts = new List<string>
         {
-            $"{artifact.Kind} / {artifact.Category}"
+            $"{artifact.Kind} / {artifact.Category}",
+            "host path hidden by default"
         };
-
-        if (!string.IsNullOrWhiteSpace(artifact.FullPath))
-        {
-            parts.Add(artifact.FullPath);
-        }
 
         if (!string.IsNullOrWhiteSpace(artifact.SafeLink) &&
             !string.Equals(artifact.SafeLink, artifact.RelativePath, StringComparison.OrdinalIgnoreCase))
@@ -5979,9 +5964,10 @@ html[lang="en"] .localized-evidence-field{display:none}
     private static string RenderProcessTreeNodeContent(SandboxEvent evt, string label, string badges, ProcessTreeActivity activity)
     {
         var image = FirstNonEmpty(evt.Path, evt.CommandLine);
+        var displayImage = string.IsNullOrWhiteSpace(image) ? string.Empty : DisplayEventTarget(evt, image);
         var imageHint = string.IsNullOrWhiteSpace(image)
             ? string.Empty
-            : $"<span class=\"process-tree-path\" title=\"{A(image)}\">image {E(AbbreviateEvidenceValue(image, 96))}</span>";
+            : $"<span class=\"process-tree-path\" title=\"{A(displayImage)}\">image {E(AbbreviateEvidenceValue(displayImage, 96))}</span>";
         return $"<span class=\"process-tree-line\"><code class=\"process-tree-label\">{E(label)}</code>{badges}{ProcessTreeSparkline(activity)}{imageHint}</span>";
     }
 
@@ -6152,7 +6138,8 @@ html[lang="en"] .localized-evidence-field{display:none}
                 var networkCount = events.Count(IsNetworkEvent);
                 var label = ResolveProcessLabel(first, processLabels);
                 var parentLabel = ResolveParentProcessLabel(first, processLabels);
-                var path = events.Select(evt => evt.Path).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+                var pathEvent = events.FirstOrDefault(evt => !string.IsNullOrWhiteSpace(evt.Path));
+                var path = pathEvent is null ? string.Empty : DisplayEventTarget(pathEvent, pathEvent.Path);
                 var commandLine = events.Select(evt => evt.CommandLine).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
                 var evidenceLines = events.Take(12).Select(EventOneLine).ToList();
                 var relatedArtifacts = FindProcessRelatedArtifacts(events, artifactLookup, artifacts);
@@ -6988,7 +6975,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     private static string EventOneLine(SandboxEvent evt)
     {
         var location = ExtractReadableEventTarget(evt);
-        return $"{evt.Timestamp:u} | {evt.EventType} | {ProcessDisplayName(evt)} | {location}";
+        return $"{evt.Timestamp:u} | {evt.EventType} | {ProcessDisplayName(evt)} | {DisplayEventTarget(evt, location)}";
     }
 
     /// <summary>
@@ -7029,6 +7016,55 @@ html[lang="en"] .localized-evidence-field{display:none}
             ? $"<span class=\"ui-status-value\">{E(value)}</span>"
             : E(value);
         html.AppendLine($"<tr><th>{E(label)}</th><td class=\"copyable\" data-copy=\"{A(value)}\">{renderedValue}</td></tr>");
+    }
+
+    /// <summary>
+    /// Appends a host-sensitive path as collapsed technical evidence. Inputs
+    /// are a user-facing label and absolute path; processing keeps the full
+    /// value copyable while exposing only a safe file-name hint by default.
+    /// </summary>
+    private static void AppendTechnicalPathRow(StringBuilder html, string label, string value)
+    {
+        var hint = SafePathLeaf(value);
+        var summary = string.IsNullOrWhiteSpace(hint)
+            ? "Technical path hidden by default"
+            : $"Technical path hidden by default ({hint})";
+        var disclosure = RenderTechnicalDisclosure(summary, value);
+        html.AppendLine($"<tr><th>{E(label)}</th><td>{disclosure}</td></tr>");
+    }
+
+    /// <summary>
+    /// Renders one collapsed technical value. Inputs are an operator-facing
+    /// summary and raw value; processing preserves copy support without placing
+    /// the raw value in the default visible report flow.
+    /// </summary>
+    private static string RenderTechnicalDisclosure(string summary, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return $"<details class=\"technical-metadata\"><summary>{E(summary)}</summary><code class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</code></details>";
+    }
+
+    private static string SafePathLeaf(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var normalized = value.Replace('\\', '/');
+            var leaf = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+            return string.IsNullOrWhiteSpace(leaf) ? string.Empty : leaf;
+        }
+        catch (ArgumentException)
+        {
+            return string.Empty;
+        }
     }
 
     /// <summary>
@@ -7122,7 +7158,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 return new ProcessGraphNode(
                     label,
                     detail,
-                    string.Join(Environment.NewLine, [$"process={label}", $"processKey={ProcessIdentityKey(first)}", detail, $"path={first.Path ?? "-"}", $"commandLine={first.CommandLine ?? "-"}"]));
+                    string.Join(Environment.NewLine, [$"process={label}", $"processKey={ProcessIdentityKey(first)}", detail, $"path={DisplayEventTarget(first, first.Path)}", $"commandLine={first.CommandLine ?? "-"}"]));
             })
             .OrderBy(node => node.Label, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -7173,12 +7209,12 @@ html[lang="en"] .localized-evidence-field{display:none}
 
             if (IsFileEvent(evt) && !string.IsNullOrWhiteSpace(evt.Path))
             {
-                edges.Add(new BehaviorGraphEdge(from, "file", evt.Path!, EventToPlainText(evt), relatedArtifacts));
+                edges.Add(new BehaviorGraphEdge(from, "file", DisplayEventTarget(evt, evt.Path), EventToPlainText(evt), relatedArtifacts));
             }
 
             if (IsRegistryEvent(evt) && !string.IsNullOrWhiteSpace(evt.Path))
             {
-                edges.Add(new BehaviorGraphEdge(from, "registry", evt.Path!, EventToPlainText(evt), relatedArtifacts));
+                edges.Add(new BehaviorGraphEdge(from, "registry", DisplayEventTarget(evt, evt.Path), EventToPlainText(evt), relatedArtifacts));
             }
 
             var networkTarget = ExtractNetworkTarget(evt);
@@ -7213,7 +7249,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         return report.Events
             .Where(IsSampleBehaviorFileEvent)
-            .Select(evt => evt.Path)
+            .Select(evt => DisplayEventTarget(evt, evt.Path))
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Cast<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -7228,7 +7264,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         return report.Events
             .Where(IsSampleBehaviorRegistryEvent)
-            .Select(evt => evt.Path)
+            .Select(evt => DisplayEventTarget(evt, evt.Path))
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Cast<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -9768,9 +9804,47 @@ html[lang="en"] .localized-evidence-field{display:none}
             return "-";
         }
 
-        return IsCollectorTechnicalTarget(evt, target)
-            ? "Collector evidence (path folded)"
-            : target;
+        if (IsCollectorTechnicalTarget(evt, target))
+        {
+            return "Collector evidence (path folded)";
+        }
+
+        if (IsHostTechnicalPath(evt, target))
+        {
+            var leaf = SafePathLeaf(target);
+            return string.IsNullOrWhiteSpace(leaf)
+                ? "Host path hidden"
+                : $"Host path hidden ({leaf})";
+        }
+
+        return target;
+    }
+
+    private static bool IsHostTechnicalPath(SandboxEvent evt, string target)
+    {
+        if (!IsAbsolutePath(target))
+        {
+            return false;
+        }
+
+        var normalized = target.Replace('/', '\\');
+        var source = evt.Source ?? string.Empty;
+        if (TextEqualsAny(source, "host", "static", "static-analysis"))
+        {
+            return true;
+        }
+
+        return normalized.Contains("\\KSwordSandbox\\", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("\\jobs\\", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("\\malware-sample\\", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("\\dynamic-vmware-inputs\\", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("\\VMs\\", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith(".vmx", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAbsolutePath(string value)
+    {
+        return Regex.IsMatch(value, "^(?:[A-Za-z]:[\\\\/]|\\\\\\\\|/)", RegexOptions.CultureInvariant);
     }
 
     private static bool IsCollectorTechnicalTarget(SandboxEvent evt, string target)
@@ -9793,7 +9867,6 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         return key.Equals("exitCode", StringComparison.OrdinalIgnoreCase) ||
             key.Equals("processId", StringComparison.OrdinalIgnoreCase) ||
-            key.Equals("parentProcessId", StringComparison.OrdinalIgnoreCase) ||
             key.Equals("imagePath", StringComparison.OrdinalIgnoreCase) ||
             key.Equals("samplePath", StringComparison.OrdinalIgnoreCase) ||
             key.Equals("phase", StringComparison.OrdinalIgnoreCase) ||
@@ -9839,8 +9912,16 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Replace("-", string.Empty, StringComparison.Ordinal)
             .Replace(".", string.Empty, StringComparison.Ordinal)
             .ToLowerInvariant();
+        // These collector fields are retained as folded technical evidence so
+        // an analyst can expand them when needed, but they must not appear in
+        // compact event cards or their summaries.
+        if (normalized.StartsWith("metadata", StringComparison.Ordinal) ||
+            normalized is "actorprocessid" or "collectorabiversion" or "producer" or "schema" or "sequence" or "stress")
+        {
+            return false;
+        }
+
         if (normalized is "omitteddatapairs" or "omittedfields" ||
-            normalized.StartsWith("metadata", StringComparison.Ordinal) ||
             normalized.StartsWith("runtime", StringComparison.Ordinal) ||
             normalized.Contains("samplecorrelation", StringComparison.Ordinal) ||
             normalized.Contains("samplebehaviorcandidate", StringComparison.Ordinal) ||
@@ -10974,7 +11055,11 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Command line", "命令行"),
         ("Encoded command", "编码命令"),
         ("Technical evidence", "技术证据"),
+        ("Technical path hidden by default", "技术路径默认隐藏"),
+        ("Host/local path hidden by default", "主机/本地路径默认隐藏"),
         ("Collector evidence (path folded)", "采集器证据（路径已折叠）"),
+        ("Host path hidden", "主机路径已隐藏"),
+        ("Host path hidden (", "主机路径已隐藏（"),
         // Keep replacements scoped to visible suffixes: replacing bare
         // `chars` would corrupt the `<meta charset>` attribute (`字符et`).
         ("chars)", "字符)"),
@@ -12554,13 +12639,15 @@ html[lang="en"] .localized-evidence-field{display:none}
             return string.Empty;
         }
 
+        var displayLabel = DisplayEventTarget(evt, label);
+
         var link = relatedArtifacts.FirstOrDefault(artifact => !string.IsNullOrWhiteSpace(ArtifactHref(artifact)));
         if (link is null)
         {
-            return E(label);
+            return E(displayLabel);
         }
 
-        return $"{E(label)} {RenderArtifactActionButtons(link, inline: true)}";
+        return $"{E(displayLabel)} {RenderArtifactActionButtons(link, inline: true)}";
     }
 
     /// <summary>
@@ -13253,9 +13340,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static string RenderArtifactLocation(ArtifactDescriptor artifact)
     {
-        var displayPath = !string.IsNullOrWhiteSpace(artifact.RelativePath)
-            ? artifact.RelativePath
-            : ArtifactDisplayName(artifact);
+        var displayPath = ArtifactDisplayName(artifact);
         var html = new StringBuilder();
         html.Append("<div class=\"artifact-location\">");
         html.Append($"<code class=\"copyable\" data-copy=\"{A(displayPath)}\">{E(string.IsNullOrWhiteSpace(displayPath) ? "-" : displayPath)}</code>");
@@ -13263,7 +13348,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         if (!string.IsNullOrWhiteSpace(artifact.FullPath))
         {
-            html.Append($"<div class=\"artifact-copy-path\"><span class=\"muted\">Host/local path (copy only)</span><br><code class=\"copyable\" data-copy=\"{A(artifact.FullPath)}\">{E(artifact.FullPath)}</code></div>");
+            html.Append(RenderTechnicalDisclosure("Host/local path hidden by default", artifact.FullPath));
         }
 
         html.Append("</div>");
@@ -13338,7 +13423,10 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         if (!string.IsNullOrWhiteSpace(artifact.RelativePath))
         {
-            return artifact.RelativePath;
+            // Keep the operator-facing label short and report-local. The full
+            // relative selector remains available on the safe Open/Download
+            // action and inside the collapsed evidence block.
+            return SafePathLeaf(artifact.RelativePath);
         }
 
         if (!string.IsNullOrWhiteSpace(artifact.Name))
