@@ -1217,13 +1217,7 @@ public sealed class HyperVRunbookBuilder
     private static string BuildGuestCredentialPreamble(SandboxConfig config)
     {
         var secretName = config.Guest.PasswordSecretName;
-        var guestUserName = config.Guest.UserName.Trim();
-        if (!guestUserName.Contains('\\', StringComparison.Ordinal) &&
-            !guestUserName.Contains('@', StringComparison.Ordinal) &&
-            !guestUserName.StartsWith(".\\", StringComparison.Ordinal))
-        {
-            guestUserName = ".\\" + guestUserName;
-        }
+        var guestUserName = NormalizeGuestUserName(config.Guest.UserName);
 
         return string.Join(" ", new[]
         {
@@ -1238,6 +1232,26 @@ public sealed class HyperVRunbookBuilder
             $"$guestCredential = [pscredential]::new({Q(guestUserName)}, $guestPassword);",
             "$guestPasswordText = $null; $guestPasswordChar = $null;"
         });
+    }
+
+    /// <summary>
+    /// Normalizes a guest account name for both remoting credentials and
+    /// Scheduled Task principals. Inputs are the configured account name;
+    /// processing qualifies a bare local account as <c>.\User</c> while
+    /// preserving domain, UPN, and already-qualified names; the value is
+    /// returned for use in every guest launch path.
+    /// </summary>
+    private static string NormalizeGuestUserName(string userName)
+    {
+        var normalized = userName.Trim();
+        if (!normalized.Contains('\\', StringComparison.Ordinal) &&
+            !normalized.Contains('@', StringComparison.Ordinal) &&
+            !normalized.StartsWith(".\\", StringComparison.Ordinal))
+        {
+            normalized = ".\\" + normalized;
+        }
+
+        return normalized;
     }
 
     /// <summary>
@@ -1794,7 +1808,7 @@ public sealed class HyperVRunbookBuilder
             "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw \"S4U fallback did not create pid marker: $pidPath\" };",
             "Write-Host \"Guest Agent S4U fallback started; live sync will wait for agent.exit.\";",
             "} ",
-            $"}} -ArgumentList {Q(agentTaskName)}, {Q(config.Guest.UserName)}, {Q(guestRoot)}, {Q(agentPidPath)}, {Q(encodedCommand)} -ErrorAction Stop;",
+            $"}} -ArgumentList {Q(agentTaskName)}, {Q(NormalizeGuestUserName(config.Guest.UserName))}, {Q(guestRoot)}, {Q(agentPidPath)}, {Q(encodedCommand)} -ErrorAction Stop;",
             "}",
             "finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
         });
