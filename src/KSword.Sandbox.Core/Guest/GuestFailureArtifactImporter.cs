@@ -38,6 +38,15 @@ public static class GuestFailureArtifactImporter
         var parsedExit = TryParseExit(exitText, out var exitCode);
         var stderr = ReadText(stderrPath);
         var missing = status?.MissingArtifacts ?? [];
+        var hasAgentMarker = statusPath is not null || stderrPath is not null || exitPath is not null || summaryPath is not null;
+        // Offline fixtures and older externally-produced events.json files do
+        // not necessarily carry the Agent marker set. Do not invent a missing
+        // summary failure for those already-complete event streams.
+        if (!hasAgentMarker)
+        {
+            return rows;
+        }
+
         if (missing.Count == 0)
         {
             if (eventsPath is null) missing.Add("events.json");
