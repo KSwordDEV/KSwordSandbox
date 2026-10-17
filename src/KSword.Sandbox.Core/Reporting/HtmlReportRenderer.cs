@@ -792,9 +792,12 @@ html[lang="en"] .localized-evidence-field{display:none}
         var threadReport = ReportMetric(report, "events.thread.report");
         var moduleRaw = ReportMetric(report, "events.module.raw");
         var moduleReport = ReportMetric(report, "events.module.report");
+        var securityRaw = ReportMetric(report, "events.security.raw");
+        var securityReport = ReportMetric(report, "events.security.report");
         Metric(html, "Process events (raw/report)", $"{processRaw}/{processReport}", processRaw > processReport ? "risk-medium" : "risk-info");
         Metric(html, "Thread events (raw/report)", $"{threadRaw}/{threadReport}", threadRaw > threadReport ? "risk-medium" : "risk-info");
         Metric(html, "Module events (raw/report)", $"{moduleRaw}/{moduleReport}", moduleRaw > moduleReport ? "risk-medium" : "risk-info");
+        Metric(html, "Security events (raw/report)", $"{securityRaw}/{securityReport}", securityRaw > securityReport ? "risk-medium" : "risk-info");
         var r0DriverRaw = ReportMetric(report, "events.r0.driver.raw");
         var r0DriverReport = ReportMetric(report, "events.r0.driver.report");
         var r0DriverOmitted = ReportMetric(report, "events.r0.driver.omitted");
@@ -11398,6 +11401,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Process events (raw/report)", "进程事件（原始/报告）"),
         ("Thread events (raw/report)", "线程事件（原始/报告）"),
         ("Module events (raw/report)", "模块事件（原始/报告）"),
+        ("Security events (raw/report)", "安全事件（原始/报告）"),
         ("Critical / high risk", "严重/高风险"),
         ("VT lookups", "VT 查询"),
         ("Risk summary", "风险摘要"),
