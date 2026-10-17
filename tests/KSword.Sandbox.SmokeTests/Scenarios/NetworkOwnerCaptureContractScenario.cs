@@ -29,6 +29,9 @@ internal sealed class NetworkOwnerCaptureContractScenario : ISmokeTestScenario
         RequireContains(source, "TcpTableOwnerPidAll", "TCP capture must request owner-PID rows rather than a PID-less table.");
         RequireContains(source, "getextendedtcptable-owner-pid", "TCP rows must record the source of an attributed owner PID.");
         RequireContains(source, "OwningProcessId", "TCP snapshots must retain the owner PID across an edge and its closed event.");
+        RequireContains(source, "BuildFlowKey", "TCP edge rows must emit the stable directional flow key used by cross-source joins.");
+        RequireContains(source, "ownerPidPresent", "TCP edge rows must disclose whether the source owner PID is present.");
+        RequireContains(source, "pcapCorrelationKey", "TCP edge rows must expose the flow key as a PCAP join candidate.");
         RequireContains(source, "unavailable-managed-api", "The managed fallback must make missing ownership explicit.");
         RequireContains(source, "unavailable-pid-zero", "PID zero must remain un-attributed.");
         RequireContains(source, "TryCaptureWindowsOwnerTableV6", "TCP owner capture must cover IPv6 rows as well as IPv4.");
