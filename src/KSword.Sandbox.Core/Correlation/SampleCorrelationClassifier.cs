@@ -158,6 +158,7 @@ public static class SampleCorrelationClassifier
         @"\windows\winsxs\",
         @"\windows\servicing\",
         @"\windows\systemresources\",
+        @"\windows\prefetch\",
         @"\program files\windows defender\",
         @"\programdata\microsoft\windows defender\",
         @"\programdata\microsoft\windows defender advanced threat protection\"
@@ -243,6 +244,17 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Environment(
                 "system32-signed-or-known-discovery-utility-without-high-signal-behavior",
                 "processImagePath/commandLine");
+        }
+
+        // A kernel System (PID 4) write to a Windows cache such as Prefetch
+        // can contain the submitted executable name. Check this boundary
+        // before generic path matching so the cache filename cannot promote
+        // an ambient OS side effect to sample behavior.
+        if (IsKernelSystemTargetArtifact(evt, data))
+        {
+            return CorrelationDisposition.Environment(
+                "driver-row-belongs-to-kernel-or-core-system-process-and-system-target",
+                "processId");
         }
 
         if (!HasExistingStrongCorrelation(data) && IsKnownUntaintedServiceHostProcess(evt, data, context))
@@ -1651,6 +1663,26 @@ public static class SampleCorrelationClassifier
 
         return !string.IsNullOrWhiteSpace(sampleFileName) &&
             value.Contains(sampleFileName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsKernelSystemTargetArtifact(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data)
+    {
+        if (!IsDriverEvidence(evt) || EventProcessId(evt, data) is not (0 or 4))
+        {
+            return false;
+        }
+
+        var targetPath = FirstNonEmpty(
+            evt.Path,
+            Value(data, "path"),
+            Value(data, "filePath"),
+            Value(data, "imagePath"),
+            Value(data, "keyPath"),
+            Value(data, "objectPath"));
+        return LooksSystemOnlyPath(targetPath) &&
+            !LooksUserWritableOrPersistenceTarget(targetPath);
     }
 
     private static bool IsDriverEvidence(SandboxEvent evt)

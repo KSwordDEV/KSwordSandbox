@@ -27,7 +27,8 @@ internal sealed class ServiceRegistryPersistenceNoiseRegressionScenario : ISmoke
         {
             "service-registry-persistence",
             "driver-registry-service-typed-persistence",
-            "service-imagepath-or-dll-registry-change"
+            "service-imagepath-or-dll-registry-change",
+            "r0-driver-registry-change-signal"
         };
         foreach (var guardedRuleId in guardedRuleIds)
         {
@@ -68,9 +69,11 @@ internal sealed class ServiceRegistryPersistenceNoiseRegressionScenario : ISmoke
                 {
                     ["persistenceCandidate"] = "true",
                     ["servicePersistenceCandidate"] = "true",
+                    ["behaviorCounted"] = "true",
                     ["persistenceFamily"] = "service-configuration",
                     ["path"] = @"HKLM\SYSTEM\CurrentControlSet\Services\SmokeSvc",
                     ["keyPath"] = @"HKLM\SYSTEM\CurrentControlSet\Services\SmokeSvc",
+                    ["operationName"] = "createKey",
                     ["registryOperationName"] = "createKey"
                 }
             },
@@ -84,8 +87,10 @@ internal sealed class ServiceRegistryPersistenceNoiseRegressionScenario : ISmoke
                 {
                     ["persistenceCandidate"] = "true",
                     ["servicePersistenceCandidate"] = "true",
+                    ["behaviorCounted"] = "true",
                     ["persistenceFamily"] = "service-configuration",
                     ["valueName"] = "ServiceDll",
+                    ["operationName"] = "setValue",
                     ["registryOperationName"] = "setValue"
                 }
             }

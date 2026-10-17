@@ -58,6 +58,32 @@ internal sealed class SystemNativeDiscoveryVerdictRegressionScenario : ISmokeTes
             string.Equals(classifiedHostname.Data.GetValueOrDefault("sampleCorrelationReason"), "system32-signed-or-known-discovery-utility-without-high-signal-behavior", StringComparison.OrdinalIgnoreCase),
             "System32 discovery suppression should expose a stable reason in raw evidence.");
 
+        var prefetch = new SandboxEvent
+        {
+            EventType = "driver.file",
+            Timestamp = timestamp.AddMilliseconds(200),
+            Source = "driver",
+            ProcessName = "System",
+            ProcessId = 4,
+            Path = @"\Windows\Prefetch\HOSTNAME.EXE-12345678.pf",
+            Data =
+            {
+                ["operationName"] = "write",
+                ["processId"] = "4",
+                ["path"] = @"\Windows\Prefetch\HOSTNAME.EXE-12345678.pf",
+                ["sampleBehaviorCandidate"] = "true",
+                ["behaviorCounted"] = "true"
+            }
+        };
+        var classifiedPrefetch = SampleCorrelationClassifier.Apply([sample, hostname, prefetch], sample.Path)
+            .Single(evt => evt.EventType.Equals("driver.file", StringComparison.OrdinalIgnoreCase));
+        SmokeAssert.True(
+            string.Equals(classifiedPrefetch.Data.GetValueOrDefault("sampleCorrelation"), "environment", StringComparison.OrdinalIgnoreCase),
+            "PID 4 Prefetch writes for a native discovery utility should remain environment evidence.");
+        SmokeAssert.True(
+            string.Equals(classifiedPrefetch.Data.GetValueOrDefault("behaviorCounted"), "false", StringComparison.OrdinalIgnoreCase),
+            "PID 4 Prefetch writes for a native discovery utility must not count as sample behavior.");
+
         var rules = RuleEngine.LoadRuleSet(Path.Combine(context.RulesDirectory, "behavior-rules.json"));
         var findings = new RuleEngine(rules).Classify(classified);
         SmokeAssert.True(

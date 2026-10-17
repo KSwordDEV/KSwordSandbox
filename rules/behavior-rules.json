@@ -2802,6 +2802,14 @@
           "true"
         ]
       },
+      "allDataContains": {
+        "persistenceCandidate": [
+          "true"
+        ],
+        "servicePersistenceCandidate": [
+          "true"
+        ]
+      },
       "excludeDataContains": {
         "keyPath": [
           "\\CTLs\\",
