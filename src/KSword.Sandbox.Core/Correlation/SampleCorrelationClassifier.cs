@@ -673,7 +673,12 @@ public static class SampleCorrelationClassifier
 
         if (LooksUserWritableOrPersistenceTarget(persistenceSurface, context))
         {
-            return CorrelationDisposition.Probable("service-or-task-target-points-to-user-writable-location", "imagePath/taskToRun");
+            if (HasIndependentSampleEvidence(evt, target, context, "mutation"))
+            {
+                return CorrelationDisposition.Probable("service-or-task-target-points-to-user-writable-location-with-cross-source-sample-evidence", "imagePath/taskToRun", "probable-cross-source-mutation-boundary");
+            }
+
+            return CorrelationDisposition.Unknown("service-or-task-target-points-to-user-writable-location-without-cross-source-evidence", "imagePath/taskToRun");
         }
 
         if (IsKnownWindowsServiceChange(data, persistenceSurface) || IsKnownWindowsTaskChange(data, persistenceSurface))

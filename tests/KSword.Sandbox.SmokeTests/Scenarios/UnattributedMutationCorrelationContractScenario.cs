@@ -50,6 +50,7 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
             },
             DriverFile(start.AddSeconds(1), filePath),
             DriverRegistry(start.AddSeconds(1), keyPath),
+            GuestService(start.AddSeconds(1), filePath),
             EtwFile(start.AddSeconds(1), filePath),
             EtwRegistry(start.AddSeconds(1), keyPath),
             new SandboxEvent
@@ -73,10 +74,13 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
         var registry = Require(withCrossSource, "driver.registry", keyPath);
         SmokeAssert.True(registry.Data["sampleCorrelation"] == "probable", "R0 registry mutation should become probable only after an ETW sample-owned key join.");
         SmokeAssert.True(registry.Data["behaviorCounted"] == "true", "Cross-source R0 registry evidence should remain behavior-counted.");
+        var service = Require(withCrossSource, "service.create", filePath);
+        SmokeAssert.True(service.Data["sampleCorrelation"] == "probable", "Ownerless service persistence should require an independent sample-owned mutation join.");
 
         var withoutCrossSource = SampleCorrelationClassifier.Apply(
             events.Where(evt => evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase) ||
                 evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+                evt.EventType.StartsWith("service.", StringComparison.OrdinalIgnoreCase) ||
                 (string.Equals(evt.Source, "etwLive", StringComparison.OrdinalIgnoreCase) && evt.ProcessId == 200)),
             SamplePath);
         var ambientFile = Require(withoutCrossSource, "driver.file", filePath);
@@ -85,6 +89,8 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
         var ambientRegistry = Require(withoutCrossSource, "driver.registry", keyPath);
         SmokeAssert.True(ambientRegistry.Data["sampleCorrelation"] == "unknown", "Ownerless R0 registry mutation must remain unknown without an independent source.");
         SmokeAssert.True(ambientRegistry.Data["behaviorCounted"] == "false", "Ownerless R0 registry mutation must stay out of primary behavior counts.");
+        var ambientService = Require(withoutCrossSource, "service.create", filePath);
+        SmokeAssert.True(ambientService.Data["sampleCorrelation"] == "unknown", "Ownerless service persistence must remain unknown without an independent source.");
 
         SmokeAssert.True(withoutCrossSource.All(evt =>
             !evt.Data.TryGetValue("sampleCorrelation", out var value) ||
@@ -151,6 +157,20 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
             ["captureSource"] = "etwLive",
             ["keyPath"] = path,
             ["operation"] = "set",
+            ["behaviorCounted"] = "true"
+        }
+    };
+
+    private static SandboxEvent GuestService(DateTimeOffset timestamp, string path) => new()
+    {
+        EventType = "service.create",
+        Source = "guest",
+        Timestamp = timestamp,
+        Data = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["imagePath"] = path,
+            ["serviceName"] = "Updater",
+            ["operation"] = "create",
             ["behaviorCounted"] = "true"
         }
     };
