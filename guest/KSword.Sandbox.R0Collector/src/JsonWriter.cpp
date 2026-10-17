@@ -122,6 +122,7 @@ bool EventWriter::WriteLine(const std::string& line) {
     ++failure_.linesAttempted;
     ++failure_.lineNumber;
     failure_.lineBytes = static_cast<unsigned long long>(line.size()) + 1ULL;
+    failure_.bytesAttempted += failure_.lineBytes;
     if (!HasOutputSpace(failure_.lineBytes)) {
         return false;
     }
@@ -132,7 +133,6 @@ bool EventWriter::WriteLine(const std::string& line) {
             return false;
         }
     }
-    failure_.bytesAttempted += failure_.lineBytes;
     errno = 0;
     (*stream_) << line << '\n';
     ++linesSinceFlush_;
