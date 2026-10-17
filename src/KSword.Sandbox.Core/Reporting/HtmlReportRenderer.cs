@@ -507,7 +507,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .event-explorer-details summary{background:#eaf5fb;border:0;border-radius:0;color:#1f5e7b;min-height:0;overflow:hidden;padding:6px 8px;text-overflow:ellipsis;white-space:nowrap}
 .modern-sandbox-report .event-explorer-detail{background:#f7fbfe;border:0;border-radius:0;margin-top:3px;max-height:42vh;min-height:0;min-width:0;overflow:auto;padding:8px 10px;width:100%}
 .modern-sandbox-report .event-explorer-detail pre,.modern-sandbox-report .event-explorer-detail code{font-size:12px;line-height:1.4}
-.modern-sandbox-report .ui-field-label{font-weight:800;color:#24516b}
+.modern-sandbox-report .ui-field-label{font-weight:800;color:#24516b;white-space:nowrap}
 .modern-sandbox-report .event-explorer-detail .event-evidence-fields{max-height:none;overflow:visible}
 .modern-sandbox-report .event-explorer-table td:nth-child(1){width:10.5rem;white-space:nowrap}
 .modern-sandbox-report .event-explorer-table td:nth-child(2){width:9rem}
@@ -518,8 +518,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .event-evidence-fields>summary,.modern-sandbox-report .raw-technical-fields>summary,.modern-sandbox-report .raw-technical-field>summary{line-height:1.25;padding:3px 0;white-space:nowrap}
 .modern-sandbox-report .event-evidence-fields,.modern-sandbox-report .raw-technical-fields,.modern-sandbox-report .raw-technical-field{margin-top:4px;padding-top:2px}
 .modern-sandbox-report .event-evidence-fields .raw-field-list{margin-top:3px}
+.modern-sandbox-report .event-evidence-fields{border-left:0;display:block;padding:0}.modern-sandbox-report .raw-technical-fields{display:grid;gap:3px}.modern-sandbox-report .raw-technical-field{align-items:flex-start;border-left:0;display:flex;gap:5px;margin:0;max-width:100%;padding:0}.modern-sandbox-report .raw-technical-field .ui-field-label{flex:0 0 auto}.modern-sandbox-report .raw-technical-field code{max-height:8rem;overflow:auto;white-space:pre-wrap;word-break:break-word}
 .modern-sandbox-report .copy-hint{display:none}
 .modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn{background:#e6f4fb;border:0;border-radius:0;color:#1e6385;padding:7px 11px}
+.modern-sandbox-report .copy-icon{align-items:center;display:inline-flex;height:28px;justify-content:center;padding:4px;width:28px}.modern-sandbox-report .copy-icon svg{fill:none;height:17px;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8;width:17px}.sr-only{height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;width:1px;clip:rect(0,0,0,0);white-space:nowrap}
 .modern-sandbox-report .badge,.modern-sandbox-report .chip{border:0;border-radius:0}
 .modern-sandbox-report .section-note{display:block}
 .modern-sandbox-report .section-note.failure-note{background:#fff5e5;border-left:0;display:block;margin:10px 0;padding:10px 12px}
@@ -966,7 +968,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 html.AppendLine($"<td><code>{E(evt.EventType)}</code></td><td>{E(string.IsNullOrWhiteSpace(evt.Source) ? "unknown" : evt.Source)}</td><td><span class=\"chip chip-info\">{E(row.Stage)}</span></td><td><span class=\"chip chip-{E(NormalizeSeverity(row.Severity))}\">{E(row.Severity)}</span></td><td><span class=\"chip chip-{E(EventDispositionCss(row.Disposition))}\">{E(row.Disposition)}</span>{(string.IsNullOrWhiteSpace(exitCode) ? string.Empty : $" <code class=\"exit-code\">{E(exitCode)}</code>")}</td>");
                 var detail = overflow
                     ? RenderProcessExitOutcome(evt)
-                    : $"{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyButton("Copy", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>";
+                    : $"{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyIconButton(plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>";
                 html.AppendLine($"<td><details class=\"event-explorer-details\"><summary>{E(evt.ProcessName ?? target ?? "Open evidence")}</summary><div class=\"event-explorer-detail\">{detail}</div></details></td>");
                 html.AppendLine("</tr>");
             }
@@ -1583,7 +1585,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         return
-            $"<span class=\"inline-actions\">{CopyButton("Copy", full)}</span>" +
+            $"<span class=\"inline-actions\">{CopyIconButton(full)}</span>" +
             $"<details class=\"flat-details\"><summary>Evidence</summary><pre class=\"copyable\" data-copy=\"{A(full)}\">{E(compact)}</pre></details>";
     }
 
@@ -9854,6 +9856,11 @@ html[lang="en"] .localized-evidence-field{display:none}
         return $"<button type=\"button\" class=\"copy-btn\" data-copy=\"{A(copyText)}\" data-copy-button=\"true\">{E(label)}</button>";
     }
 
+    private static string CopyIconButton(string copyText)
+    {
+        return $"<button type=\"button\" class=\"copy-btn copy-icon\" data-copy=\"{A(copyText)}\" data-copy-button=\"true\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"8\" y=\"8\" width=\"11\" height=\"11\" rx=\"1\"></rect><path d=\"M5 15V5a2 2 0 0 1 2-2h10\"></path></svg><span class=\"sr-only\">Copy</span></button>";
+    }
+
     /// <summary>
     /// Renders report-local open/download controls for a safe artifact link.
     /// Inputs are an artifact descriptor and display mode; processing validates
@@ -10014,13 +10021,15 @@ html[lang="en"] .localized-evidence-field{display:none}
             return string.Empty;
         }
 
-        return $"<details class=\"technical-field\"><summary>{E(TechnicalFieldLabel(label))}</summary><pre class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</pre></details>";
+        var displayLabel = TechnicalFieldLabel(label);
+        var prefix = string.Equals(displayLabel, "Command line", StringComparison.OrdinalIgnoreCase) ? "Execute: " : $"{displayLabel}: ";
+        return $"<div class=\"technical-field\"><span class=\"ui-field-label\">{E(prefix)}</span><pre class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</pre></div>";
     }
 
     /// <summary>
-    /// Renders event data with long command/stdout/stderr/PowerShell payloads
-    /// hidden in nested details. Inputs are one event; processing keeps compact
-    /// keys visible and technical payloads closed by default; returns HTML.
+    /// Renders event data directly inside the selected event row. Inputs are
+    /// one event; processing keeps compact and command evidence visible while
+    /// bounding long values with CSS; returns HTML.
     /// </summary>
     private static string RenderEventEvidenceDetails(SandboxEvent evt)
     {
@@ -10040,11 +10049,11 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         var html = new StringBuilder();
-        html.Append($"<details class=\"event-evidence-fields\" data-copy=\"{A(EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300))}\"><summary>Evidence</summary>");
+        html.Append($"<div class=\"event-evidence-fields\" data-copy=\"{A(EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300))}\">");
         var processExitContext = BuildProcessExitCodeContext(evt);
         if (!string.IsNullOrWhiteSpace(processExitContext))
         {
-            html.Append($"<div class=\"section-note failure-note process-exit-context\"><strong>Exit code context:</strong> {E(processExitContext)}</div>");
+            html.Append($"<div class=\"process-exit-context\"><span class=\"ui-field-label\">退出码：</span>{E(processExitContext)}</div>");
         }
         if (compactFields.Count == 0 && technicalFields.Count == 0)
         {
@@ -10057,8 +10066,6 @@ html[lang="en"] .localized-evidence-field{display:none}
                 var inlineCompactFields = compactFields
                     .Take(EventCompactFieldInlineLimit)
                     .ToList();
-                var hiddenCompactFields = Math.Max(0, compactFields.Count - inlineCompactFields.Count);
-
                 html.Append("<ul class=\"raw-field-list\">");
                 foreach (var pair in inlineCompactFields)
                 {
@@ -10071,30 +10078,27 @@ html[lang="en"] .localized-evidence-field{display:none}
                     html.Append($"<li class=\"{localizedClass.Trim()}\"><span class=\"ui-field-label\">{E(EventFieldLabel(pair.Key))}</span>=<code class=\"copyable\" data-copy=\"{A(copy)}\">{E(displayValue)}</code></li>");
                 }
 
-                if (hiddenCompactFields > 0)
-                {
-                    html.Append($"<li><span class=\"muted\">... {E(hiddenCompactFields.ToString())} additional fields hidden; open report.json/events.json for the full record.</span></li>");
-                }
-
                 html.Append("</ul>");
             }
 
             if (technicalFields.Count > 0)
             {
-                html.Append("<details class=\"raw-technical-fields\"><summary>Technical fields</summary>");
+                html.Append("<div class=\"raw-technical-fields\">");
                 foreach (var field in technicalFields)
                 {
                     var boundedValue = FormatBoundedEvidenceFieldValue(field.Label, field.Value, 1_200);
                     var copy = $"{field.Label}={boundedValue}";
                     var localizedClass = IsLocalizedEvidenceField(field.Label) ? " localized-evidence-field" : string.Empty;
-                    html.Append($"<details class=\"raw-technical-field{localizedClass}\"><summary>{E(TechnicalFieldLabel(field.Label))}</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+                    var label = TechnicalFieldLabel(field.Label);
+                    var prefix = string.Equals(label, "Command line", StringComparison.OrdinalIgnoreCase) ? "Execute: " : $"{label}: ";
+                    html.Append($"<div class=\"raw-technical-field{localizedClass}\"><span class=\"ui-field-label\">{E(prefix)}</span><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(boundedValue)}</code></div>");
                 }
 
-                html.Append("</details>");
+                html.Append("</div>");
             }
         }
 
-        html.Append("</details>");
+        html.Append("</div>");
         return html.ToString();
     }
 
@@ -10775,6 +10779,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Yes", "是"),
         (">No<", ">否<"),
         ("Reset filters", "重置筛选"),
+        ("visible rows", "可见行"),
+        ("Execute: ", "执行："),
         ("visible rows; ", "可见行；"),
         ("visible evidence rows; ", "可见证据行；"),
         ("more evidence rows are available in the report.", "报告中还有更多证据行。"),
