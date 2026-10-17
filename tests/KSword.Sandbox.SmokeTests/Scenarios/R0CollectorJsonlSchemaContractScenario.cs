@@ -29,9 +29,14 @@ internal sealed class R0CollectorJsonlSchemaContractScenario : ISmokeTestScenari
         var parser = ReadText(context, "guest", "KSword.Sandbox.R0Collector", "src", "EventParser.cpp");
         var synthetic = ReadText(context, "guest", "KSword.Sandbox.R0Collector", "src", "SyntheticMode.cpp");
         var abiSelfCheck = ReadText(context, "guest", "KSword.Sandbox.R0Collector", "src", "AbiSelfCheck.cpp");
+        var agent = ReadText(context, "guest", "KSword.Sandbox.Agent", "Program.cs");
+        var driverReader = ReadText(context, "guest", "KSword.Sandbox.Agent", "Output", "DriverJsonLinesReader.cs");
+        var reportSampler = ReadText(context, "src", "KSword.Sandbox.Core", "Reporting", "ReportEventSampler.cs");
+        var jobService = ReadText(context, "src", "KSword.Sandbox.Core", "Jobs", "SandboxJobService.cs");
 
         AssertDocumentedSchemaFields(schemaDoc, collectorDoc);
         AssertSourceSchemaFields(header, common, parser, synthetic, abiSelfCheck);
+        AssertDriverCoveragePolicy(agent, driverReader, reportSampler, jobService);
         AssertInMemoryJsonlNoiseAndSchemaParsing();
 
         return Task.FromResult(new SmokeTestResult
@@ -40,6 +45,17 @@ internal sealed class R0CollectorJsonlSchemaContractScenario : ISmokeTestScenari
             Passed = true,
             Message = "R0Collector JSONL schema documents and parses sequence/loss/high-watermark/backpressure/noise fields."
         });
+    }
+
+    private static void AssertDriverCoveragePolicy(string agent, string driverReader, string reportSampler, string jobService)
+    {
+        RequireContains(agent, "DefaultR0CollectorDriverEventSampleStride = 1", "Guest Agent should default to full eligible driver-row emission.");
+        RequireContains(agent, "all-driver-rows-plus-collector-lifecycle", "Guest Agent should document the all-driver-row import boundary.");
+        RequireContains(driverReader, "var isDriverRow", "Driver JSONL reader should explicitly retain driver-origin rows without a sample PID.");
+        RequireContains(driverReader, "isCollector || isDriverRow", "Driver JSONL reader should keep all driver rows and collector diagnostics.");
+        RequireContains(reportSampler, "type.StartsWith(\"driver.\"", "Report sampling should retain every driver event class.");
+        RequireContains(jobService, "events.r0.driver.omitted", "Report metrics should expose R0 driver-row omission accounting.");
+        RequireContains(jobService, "events.r0.driver.lossRateBasisPoints", "Report metrics should expose an explicit R0 loss-rate boundary.");
     }
 
     private static void AssertDocumentedSchemaFields(string schemaDoc, string collectorDoc)

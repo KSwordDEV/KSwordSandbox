@@ -211,7 +211,8 @@ public sealed partial class SandboxJobService
             StaticAnalysis = staticAnalysis,
             Events = seedEvents,
             Findings = findings,
-            Metrics = BuildMetrics(seedEvents, findings, staticAnalysis)
+            Metrics = BuildMetrics(seedEvents, findings, staticAnalysis),
+            CollectionHealth = CollectionHealthSummaryBuilder.Build(seedEvents)
         };
 
         var jsonPath = Path.Combine(jobRoot, "report.json");
@@ -2151,6 +2152,18 @@ public sealed partial class SandboxJobService
 
         AddDynamicCoverageMetrics(metrics, events, rawEvents ?? events, rawEventCount, omittedReportEvents);
         AddR0DriverCoverageMetrics(metrics, events, rawEvents ?? events);
+        CollectionHealthSummaryBuilder.AddMetrics(
+            metrics,
+            CollectionHealthSummaryBuilder.Build(rawEvents ?? events, events));
+        if (importSummary is not null)
+        {
+            metrics["events.sources.total"] = importSummary.SourceCount;
+            metrics["events.sources.primary"] = 1;
+            metrics["events.sources.driver"] = importSummary.DriverPaths.Count;
+            metrics["events.sources.primaryEvents"] = importSummary.PrimaryEventCount;
+            metrics["events.sources.driverEvents"] = importSummary.DriverEventCount;
+            metrics["events.sources.driverEventsMerged"] = importSummary.DriverEventCountMerged;
+        }
 
         foreach (var group in findings.GroupBy(finding => finding.Severity))
         {
@@ -2178,6 +2191,8 @@ public sealed partial class SandboxJobService
         metrics["events.r0.driver.omitted"] = Math.Max(0, rawDriverRows.Count - reportDriverRows.Count);
         metrics["events.r0.driver.lossObserved"] = rawEvents.Count(IsR0LossEvidenceEvent);
         metrics["events.r0.driver.backpressureObserved"] = rawEvents.Count(IsR0BackpressureEvidenceEvent);
+        metrics["events.r0.driver.drainStoppedAtDeadline"] = rawEvents.Count(evt => EventDataBoolTrue(evt, "drainStoppedAtDeadline"));
+        metrics["events.r0.driver.drainStoppedAtBatchLimit"] = rawEvents.Count(evt => EventDataBoolTrue(evt, "drainStoppedAtBatchLimit"));
         var readSummaries = rawEvents.Where(evt => evt.EventType.Equals("r0collector.driverReadEvents", StringComparison.OrdinalIgnoreCase)).ToList();
         var lostCount = MaxDataUnsigned(rawEvents, "lostCount", "eventsDropped", "TotalEventsDropped");
         var processed = SumDataUnsigned(readSummaries, "recordsProcessed");
