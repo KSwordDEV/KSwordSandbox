@@ -267,7 +267,13 @@ internal static class AgentProgram
             // phases so a root that finished before a Toolhelp snapshot is
             // represented as recovered root/exit evidence instead of a false
             // process-tree collection gap.
-            runningProbeContext = runningProbeContext with { RootProcessExitObserved = true };
+            // A timeout kill can fail (the process may remain alive), so do
+            // not claim an exit merely because the wait branch completed.
+            // Preserve a live-root tree gap for that genuine failure path.
+            runningProbeContext = runningProbeContext with
+            {
+                RootProcessExitObserved = HasProcessExited(process)
+            };
 
             executionStage = "exit";
             events.Add(new SandboxEvent
