@@ -1948,6 +1948,7 @@ public sealed class HyperVRunbookBuilder
                 $"$vmxPath = {Q(config.VMware.VmxPath)};",
                 "if (Test-Path -LiteralPath $vmxPath -PathType Leaf) { $vmxPath = (Resolve-Path -LiteralPath $vmxPath).ProviderPath };",
                 $"$vmType = {Q(config.VMware.VmType)};",
+                $"$snapshotName = {Q(config.VMware.SnapshotName)};",
                 "$runningOutput = @(& $vmrun -T $vmType list 2>&1);",
                 "$listExitCode = $LASTEXITCODE;",
                 "if ($listExitCode -ne 0) { throw \"vmrun list failed with exit code $listExitCode. $($runningOutput -join ' ')\" };",
@@ -1956,9 +1957,14 @@ public sealed class HyperVRunbookBuilder
                 "$stopExitCode = $LASTEXITCODE;",
                 "if ($stopExitCode -ne 0) { throw \"vmrun stop failed with exit code $stopExitCode. $($stopOutput -join ' ')\" };",
                 BuildVMwarePowerStateWaitCommand(expectedRunning: false, operation: "cleanup stop"),
-                "} else { Write-Host 'VMware VM is already stopped.' };"
+                "} else { Write-Host 'VMware VM is already stopped.' };",
+                "$restoreOutput = @(& $vmrun -T $vmType revertToSnapshot $vmxPath $snapshotName 2>&1);",
+                "$restoreExitCode = $LASTEXITCODE;",
+                "if ($restoreExitCode -ne 0) { throw \"vmrun cleanup revertToSnapshot failed with exit code $restoreExitCode. $($restoreOutput -join ' ')\" };",
+                BuildVMwarePowerStateWaitCommand(expectedRunning: false, operation: "cleanup snapshot restore"),
+                "Write-Host \"VMware clean snapshot '$snapshotName' restored during cleanup.\";"
             });
-            steps.Add(Step("stop-vm", "Stop VMware analysis VM", command));
+            steps.Add(Step("stop-vm", "Stop VMware analysis VM and restore clean snapshot", command));
             return;
         }
 
