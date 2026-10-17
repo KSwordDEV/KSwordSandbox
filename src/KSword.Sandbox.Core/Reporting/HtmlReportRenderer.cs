@@ -750,6 +750,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         Metric(html, "R0 driver rows (raw)", r0DriverRaw.ToString(CultureInfo.InvariantCulture), "risk-info");
         Metric(html, "R0 driver rows (report)", r0DriverReport.ToString(CultureInfo.InvariantCulture), "risk-info");
         Metric(html, "R0 driver rows omitted", r0DriverOmitted.ToString(CultureInfo.InvariantCulture), r0DriverOmitted > 0 ? "risk-medium" : "risk-info");
+        var r0QualityWarnings = ReportMetric(report, "events.r0.driver.qualityWarningRows");
+        Metric(html, "R0 collection warnings", r0QualityWarnings.ToString(CultureInfo.InvariantCulture), r0QualityWarnings > 0 ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
         if (r0DriverRaw > 0)
         {
@@ -769,8 +771,15 @@ html[lang="en"] .localized-evidence-field{display:none}
             var lossRateBasisPoints = ReportMetric(report, "events.r0.driver.lossRateBasisPoints");
             var deadlineStop = ReportMetric(report, "events.r0.driver.drainStoppedAtDeadline");
             var batchLimitStop = ReportMetric(report, "events.r0.driver.drainStoppedAtBatchLimit");
+            var queueDepth = ReportMetric(report, "events.r0.driver.queueDepth");
+            var remainingUnread = ReportMetric(report, "events.r0.driver.remainingUnread");
+            var eventsSuppressed = ReportMetric(report, "events.r0.driver.eventsSuppressed");
+            var qualityWarnings = ReportMetric(report, "events.r0.driver.qualityWarningRows");
             var lossRate = $"{lossRateBasisPoints / 100}.{lossRateBasisPoints % 100:00}%";
-            html.AppendLine($"<div class=\"section-note\"><strong>R0 driver coverage.</strong> Raw/report rows by class (raw/report): {E(driverClassSummary)}. Collector loss markers: {E(loss.ToString(CultureInfo.InvariantCulture))}; lost count: {E(lostCount.ToString(CultureInfo.InvariantCulture))}/{E(processed.ToString(CultureInfo.InvariantCulture))} processed ({E(lossRate)}); backpressure markers: {E(backpressure.ToString(CultureInfo.InvariantCulture))}; drain deadline/batch-limit stops: {E(deadlineStop.ToString(CultureInfo.InvariantCulture))}/{E(batchLimitStop.ToString(CultureInfo.InvariantCulture))}. Raw driver-events.jsonl remains the complete source artifact.</div>");
+            var completeness = qualityWarnings == 0 && remainingUnread == 0 && lostCount == 0
+                ? "No loss or bounded-drain warning was reported."
+                : "Collection completeness requires review; a zero lostCount alone does not prove that every record was drained.";
+            html.AppendLine($"<div class=\"section-note\"><strong>R0 driver coverage.</strong> Raw/report rows by class (raw/report): {E(driverClassSummary)}. Collector loss markers: {E(loss.ToString(CultureInfo.InvariantCulture))}; lost count: {E(lostCount.ToString(CultureInfo.InvariantCulture))}/{E(processed.ToString(CultureInfo.InvariantCulture))} processed ({E(lossRate)}); backpressure markers: {E(backpressure.ToString(CultureInfo.InvariantCulture))}; queue depth/remaining unread: {E(queueDepth.ToString(CultureInfo.InvariantCulture))}/{E(remainingUnread.ToString(CultureInfo.InvariantCulture))}; suppressed events: {E(eventsSuppressed.ToString(CultureInfo.InvariantCulture))}; drain deadline/batch-limit stops: {E(deadlineStop.ToString(CultureInfo.InvariantCulture))}/{E(batchLimitStop.ToString(CultureInfo.InvariantCulture))}; quality warnings: {E(qualityWarnings.ToString(CultureInfo.InvariantCulture))}. {E(completeness)} Raw driver-events.jsonl remains the complete source artifact.</div>");
         }
         if (HasExecutionBlockedVerdict(report))
         {
@@ -4954,7 +4963,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         var collectionHealthAlert = collectionFailureRows > 0 ||
             collectionLossRows > 0 ||
             report.CollectionHealth.DriverLostCount > 0 ||
-            report.CollectionHealth.EtwEventsLost > 0;
+            report.CollectionHealth.EtwEventsLost > 0 ||
+            report.CollectionHealth.DriverQualityWarningRows > 0 ||
+            report.CollectionHealth.DriverRemainingUnread > 0 ||
+            report.CollectionHealth.DriverDrainStoppedAtDeadlineRows > 0;
         html.AppendLine("<section id=\"failure\" class=\"card\"><h2>Failure reasons</h2>");
         if (report.Status != AnalysisStatus.Failed && failures.Count == 0 && sampleExitOutcomes.Count == 0 && !collectionHealthAlert)
         {
@@ -4986,7 +4998,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         if (collectionHealthAlert)
         {
-            html.AppendLine($"<div class=\"section-note failure-note collection-health-note\"><strong>Collection health:</strong> failure rows={E(collectionFailureRows.ToString(CultureInfo.InvariantCulture))}; loss rows={E(collectionLossRows.ToString(CultureInfo.InvariantCulture))}; driver lost={E(report.CollectionHealth.DriverLostCount.ToString(CultureInfo.InvariantCulture))}; ETW EventsLost={E(report.CollectionHealth.EtwEventsLost.ToString(CultureInfo.InvariantCulture))}.</div>");
+            html.AppendLine($"<div class=\"section-note failure-note collection-health-note\"><strong>Collection health:</strong> failure rows={E(collectionFailureRows.ToString(CultureInfo.InvariantCulture))}; loss rows={E(collectionLossRows.ToString(CultureInfo.InvariantCulture))}; driver lost={E(report.CollectionHealth.DriverLostCount.ToString(CultureInfo.InvariantCulture))}; queue depth/remaining unread={E(report.CollectionHealth.DriverQueueDepth.ToString(CultureInfo.InvariantCulture))}/{E(report.CollectionHealth.DriverRemainingUnread.ToString(CultureInfo.InvariantCulture))}; suppressed={E(report.CollectionHealth.DriverEventsSuppressed.ToString(CultureInfo.InvariantCulture))}; deadline stops={E(report.CollectionHealth.DriverDrainStoppedAtDeadlineRows.ToString(CultureInfo.InvariantCulture))}; quality warnings={E(report.CollectionHealth.DriverQualityWarningRows.ToString(CultureInfo.InvariantCulture))}; ETW EventsLost={E(report.CollectionHealth.EtwEventsLost.ToString(CultureInfo.InvariantCulture))}.</div>");
         }
 
         html.AppendLine("</section>");
@@ -8843,6 +8855,13 @@ html[lang="en"] .localized-evidence-field{display:none}
             evt,
             "driverStateName",
             "queueDepth",
+            "queueUnread",
+            "remainingUnread",
+            "remainingUnreadEvents",
+            "eventsSuppressed",
+            "collectorSuppressedEvents",
+            "selfNoiseSuppressedEvents",
+            "drainStoppedAtDeadline",
             "queueCapacity",
             "queueHighWatermark",
             "eventsDropped",
@@ -9032,6 +9051,13 @@ html[lang="en"] .localized-evidence-field{display:none}
             "driverState",
             "driverStateName",
             "queueDepth",
+            "queueUnread",
+            "remainingUnread",
+            "remainingUnreadEvents",
+            "eventsSuppressed",
+            "collectorSuppressedEvents",
+            "selfNoiseSuppressedEvents",
+            "drainStoppedAtDeadline",
             "queueCapacity",
             "queueHighWatermark",
             "producerEnableMask",
@@ -10494,6 +10520,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("loss rows=", "丢失行数="),
         ("driver lost=", "驱动丢失="),
         ("ETW EventsLost=", "ETW 丢失事件数="),
+        ("queue depth/remaining unread=", "队列深度/剩余未读="),
+        ("; suppressed=", "；被抑制="),
+        ("; deadline stops=", "；截止停止="),
+        ("; quality warnings=", "；质量警告="),
         ("Evidence import", "证据导入"),
         ("Collection quality", "采集质量"),
         ("Analysis environment", "分析环境"),
@@ -10517,13 +10547,19 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("R0 driver rows (raw)", "R0 驱动行（原始）"),
         ("R0 driver rows (report)", "R0 驱动行（报告）"),
         ("R0 driver rows omitted", "R0 驱动省略行"),
+        ("R0 collection warnings", "R0 采集警告"),
         ("R0 driver coverage.", "R0 驱动覆盖。"),
         ("Raw/report rows by class (raw/report): ", "各类别原始/报告行数："),
         ("Collector loss markers: ", "采集器丢失标记："),
         ("; lost count: ", "；丢失数量："),
         (") processed (", "）已处理（"),
         ("); backpressure markers: ", "）；背压标记："),
+        ("; queue depth/remaining unread: ", "；队列深度/剩余未读："),
+        ("; suppressed events: ", "；被抑制事件："),
         ("; drain deadline/batch-limit stops: ", "；截止时间/批量上限停止："),
+        ("; quality warnings: ", "；质量警告："),
+        ("No loss or bounded-drain warning was reported.", "未报告丢失或有界排空警告。"),
+        ("Collection completeness requires review; a zero lostCount alone does not prove that every record was drained.", "采集完整性需要复核；lostCount 为 0 不能单独证明所有记录都已排空。"),
         (". Raw driver-events.jsonl remains the complete source artifact.", "。原始 driver-events.jsonl 仍是完整来源证据。"),
         ("Unified startup.* facts retained from before/after inventory diffs.", "保留启动项在启动前后清单差异中的统一事实。"),
         ("Persistence surfaces that appeared or changed after launch.", "启动后出现或发生变化的持久化入口。"),

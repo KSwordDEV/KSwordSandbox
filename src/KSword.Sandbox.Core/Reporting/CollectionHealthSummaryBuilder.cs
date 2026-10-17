@@ -27,6 +27,31 @@ public static class CollectionHealthSummaryBuilder
         "totalEventsLost"
     ];
 
+    private static readonly string[] DriverQueueDepthKeys =
+    [
+        "queueDepth",
+        "queueUnread",
+        "unreadQueue",
+        "eventsQueued"
+    ];
+
+    private static readonly string[] DriverRemainingUnreadKeys =
+    [
+        "remainingUnread",
+        "remainingUnreadEvents",
+        "unread",
+        "remaining",
+        "remainingEvents"
+    ];
+
+    private static readonly string[] DriverSuppressedKeys =
+    [
+        "eventsSuppressed",
+        "collectorSuppressedEvents",
+        "selfNoiseSuppressedEvents",
+        "suppressed"
+    ];
+
     public static CollectionHealthSummary Build(
         IReadOnlyCollection<SandboxEvent> rawEvents,
         IReadOnlyCollection<SandboxEvent>? reportEvents = null)
@@ -36,6 +61,7 @@ public static class CollectionHealthSummaryBuilder
         var report = reportEvents.Where(IsHealthRow).ToList();
         var etwLossRows = raw.Where(IsEtwLossRow).ToList();
         var driverLossRows = raw.Where(IsDriverLossRow).ToList();
+        var driverHealthRows = raw.Where(IsDriverHealthRow).ToList();
         var failureRows = raw.Where(IsFailureRow).ToList();
         var omitted = Math.Max(0, raw.Count - report.Count);
 
@@ -51,6 +77,11 @@ public static class CollectionHealthSummaryBuilder
             EtwEventsLost = ToMetricInt(MaxDataUnsigned(etwLossRows, EtwLostKeys)),
             DriverLossRows = driverLossRows.Count,
             DriverLostCount = ToMetricInt(MaxDataUnsigned(driverLossRows, DriverLostKeys)),
+            DriverQueueDepth = ToMetricInt(MaxDataUnsigned(driverHealthRows, DriverQueueDepthKeys)),
+            DriverRemainingUnread = ToMetricInt(MaxDataUnsigned(driverHealthRows, DriverRemainingUnreadKeys)),
+            DriverDrainStoppedAtDeadlineRows = driverHealthRows.Count(IsDrainStoppedAtDeadline),
+            DriverEventsSuppressed = ToMetricInt(MaxDataUnsigned(driverHealthRows, DriverSuppressedKeys)),
+            DriverQualityWarningRows = driverHealthRows.Count(IsDriverQualityWarning),
             ProcessTreeUnavailable = raw.Count(IsProcessTreeUnavailable),
             ScheduledTaskCaptureFailed = raw.Count(IsScheduledTaskCaptureFailed),
             PktmonStopFailed = raw.Count(IsPktmonStopFailed),
@@ -76,6 +107,11 @@ public static class CollectionHealthSummaryBuilder
         metrics["collectionHealth.etw.eventsLost"] = summary.EtwEventsLost;
         metrics["collectionHealth.driver.lossRows"] = summary.DriverLossRows;
         metrics["collectionHealth.driver.lostCount"] = summary.DriverLostCount;
+        metrics["collectionHealth.driver.queueDepth"] = summary.DriverQueueDepth;
+        metrics["collectionHealth.driver.remainingUnread"] = summary.DriverRemainingUnread;
+        metrics["collectionHealth.driver.drainStoppedAtDeadlineRows"] = summary.DriverDrainStoppedAtDeadlineRows;
+        metrics["collectionHealth.driver.eventsSuppressed"] = summary.DriverEventsSuppressed;
+        metrics["collectionHealth.driver.qualityWarningRows"] = summary.DriverQualityWarningRows;
         metrics["collectionHealth.process.treeUnavailable"] = summary.ProcessTreeUnavailable;
         metrics["collectionHealth.scheduledTask.captureFailed"] = summary.ScheduledTaskCaptureFailed;
         metrics["collectionHealth.pktmon.stopFailed"] = summary.PktmonStopFailed;
@@ -98,6 +134,11 @@ public static class CollectionHealthSummaryBuilder
         metrics["events.collectionHealth.etw.eventsLost"] = summary.EtwEventsLost;
         metrics["events.collectionHealth.driver.lossRows"] = summary.DriverLossRows;
         metrics["events.collectionHealth.driver.lostCount"] = summary.DriverLostCount;
+        metrics["events.collectionHealth.driver.queueDepth"] = summary.DriverQueueDepth;
+        metrics["events.collectionHealth.driver.remainingUnread"] = summary.DriverRemainingUnread;
+        metrics["events.collectionHealth.driver.drainStoppedAtDeadlineRows"] = summary.DriverDrainStoppedAtDeadlineRows;
+        metrics["events.collectionHealth.driver.eventsSuppressed"] = summary.DriverEventsSuppressed;
+        metrics["events.collectionHealth.driver.qualityWarningRows"] = summary.DriverQualityWarningRows;
         metrics["events.collectionHealth.process.treeUnavailable"] = summary.ProcessTreeUnavailable;
         metrics["events.collectionHealth.scheduledTask.captureFailed"] = summary.ScheduledTaskCaptureFailed;
         metrics["events.collectionHealth.pktmon.stopFailed"] = summary.PktmonStopFailed;
@@ -106,7 +147,15 @@ public static class CollectionHealthSummaryBuilder
 
     private static bool IsHealthRow(SandboxEvent evt)
     {
-        if (BoolTrue(evt, "collectionHealth", "collection_health", "collectionDiagnostic", "collectorDiagnostic"))
+        if (BoolTrue(evt, "collectionHealth", "collection_health", "collectionDiagnostic", "collectorDiagnostic", "collectorHealthEvidence"))
+        {
+            return true;
+        }
+
+        // R0 health rows can be emitted directly by the collector without a
+        // normalized collectionHealth marker. Keep these rows in the quality
+        // lane so queue state and bounded-drain evidence cannot disappear.
+        if (IsDriverHealthRow(evt))
         {
             return true;
         }
@@ -144,20 +193,69 @@ public static class CollectionHealthSummaryBuilder
         // event type in some older agents. Keep the explicit counter even
         // when only its field name identifies the ETW lane, while leaving
         // cumulative driver TotalEventsLost in the driver lane.
-        return PositiveData(evt, EtwLostKeys) && (etwTagged || !IsDriverRow(evt));
+        return PositiveData(evt, EtwLostKeys) && (etwTagged || (!IsDriverRow(evt) && !IsDriverHealthRow(evt)));
     }
 
     private static bool IsDriverLossRow(SandboxEvent evt)
     {
-        return IsDriverRow(evt) && PositiveData(evt, DriverLostKeys);
+        if (IsDriverDeferredSummary(evt))
+        {
+            return AnyPositiveData(evt, "rawJsonlLostEventCount", "rawJsonlLossRowCount");
+        }
+
+        return IsDriverHealthRow(evt) && PositiveData(evt, DriverLostKeys);
     }
 
     private static bool IsDriverRow(SandboxEvent evt)
     {
+        return IsR0DriverTelemetryRow(evt);
+    }
+
+    /// <summary>
+    /// Identifies actual driver producer rows. ETW image.load rows and the
+    /// guest-side driver.events.deferred summary are deliberately excluded;
+    /// their evidence is accounted for in their own lanes.
+    /// </summary>
+    private static bool IsR0DriverTelemetryRow(SandboxEvent evt)
+    {
         var type = evt.EventType ?? string.Empty;
-        return string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
-            type.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase);
+        if (!type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(type, "driver.events.deferred", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return string.Equals(Value(evt, "schema"), "ksword.sandbox.r0.event", StringComparison.OrdinalIgnoreCase) &&
+            Value(evt, "eventOrigin").Contains("kernel-driver", StringComparison.OrdinalIgnoreCase) &&
+            TextEqualsAny(Value(evt, "producerCategory"), "driver", "process", "image", "file", "registry", "network");
+    }
+
+    private static bool IsDriverHealthRow(SandboxEvent evt)
+    {
+        var type = evt.EventType ?? string.Empty;
+        return type.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.Source, "r0collector", StringComparison.OrdinalIgnoreCase) ||
+            BoolTrue(evt, "collectorHealthEvidence");
+    }
+
+    private static bool IsDriverDeferredSummary(SandboxEvent evt) =>
+        string.Equals(evt.EventType, "driver.events.deferred", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsDrainStoppedAtDeadline(SandboxEvent evt) =>
+        BoolTrue(evt, "drainStoppedAtDeadline", "drainDeadlineReached", "deadlineReached");
+
+    private static bool IsDriverQualityWarning(SandboxEvent evt)
+    {
+        return IsDrainStoppedAtDeadline(evt) ||
+            PositiveData(evt, DriverRemainingUnreadKeys) ||
+            PositiveData(evt, DriverSuppressedKeys) ||
+            BoolTrue(evt, "backpressure", "backpressureObserved") ||
+            IsDriverLossRow(evt);
     }
 
     private static bool IsProcessTreeUnavailable(SandboxEvent evt) =>
@@ -191,6 +289,9 @@ public static class CollectionHealthSummaryBuilder
     }
 
     private static bool PositiveData(SandboxEvent evt, IReadOnlyCollection<string> keys) =>
+        keys.Any(key => ReadUnsigned(evt, key) > 0);
+
+    private static bool AnyPositiveData(SandboxEvent evt, params string[] keys) =>
         keys.Any(key => ReadUnsigned(evt, key) > 0);
 
     private static ulong MaxDataUnsigned(IEnumerable<SandboxEvent> events, IReadOnlyCollection<string> keys)
@@ -243,3 +344,4 @@ public static class CollectionHealthSummaryBuilder
 
     private static int ToMetricInt(ulong value) => value > int.MaxValue ? int.MaxValue : (int)value;
 }
+

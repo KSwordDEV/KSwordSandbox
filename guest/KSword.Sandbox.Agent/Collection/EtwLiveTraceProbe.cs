@@ -386,7 +386,10 @@ internal sealed class EtwLiveTraceProbe : IGuestProbe
             var payloadProcessId = ParseProcessId(ValueOrEmpty(payloadByName, "processid", "pid"));
             processId = payloadProcessId ?? processId;
             var parentProcessId = ParseProcessId(ValueOrEmpty(payloadByName, "parentprocessid", "parentpid", "parentid"));
-            threadId = FirstNonEmpty(threadId, ValueOrEmpty(payloadByName, "threadid", "tthreadid"));
+            // Kernel payload TThreadId identifies the event's actual thread;
+            // tracerpt's System/Execution ThreadID identifies the decoder
+            // context and can point at a different thread.
+            threadId = FirstNonEmpty(ValueOrEmpty(payloadByName, "threadid", "tthreadid"), threadId);
             var image = ValueOrEmpty(payloadByName, "imagename", "imagefilename", "image", "processname", "process");
             var path = ValueOrEmpty(payloadByName, "filename", "file", "path", "imagepath", "keyname", "keypath", "objectname");
             var commandLine = ValueOrEmpty(payloadByName, "commandline", "command");

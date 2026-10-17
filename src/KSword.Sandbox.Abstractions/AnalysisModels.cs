@@ -219,6 +219,36 @@ public sealed record CollectionHealthSummary
 
     public int DriverLostCount { get; init; }
 
+    /// <summary>
+    /// Peak unread R0 records observed in a queue/status snapshot. This is
+    /// evidence-quality telemetry and must not be presented as sample
+    /// behavior.
+    /// </summary>
+    public int DriverQueueDepth { get; init; }
+
+    /// <summary>
+    /// Peak unread records reported by the collector's drain summaries. A
+    /// non-zero value means the drain did not prove that the queue was empty.
+    /// </summary>
+    public int DriverRemainingUnread { get; init; }
+
+    /// <summary>
+    /// Number of driver health rows that report a drain deadline stop.
+    /// </summary>
+    public int DriverDrainStoppedAtDeadlineRows { get; init; }
+
+    /// <summary>
+    /// Peak number of events suppressed by the collector or its sampling
+    /// policy. Suppression is kept separate from kernel lostCount.
+    /// </summary>
+    public int DriverEventsSuppressed { get; init; }
+
+    /// <summary>
+    /// Number of driver health rows with bounded-drain or suppression evidence.
+    /// This remains visible even when lostCount is zero.
+    /// </summary>
+    public int DriverQualityWarningRows { get; init; }
+
     public int ProcessTreeUnavailable { get; init; }
 
     public int ScheduledTaskCaptureFailed { get; init; }

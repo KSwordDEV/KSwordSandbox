@@ -31,6 +31,11 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(7, summary.EtwEventsLost, "ETW EventsLost should preserve the numeric loss counter.");
         RequireEqual(1, summary.DriverLossRows, "Driver lostCount should produce one loss row.");
         RequireEqual(4, summary.DriverLostCount, "Driver lostCount should preserve the numeric loss counter.");
+        RequireEqual(9, summary.DriverQueueDepth, "Driver queue depth should preserve the peak unread queue snapshot.");
+        RequireEqual(3, summary.DriverRemainingUnread, "Driver remaining unread should remain separate from lostCount.");
+        RequireEqual(1, summary.DriverDrainStoppedAtDeadlineRows, "A drain deadline should remain visible as a quality marker.");
+        RequireEqual(2, summary.DriverEventsSuppressed, "Collector suppression should remain separate from kernel loss.");
+        RequireEqual(1, summary.DriverQualityWarningRows, "Quality warnings should remain visible even with a zero loss counter.");
         RequireEqual(1, summary.ProcessTreeUnavailable, "Missing process tree roots should count as collection failures.");
         RequireEqual(1, summary.ScheduledTaskCaptureFailed, "Scheduled task capture failures should count as collection failures.");
         RequireEqual(1, summary.PktmonStopFailed, "pktmon stop failures should count as collection failures.");
@@ -41,6 +46,11 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(6, metrics["collectionHealth.failures"], "Failure metric should be non-zero.");
         RequireEqual(7, metrics["collectionHealth.etw.eventsLost"], "ETW loss metric should preserve EventsLost.");
         RequireEqual(4, metrics["collectionHealth.driver.lostCount"], "Driver loss metric should preserve lostCount.");
+        RequireEqual(9, metrics["collectionHealth.driver.queueDepth"], "Driver queue depth metric should preserve the queue snapshot.");
+        RequireEqual(3, metrics["collectionHealth.driver.remainingUnread"], "Driver remaining unread metric should preserve the unread count.");
+        RequireEqual(1, metrics["collectionHealth.driver.drainStoppedAtDeadlineRows"], "Driver deadline metric should preserve the count.");
+        RequireEqual(2, metrics["collectionHealth.driver.eventsSuppressed"], "Driver suppression metric should preserve the count.");
+        RequireEqual(1, metrics["collectionHealth.driver.qualityWarningRows"], "Driver quality warning metric should remain non-zero.");
         RequireEqual(6, metrics["runtime.failures"], "Runtime failure alias should include collection failures.");
 
         var model = new AnalysisReport
@@ -94,7 +104,11 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
                 Data =
                 {
                     ["collectionHealth"] = "true",
-                    ["lostCount"] = "4"
+                    ["lostCount"] = "4",
+                    ["queueDepth"] = "9",
+                    ["remainingUnread"] = "3",
+                    ["drainStoppedAtDeadline"] = "true",
+                    ["eventsSuppressed"] = "2"
                 }
             },
             new SandboxEvent

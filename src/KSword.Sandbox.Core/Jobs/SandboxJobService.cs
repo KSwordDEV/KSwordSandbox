@@ -2247,6 +2247,16 @@ public sealed partial class SandboxJobService
                 ? 10000
                 : ToMetricInt(lostCount * 10000UL / processed);
 
+        // Keep queue/drain quality separate from the kernel lost counter. A
+        // zero lostCount does not prove a complete drain when unread records,
+        // a deadline stop, or collector suppression was reported.
+        var health = CollectionHealthSummaryBuilder.Build(rawEvents, reportEvents);
+        metrics["events.r0.driver.queueDepth"] = health.DriverQueueDepth;
+        metrics["events.r0.driver.remainingUnread"] = health.DriverRemainingUnread;
+        metrics["events.r0.driver.drainStoppedAtDeadlineRows"] = health.DriverDrainStoppedAtDeadlineRows;
+        metrics["events.r0.driver.eventsSuppressed"] = health.DriverEventsSuppressed;
+        metrics["events.r0.driver.qualityWarningRows"] = health.DriverQualityWarningRows;
+
         foreach (var category in new[] { "process", "image", "file", "registry", "network", "load", "other" })
         {
             metrics[$"events.r0.driver.{category}.raw"] = rawDriverRows.Count(evt => R0DriverCategory(evt) == category);
@@ -2256,10 +2266,25 @@ public sealed partial class SandboxJobService
 
     private static bool IsR0DriverTelemetryRow(SandboxEvent evt)
     {
-        return string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("image.", StringComparison.OrdinalIgnoreCase);
+        if (!evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Equals("driver.events.deferred", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return R0DataValue(evt, "schema").Equals("ksword.sandbox.r0.event", StringComparison.OrdinalIgnoreCase) &&
+            R0DataValue(evt, "eventOrigin").Contains("kernel-driver", StringComparison.OrdinalIgnoreCase) &&
+            new[] { "driver", "process", "image", "file", "registry", "network" }
+                .Contains(R0DataValue(evt, "producerCategory"), StringComparer.OrdinalIgnoreCase);
     }
+
+    private static string R0DataValue(SandboxEvent evt, string key) =>
+        evt.Data.TryGetValue(key, out var value) ? value : string.Empty;
 
     private static bool IsR0LossEvidenceEvent(SandboxEvent evt)
     {
