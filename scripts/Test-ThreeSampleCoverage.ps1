@@ -162,9 +162,10 @@ foreach ($root in $jobRoots) {
     if ($null -eq $etlDecodeRequired) { $etlDecodeRequired = Test-TrueValue (Get-EventDataFlag $events @('etw_live.captured','etw_live.decode_failed') @('etlDecodeRequired')) }
     $protocolParserNotImplemented = Get-Boolean $metrics @('events.packetCapture.protocolParserNotImplemented','packet_capture.protocolParserNotImplemented')
     $protocolReason = Get-Value $metrics @('events.packetCapture.protocolSummaryReason','packet_capture.protocolSummaryReason')
-    if ($null -eq $protocolReason) { $protocolReason = Get-EventDataFlag $events @('packet_capture.failed','packet_capture.summary','pcap.summary') @('protocolSummaryReason') }
+    $packetCaptureEventTypes = @('packet_capture.failed','packet_capture.summary','packet_capture.protocol_summary','pcap.summary','pcap.flow','network.flow')
+    if ($null -eq $protocolReason) { $protocolReason = Get-EventDataFlag $events $packetCaptureEventTypes @('protocolSummaryReason') }
     if ($null -eq $protocolParserNotImplemented) {
-        $protocolFlag = Get-EventDataFlag $events @('packet_capture.failed','packet_capture.summary','pcap.summary') @('protocolParserNotImplemented')
+        $protocolFlag = Get-EventDataFlag $events $packetCaptureEventTypes @('protocolParserNotImplemented')
         $protocolParserNotImplemented = (Test-TrueValue $protocolFlag) -or ([string]$protocolReason -ieq 'protocolParserNotImplemented')
     }
     $sampleProcessExitErrors = @($events | Where-Object { (Test-SampleProcessExit $_ $sample) -and (Test-NonZeroExitCode (Get-ExitValue $_)) }).Count
