@@ -1195,14 +1195,14 @@ html[lang="en"] .localized-evidence-field{display:none}
                 "Collection/self-noise policy",
                 $"sampleBehaviorEvents={sampleBehavior}",
                 $"excludedFromBehaviorStory={excludedUnion}",
-                $"behaviorCountedFalse={behaviorCountedFalse}",
-                $"nonbehavior={nonBehavior}",
-                $"notSampleBehavior={notSampleBehavior}",
+                $"excludedEvidenceRows={behaviorCountedFalse}",
+                $"nonBehaviorRows={nonBehavior}",
+                $"unattributedRows={notSampleBehavior}",
                 $"staticOnlyEvidenceRows={stats.StaticOnlyEvidenceRows}",
-                $"collectorSelfNoise={collectorSelfNoise}",
-                $"collectorNoise={stats.CollectorNoise}",
+                $"collectorNoiseRows={collectorSelfNoise}",
+                $"collectorDiagnosticRows={stats.CollectorNoise}",
                 $"collectionHealthRows={stats.CollectionHealthRows}",
-                $"vtQuietStates={vtQuiet}",
+                $"enrichmentStatusRows={vtQuiet}",
                 $"r0HealthRows={r0Health}",
                 $"correlationConfirmed={stats.CorrelationConfirmed}",
                 $"correlationProbable={stats.CorrelationProbable}",
@@ -1215,16 +1215,16 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         html.AppendLine("<h3>Collection/self-noise policy</h3>");
         html.AppendLine("<div class=\"compact-evidence-summary copyable\" data-copy=\"" + A(copy) + "\"><strong>Collection/self-noise policy.</strong><br>");
-        html.AppendLine("Behavior story counts exclude rows marked <code>behaviorCounted=false</code>, <code>nonbehavior</code>, <code>notSampleBehavior</code>, collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.");
+        html.AppendLine("Behavior story counts include only sample-attributed actions. Collection health, collector noise, enrichment status, and other excluded evidence remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.");
         html.AppendLine("<div class=\"story-metrics\">");
         html.AppendLine($"<span>sample behavior {E(sampleBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>excluded union {E(excludedUnion.ToString(CultureInfo.InvariantCulture))}</span>");
-        html.AppendLine($"<span>behaviorCounted=false {E(behaviorCountedFalse.ToString(CultureInfo.InvariantCulture))}</span>");
-        html.AppendLine($"<span>nonbehavior {E(nonBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
-        html.AppendLine($"<span>notSampleBehavior {E(notSampleBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>Excluded evidence {E(behaviorCountedFalse.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>Non-behavior {E(nonBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>Unattributed {E(notSampleBehavior.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>static-only evidence {E(stats.StaticOnlyEvidenceRows.ToString(CultureInfo.InvariantCulture))}</span>");
-        html.AppendLine($"<span>collectorSelfNoise {E(collectorSelfNoise.ToString(CultureInfo.InvariantCulture))}</span>");
-        html.AppendLine($"<span>VT quiet {E(vtQuiet.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>Collector noise {E(collectorSelfNoise.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span>Enrichment status {E(vtQuiet.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine($"<span>R0 health {E(r0Health.ToString(CultureInfo.InvariantCulture))}</span>");
         html.AppendLine("</div>");
         html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy collection policy", copy)}</div></div>");
@@ -2290,22 +2290,22 @@ html[lang="en"] .localized-evidence-field{display:none}
         var copy = string.Join(
             Environment.NewLine,
             [
-                "graphSelfNoiseBoundary=sample-behavior-vs-collection-metadata",
+                "Evidence routing summary",
                 $"sampleBehaviorRows={sampleBehavior}",
                 $"excludedRows={excluded}",
-                $"behaviorCountedFalse={behaviorCountedFalse}",
-                $"nonBehavior={nonBehavior}",
-                $"notSampleBehavior={notSampleBehavior}",
-                $"collectorSelfNoise={collectorSelfNoise}",
+                $"excludedEvidenceRows={behaviorCountedFalse}",
+                $"nonBehaviorRows={nonBehavior}",
+                $"unattributedRows={notSampleBehavior}",
+                $"collectorNoiseRows={collectorSelfNoise}",
                 $"collectionHealthRows={healthRows}",
-                $"vtQuietRows={vtQuiet}",
-                "completeSource=Raw normalized events/report.json; pagination/folding unchanged"
+                $"enrichmentStatusRows={vtQuiet}",
+                "Complete source: Raw normalized events/report.json; pagination and folding unchanged"
             ]);
 
         html.AppendLine($"<div class=\"compact-evidence-summary copyable\" data-copy=\"{A(copy)}\"><strong>Graph self-noise boundary / 图谱自噪声边界</strong><br>");
         html.AppendLine($"Sample behavior rows / 样本行为行: <b>{E(sampleBehavior.ToString(CultureInfo.InvariantCulture))}</b>; excluded collection/reputation rows / 已分离采集与信誉行: <b>{E(excluded.ToString(CultureInfo.InvariantCulture))}</b>.");
         html.AppendLine("<br><span class=\"muted\">Hint / 提示: these rows remain copyable in R0/VT/Raw sections and report.json; graph cards do not promote them into sample behavior.</span>");
-        html.AppendLine($"<div class=\"story-metrics\"><span>behaviorCounted=false {E(behaviorCountedFalse.ToString(CultureInfo.InvariantCulture))}</span><span>nonbehavior {E(nonBehavior.ToString(CultureInfo.InvariantCulture))}</span><span>notSampleBehavior {E(notSampleBehavior.ToString(CultureInfo.InvariantCulture))}</span><span>collector {E(collectorSelfNoise.ToString(CultureInfo.InvariantCulture))}</span><span>health {E(healthRows.ToString(CultureInfo.InvariantCulture))}</span><span>VT quiet {E(vtQuiet.ToString(CultureInfo.InvariantCulture))}</span></div>{CopyButton("Copy graph boundary", copy)}</div>");
+        html.AppendLine($"<div class=\"story-metrics\"><span>Excluded evidence {E(behaviorCountedFalse.ToString(CultureInfo.InvariantCulture))}</span><span>Non-behavior {E(nonBehavior.ToString(CultureInfo.InvariantCulture))}</span><span>Unattributed {E(notSampleBehavior.ToString(CultureInfo.InvariantCulture))}</span><span>Collector noise {E(collectorSelfNoise.ToString(CultureInfo.InvariantCulture))}</span><span>Collection health {E(healthRows.ToString(CultureInfo.InvariantCulture))}</span><span>Enrichment status {E(vtQuiet.ToString(CultureInfo.InvariantCulture))}</span></div>{CopyButton("Copy graph boundary", copy)}</div>");
     }
 
     /// <summary>
@@ -2346,13 +2346,13 @@ html[lang="en"] .localized-evidence-field{display:none}
                 $"sampleFamilies={string.Join(",", sampleFamilies)}",
                 $"excludedFamilies={string.Join(",", excludedFamilies)}",
                 "excludedReasonHits:",
-                .. reasonCounts.Select(reason => $"{reason.Label}={reason.Count}"),
+                .. reasonCounts.Select(reason => $"{UserFacingExclusionReason(reason.Label)}={reason.Count}"),
                 "sampleExamples:",
                 .. sampleEvents.Take(5).Select(EventOneLine)
             ]);
 
         html.AppendLine("<h3>Behavior story routing</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Behavior story routing.</strong> The graph, process tree, network cards, file table, and registry table use only sample-behavior rows. Collection metadata, <code>nonbehavior</code>, <code>notSampleBehavior</code>, collector self-noise, VT quiet states, and R0 health remain visible in their own lanes and raw events.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Behavior story routing.</strong> The graph, process tree, network cards, file table, and registry table use only sample-attributed actions. Collection health, collector noise, enrichment status, and other excluded evidence remain visible in their own lanes and raw events.</div>");
         html.AppendLine($"<div class=\"overview-strip behavior-routing-overview copyable\" data-copy=\"{A(copy)}\">");
         AppendOverviewItem(
             html,
@@ -2430,8 +2430,20 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         return reasonCounts.Count == 0
             ? string.Empty
-            : string.Join("; ", reasonCounts.Select(reason => $"{reason.Label}: {reason.Count}"));
+            : string.Join("; ", reasonCounts.Select(reason => $"{UserFacingExclusionReason(reason.Label)}: {reason.Count}"));
     }
+
+    private static string UserFacingExclusionReason(string label) => label switch
+    {
+        "behaviorCounted=false" => "Excluded evidence",
+        "nonbehavior" => "Non-behavior",
+        "notSampleBehavior" => "Unattributed",
+        "collectorSelfNoise" => "Collector noise",
+        "collectorNoise" => "Collector noise",
+        "collectionHealth" => "Collection health",
+        "vtQuiet" => "Enrichment status",
+        _ => label
+    };
 
     /// <summary>
     /// Appends a compact left-to-right narrative before the heavier graph
@@ -5302,7 +5314,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             ]);
 
         html.AppendLine("<h3>Raw event slimming story</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Raw event slimming story.</strong> These cards explain the renderer's weak-interaction policy before any dense row expansion: visible pages are bounded, long technical payloads stay folded, and report.json/source artifacts remain the complete record.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Raw event slimming story.</strong> These cards summarize the bounded report view before any dense row expansion: visible pages are bounded, long technical payloads stay folded, and report.json/source artifacts remain the complete record.</div>");
         html.AppendLine("<div class=\"overview-strip raw-slimming-story\">");
         AppendOverviewItem(
             html,
@@ -10724,6 +10736,12 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Top-level guest artifact manifest jobId is all-zero while report/runbook JobId is", "Guest artifact manifest 顶层 jobId 为全零，而报告/运行手册 JobId 为"),
         ("Static analysis only", "仅静态分析"),
         ("No high-risk behavior", "未发现高风险行为"),
+        ("Excluded evidence", "排除证据"),
+        ("Non-behavior", "非行为"),
+        ("Unattributed", "未归因"),
+        ("Collector noise", "采集器噪声"),
+        ("Enrichment status", "增强状态"),
+        ("Collection health", "采集健康"),
         ("Critical risk", "严重风险"),
         ("High risk", "高风险"),
         ("Suspicious", "可疑行为"),
@@ -10949,6 +10967,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Behavior detections", "行为命中"),
         ("Collection/self-noise policy", "采集/自噪声策略"),
         ("Collection/self-noise policy.", "采集/自噪声策略。"),
+        ("Behavior story counts include only sample-attributed actions. Collection health, collector noise, enrichment status, and other excluded evidence remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.", "行为叙事只计入归属于样本的动作。采集健康、采集器噪声、增强状态和其他排除证据仍会在专用章节及原始规范化事件/report.json 中展示；原始分页和折叠证据保持不变。"),
         ("Behavior story counts exclude rows marked <code>behaviorCounted=false</code>, <code>nonbehavior</code>, <code>notSampleBehavior</code>, collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.", "行为叙事计数会排除标记为 <code>behaviorCounted=false</code>、<code>nonbehavior</code>、<code>notSampleBehavior</code>、采集器自噪声、VT 安静状态以及 R0 健康/就绪诊断的行。这些行仍会在各自专用章节和原始规范化事件/report.json 中可见；原始分页和折叠证据保持不变。"),
         ("Behavior story counts exclude rows marked", "行为叙事会排除标记为"),
         ("collector self-noise, VT quiet states, and R0 health/readiness diagnostics. These rows remain visible in their dedicated sections and in Raw normalized events/report.json; raw pagination and folded evidence are unchanged.", "采集器自噪声、VT 安静状态和 R0 健康/就绪诊断。这些行仍会在各自专用章节和原始规范化事件/report.json 中可见；原始分页和折叠证据保持不变。"),
@@ -11868,6 +11887,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Hint / 提示: artifact badges show indexed evidence already present in report.json/artifact-index; self-noise stays in raw evidence, not sample behavior.", "提示：证据文件徽标表示 report.json/证据索引中已有的证据；自噪声保留在原始证据中，不计为样本行为。"),
         ("Behavior story routing", "行为故事路由"),
         ("The graph, process tree, network cards, file table, and registry table use only sample-behavior rows. Collection metadata, <code>nonbehavior</code>, <code>notSampleBehavior</code>, collector self-noise, VT quiet states, and R0 health remain visible in their own lanes and raw events.", "图谱、进程树、网络卡片、文件表和注册表表格只使用样本行为行。采集元数据、<code>nonbehavior</code>、<code>notSampleBehavior</code>、采集器自噪声、VT 安静状态和 R0 健康状态仍在各自通道及原始事件中可见。"),
+        ("The graph, process tree, network cards, file table, and registry table use only sample-attributed actions. Collection health, collector noise, enrichment status, and other excluded evidence remain visible in their own lanes and raw events.", "图谱、进程树、网络卡片、文件表和注册表表格只使用归属于样本的动作。采集健康、采集器噪声、增强状态和其他排除证据仍会在各自通道及原始事件中展示。"),
         ("Stable relationship lanes", "稳定关系通道"),
         ("Weak-interaction lane map for process lineage, file paths, registry paths, network paths, and artifact proof. Counts and representative paths are visible before the dense edge table; complete edge evidence remains bounded below.", "进程谱系、文件路径、注册表路径、网络路径和证据文件证明的弱交互通道图。密集边表之前先展示计数和代表性路径；完整边证据在下方保持有界。"),
         ("No inline evidence observed in this lane; check Raw normalized events/report.json and Artifact links for complete source data.", "此通道未观察到内联证据；请查看原始规范化事件/report.json 和证据文件链接获取完整来源数据。"),
