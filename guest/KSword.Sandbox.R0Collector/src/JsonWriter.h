@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <ostream>
 #include <sstream>
@@ -33,11 +34,22 @@ std::wstring BaseNameFromPath(const std::wstring& path);
 // value and mutate the builder.
 class JsonDataObjectBuilder {
 public:
+    JsonDataObjectBuilder() = default;
+
+    explicit JsonDataObjectBuilder(std::function<bool(std::string_view)> filter)
+        : filter_(std::move(filter)) {}
+
     void AddUtf8(const std::string& key, const std::string& value) {
+        if (!ShouldKeep(key)) {
+            return;
+        }
         entries_.push_back({key, JsonStringFromUtf8(value)});
     }
 
     void AddWide(const std::string& key, const std::wstring& value) {
+        if (!ShouldKeep(key)) {
+            return;
+        }
         entries_.push_back({key, JsonStringFromWide(value)});
     }
 
@@ -85,12 +97,17 @@ public:
     }
 
 private:
+    bool ShouldKeep(const std::string_view key) const {
+        return !filter_ || filter_(key);
+    }
+
     struct Entry {
         std::string key;
         std::string encodedValue;
     };
 
     std::vector<Entry> entries_;
+    std::function<bool(std::string_view)> filter_;
 };
 
 // Input: Mutable JSON data builder and optional process-handle capability state.

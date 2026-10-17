@@ -5245,7 +5245,13 @@ std::string BuildDriverEventData(
     const bool lost = header.LostEvents != 0;
     const bool backpressure = header.BackpressureEvents != 0;
 
-    JsonDataObjectBuilder data;
+    JsonDataObjectBuilder data([&](const std::string_view key) {
+        return key == "driverRowMetadataContractVersion" ||
+            key == "driverRowMetadataEncoding" ||
+            key == "driverRowMetadataOmitted" ||
+            key == "driverRowMetadataEvidencePolicy" ||
+            ShouldEmitCompactDriverField(header.Type, key);
+    });
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", driverEventTypeName);
     data.AddUtf8("eventOrigin", attribution.eventOrigin);
@@ -5325,13 +5331,7 @@ std::string BuildDriverEventData(
         "driverRowMetadataEvidencePolicy",
         "dynamic-payload-path-lineage-status-sequence-loss-backpressure-and-coverage-fields-retained");
 
-    return data.BuildFiltered([&](const std::string_view key) {
-        return key == "driverRowMetadataContractVersion" ||
-            key == "driverRowMetadataEncoding" ||
-            key == "driverRowMetadataOmitted" ||
-            key == "driverRowMetadataEvidencePolicy" ||
-            ShouldEmitCompactDriverField(header.Type, key);
-    });
+    return data.Build();
 }
 
 } // namespace KSword::Sandbox::R0Collector
