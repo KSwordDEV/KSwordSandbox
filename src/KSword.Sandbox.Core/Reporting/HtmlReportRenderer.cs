@@ -138,7 +138,8 @@ public sealed class HtmlReportRenderer
         string Stage,
         string Family,
         string Severity,
-        bool SampleBehavior);
+        bool SampleBehavior,
+        string Disposition);
 
     private sealed record ArtifactEvidenceMatrixRow(
         string CollectionName,
@@ -880,16 +881,31 @@ html[lang="en"] .localized-evidence-field{display:none}
                 EventExplorerStage(evt),
                 EventFamilyLabel(evt),
                 EventExplorerSeverity(report, evt),
-                IsSampleBehaviorEvent(evt)))
+                IsSampleBehaviorEvent(evt),
+                EventExplorerDisposition(evt)))
             .ToList();
         var inlineRows = Math.Min(EventExplorerInlineLimit, rows.Count);
-        var hidden = Math.Max(0, rows.Count - inlineRows);
+        // Reserve visible slots for process exits and collection gaps. Dense
+        // driver/file telemetry must not push the execution outcome out of
+        // the first screen where operators look for it.
+        var priorityRows = rows
+            .Where(row => IsEventExplorerPriority(row.Event))
+            .Take(Math.Min(40, inlineRows))
+            .ToList();
+        var priorityKeys = priorityRows.Select(row => EventIdentityKey(row.Event)).ToHashSet(StringComparer.Ordinal);
+        var fillerRows = rows
+            .Where(row => !priorityKeys.Contains(EventIdentityKey(row.Event)))
+            .Take(Math.Max(0, inlineRows - priorityRows.Count))
+            .ToList();
+        var inlineRowsSelected = priorityRows.Concat(fillerRows).ToList();
+        var inlineKeySet = inlineRowsSelected.Select(row => EventIdentityKey(row.Event)).ToHashSet(StringComparer.Ordinal);
+        var hidden = Math.Max(0, rows.Count - inlineRowsSelected.Count);
         var overflowRows = rows
-            .Skip(inlineRows)
+            .Where(row => !inlineKeySet.Contains(EventIdentityKey(row.Event)))
             .GroupBy(row => string.Join("|", row.Event.EventType, row.Event.Source, row.Family, row.Stage, row.Severity, row.SampleBehavior), StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToList();
-        var renderRows = rows.Take(inlineRows).Concat(overflowRows).ToList();
+        var renderRows = inlineRowsSelected.Concat(overflowRows).ToList();
         var types = explorerEvents.Select(evt => evt.EventType).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var sources = explorerEvents.Select(evt => string.IsNullOrWhiteSpace(evt.Source) ? "unknown" : evt.Source).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var stages = rows.Select(row => row.Stage).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
@@ -897,14 +913,16 @@ html[lang="en"] .localized-evidence-field{display:none}
         var severities = rows.Select(row => row.Severity).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(SeverityRank).ToList();
 
         html.AppendLine("<section id=\"event-explorer\" class=\"card\"><h2>Key event explorer</h2>");
-        html.AppendLine("<div class=\"section-note\"><strong>Review the signal first.</strong> Search or filter by event type, source, stage, severity, and sample-behavior status. Rows marked No remain retained as captured but unattributed evidence and can be revealed by filtering.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Review the signal first.</strong> Search or filter by event type, source, stage, severity, and sample-behavior status. Evidence disposition separates confirmed/probable sample links, unattributed observations, and collection diagnostics.</div>");
+        AppendCollectionCoverageBanner(html, report, explorerEvents);
         html.AppendLine("<div class=\"event-explorer-toolbar\">");
-        html.AppendLine("<label>Search <input type=\"search\" data-event-search placeholder=\"type, path, process, target\"></label>");
+        html.AppendLine("<label>Search <input type=\"search\" data-event-search placeholder=\"事件类型、路径、进程或目标\"></label>");
         AppendEventExplorerSelect(html, "Event type", "data-event-type", types);
         AppendEventExplorerSelect(html, "Source", "data-event-source", sources);
         AppendEventExplorerSelect(html, "Behavior family", "data-event-family", families);
         AppendEventExplorerSelect(html, "Stage", "data-event-stage", stages);
         AppendEventExplorerSelect(html, "Severity", "data-event-severity", severities);
+        AppendEventExplorerSelect(html, "Disposition", "data-event-disposition", rows.Select(row => row.Disposition).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase));
         html.AppendLine("<label>Sample behavior <select data-event-sample><option value=\"all\">All</option><option value=\"true\">Yes</option><option value=\"false\">No</option></select></label>");
         html.AppendLine("<button type=\"button\" class=\"focus-action secondary\" data-event-reset>Reset filters</button>");
         html.AppendLine("</div>");
@@ -915,25 +933,26 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
         else
         {
-            html.AppendLine("<div class=\"event-table-wrap event-explorer-wrap\"><table class=\"event-explorer-table\"><thead><tr><th>Time</th><th>Event type</th><th>Source</th><th>Stage</th><th>Severity</th><th>Sample behavior</th><th>Evidence</th></tr></thead><tbody>");
+            html.AppendLine("<div class=\"event-table-wrap event-explorer-wrap\"><table class=\"event-explorer-table\"><thead><tr><th>Time</th><th>Event type</th><th>Source</th><th>Stage</th><th>Severity</th><th>Disposition</th><th>Evidence</th></tr></thead><tbody>");
             for (var rowIndex = 0; rowIndex < renderRows.Count; rowIndex++)
             {
                 var row = renderRows[rowIndex];
                 var evt = row.Event;
                 var target = ExtractReadableEventTarget(evt);
-                var search = string.Join(" ", evt.EventType, evt.Source, evt.ProcessName, evt.Path, target, row.Family, row.Stage, row.Severity);
-                var overflow = rowIndex >= inlineRows;
+                var exitCode = ProcessExitCodeText(evt);
+                var search = string.Join(" ", evt.EventType, evt.Source, evt.ProcessName, evt.Path, target, exitCode, row.Family, row.Stage, row.Severity, row.Disposition);
+                var overflow = !inlineKeySet.Contains(EventIdentityKey(evt));
                 var relatedArtifacts = overflow
                     ? Array.Empty<ArtifactDescriptor>()
                     : FindRelatedArtifacts(evt, artifactLookup, artifacts);
                 var plain = overflow
                     ? string.Empty
                     : EventToBoundedPlainText(evt, maxDataPairs: 24, maxValueLength: 220);
-                html.AppendLine($"<tr class=\"event-explorer-row\" data-event-row data-event-overflow=\"{(overflow ? "true" : "false")}\" data-type=\"{A(evt.EventType)}\" data-source=\"{A(evt.Source)}\" data-family=\"{A(row.Family)}\" data-stage=\"{A(row.Stage)}\" data-severity=\"{A(row.Severity)}\" data-sample=\"{(row.SampleBehavior ? "true" : "false")}\" data-search=\"{A(search)}\">");
+                html.AppendLine($"<tr class=\"event-explorer-row\" data-event-row data-event-overflow=\"{(overflow ? "true" : "false")}\" data-type=\"{A(evt.EventType)}\" data-source=\"{A(evt.Source)}\" data-family=\"{A(row.Family)}\" data-stage=\"{A(row.Stage)}\" data-severity=\"{A(row.Severity)}\" data-sample=\"{(row.SampleBehavior ? "true" : "false")}\" data-event-disposition=\"{A(row.Disposition)}\" data-search=\"{A(search)}\">");
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
-                html.AppendLine($"<td><code>{E(evt.EventType)}</code></td><td>{E(string.IsNullOrWhiteSpace(evt.Source) ? "unknown" : evt.Source)}</td><td><span class=\"chip chip-info\">{E(row.Stage)}</span></td><td><span class=\"chip chip-{E(NormalizeSeverity(row.Severity))}\">{E(row.Severity)}</span></td><td>{(row.SampleBehavior ? "<span class=\"chip chip-medium\">Yes</span>" : "<span class=\"chip chip-info\">No</span>")}</td>");
+                html.AppendLine($"<td><code>{E(evt.EventType)}</code></td><td>{E(string.IsNullOrWhiteSpace(evt.Source) ? "unknown" : evt.Source)}</td><td><span class=\"chip chip-info\">{E(row.Stage)}</span></td><td><span class=\"chip chip-{E(NormalizeSeverity(row.Severity))}\">{E(row.Severity)}</span></td><td><span class=\"chip chip-{E(EventDispositionCss(row.Disposition))}\">{E(row.Disposition)}</span>{(string.IsNullOrWhiteSpace(exitCode) ? string.Empty : $" <code class=\"exit-code\">{E(exitCode)}</code>")}</td>");
                 var detail = overflow
-                    ? "<div class=\"muted\">Detailed fields remain in the raw event JSON; use the compact row to identify this event.</div>"
+                    ? $"<div class=\"muted\">Detailed fields remain in the raw event JSON; use the compact row to identify this event.</div>{RenderProcessExitOutcome(evt)}"
                     : $"<div class=\"muted\">{E(DisplayEventTarget(evt, target))}</div>{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyButton("Copy event", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>";
                 html.AppendLine($"<td><details class=\"event-explorer-details\"><summary>{E(evt.ProcessName ?? target ?? "Open evidence")}</summary><div class=\"event-explorer-detail\">{detail}</div></details></td>");
                 html.AppendLine("</tr>");
@@ -956,6 +975,88 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         html.AppendLine("</select></label>");
+    }
+
+    private static string EventExplorerDisposition(SandboxEvent evt)
+    {
+        if (IsCollectionDiagnosticFailure(evt) || IsCollectionHealthEvent(evt))
+        {
+            return "diagnostic";
+        }
+
+        var correlation = FirstEventDataValue(evt, "sampleCorrelation", "sample_correlation");
+        var status = FirstEventDataValue(evt, "sampleCorrelationStatus", "sample_correlation_status");
+        if (EventDataBoolTrue(evt, "strongSampleCorrelation", "strong_sample_correlation") ||
+            TextEqualsAny(correlation ?? string.Empty, "confirmed") ||
+            TextEqualsAny(status ?? string.Empty, "confirmed"))
+        {
+            return "confirmed";
+        }
+
+        if (TextEqualsAny(correlation ?? string.Empty, "probable") ||
+            TextEqualsAny(status ?? string.Empty, "probable"))
+        {
+            return "probable";
+        }
+
+        return IsSampleBehaviorEvent(evt) ? "observed" : "unattributed";
+    }
+
+    private static string EventDispositionCss(string disposition) => disposition.ToLowerInvariant() switch
+    {
+        "confirmed" => "high",
+        "probable" => "medium",
+        "observed" => "medium",
+        _ => "info"
+    };
+
+    private static bool IsEventExplorerPriority(SandboxEvent evt) =>
+        TextEqualsAny(evt.EventType, "process.exit") ||
+        IsCollectionDiagnosticFailure(evt) ||
+        IsOperationalFailureEvent(evt) ||
+        IsNonZeroSampleExitEvent(evt);
+
+    private static void AppendCollectionCoverageBanner(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyCollection<SandboxEvent> explorerEvents)
+    {
+        var health = report.CollectionHealth;
+        var diagnosticRows = explorerEvents.Count(IsCollectionDiagnosticFailure);
+        var healthAlert = health.FailureRows > 0 ||
+            health.LossRows > 0 ||
+            health.DriverLostCount > 0 ||
+            health.EtwEventsLost > 0 ||
+            health.DriverMalformedRows > 0 ||
+            health.DriverOutputWriteFailureRows > 0 ||
+            health.DriverRemainingUnread > 0 ||
+            health.DriverDrainStoppedAtDeadlineRows > 0 ||
+            health.DriverQualityWarningRows > 0 ||
+            health.EtwFailureRows > 0 ||
+            health.PcapFailureRows > 0 ||
+            health.AgentFailureRows > 0 ||
+            TextEqualsAny(health.State, "partial", "degraded", "failed", "unknown");
+        if (!healthAlert && diagnosticRows == 0)
+        {
+            return;
+        }
+
+        var reasons = new List<string>();
+        if (diagnosticRows > 0) reasons.Add($"diagnostic rows={diagnosticRows}");
+        if (health.DriverOutputWriteFailureRows > 0) reasons.Add($"driver output failures={health.DriverOutputWriteFailureRows}");
+        if (health.DriverMalformedRows > 0) reasons.Add($"malformed driver rows={health.DriverMalformedRows}");
+        if (health.DriverLostCount > 0 || health.LossRows > 0) reasons.Add($"lost rows={Math.Max(health.DriverLostCount, health.LossRows)}");
+        if (health.EtwFailureRows > 0 || health.EtwEventsLost > 0) reasons.Add($"ETW gaps={Math.Max(health.EtwFailureRows, health.EtwEventsLost)}");
+        if (health.PcapFailureRows > 0) reasons.Add($"PCAP gaps={health.PcapFailureRows}");
+        if (health.AgentFailureRows > 0) reasons.Add($"guest collection failures={health.AgentFailureRows}");
+        if (health.DriverRemainingUnread > 0 || health.DriverDrainStoppedAtDeadlineRows > 0) reasons.Add("driver drain did not prove an empty queue");
+        if (reasons.Count == 0) reasons.Add($"collection state={FirstNonEmpty(health.State, "unknown")}");
+
+        html.AppendLine("<div class=\"collection-gap-banner\" role=\"status\">");
+        html.AppendLine("<strong>Evidence coverage warning.</strong> Collection quality has an unresolved gap; this does not by itself indicate malicious sample behavior.");
+        html.AppendLine($"<span>{E(string.Join("; ", reasons))}</span>");
+        html.AppendLine("<a href=\"#collection-health\">Review collection health</a> <a href=\"#failure\">Review execution and collection diagnostics</a>");
+        html.AppendLine("</div>");
     }
 
     private static string EventExplorerStage(SandboxEvent evt)
@@ -8005,6 +8106,11 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static bool IsEventExplorerEvent(SandboxEvent evt)
     {
+        if (IsCollectionDiagnosticFailure(evt))
+        {
+            return true;
+        }
+
         if (IsUserFacingEvent(evt))
         {
             return true;
@@ -8963,8 +9069,8 @@ html[lang="en"] .localized-evidence-field{display:none}
             return false;
         }
 
-        var exitCode = FirstEventDataValue(evt, "exitCode", "processExitCode", "code");
-        return long.TryParse(exitCode, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed != 0;
+        var exitCode = ProcessExitCodeRaw(evt);
+        return TryParseExitCode(exitCode, out var parsed) && parsed != 0;
     }
 
     private static string? BuildProcessExitCodeContext(SandboxEvent evt)
@@ -8974,7 +9080,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             return null;
         }
 
-        var rawExitCode = FirstEventDataValue(evt, "exitCode", "processExitCode", "code");
+        var rawExitCode = ProcessExitCodeRaw(evt);
         if (!TryParseExitCode(rawExitCode, out var exitCode) || exitCode == 0)
         {
             return null;
@@ -8993,6 +9099,50 @@ html[lang="en"] .localized-evidence-field{display:none}
         };
 
         return $"Exit code {rawExitCode} ({hex}): {meaning}. Sample-attributed behavior is indeterminate; this execution outcome is not treated as malicious sample behavior.";
+    }
+
+    private static string? ProcessExitCodeRaw(SandboxEvent evt)
+    {
+        if (!TextEqualsAny(evt.EventType, "process.exit"))
+        {
+            return null;
+        }
+
+        var direct = FirstEventDataValue(evt, "exitCode", "processExitCode", "exitStatus", "ExitStatus", "code");
+        if (!string.IsNullOrWhiteSpace(direct))
+        {
+            return direct;
+        }
+
+        foreach (var value in evt.Data.Values)
+        {
+            var match = Regex.Match(value ?? string.Empty, @"(?i)\b(?:exitstatus|exitcode|processExitCode)\s*=\s*(-?(?:0x[0-9a-f]+|\d+))");
+            if (match.Success)
+            {
+                return match.Groups[1].Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ProcessExitCodeText(SandboxEvent evt)
+    {
+        var raw = ProcessExitCodeRaw(evt);
+        return string.IsNullOrWhiteSpace(raw) ? null : $"exitCode={raw}";
+    }
+
+    private static string RenderProcessExitOutcome(SandboxEvent evt)
+    {
+        if (!TextEqualsAny(evt.EventType, "process.exit"))
+        {
+            return string.Empty;
+        }
+
+        var context = BuildProcessExitCodeContext(evt);
+        return string.IsNullOrWhiteSpace(context)
+            ? "<div class=\"muted process-exit-outcome\">Exit code was not captured for this process exit row.</div>"
+            : $"<div class=\"section-note process-exit-outcome\"><strong>Exit code context:</strong> {E(context)}</div>";
     }
 
     private static bool TryParseExitCode(string? value, out long exitCode)
@@ -10513,6 +10663,27 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Copy analyst focus", "复制分析重点"),
         ("Key event explorer", "关键事件筛选器"),
         ("Review the signal first.", "先查看信号。"),
+        ("Evidence disposition separates confirmed/probable sample links, unattributed observations, and collection diagnostics.", "证据归因状态会区分已确认/可能关联的样本行为、未归因观察和采集诊断。"),
+        ("Evidence coverage warning.", "证据覆盖警告。"),
+        ("Collection quality has an unresolved gap; this does not by itself indicate malicious sample behavior.", "采集质量存在未解决缺口；这本身不代表样本存在恶意行为。"),
+        ("diagnostic rows=", "诊断行数="),
+        ("driver output failures=", "驱动输出失败="),
+        ("malformed driver rows=", "驱动格式错误行="),
+        ("lost rows=", "丢失行数="),
+        ("ETW gaps=", "ETW 缺口="),
+        ("PCAP gaps=", "PCAP 缺口="),
+        ("guest collection failures=", "来宾采集失败="),
+        ("driver drain did not prove an empty queue", "驱动排空未证明队列为空"),
+        ("collection state=", "采集状态="),
+        ("Review collection health", "查看采集健康"),
+        ("Review execution and collection diagnostics", "查看执行与采集诊断"),
+        ("Disposition", "归因状态"),
+        ("confirmed", "已确认"),
+        ("probable", "可能关联"),
+        ("observed", "已观察"),
+        ("unattributed", "未归因"),
+        ("diagnostic", "采集诊断"),
+        ("Exit code was not captured for this process exit row.", "该进程退出行未采集到退出码。"),
         ("Rows marked No remain visible as captured but unattributed evidence.", "标记为“否”的行仍会保留，表示已采集但尚未归因的证据。"),
         ("Rows marked No remain retained as captured but unattributed evidence and can be revealed by filtering.", "标记为“否”的行仍会保留，表示已采集但尚未归因的证据，可通过筛选显示。"),
         ("Search or filter by event type, source, stage, severity, and sample-behavior status. Agent lifecycle rows are omitted from this table; expand Raw normalized events for complete audit evidence.", "可按事件类型、来源、阶段、严重性和是否样本行为搜索或筛选。Agent 生命周期行不会出现在此表；展开原始规范化事件可查看完整审计证据。"),
@@ -13740,6 +13911,7 @@ html[lang="en"] .localized-evidence-field{display:none}
       family: explorer.querySelector('[data-event-family]'),
       stage: explorer.querySelector('[data-event-stage]'),
       severity: explorer.querySelector('[data-event-severity]'),
+      disposition: explorer.querySelector('[data-event-disposition]'),
       sample: explorer.querySelector('[data-event-sample]')
     };
     function explorerValue(control) { return control ? (control.value || 'all').toLowerCase() : 'all'; }
@@ -13756,6 +13928,7 @@ html[lang="en"] .localized-evidence-field{display:none}
           (explorerValue(explorerFilters.family) === 'all' || explorerValue(explorerFilters.family) === (row.getAttribute('data-family') || '').toLowerCase()) &&
           (explorerValue(explorerFilters.stage) === 'all' || explorerValue(explorerFilters.stage) === (row.getAttribute('data-stage') || '').toLowerCase()) &&
           (explorerValue(explorerFilters.severity) === 'all' || explorerValue(explorerFilters.severity) === (row.getAttribute('data-severity') || '').toLowerCase()) &&
+          (explorerValue(explorerFilters.disposition) === 'all' || explorerValue(explorerFilters.disposition) === (row.getAttribute('data-event-disposition') || '').toLowerCase()) &&
           (explorerValue(explorerFilters.sample) === 'all' || explorerValue(explorerFilters.sample) === (row.getAttribute('data-sample') || '').toLowerCase());
         var overflow = row.getAttribute('data-event-overflow') === 'true';
         var shown = matches && (!overflow || hasFilter);
@@ -13811,4 +13984,6 @@ html[lang="en"] .localized-evidence-field{display:none}
 """);
     }
 }
+
+
 
