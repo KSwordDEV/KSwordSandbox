@@ -238,7 +238,7 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Environment("row-belongs-to-sandbox-collector-or-agent", "processName");
         }
 
-        if (IsBenignWindowsDiscoveryUtility(evt, data))
+        if (IsBenignWindowsDiscoveryUtility(evt, data, context))
         {
             return CorrelationDisposition.Environment(
                 "system32-signed-or-known-discovery-utility-without-high-signal-behavior",
@@ -1706,7 +1706,8 @@ public static class SampleCorrelationClassifier
 
     private static bool IsBenignWindowsDiscoveryUtility(
         SandboxEvent evt,
-        IReadOnlyDictionary<string, string> data)
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context)
     {
         if (!IsProcessEvidence(evt))
         {
@@ -1731,7 +1732,11 @@ public static class SampleCorrelationClassifier
             Value(data, "processImagePath"),
             Value(data, "imagePath"),
             Value(data, "actorProcessImagePath"));
+        var submittedKnownSystemUtility =
+            TextEqualsAny(TrimExe(Path.GetFileName(context.SampleFullPath)), BenignWindowsDiscoveryUtilityNames) &&
+            LooksSystemOnlyPath(context.SampleFullPath);
         var signedOrKnownSystemImage = LooksSystemOnlyPath(imageOrPath) ||
+            submittedKnownSystemUtility ||
             IsTruthy(Value(data, "signed")) ||
             IsTruthy(Value(data, "isSigned")) ||
             IsTruthy(Value(data, "signatureTrusted")) ||
