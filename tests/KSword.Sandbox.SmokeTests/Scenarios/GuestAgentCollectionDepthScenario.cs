@@ -335,6 +335,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("flags.Contains(\"packet-capture\")", StringComparison.Ordinal), "Packet capture must require an explicit flag.");
         SmokeAssert.True(programText.Contains("R0CollectorEnableMask", StringComparison.Ordinal), "Agent options must carry the requested R0 producer mask.");
         SmokeAssert.True(programText.Contains("--enable-mask", StringComparison.Ordinal), "Agent must forward the requested producer mask to R0Collector.");
+        SmokeAssert.True(programText.Contains("R0CollectorDrainGraceMs", StringComparison.Ordinal), "Agent options must carry the bounded R0 post-window drain grace.");
+        SmokeAssert.True(programText.Contains("--drain-grace-ms", StringComparison.Ordinal), "Agent must forward the R0 post-window drain grace to R0Collector.");
+        SmokeAssert.True(programText.Contains("GracefulStopTimeout", StringComparison.Ordinal), "Agent must wait through the configured R0 drain grace before forcing sidecar shutdown.");
         SmokeAssert.True(programText.Contains("DriverEventsInlineThresholdBytes", StringComparison.Ordinal), "Guest agent must bound inline duplication of large driver JSONL streams.");
         SmokeAssert.True(programText.Contains("ShouldDeferDriverEvents", StringComparison.Ordinal), "Guest agent must defer high-volume driver JSONL to host-side merge.");
         SmokeAssert.True(programText.Contains("driver.events.deferred", StringComparison.Ordinal), "Deferred driver streams must leave an explicit compact marker in events.json.");
