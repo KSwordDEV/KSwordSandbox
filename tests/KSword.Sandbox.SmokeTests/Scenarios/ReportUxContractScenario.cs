@@ -147,7 +147,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Index by event family", "Raw event index should group by event family.");
         RequireContains(rendererSource, "report.json only", "Raw event index should identify rows outside the inline cap.");
         RequireContains(rendererSource, "raw-technical-field", "Report renderer should hide long raw technical fields behind nested details.");
-        RequireContains(rendererSource, "Command/stdout/stderr/PowerShell fields hidden by default", "Report renderer should collapse long command/output/script fields.");
+        RequireContains(rendererSource, "RenderEventEvidenceDetails", "Report renderer should collapse long command/output/script fields behind event evidence details.");
         RequireContains(rendererSource, "Hidden raw events", "Report renderer should expose hidden raw event counts.");
         RequireContains(rendererSource, "report.json", "Report renderer should point operators to report.json.");
         RequireContains(rendererSource, "raw source artifacts", "Report renderer should point operators to raw source artifacts.");
@@ -435,8 +435,14 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseVisibleText, "证据覆盖警告。", "Chinese report should visibly explain incomplete evidence coverage.");
         RequireNotContains(chineseVisibleText, "type, path, process, target", "Chinese event explorer must not leak the English search placeholder.");
         RequireContains(chineseHtml, "placeholder=\"事件类型、路径、进程或目标\"", "Chinese event explorer search placeholder should be localized in the control attribute.");
-        RequireContains(chineseVisibleText, "命令/stdout/stderr/PowerShell 字段默认隐藏", "Chinese technical-field fold summary should be localized.");
         RequireContains(chineseVisibleText, "此通道没有归属于样本的证据。", "Chinese story-lane empty state should be localized.");
+        RequireNotContains(chineseVisibleText, "隐藏技术字段", "Chinese event evidence must use compact field labels instead of the technical-field prompt.");
+        RequireNotContains(chineseVisibleText, "复制行为证据", "Chinese event evidence copy buttons should use the compact 复制 label.");
+        RequireNotContains(chineseVisibleText, "证据字段", "Chinese event evidence must not expose an evidence-field count or heading.");
+        RequireContains(chineseHtml, "data-copy-button=\"true\">复制</button>", "Chinese event evidence should expose a compact 复制 button.");
+        RequireNotContains(chineseVisibleText, "行为规则命中“命令和脚本解释器”", "Chinese behavior cards must not repeat verbose rule-hit guidance.");
+        RequireNotContains(chineseVisibleText, "请结合 evidenceFields、进程树和样本上下文复核", "Chinese behavior cards must not leak internal evidenceFields review instructions.");
+        RequireNotContains(chineseVisibleText, "evidenceFields", "Chinese report chrome must not leak the internal evidenceFields key.");
         RequireContains(chineseHtml, "class=\"chip chip-high\">高</span>", "Chinese report should localize high-severity UI badges.");
         RequireContains(chineseHtml, "class=\"chip chip-medium\">中</span>", "Chinese report should localize medium-severity UI badges.");
         RequireNotContains(chineseHtml, "additional behavior rows in report.json", "Chinese report must not leak the event explorer report-only-row phrase.");
@@ -500,10 +506,15 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(englishHtml, "href=\"C:\\", "Rendered HTML must not expose guest/local absolute Windows paths as href values.");
         RequireNotContains(englishHtml, "file://", "Rendered HTML must not expose file:// artifact hrefs.");
         RequireContains(englishHtml, "Command line hidden by default", "Rendered event rows should fold command lines by default.");
-        RequireContains(englishHtml, "Command/stdout/stderr/PowerShell fields hidden by default", "Rendered raw event details should fold long technical fields.");
-        RequireContains(englishHtml, "Hidden technical field: Standard output", "Rendered raw event details should hide stdout fields behind an analyst label.");
-        RequireContains(englishHtml, "Hidden technical field: PowerShell / script content", "Rendered raw event details should hide PowerShell fields behind an analyst label.");
-        RequireContains(englishHtml, "<details class=\"raw-technical-field\"><summary>Hidden technical field: Standard error", "Rendered raw event details should keep stderr in copyable details without leaking its raw key in the summary.");
+        RequireContains(englishHtml, "raw-technical-fields", "Rendered raw event details should retain a compact technical-field disclosure.");
+        RequireContains(englishHtml, "raw-technical-field", "Rendered raw event details should retain expandable technical-field rows.");
+        RequireContains(englishHtml, "Standard output", "Rendered raw event details should retain the stdout field label.");
+        RequireContains(englishHtml, "PowerShell / script content", "Rendered raw event details should retain the script field label.");
+        RequireNotContains(englishHtml, "Hidden technical field:", "Rendered raw event details should use compact field labels instead of technical-field prompts.");
+        RequireNotContains(englishHtml, "Copy behavior evidence", "Rendered event evidence copy buttons should use a compact label.");
+        RequireNotContains(englishHtml, "<summary>Evidence fields (", "Rendered event evidence must not expose a field-count summary.");
+        RequireNotContains(englishHtml, "evidenceFields", "Rendered behavior cards must not leak the internal evidenceFields key.");
+        RequireContains(englishHtml, "data-copy-button=\"true\">Copy</button>", "English event evidence should expose a compact Copy button.");
         RequireNotContains(englishHtml, "<br><span class=\"muted\">cmd.exe /c whoami</span>", "Rendered event tables should not inline command lines directly.");
         RequireContains(englishHtml, "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>", "Rendered HTML should include the behavior graph section.");
         RequireContains(englishHtml, "Evidence graph edges", "Rendered HTML should include graph edge evidence.");
@@ -627,7 +638,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(chineseHtml, "overf低：", "Chinese localization must not translate the low: token inside overflow CSS properties.");
         RequireContains(chineseHtml, "打开", "Chinese HTML should localize artifact open buttons.");
         RequireContains(chineseHtml, "下载", "Chinese HTML should localize artifact download buttons.");
-        RequireContains(chineseHtml, "命令行默认隐藏", "Chinese HTML should localize folded command-line details.");
+        RequireNotContains(chineseVisibleText, "命令行默认隐藏", "Chinese HTML should avoid verbose folded-command prompts.");
         RequireContains(chineseHtml, "启动项 / 持久化差异", "Chinese HTML should localize the startup diff navigation label.");
         RequireNotContains(chineseHtml, "图谱自噪声边界", "Chinese HTML should omit the removed graph noise boundary strategy text.");
         RequireNotContains(chineseHtml, "not样本行为", "Chinese localization must not rewrite the notSampleBehavior technical key.");
@@ -1153,7 +1164,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                     Severity = "medium",
                     MitreTechniqueId = "T1059",
                     MitreTechniqueName = "Command and Scripting Interpreter",
-                    Summary = "Synthetic behavior evidence for report UX contract.",
+                    Summary = "行为规则命中“命令和脚本解释器”；请结合 evidenceFields、进程树和样本上下文复核。",
                     Evidence = [processEvent]
                 }
             ],

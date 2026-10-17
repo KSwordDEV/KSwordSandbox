@@ -435,6 +435,7 @@ section.card{contain:layout paint;counter-increment:report-section;isolation:iso
  .badge-critical,.chip-critical{background:#fecaca;color:#7f1d1d}.badge-high,.chip-high{background:#fee2e2;color:#991b1b}.badge-medium,.chip-medium{background:#fef3c7;color:#92400e}.badge-low,.chip-low{background:#dcfce7;color:#166534}.badge-info,.chip-info{background:var(--primary-soft);color:#075985}.static-only-badge{background:#eef2ff;color:#3730a3;border-color:#c7d2fe}
 .section-note{background:#f7fbff;border:1px solid #dbeafe;border-left:4px solid var(--primary);border-radius:2px;color:#475569;margin:10px 0;padding:10px 12px}
 table{border-collapse:collapse;border-spacing:0;width:100%;margin-top:14px}td,th{border-bottom:1px solid #e5edf6;padding:10px;text-align:left;vertical-align:top}th{background:#f8fbff;color:#475569;font-size:12px;position:static;text-transform:uppercase}
+.behavior-findings-table{table-layout:auto}.behavior-findings-table td,.behavior-findings-table th{padding:7px 8px;line-height:1.3}.behavior-findings-table th:first-child{width:72px}.behavior-findings-table th:nth-child(2){min-width:240px;width:42%}.behavior-findings-table td:nth-child(2){word-break:keep-all;overflow-wrap:normal}.behavior-findings-table td:nth-child(3){min-width:220px}.behavior-findings-table .flat-details{margin-top:3px;padding:2px 0 2px 6px}.behavior-findings-table .flat-details summary{font-size:12px}.behavior-findings-table .flat-details pre{font-size:12px;line-height:1.35;margin:4px 0 0}.behavior-findings-table .inline-actions{margin-bottom:0}
 code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .empty{background:#fff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);padding:14px}
 .copy-btn{background:#fff;border:1px solid rgba(67,160,255,.55);border-radius:2px;color:#075985;cursor:pointer;font-size:12px;font-weight:700;margin:2px 6px 2px 0;padding:4px 8px}.copyable{cursor:copy}.copy-hint{color:var(--muted);font-size:12px;margin-top:8px}.no-js-fallback{border-color:#b9ddff}.no-js-fallback:before{background:#38bdf8}.fold-label{background:#f8fbff;border:1px solid #cfe6fb;color:#075985;display:inline-block;font-size:12px;font-weight:800;margin:2px 6px 2px 0;padding:3px 7px}
@@ -1262,10 +1263,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
         else
         {
-            html.AppendLine("<table><thead><tr><th>Severity</th><th>Behavior</th><th>Evidence</th></tr></thead><tbody>");
+            html.AppendLine("<table class=\"behavior-findings-table\"><thead><tr><th>Severity</th><th>Behavior</th><th>Evidence</th></tr></thead><tbody>");
             foreach (var finding in findings)
             {
-                html.AppendLine($"<tr><td class=\"risk-{E(NormalizeSeverity(finding.Severity))}\">{E(finding.Severity)}</td><td><strong>{E(finding.Title)}</strong><br><span class=\"muted\">{E(finding.Summary)}</span></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
+                html.AppendLine($"<tr><td class=\"risk-{E(NormalizeSeverity(finding.Severity))}\">{E(finding.Severity)}</td><td><strong>{E(finding.Title)}</strong></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
             }
 
             html.AppendLine("</tbody></table>");
@@ -1511,17 +1512,17 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         var isStaticTriage = string.Equals(title, "Static triage indicators", StringComparison.Ordinal);
         html.AppendLine(isStaticTriage
-            ? "<table><thead><tr><th>Evidence class</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>"
-            : "<table><thead><tr><th>Severity</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>");
+            ? "<table class=\"behavior-findings-table\"><thead><tr><th>Evidence class</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>"
+            : "<table class=\"behavior-findings-table\"><thead><tr><th>Severity</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>");
         foreach (var finding in findings)
         {
             if (isStaticTriage)
             {
-                html.AppendLine($"<tr><td><span class=\"badge static-only-badge\">Static-only / unverified</span><br><span class=\"muted\">Confidence: <span class=\"confidence-value\">{E(finding.Confidence)}</span></span></td><td><strong>{E(StaticFindingTitle(finding))}</strong><br><span class=\"muted\">{E(StaticFindingSummary(finding))}</span></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
+                html.AppendLine($"<tr><td><span class=\"badge static-only-badge\">Static-only / unverified</span></td><td><strong>{E(StaticFindingTitle(finding))}</strong></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
             }
             else
             {
-                html.AppendLine($"<tr><td class=\"risk-{E(NormalizeSeverity(finding.Severity))}\">{E(finding.Severity)}</td><td><strong>{E(finding.Title)}</strong><br><span class=\"muted\">{E(finding.Summary)}</span></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
+                html.AppendLine($"<tr><td class=\"risk-{E(NormalizeSeverity(finding.Severity))}\">{E(finding.Severity)}</td><td><strong>{E(finding.Title)}</strong></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
             }
         }
 
@@ -1559,25 +1560,24 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         if (evidence.Count == 0)
         {
-            return "<span class=\"muted\">0 evidence events</span>";
+            return "<span class=\"muted\">—</span>";
         }
 
         const int inlineLimit = 5;
         var topEvidence = evidence.Take(inlineLimit).ToList();
         var hidden = Math.Max(0, evidence.Count - topEvidence.Count);
-        var summary = $"{evidence.Count} evidence events";
         var compact = string.Join(Environment.NewLine, topEvidence.Select(EventOneLine));
         var full = string.Join(
             Environment.NewLine + Environment.NewLine,
             evidence.Select(evt => EventToBoundedPlainText(evt, FindingEvidenceDataPairLimit, FindingEvidenceValueLimit)));
         if (hidden > 0)
         {
-            compact += Environment.NewLine + $"... {hidden} more evidence events; expand or copy to view all";
+            compact += Environment.NewLine + "…";
         }
 
         return
-            $"<span class=\"inline-actions\">{CopyButton("Copy behavior evidence", full)}<span class=\"evidence-count copyable\" data-copy=\"{A(summary)}\">{E(summary)}</span></span>" +
-            $"<details class=\"flat-details\"><summary>Top evidence summary</summary><pre class=\"copyable\" data-copy=\"{A(full)}\">{E(compact)}</pre></details>";
+            $"<span class=\"inline-actions\">{CopyButton("Copy", full)}</span>" +
+            $"<details class=\"flat-details\"><summary>Evidence</summary><pre class=\"copyable\" data-copy=\"{A(full)}\">{E(compact)}</pre></details>";
     }
 
     /// <summary>
