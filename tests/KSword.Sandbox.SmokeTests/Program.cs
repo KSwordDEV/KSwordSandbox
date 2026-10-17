@@ -339,6 +339,10 @@ internal static class SmokeTestProgram
         var liveSyncStep = runbook.Steps.Single(step => step.Id == "sync-live-output");
         Assert(liveSyncStep.PowerShell.Contains("Copy-Item -FromSession", StringComparison.Ordinal), "runbook should sync guest output through PowerShell Direct");
         Assert(liveSyncStep.PowerShell.Contains($"{job.JobId:N}", StringComparison.Ordinal), "live sync should target the job-specific guest output directory");
+        Assert(liveSyncStep.PowerShell.Contains("driver-events.part-*.jsonl", StringComparison.Ordinal), "live sync should enumerate rotated R0 JSONL segments");
+        Assert(liveSyncStep.PowerShell.Contains("segmentCleanupWarningCount", StringComparison.Ordinal), "live sync should preserve segment cleanup diagnostics");
+        Assert(liveSyncStep.PowerShell.Contains("$hostLength -eq [int64]$segment.Length", StringComparison.Ordinal), "live sync should delete a guest segment only after an exact-length host copy");
+        Assert(liveSyncStep.PowerShell.Contains("Remove-Item -LiteralPath (Join-Path $root $name)", StringComparison.Ordinal), "live sync should release closed guest R0 segments after host verification");
         Assert(runbook.Steps.Any(step => step.Id == "collect-output"), "runbook should keep a final guest output collection step");
         Assert(File.Exists(job.JsonReportPath), "json report should exist");
         Assert(File.Exists(job.HtmlReportPath), "html report should exist");

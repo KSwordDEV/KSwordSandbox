@@ -1811,6 +1811,8 @@ public sealed class HyperVRunbookBuilder
             "$requiredOutputNames = @('events.json', 'agent-summary.json', 'agent.pid', 'agent.exit');",
             "$copyWarningCount = 0;",
             "$firstCopyWarning = '';",
+            "$segmentCleanupWarningCount = 0;",
+            "$firstSegmentCleanupWarning = '';",
             "New-Item -ItemType Directory -Force -Path $hostOut | Out-Null;",
             "$pidText = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-Content -LiteralPath $path -Raw).Trim() } else { '' } } -ArgumentList $pidPath -ErrorAction Stop;",
             "if ([string]::IsNullOrWhiteSpace([string]$pidText)) { throw \"Guest Agent pid marker was not found: $pidPath. The run-agent step may not have started the guest wrapper.\" };",
@@ -1819,24 +1821,38 @@ public sealed class HyperVRunbookBuilder
             "Write-Host \"Live output sync is watching Guest Agent pid $guestAgentPid and waiting for events.json, agent-summary.json, agent.pid, and agent.exit.\";",
             "do {",
             "try { Copy-Item -FromSession $session -Path (Join-Path $guestOut '*') -Destination $hostOut -Recurse -Force -ErrorAction Stop } catch { if ($copyWarningCount -eq 0) { $firstCopyWarning = $_.Exception.Message }; $copyWarningCount++ };",
+            // R0 rotates the high-volume stream into closed numbered parts.
+            // Keep the newest part (the collector may still be writing it),
+            // and remove older parts only after the host copy has the exact
+            // byte length reported by the guest.  This prevents closed parts
+            // from filling the guest system disk while preserving the live
+            // canonical stream and the currently-open part.
+            "$segmentStates = @(Invoke-Command -Session $session -ScriptBlock { param($root) @(Get-ChildItem -LiteralPath $root -Filter 'driver-events.part-*.jsonl' -File -ErrorAction SilentlyContinue | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Length = [int64]$_.Length } }) } -ArgumentList $guestOut -ErrorAction Stop);",
+            "if ($segmentStates.Count -gt 1) { $newestSegment = [string](($segmentStates | Sort-Object Name -Descending | Select-Object -First 1).Name); foreach ($segment in $segmentStates) { if ([string]$segment.Name -eq $newestSegment) { continue }; $hostSegment = Join-Path $hostOut ([string]$segment.Name); if (Test-Path -LiteralPath $hostSegment -PathType Leaf) { $hostLength = [int64](Get-Item -LiteralPath $hostSegment).Length; if ($hostLength -eq [int64]$segment.Length) { try { Invoke-Command -Session $session -ScriptBlock { param($root, $name) Remove-Item -LiteralPath (Join-Path $root $name) -Force -ErrorAction Stop } -ArgumentList $guestOut, ([string]$segment.Name) -ErrorAction Stop } catch { if ($segmentCleanupWarningCount -eq 0) { $firstSegmentCleanupWarning = $_.Exception.Message }; $segmentCleanupWarningCount++ } } } } }",
             "$outputState = Invoke-Command -Session $session -ScriptBlock { param($root, $names) $missing = @($names | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_) -PathType Leaf) }); [pscustomobject]@{ Ready = ($missing.Count -eq 0); Missing = ($missing -join ',') } } -ArgumentList $guestOut, $requiredOutputNames -ErrorAction Stop;",
             "$processState = Invoke-Command -Session $session -ScriptBlock { param($processId) if ($processId -le 0) { return [pscustomobject]@{ Visible = $false; Running = $false; QueryFailed = $true; Error = 'invalid PID' } }; $process = Get-Process -Id $processId -ErrorAction SilentlyContinue; if ($null -eq $process) { [pscustomobject]@{ Visible = $false; Running = $false; QueryFailed = $false; Error = 'PID is no longer visible' } } else { try { $process.Refresh(); [pscustomobject]@{ Visible = $true; Running = (-not $process.HasExited); QueryFailed = $false; Error = '' } } catch { [pscustomobject]@{ Visible = $true; Running = $true; QueryFailed = $true; Error = $_.Exception.Message } } } } -ArgumentList $guestAgentPid -ErrorAction Stop;",
             "$running = [bool]$processState.Running;",
             "$processUnknown = [bool]$processState.QueryFailed;",
             "$outputsReady = [bool]$outputState.Ready;",
-            "if ((Get-Date) -ge $nextHeartbeat) { Write-Host \"Guest Agent sync state: running=$running, processUnknown=$processUnknown, outputsReady=$outputsReady, missing=$($outputState.Missing), suppressed copy warning count: $copyWarningCount\"; $nextHeartbeat = (Get-Date).AddSeconds(15) };",
+            "if ((Get-Date) -ge $nextHeartbeat) { Write-Host \"Guest Agent sync state: running=$running, processUnknown=$processUnknown, outputsReady=$outputsReady, missing=$($outputState.Missing), suppressed copy warning count: $copyWarningCount, segment cleanup warning count: $segmentCleanupWarningCount\"; $nextHeartbeat = (Get-Date).AddSeconds(15) };",
             // A crashed Agent may never create events.json/summary.  Once its
             // PID is gone, stop polling and copy whatever evidence exists so
             // the final collect step can preserve and classify the failure.
             "if ($running -or $processUnknown) { Start-Sleep -Seconds 2 }",
             "} while (($running -or $processUnknown) -and (Get-Date) -lt $deadline);",
             "try { Copy-Item -FromSession $session -Path (Join-Path $guestOut '*') -Destination $hostOut -Recurse -Force -ErrorAction Stop } catch { $copyContext = if ([string]::IsNullOrWhiteSpace($firstCopyWarning)) { '' } else { \" First periodic copy warning: $firstCopyWarning\" }; throw \"Final live output copy failed from '$guestOut' to '$hostOut': $($_.Exception.Message).$copyContext\" };",
+            // The Agent has stopped before this final copy.  Re-check every
+            // numbered part, then release it from the guest only when the
+            // host copy is byte-for-byte complete; a failed copy leaves the
+            // guest evidence intact for the failure path.
+            "$finalSegmentStates = @(Invoke-Command -Session $session -ScriptBlock { param($root) @(Get-ChildItem -LiteralPath $root -Filter 'driver-events.part-*.jsonl' -File -ErrorAction SilentlyContinue | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Length = [int64]$_.Length } }) } -ArgumentList $guestOut -ErrorAction Stop);",
+            "foreach ($segment in $finalSegmentStates) { $hostSegment = Join-Path $hostOut ([string]$segment.Name); if (Test-Path -LiteralPath $hostSegment -PathType Leaf) { $hostLength = [int64](Get-Item -LiteralPath $hostSegment).Length; if ($hostLength -eq [int64]$segment.Length) { try { Invoke-Command -Session $session -ScriptBlock { param($root, $name) Remove-Item -LiteralPath (Join-Path $root $name) -Force -ErrorAction Stop } -ArgumentList $guestOut, ([string]$segment.Name) -ErrorAction Stop } catch { if ($segmentCleanupWarningCount -eq 0) { $firstSegmentCleanupWarning = $_.Exception.Message }; $segmentCleanupWarningCount++ } } } }",
             "if ($running -or $processUnknown) { $missing = if ([string]::IsNullOrWhiteSpace([string]$outputState.Missing)) { 'unknown' } else { [string]$outputState.Missing }; if ($hasSyncDeadline) { throw \"Guest Agent did not stop before the live-sync deadline ($maxSyncSeconds seconds). running=$running, processUnknown=$processUnknown, missing=$missing. Suppressed copy warning count: $copyWarningCount\" } else { throw \"Guest Agent did not stop during live sync. running=$running, processUnknown=$processUnknown, missing=$missing\" } }",
             "$exitText = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-Content -LiteralPath $path -Raw).Trim() } else { '' } } -ArgumentList $exitPath -ErrorAction Stop;",
             // Do not fail here on a non-zero/invalid marker: collect-output
             // must run once more to copy logs and record marker bytes.
             "if ([string]::IsNullOrWhiteSpace([string]$exitText)) { Write-Warning \"Guest Agent exit marker is missing or empty after process termination: $exitPath\" } else { $exitCode = 0; if (-not [int]::TryParse([string]$exitText, [ref]$exitCode)) { Write-Warning \"Guest Agent exit marker is not an integer; collect-output will preserve its raw bytes: $exitPath\" } elseif ($exitCode -ne 0) { Write-Warning \"Guest Agent exited with code $exitCode; continuing so collect-output can preserve stdout/stderr.\" } }",
-            "if ($copyWarningCount -gt 0) { Write-Warning \"Live output sync suppressed $copyWarningCount periodic copy warning(s); final copy succeeded. First warning: $firstCopyWarning\" }",
+            "if ($copyWarningCount -gt 0 -or $segmentCleanupWarningCount -gt 0) { Write-Warning \"Live output sync copy warnings=$copyWarningCount, segment cleanup warnings=$segmentCleanupWarningCount; final copy succeeded. First copy warning: $firstCopyWarning; first cleanup warning: $firstSegmentCleanupWarning\" }",
             "}",
             "finally {",
             "if ($session) {",
