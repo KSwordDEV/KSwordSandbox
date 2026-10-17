@@ -940,11 +940,20 @@ public sealed partial class SandboxJobService
         var fullEvents = SampleCorrelationClassifier.Apply(events.OrderBy(evt => evt.Timestamp), sample.FullPath);
         var rawFindings = ruleEngine.Classify(fullEvents);
         var findings = ReportEventSampler.SanitizeFindings(rawFindings);
-        var driverEventsPath = importSummary?.DriverPaths.FirstOrDefault() ??
+        var driverEventPaths = importSummary?.DriverPaths ?? [];
+        var driverEventsPath = driverEventPaths.FirstOrDefault(path =>
+                string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase)) ??
+            driverEventPaths.FirstOrDefault() ??
             (string.IsNullOrWhiteSpace(guestEventsPath)
                 ? null
                 : Path.Combine(Path.GetDirectoryName(guestEventsPath) ?? string.Empty, "driver-events.jsonl"));
-        var sampling = ReportEventSampler.SampleForReport(fullEvents, jobRoot: jobRoot, eventsPath: guestEventsPath, driverEventsPath: driverEventsPath, findings: rawFindings);
+        var sampling = ReportEventSampler.SampleForReport(
+            fullEvents,
+            jobRoot: jobRoot,
+            eventsPath: guestEventsPath,
+            driverEventsPath: driverEventsPath,
+            driverEventsPaths: driverEventPaths,
+            findings: rawFindings);
         var report = new AnalysisReport
         {
             JobId = job.JobId,
@@ -1462,46 +1471,202 @@ public sealed partial class SandboxJobService
                 !evt.EventType.EndsWith(".summary", StringComparison.OrdinalIgnoreCase) &&
                 !evt.EventType.Contains("parse_error", StringComparison.OrdinalIgnoreCase))
             .ToList();
-        if (parsed.Count == 0)
+
+        // The guest packet rows are intentionally emitted before host import
+        // (the guest has only captured an artifact at that point). Treat a
+        // successful host summary as parse success even when it is parsed-empty
+        // so the old capture-metadata-only boundary does not survive import.
+        var successfulSummaries = events.Where(static evt =>
+                evt.EventType.Equals("pcap.summary", StringComparison.OrdinalIgnoreCase) &&
+                IsProtocolSummarySuccessful(evt.Data))
+            .ToList();
+        if (parsed.Count == 0 && successfulSummaries.Count == 0)
         {
             return events;
         }
 
-        var dns = parsed.Any(static evt => evt.EventType.Equals("pcap.dns", StringComparison.OrdinalIgnoreCase));
-        var http = parsed.Any(static evt => evt.EventType.Equals("pcap.http", StringComparison.OrdinalIgnoreCase));
-        var tls = parsed.Any(static evt => evt.EventType.Equals("pcap.tls", StringComparison.OrdinalIgnoreCase));
-        var protocols = string.Join(",", parsed
-            .SelectMany(static evt => new[] { evt.EventType.StartsWith("pcap.dns", StringComparison.OrdinalIgnoreCase) ? "dns" : string.Empty,
-                evt.EventType.StartsWith("pcap.http", StringComparison.OrdinalIgnoreCase) ? "http" : string.Empty,
-                evt.EventType.StartsWith("pcap.tls", StringComparison.OrdinalIgnoreCase) ? "tls" : string.Empty,
-                evt.EventType.StartsWith("pcap.flow", StringComparison.OrdinalIgnoreCase) ? "flow" : string.Empty })
-            .Where(static value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase));
+        var rollups = BuildPcapProtocolRollups(parsed, successfulSummaries);
 
         return events.Select(evt =>
         {
-            if (!evt.EventType.Equals("packet_capture.protocol_summary", StringComparison.OrdinalIgnoreCase))
+            if (!evt.EventType.Equals("packet_capture.protocol_summary", StringComparison.OrdinalIgnoreCase) &&
+                !evt.EventType.Equals("packet_capture.captured", StringComparison.OrdinalIgnoreCase))
             {
                 return evt;
             }
 
+            var rollup = rollups.FirstOrDefault(candidate => PcapEventsMatch(evt, candidate.ArtifactKeys));
+            if (rollup is null)
+            {
+                return evt;
+            }
+
+            var protocols = string.IsNullOrWhiteSpace(rollup.Protocols) ? "unknown" : rollup.Protocols;
             var data = new Dictionary<string, string>(evt.Data, StringComparer.OrdinalIgnoreCase)
             {
-                ["protocolSummaryAvailable"] = "true",
-                ["protocolSummaryState"] = "parsed",
+                ["protocolSummaryAvailable"] = rollup.Available.ToString().ToLowerInvariant(),
+                ["protocolSummaryState"] = rollup.State,
                 ["protocolSummaryStatus"] = "ok",
                 ["protocolSummaryReason"] = "nativePcapParser",
                 ["protocolSummaryFormat"] = "normalized-events",
                 ["protocolSummaryParser"] = "native-pcap",
                 ["protocolSummaryHostNormalized"] = "true",
-                ["protocolsObserved"] = string.IsNullOrWhiteSpace(protocols) ? "unknown" : protocols,
-                ["dnsSummaryState"] = dns ? "parsed" : "empty",
-                ["httpSummaryState"] = http ? "parsed" : "empty",
-                ["tlsSummaryState"] = tls ? "parsed" : "empty"
+                ["protocolsObserved"] = protocols,
+                ["protocol"] = protocols,
+                ["protocols"] = protocols,
+                ["dnsSummaryState"] = rollup.Dns ? "parsed" : "empty",
+                ["httpSummaryState"] = rollup.Http ? "parsed" : "empty",
+                ["tlsSummaryState"] = rollup.Tls ? "parsed" : "empty",
+                ["protocolSummary"] = JsonSerializer.Serialize(new { state = rollup.State, protocols })
             };
+
+            // `reason` on the guest rows used to carry the legacy
+            // protocolParserNotImplemented marker. Replace it after a
+            // successful host parse while preserving capture status (`captured`)
+            // on both guest evidence rows.
+            data["reason"] = "nativePcapParser";
+
             return evt with { Data = data };
         }).ToList();
+    }
+
+    private sealed record PcapProtocolRollup(
+        IReadOnlySet<string> ArtifactKeys,
+        bool Available,
+        string State,
+        bool Dns,
+        bool Http,
+        bool Tls,
+        string Protocols);
+
+    private static List<PcapProtocolRollup> BuildPcapProtocolRollups(
+        IReadOnlyCollection<SandboxEvent> parsed,
+        IReadOnlyCollection<SandboxEvent> successfulSummaries)
+    {
+        var grouped = parsed
+            .Concat(successfulSummaries)
+            .GroupBy(GetPcapArtifactKey, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return grouped.Select(group =>
+        {
+            var protocolEvents = group.Where(static evt =>
+                    evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) &&
+                    !evt.EventType.Equals("pcap.summary", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var summary = group.FirstOrDefault(static evt => evt.EventType.Equals("pcap.summary", StringComparison.OrdinalIgnoreCase));
+            var dns = protocolEvents.Any(static evt => evt.EventType.Equals("pcap.dns", StringComparison.OrdinalIgnoreCase));
+            var http = protocolEvents.Any(static evt => evt.EventType.Equals("pcap.http", StringComparison.OrdinalIgnoreCase));
+            var tls = protocolEvents.Any(static evt => evt.EventType.Equals("pcap.tls", StringComparison.OrdinalIgnoreCase));
+            var protocols = string.Join(",", protocolEvents
+                .SelectMany(static evt => new[]
+                {
+                    evt.EventType.StartsWith("pcap.dns", StringComparison.OrdinalIgnoreCase) ? "dns" : string.Empty,
+                    evt.EventType.StartsWith("pcap.http", StringComparison.OrdinalIgnoreCase) ? "http" : string.Empty,
+                    evt.EventType.StartsWith("pcap.tls", StringComparison.OrdinalIgnoreCase) ? "tls" : string.Empty,
+                    evt.EventType.StartsWith("pcap.flow", StringComparison.OrdinalIgnoreCase) ? "flow" : string.Empty
+                })
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Concat(summary is null ? [] : ReadProtocolValues(summary.Data))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase));
+
+            var state = summary?.Data.TryGetValue("protocolSummaryState", out var summaryState) == true &&
+                !string.IsNullOrWhiteSpace(summaryState)
+                ? summaryState
+                : protocolEvents.Count > 0 ? "parsed" : "parsed-empty";
+            var available = true;
+            if (summary is not null &&
+                summary.Data.TryGetValue("protocolSummaryAvailable", out var summaryAvailable))
+            {
+                available = !string.Equals(summaryAvailable, "false", StringComparison.OrdinalIgnoreCase);
+            }
+            return new PcapProtocolRollup(
+                group.SelectMany(GetPcapArtifactKeys).ToHashSet(StringComparer.OrdinalIgnoreCase),
+                available,
+                state,
+                dns,
+                http,
+                tls,
+                protocols);
+        }).ToList();
+    }
+
+    private static IEnumerable<string> ReadProtocolValues(IReadOnlyDictionary<string, string> data)
+    {
+        foreach (var key in new[] { "protocols", "protocol", "protocolsObserved" })
+        {
+            if (data.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                foreach (var protocol in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (protocol is "dns" or "http" or "tls" or "flow")
+                    {
+                        yield return protocol;
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool IsProtocolSummarySuccessful(IReadOnlyDictionary<string, string> data)
+    {
+        return data.TryGetValue("protocolSummaryAvailable", out var available) &&
+            !string.Equals(available, "false", StringComparison.OrdinalIgnoreCase) &&
+            data.TryGetValue("protocolSummaryStatus", out var status) &&
+            string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool PcapEventsMatch(SandboxEvent evt, IReadOnlySet<string> artifactKeys)
+    {
+        var keys = GetPcapArtifactKeys(evt).ToList();
+        return keys.Count == 0 || keys.Any(artifactKeys.Contains);
+    }
+
+    private static string GetPcapArtifactKey(SandboxEvent evt)
+    {
+        return GetPcapArtifactKeys(evt).FirstOrDefault() ?? string.Empty;
+    }
+
+    private static IEnumerable<string> GetPcapArtifactKeys(SandboxEvent evt)
+    {
+        var values = new[]
+        {
+            evt.Path,
+            ReadEventData(evt, "sourceArtifactPath"),
+            ReadEventData(evt, "sourceArtifactRelativePath"),
+            ReadEventData(evt, "sourcePcapArtifactPath"),
+            ReadEventData(evt, "sourcePcapArtifactRelativePath"),
+            ReadEventData(evt, "pcapSourceArtifactPath"),
+            ReadEventData(evt, "pcapSourceArtifactRelativePath"),
+            ReadEventData(evt, "pcapDownloadSelector"),
+            ReadEventData(evt, "sourceArtifactSelector"),
+            ReadEventData(evt, "artifactRelativePath"),
+            ReadEventData(evt, "packetCaptureRelativePath"),
+            ReadEventData(evt, "relativePath"),
+            ReadEventData(evt, "pcapngRelativePath")
+        };
+        foreach (var value in values.Where(static value => !string.IsNullOrWhiteSpace(value)))
+        {
+            yield return NormalizePcapArtifactKey(value!);
+        }
+    }
+
+    private static string? ReadEventData(SandboxEvent evt, string key)
+    {
+        return evt.Data.TryGetValue(key, out var value) ? value : null;
+    }
+
+    private static string NormalizePcapArtifactKey(string value)
+    {
+        try
+        {
+            return Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            return value.Trim();
+        }
     }
 
     /// <summary>

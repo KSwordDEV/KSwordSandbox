@@ -1562,7 +1562,13 @@ internal sealed class GuestArtifactWriter
             "sourcePathMissing" => "源事件没有可复制路径。",
             "sourcePathInvalid" => "源路径无效。",
             "sourceFileMissing" => "复制时源文件已不存在。",
-            "outsideWorkingDirectory" => "源文件位于样本工作目录之外，按策略跳过复制。",
+            "outsideApprovedWriteRoot" => "源文件不在样本目录或受控用户可写目录内，按策略跳过复制。",
+            "outsideWorkingDirectory" => "源文件不在样本目录或受控用户可写目录内，按策略跳过复制。",
+            "sourceReparsePoint" => "源文件是重解析点，按策略跳过以避免路径穿越。",
+            "artifactFileLimitExceeded" => "已达到掉落文件复制数量上限。",
+            "artifactFileTooLarge" => "源文件超过单文件证据大小上限。",
+            "artifactTotalSizeLimitExceeded" => "已达到掉落文件证据总大小上限。",
+            "sourceMetadataFailed" => "无法读取源文件元数据。",
             "underOutputDirectory" => "源文件位于输出目录下，按策略跳过递归采集。",
             "destinationPathInvalid" => "无法生成安全的证据目标路径。",
             "copyFailed" => "掉落文件复制失败。",
@@ -1613,7 +1619,7 @@ internal sealed class GuestArtifactWriter
     {
         return collectionName switch
         {
-            "dropped-files" => "explicit-opt-in-copy-working-directory-new-files",
+            "dropped-files" => "explicit-opt-in-copy-approved-user-write-roots",
             "screenshots" => "explicit-opt-in-screenshot",
             "memory-dumps" => "explicit-opt-in-sensitive-memory-dump",
             "packet-captures" => "explicit-opt-in-network-packet-capture",

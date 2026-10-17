@@ -166,6 +166,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContainsNormalized(rendererSource, "position:static", "Unbounded tables should keep non-sticky headers so they cannot leak across chapters.");
         RequireContains(rendererSource, "report-layout", "Report renderer should expose a documentation-style sidebar/content shell.");
         RequireContains(rendererSource, "report-sidebar", "Report renderer should place navigation in a dedicated left sidebar.");
+        RequireContains(rendererSource, "details open class=\\\"event-explorer-details\\\"", "Primary event evidence should be visible without a disclosure click.");
+        RequireContains(rendererSource, ".modern-sandbox-report{font-size:13px;line-height:1.35}", "Modern report rows should use a compact base line height.");
+        RequireContains(rendererSource, ".modern-sandbox-report .event-explorer-table td{line-height:1.2;padding:4px 7px}", "Event explorer rows should use compact cell padding.");
+        RequireContains(rendererSource, "CopyIconButton(copyText, label)", "Copy actions should use short icon buttons with accessible labels.");
         RequireContainsNormalized(rendererSource, "grid-template-columns:minmax(248px,280px) minmax(0,1fr)", "Desktop report layout should reserve a stable left navigation column.");
         RequireContainsNormalized(rendererSource, "max-height:calc(100vh - 32px)", "Desktop report sidebar should stay viewport-bounded.");
         RequireContains(rendererSource, "IntersectionObserver", "Report navigation should track the currently visible chapter.");
@@ -526,6 +530,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
             RequireNotContains(chineseHtml, internalField, $"Rendered Chinese evidence must not expose internal field {internalField}.");
         }
         RequireContains(englishHtml, "class=\"copy-btn copy-icon\"", "English event evidence should expose an icon copy button.");
+        RequireContains(englishHtml, "<details open class=\"event-explorer-details\">", "English event evidence should be visible by default.");
+        RequireContains(englishHtml, "aria-label=\"Copy evidence summary\"", "Icon copy buttons should retain accessible labels.");
         RequireContains(englishHtml, "<span class=\"sr-only\">Copy</span>", "English icon copy button should keep an accessible label.");
         RequireNotContains(englishHtml, "<br><span class=\"muted\">cmd.exe /c whoami</span>", "Rendered event tables should not inline command lines directly.");
         RequireContains(englishHtml, "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>", "Rendered HTML should include the behavior graph section.");

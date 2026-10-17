@@ -236,7 +236,14 @@ internal sealed class StaticRulesMitreScenario : ISmokeTestScenario
             {
                 EventType = "registry.set",
                 Source = "driver",
-                Path = "HKLM\\SYSTEM\\CurrentControlSet\\Services\\KswordSmoke"
+                Path = "HKLM\\SYSTEM\\CurrentControlSet\\Services\\KswordSmoke",
+                Data =
+                {
+                    ["persistenceCandidate"] = "true",
+                    ["servicePersistenceCandidate"] = "true",
+                    ["persistenceFamily"] = "service-configuration",
+                    ["registryOperationName"] = "setValue"
+                }
             },
             new SandboxEvent
             {

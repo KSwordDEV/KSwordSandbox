@@ -792,6 +792,7 @@ public sealed class StaticAnalyzer
         using var stream = File.OpenRead(fullPath);
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         var header = ParsePe(reader, stream.Length, tags, interestingStrings, warnings);
+        AddHostPathContext(fullPath, tags, interestingStrings);
         var managedMetadata = ReadManagedMetadata(fullPath, warnings);
         ExtractStrings(fullPath, tags, urls, interestingStrings, warnings, stringEvidence);
 
@@ -1759,7 +1760,25 @@ public sealed class StaticAnalyzer
 
         try
         {
-            return Regex.IsMatch(context.AsciiText, yaraString.Pattern, options, TimeSpan.FromMilliseconds(200));
+            // The built-in network rule uses an IPv4 regex. Keep it aligned
+            // with AddIpClassifications, which deliberately suppresses
+            // version tuples such as 5.1.0.0 found in Windows VERSIONINFO.
+            // Without this guard, signed System32 binaries produce a network
+            // YARA hit even though no network indicator was extracted.
+            var matches = Regex.Matches(context.AsciiText, yaraString.Pattern, options, TimeSpan.FromMilliseconds(200));
+            if (matches.Count == 0)
+            {
+                return false;
+            }
+
+            if (!LooksLikeIpv4Regex(yaraString.Pattern) && !LooksLikeDomainRegex(yaraString.Pattern))
+            {
+                return true;
+            }
+
+            return matches.Cast<Match>().Any(match =>
+                !IsVersionLikeIpv4(match.Value, context.AsciiText) &&
+                !IsBenignAssemblyDomain(match.Value));
         }
         catch (ArgumentException)
         {
@@ -1769,6 +1788,35 @@ public sealed class StaticAnalyzer
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Identifies the bounded IPv4 regex used by static-notes.yar so its
+    /// matches can share the analyzer's version-tuple suppression.
+    /// </summary>
+    private static bool LooksLikeIpv4Regex(string pattern)
+    {
+        return pattern.Contains("\\.", StringComparison.Ordinal) &&
+            pattern.Contains("25[0-5]", StringComparison.Ordinal) &&
+            pattern.Count(character => character == '.') >= 3;
+    }
+
+    /// <summary>
+    /// Windows version/import metadata can contain assembly-style names such
+    /// as Microsoft.Windows.Net. They satisfy the broad domain YARA pattern
+    /// but are not network indicators. Keep the generic domain rule useful
+    /// for submitted samples while filtering this known metadata form.
+    /// </summary>
+    private static bool IsBenignAssemblyDomain(string value)
+    {
+        return value.EndsWith(".Windows.Net", StringComparison.OrdinalIgnoreCase) ||
+            value.EndsWith(".Microsoft.Net", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeDomainRegex(string pattern)
+    {
+        return pattern.Contains("(com|net|org|", StringComparison.OrdinalIgnoreCase) &&
+            pattern.Contains("[A-Za-z0-9", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -4485,10 +4533,12 @@ public sealed class StaticAnalyzer
             return;
         }
 
-        tags.Add("tls_callback_pointer");
         callbackTableText = $"0x{callbacksVa:X}";
         if (!TryVaToFileOffset(callbacksVa, imageBase, sections, fileLength, out var callbacksOffset))
         {
+            // A non-zero AddressOfCallBacks field only identifies a table. It
+            // does not prove that the table contains a callback; keep the
+            // table as low-risk metadata when it cannot be mapped.
             AddPeEvidence(interestingStrings, $"tls:callback-table@0x{callbacksVa:X}", ref evidenceCount, MaxTlsCallbacks);
             peEvidence.Tls = new PeTlsInfo
             {
@@ -4499,11 +4549,6 @@ public sealed class StaticAnalyzer
         }
 
         callbackTableFileOffset = $"0x{callbacksOffset:X}";
-        AddPeEvidence(
-            interestingStrings,
-            $"tls:callback-table@0x{callbacksVa:X},file=0x{callbacksOffset:X}",
-            ref evidenceCount,
-            MaxTlsCallbacks);
         var pointerSize = isPe32Plus ? sizeof(ulong) : sizeof(uint);
         for (var index = 0; index < MaxTlsCallbacks; index++)
         {
@@ -4519,6 +4564,16 @@ public sealed class StaticAnalyzer
             if (callbackVa == 0)
             {
                 break;
+            }
+
+            if (callbacks.Count == 0)
+            {
+                tags.Add("tls_callback_pointer");
+                AddPeEvidence(
+                    interestingStrings,
+                    $"tls:callback-table@0x{callbacksVa:X},file=0x{callbacksOffset:X}",
+                    ref evidenceCount,
+                    MaxTlsCallbacks);
             }
 
             tags.Add("tls_callbacks");
@@ -4554,6 +4609,43 @@ public sealed class StaticAnalyzer
             CallbackTableFileOffset = callbackTableFileOffset,
             Callbacks = callbacks
         };
+    }
+
+    /// <summary>
+    /// Adds low-risk provenance context when the caller explicitly analyzes a
+    /// file from the Windows system directory. This is contextual metadata
+    /// only; it does not suppress imports, strings, YARA matches, or PE clues.
+    /// </summary>
+    private static void AddHostPathContext(
+        string fullPath,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings)
+    {
+        var directory = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        var windowsRoot = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        if (string.IsNullOrWhiteSpace(windowsRoot))
+        {
+            windowsRoot = Environment.GetEnvironmentVariable("WINDIR") ?? string.Empty;
+        }
+
+        var system32 = string.IsNullOrWhiteSpace(windowsRoot)
+            ? null
+            : Path.Combine(windowsRoot, "System32");
+        var sysWow64 = string.IsNullOrWhiteSpace(windowsRoot)
+            ? null
+            : Path.Combine(windowsRoot, "SysWOW64");
+
+        if ((!string.IsNullOrWhiteSpace(system32) && string.Equals(directory, system32, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrWhiteSpace(sysWow64) && string.Equals(directory, sysWow64, StringComparison.OrdinalIgnoreCase)))
+        {
+            tags.Add("host_system_path_context");
+            AddInterestingString(interestingStrings, "context:path=windows-system-directory");
+        }
     }
 
     /// <summary>

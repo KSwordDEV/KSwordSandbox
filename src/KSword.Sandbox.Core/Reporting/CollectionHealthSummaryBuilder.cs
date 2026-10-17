@@ -72,7 +72,7 @@ public static class CollectionHealthSummaryBuilder
     ["effectiveProducerMask", "producerRuntimeEffectiveMask", "producerEnableMask"];
 
     private static readonly string[] ProducerSupportedMaskKeys =
-    ["supportedProducerMask", "activeProducerMask"];
+    ["supportedProducerMask", "supportedProducerMaskHex"];
 
     public static CollectionHealthSummary Build(
         IReadOnlyCollection<SandboxEvent> rawEvents,

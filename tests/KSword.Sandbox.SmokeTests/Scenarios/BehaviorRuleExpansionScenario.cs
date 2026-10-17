@@ -352,7 +352,10 @@ internal sealed class BehaviorRuleExpansionScenario : ISmokeTestScenario
                 {
                     ["path"] = @"HKLM\SYSTEM\CurrentControlSet\Services\SmokeSvc\Parameters\ServiceDll",
                     ["valueName"] = "ServiceDll",
-                    ["value"] = @"C:\ProgramData\Smoke\svc.dll"
+                    ["value"] = @"C:\ProgramData\Smoke\svc.dll",
+                    ["persistenceCandidate"] = "true",
+                    ["servicePersistenceCandidate"] = "true",
+                    ["persistenceFamily"] = "service-configuration"
                 }
             },
             new SandboxEvent

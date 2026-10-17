@@ -74,6 +74,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         var eventParser = ReadText(Path.Combine(sourceRoot, "EventParser.cpp"));
         var runtimeLoop = ReadText(Path.Combine(sourceRoot, "RuntimeLoop.cpp"));
         var abiSelfCheck = ReadText(Path.Combine(sourceRoot, "AbiSelfCheck.cpp"));
+        var capabilitiesData = ExtractFunctionBody(eventParser, "BuildCapabilitiesData");
         var readinessDiagnostics = ReadText(Path.Combine(sourceRoot, "ReadinessDiagnostics.cpp"));
         var healthData = ExtractFunctionBody(eventParser, "BuildHealthData");
         var statusData = ExtractFunctionBody(eventParser, "BuildStatusData");
@@ -134,6 +135,13 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(eventParser, "GetNetworkStatus", "Capabilities row should name network status diagnostics support.");
         RequireContains(eventParser, "EventCommonMetadata", "Capabilities row should name common event metadata support.");
         RequireContains(eventParser, "SelfNoiseMetadata", "Capabilities row should name self-noise metadata support.");
+        RequireContains(capabilitiesData, "processHandleAccessTelemetrySupported", "Capabilities row should preserve process-handle support separately from runtime active state.");
+        RequireContains(capabilitiesData, "processHandleAccessActiveKnown", "Capabilities row should mark process-handle active state as unknown until status is queried.");
+        RequireContains(capabilitiesData, "processHandleAccessRuntimeState", "Capabilities row should explain that process-handle status awaits an active/effective status row.");
+        RequireContains(capabilitiesData, "tokenPrivilegeTelemetrySupported", "Capabilities row should preserve token-privilege capability separately from runtime active state.");
+        RequireContains(capabilitiesData, "tokenPrivilegeActiveKnown", "Capabilities row should mark token-privilege active state as unknown until status is queried.");
+        RequireContains(capabilitiesData, "Capabilities advertise supported lanes only", "Capabilities row should state that supported lanes are not active observation evidence.");
+        RequireContains(capabilitiesData, "status-active-effective-mask", "Capabilities row should direct operators to status active/effective masks for handle-access state.");
         RequireContains(eventParser, "supportedProducerMaskHex", "Capabilities/status rows should preserve supported producer mask.");
         RequireContains(eventParser, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "Health flag names should decode producer-mask availability.");
         RequireContains(eventParser, "ProducerMasksAvailable", "Health flag names should print producer-mask availability.");

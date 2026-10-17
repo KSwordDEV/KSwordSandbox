@@ -3255,6 +3255,55 @@ function Invoke-WebUi {
     exit $LASTEXITCODE
 }
 
+function Get-EffectiveRunStepTimeoutSeconds {
+    <#
+    The executor applies one timeout to each runbook step.  Guest readiness and
+    live output sync are separate steps, so the safe finite timeout is the
+    larger of those two deadlines.  A short default run remains unchanged,
+    while a longer sample cannot be killed by the wrapper before its own
+    duration plus R0 drain grace has elapsed.
+    #>
+    param(
+        [Parameter(Mandatory)][object]$Config,
+        [Parameter(Mandatory)][bool]$RunLive
+    )
+
+    if (-not $RunLive -or $ExecutionTimeoutSeconds -le 0) {
+        return [int]$ExecutionTimeoutSeconds
+    }
+
+    $analysis = Get-RunObjectPropertyValue -Object $Config -Name 'analysis' -DefaultValue $null
+    $driver = Get-RunObjectPropertyValue -Object $Config -Name 'driver' -DefaultValue $null
+    $configuredDuration = [int](Get-RunObjectPropertyValue -Object $analysis -Name 'defaultDurationSeconds' -DefaultValue 30)
+    $configuredMaxDuration = [int](Get-RunObjectPropertyValue -Object $analysis -Name 'maxDurationSeconds' -DefaultValue 900)
+    $durationSeconds = if ($DurationSeconds -gt 0) { $DurationSeconds } else { $configuredDuration }
+    if ($configuredMaxDuration -gt 0) {
+        $durationSeconds = [Math]::Min($durationSeconds, $configuredMaxDuration)
+    }
+    $durationUnlimited = Get-RunBooleanOrDefault -Value (Get-RunObjectPropertyValue -Object $analysis -Name 'durationUnlimited' -DefaultValue $false) -DefaultValue $false
+    if ($durationUnlimited -or $durationSeconds -le 0) {
+        return [int]$ExecutionTimeoutSeconds
+    }
+
+    $guestReadySeconds = [Math]::Max(1, [int]$GuestReadyTimeoutSeconds)
+    $driverEnabled = Get-RunBooleanOrDefault -Value (Get-RunObjectPropertyValue -Object $driver -Name 'enabled' -DefaultValue $true) -DefaultValue $true
+    $drainGraceMilliseconds = if ($NoR0Collector -or -not $driverEnabled) {
+        0
+    }
+    else {
+        [int](Get-RunObjectPropertyValue -Object $driver -Name 'r0CollectorDrainGraceMs' -DefaultValue 120000)
+    }
+    $drainGraceSeconds = [int][Math]::Ceiling([Math]::Max(0, $drainGraceMilliseconds) / 1000.0)
+    $syncMinimumSeconds = $durationSeconds + $drainGraceSeconds + 60
+    $minimumSeconds = [Math]::Max($guestReadySeconds, $syncMinimumSeconds)
+    $effectiveSeconds = [Math]::Max([int]$ExecutionTimeoutSeconds, $minimumSeconds)
+    if ($effectiveSeconds -ne $ExecutionTimeoutSeconds) {
+        Write-RunInfo "已将 Live 单步 timeout 从 $ExecutionTimeoutSeconds 秒提升到 $effectiveSeconds 秒，以覆盖 guest readiness、分析时长和 R0 drain grace。 / Live step timeout raised to cover guest readiness, analysis duration, and R0 drain grace."
+    }
+
+    return [int]$effectiveSeconds
+}
+
 function Invoke-OneShotAnalysis {
     param(
         [Parameter(Mandatory)][string]$EffectiveConfigPath,
@@ -3279,6 +3328,7 @@ function Invoke-OneShotAnalysis {
     $provider = Get-RunVirtualizationProvider -Config $Config
     Assert-RunProviderResourceOverrides -Provider $provider -Config $Config
     $runLive = [bool]$Live -and (-not [bool]$PlanOnly) -and ($Mode -ne 'Plan')
+    $effectiveStepTimeoutSeconds = Get-EffectiveRunStepTimeoutSeconds -Config $Config -RunLive $runLive
     if ($runLive -and $provider -eq 'HyperV' -and (-not (Test-RunIsAdministrator)) -and (-not $WhatIfPreference)) {
         Invoke-RunSelfElevatedForLive -ResolvedSamplePath $resolvedSample
     }
@@ -3320,7 +3370,7 @@ function Invoke-OneShotAnalysis {
         '--sample', $resolvedSample,
         '--duration', ([string]$DurationSeconds),
         '--guest-ready-timeout-seconds', ([string]$GuestReadyTimeoutSeconds),
-        '--step-timeout-seconds', ([string]$ExecutionTimeoutSeconds),
+        '--step-timeout-seconds', ([string]$effectiveStepTimeoutSeconds),
         '--provider', $provider
     )
 

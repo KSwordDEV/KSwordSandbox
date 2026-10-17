@@ -842,12 +842,12 @@
     },
     {
       "id": "static-pe-tls-callbacks",
-      "title": "TLS directory or callback pointer present",
-      "titleZh": "存在 PE TLS 目录或回调指针",
+      "title": "TLS callback present",
+      "titleZh": "存在 PE TLS 回调",
       "severity": "medium",
       "confidence": "low",
-      "summary": "Static analysis found a PE TLS directory or callback pointer, which can execute code before the main entry point and is useful to triage for packing or evasion.",
-      "summaryZh": "静态分析发现 PE TLS 目录或回调指针；该结构可在主入口点前执行代码，常用于打包、初始化或规避分诊。",
+      "summary": "Static analysis found a decoded PE TLS callback, which can execute code before the main entry point and is useful to triage for packing or evasion. A directory with an empty callback table remains low-risk metadata.",
+      "summaryZh": "静态分析解码出 PE TLS 回调；回调可能在主入口点前执行，可用于打包或规避分诊。只有目录但回调表为空时保留为低风险元数据。",
       "mitreTechniqueId": "T1027",
       "mitreTechniqueName": "Obfuscated Files or Information",
       "eventTypes": [
@@ -857,8 +857,6 @@
       ],
       "dataContains": {
         "tags": [
-          "tls_directory_present",
-          "tls_callback_pointer",
           "tls_callbacks"
         ]
       },
@@ -1003,6 +1001,11 @@
         "CurrentControlSet\\Services\\",
         "\\Services\\"
       ],
+      "allDataContains": {
+        "servicePersistenceCandidate": [
+          "true"
+        ]
+      },
       "tags": [
         "registry",
         "persistence",
@@ -3297,6 +3300,11 @@
           "\\Services\\"
         ]
       },
+      "allDataContains": {
+        "servicePersistenceCandidate": [
+          "true"
+        ]
+      },
       "tags": [
         "driver",
         "r0",
@@ -3345,6 +3353,11 @@
           "ServiceDll",
           "FailureCommand",
           "ObjectName"
+        ]
+      },
+      "allDataContains": {
+        "servicePersistenceCandidate": [
+          "true"
         ]
       },
       "tags": [

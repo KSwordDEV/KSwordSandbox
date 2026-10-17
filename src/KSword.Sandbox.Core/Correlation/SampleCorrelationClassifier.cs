@@ -101,6 +101,29 @@ public static class SampleCorrelationClassifier
         "sgrmbroker"
     ];
 
+    // These Windows-native commands are routinely launched by the guest
+    // probes and shell setup.  A System32 image/known signed binary doing
+    // local discovery is retained as evidence, but it must not become sample
+    // behavior merely because its PID or command line appears in the sample
+    // process tree.  Higher-signal semantics (persistence, injection,
+    // defense evasion, download/execute, or explicit malicious network data)
+    // bypass this baseline guard below.
+    private static readonly string[] BenignWindowsDiscoveryUtilityNames =
+    [
+        "arp",
+        "getmac",
+        "hostname",
+        "ipconfig",
+        "nbtstat",
+        "netstat",
+        "nslookup",
+        "pathping",
+        "route",
+        "systeminfo",
+        "tasklist",
+        "whoami"
+    ];
+
     private static readonly string[] NormalInteractiveGuiProcessNamePrefixes =
     [
         "notepad"
@@ -213,6 +236,13 @@ public static class SampleCorrelationClassifier
         if (IsCollectorOrAgentProcess(evt, data, context))
         {
             return CorrelationDisposition.Environment("row-belongs-to-sandbox-collector-or-agent", "processName");
+        }
+
+        if (IsBenignWindowsDiscoveryUtility(evt, data))
+        {
+            return CorrelationDisposition.Environment(
+                "system32-signed-or-known-discovery-utility-without-high-signal-behavior",
+                "processImagePath/commandLine");
         }
 
         if (!HasExistingStrongCorrelation(data) && IsKnownUntaintedServiceHostProcess(evt, data, context))
@@ -1672,6 +1702,79 @@ public static class SampleCorrelationClassifier
             normalized.Contains("\\AppRepository\\", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains("RPTA", StringComparison.OrdinalIgnoreCase) &&
             normalized.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsBenignWindowsDiscoveryUtility(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data)
+    {
+        if (!IsProcessEvidence(evt))
+        {
+            return false;
+        }
+
+        var processName = TrimExe(FirstNonEmpty(
+            evt.ProcessName,
+            Value(data, "processName"),
+            Value(data, "actorProcessName"),
+            Path.GetFileName(FirstNonEmpty(
+                Value(data, "processImagePath"),
+                Value(data, "imagePath"),
+                evt.Path))));
+        if (!TextEqualsAny(processName, BenignWindowsDiscoveryUtilityNames))
+        {
+            return false;
+        }
+
+        var imageOrPath = FirstNonEmpty(
+            evt.Path,
+            Value(data, "processImagePath"),
+            Value(data, "imagePath"),
+            Value(data, "actorProcessImagePath"));
+        var signedOrKnownSystemImage = LooksSystemOnlyPath(imageOrPath) ||
+            IsTruthy(Value(data, "signed")) ||
+            IsTruthy(Value(data, "isSigned")) ||
+            IsTruthy(Value(data, "signatureTrusted")) ||
+            IsTruthy(Value(data, "signedBinary")) ||
+            IsTruthy(Value(data, "knownWindowsBinary")) ||
+            IsTruthy(Value(data, "windowsNativeBinary")) ||
+            IsTruthy(Value(data, "isSystemBinary")) ||
+            TextEqualsAny(Value(data, "signatureStatus"), "valid", "trusted", "signed");
+        if (!signedOrKnownSystemImage)
+        {
+            return false;
+        }
+
+        return !HasHighSignalDiscoveryOverride(evt, data);
+    }
+
+    private static bool HasHighSignalDiscoveryOverride(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data)
+    {
+        if (IsHighSignalMutation(evt, data))
+        {
+            return true;
+        }
+
+        foreach (var key in new[]
+        {
+            "persistenceCandidate", "servicePersistenceCandidate", "startupRegistryCandidate",
+            "injectionCandidate", "remoteInjection", "remoteThread", "defenseEvasionCandidate",
+            "downloadCandidate", "downloadExecute", "maliciousNetwork", "maliciousNetworkCandidate"
+        })
+        {
+            if (IsTruthy(Value(data, key)))
+            {
+                return true;
+            }
+        }
+
+        var commandLine = FirstNonEmpty(evt.CommandLine, Value(data, "commandLine"));
+        return ContainsAny(
+            commandLine,
+            "-enc", "-encodedcommand", "invoke-webrequest", "downloadstring", "start-bitstransfer",
+            "rundll32", "regsvr32", "mshta", "schtasks /create", "sc create", "reg add");
     }
 
     private static bool ExactSamplePathMatches(string? value, CorrelationContext context)

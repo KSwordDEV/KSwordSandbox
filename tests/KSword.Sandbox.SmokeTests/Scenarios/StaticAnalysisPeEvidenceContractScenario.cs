@@ -164,6 +164,7 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         AssertProjectedStaticEvents(projectedEvents);
         AssertProjectedStaticRuleConsumption(context, projectedEvents);
         AssertHighSignalCapabilityClusters(context);
+        AssertNativeSystemBaseline(analyzer);
 
         return Task.FromResult(new SmokeTestResult
         {
@@ -171,6 +172,50 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             Passed = true,
             Message = "Static analyzer emits structured PE, overlay, signature, URL/IP/email, path, command, packer, and YARA-like event evidence."
         });
+    }
+
+    /// <summary>
+    /// Guards against common static-only false positives in the real Windows
+    /// command-line utilities used for triage calibration. Their VERSIONINFO
+    /// contains tuples such as 5.1.0.0, and some builds expose an empty TLS
+    /// callback table; neither should become a network YARA hit or callback
+    /// finding. API imports and PDB metadata remain available as low-risk
+    /// static evidence.
+    /// </summary>
+    private static void AssertNativeSystemBaseline(StaticAnalyzer analyzer)
+    {
+        var systemDirectory = Environment.SystemDirectory;
+        if (string.IsNullOrWhiteSpace(systemDirectory))
+        {
+            return;
+        }
+
+        foreach (var name in new[] { "whoami.exe", "hostname.exe", "ipconfig.exe" })
+        {
+            var path = Path.Combine(systemDirectory, name);
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            var result = analyzer.Analyze(path);
+            SmokeAssert.True(
+                !result.InterestingStrings.Any(value =>
+                    value.StartsWith("static.yara.strings:KSwordSandbox_Static_Network_Indicators:", StringComparison.OrdinalIgnoreCase)),
+                $"Windows utility {name} should not classify VERSIONINFO tuples as network YARA indicators.");
+
+            if (result.Tls is { DirectoryPresent: true, Callbacks.Count: 0 })
+            {
+                SmokeAssert.True(
+                    !result.Tags.Contains("tls_callback_pointer", StringComparer.OrdinalIgnoreCase) &&
+                    !result.Tags.Contains("tls_callbacks", StringComparer.OrdinalIgnoreCase),
+                    $"Windows utility {name} with an empty TLS callback table should retain directory metadata only.");
+            }
+
+            SmokeAssert.True(
+                result.Tags.Contains("host_system_path_context", StringComparer.OrdinalIgnoreCase),
+                $"Windows utility {name} should expose low-risk System32 path context.");
+        }
     }
 
     /// <summary>

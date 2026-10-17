@@ -305,7 +305,7 @@ public static class EtwTraceXmlEventImporter
     }
 
     private static bool IsUsefulType(string type) =>
-        type is "process.start" or "process.exit" or "image.load" or "image.unload" or "thread.start" or "thread.exit" or "registry.etw" ||
+        type is "process.start" or "process.exit" or "process.event" or "image.load" or "image.unload" or "thread.start" or "thread.exit" or "thread.event" or "registry.etw" ||
         type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
         type.StartsWith("network.", StringComparison.OrdinalIgnoreCase);
 
@@ -320,6 +320,24 @@ public static class EtwTraceXmlEventImporter
         if (value.Contains("thread", StringComparison.Ordinal) && (value.Contains("stop", StringComparison.Ordinal) || value.Contains("end", StringComparison.Ordinal) || value.Contains("exit", StringComparison.Ordinal) || value.Contains("dcexit", StringComparison.Ordinal))) return "thread.exit";
         if (value.Contains("file", StringComparison.Ordinal) || value.Contains("fileio", StringComparison.Ordinal)) return "file.etw";
         if (value.Contains("network", StringComparison.Ordinal) || value.Contains("tcp", StringComparison.Ordinal)) return "network.etw";
+        // tracerpt can omit RenderingInfo for kernel rows. Mirror the live
+        // decoder's constrained payload-shape fallback so those rows retain
+        // a stable process/thread family instead of being discarded as the
+        // generic etw.event type.
+        var hasThreadPayload = !string.IsNullOrWhiteSpace(Value(payload, "tthreadid", "threadid", "tid"));
+        var hasProcessPayload = !string.IsNullOrWhiteSpace(Value(payload, "processid", "pid")) &&
+            (!string.IsNullOrWhiteSpace(Value(payload, "parentid", "parentprocessid", "parentpid")) ||
+             !string.IsNullOrWhiteSpace(Value(payload, "imagename", "imagefilename", "processname")));
+        if (hasThreadPayload && !hasProcessPayload)
+        {
+            return "thread.event";
+        }
+
+        if (hasProcessPayload)
+        {
+            return "process.event";
+        }
+
         return value.Contains("registry", StringComparison.Ordinal) ? "registry.etw" : "etw.event";
     }
 

@@ -57,6 +57,11 @@ public sealed class HtmlReportRenderer
     private const int RelationshipCardInlineLimit = 24;
     private const int RelationshipArtifactInlineLimit = 6;
     private const int EvidenceStoryInlineLimit = 12;
+    private static readonly string[] BenignWindowsDiscoveryUtilityNames =
+    [
+        "arp", "getmac", "hostname", "ipconfig", "nbtstat", "netstat",
+        "nslookup", "pathping", "route", "systeminfo", "tasklist", "whoami"
+    ];
     // Keep the initial table compact while retaining every explorer row in
     // the document. Overflow rows become visible when a filter selects them,
     // so late dynamic event types are never silently unavailable.
@@ -521,7 +526,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .event-evidence-fields{border-left:0;display:block;padding:0}.modern-sandbox-report .raw-technical-fields{display:grid;gap:3px}.modern-sandbox-report .raw-technical-field{align-items:flex-start;border-left:0;display:flex;gap:5px;margin:0;max-width:100%;padding:0}.modern-sandbox-report .raw-technical-field .ui-field-label{flex:0 0 auto}.modern-sandbox-report .raw-technical-field code{max-height:8rem;overflow:auto;white-space:pre-wrap;word-break:break-word}
 .modern-sandbox-report .copy-hint{display:none}
 .modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn{background:#e6f4fb;border:0;border-radius:0;color:#1e6385;padding:7px 11px}
-.modern-sandbox-report .copy-icon{align-items:center;display:inline-flex;height:28px;justify-content:center;padding:4px;width:28px}.modern-sandbox-report .copy-icon svg{fill:none;height:17px;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8;width:17px}.sr-only{height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;width:1px;clip:rect(0,0,0,0);white-space:nowrap}
+.modern-sandbox-report{font-size:13px;line-height:1.35}
+.modern-sandbox-report table td,.modern-sandbox-report table th{line-height:1.25;padding:5px 7px}
+.modern-sandbox-report .event-explorer-table td{line-height:1.2;padding:4px 7px}
+.modern-sandbox-report .event-explorer-detail{margin-top:2px;padding:5px 7px}
+.modern-sandbox-report .event-explorer-details summary{font-size:11px;padding:4px 7px}
+.modern-sandbox-report .copy-btn.copy-icon{align-items:center;display:inline-flex;height:26px;justify-content:center;padding:3px;width:26px}
+.modern-sandbox-report .copy-icon{align-items:center;display:inline-flex;height:26px;justify-content:center;padding:3px;width:26px}.modern-sandbox-report .copy-icon svg{fill:none;height:16px;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8;width:16px}.sr-only{height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;width:1px;clip:rect(0,0,0,0);white-space:nowrap}
 .modern-sandbox-report .badge,.modern-sandbox-report .chip{border:0;border-radius:0}
 .modern-sandbox-report .section-note{display:block}
 .modern-sandbox-report .section-note.failure-note{background:#fff5e5;border-left:0;display:block;margin:10px 0;padding:10px 12px}
@@ -979,7 +990,9 @@ html[lang="en"] .localized-evidence-field{display:none}
                 var detail = overflow
                     ? RenderProcessExitOutcome(evt)
                     : $"{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyIconButton(plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>";
-                html.AppendLine($"<td><details class=\"event-explorer-details\"><summary>{E(evt.ProcessName ?? target ?? "Open evidence")}</summary><div class=\"event-explorer-detail\">{detail}</div></details></td>");
+                // Keep primary evidence open so operators can read and copy it
+                // without an extra disclosure click.
+                html.AppendLine($"<td><details open class=\"event-explorer-details\"><summary>{E(evt.ProcessName ?? target ?? "Open evidence")}</summary><div class=\"event-explorer-detail\">{detail}</div></details></td>");
                 html.AppendLine("</tr>");
             }
 
@@ -9757,6 +9770,18 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static bool IsDiagnosticFinding(BehaviorFinding finding)
     {
+        // Keep legacy/external reports aligned with the correlation policy:
+        // System32 native discovery utilities (hostname/whoami/ipconfig and
+        // peers) are useful raw evidence, but routine discovery/configuration
+        // must not drive the primary verdict.  Findings with any explicit
+        // persistence, injection, defense-evasion, or download/execute signal
+        // remain primary through the mixed-evidence check below.
+        if (finding.Evidence.Count > 0 &&
+            finding.Evidence.All(IsBenignWindowsDiscoveryUtilityEvidence))
+        {
+            return true;
+        }
+
         // Reports loaded from older or externally-produced JSON may still
         // carry the historical generic process-new finding. Demote it when
         // every evidence row lacks confirmed/probable sample correlation so
@@ -9803,6 +9828,64 @@ html[lang="en"] .localized-evidence-field{display:none}
             finding.RuleId.StartsWith("runbook-", StringComparison.OrdinalIgnoreCase) ||
             finding.RuleId.StartsWith("r0collector-", StringComparison.OrdinalIgnoreCase) ||
             finding.RuleId.Contains("unavailable", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsBenignWindowsDiscoveryUtilityEvidence(SandboxEvent evt)
+    {
+        var reason = FirstEventDataValue(evt, "sampleCorrelationReason");
+        var hasPolicyReason = string.Equals(
+            reason,
+            "system32-signed-or-known-discovery-utility-without-high-signal-behavior",
+            StringComparison.OrdinalIgnoreCase);
+
+        var processName = (evt.ProcessName ?? FirstEventDataValue(evt, "processName", "actorProcessName") ?? string.Empty).Trim();
+        processName = Path.GetFileName(processName.Replace('/', '\\'));
+        if (processName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            processName = processName[..^4];
+        }
+
+        var imagePath = string.Join(" ", new[]
+        {
+            evt.Path,
+            FirstEventDataValue(evt, "processImagePath", "imagePath", "actorProcessImagePath")
+        }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        var normalizedPath = imagePath.Replace('/', '\\');
+        var systemImage = normalizedPath.Contains("\\windows\\system32\\", StringComparison.OrdinalIgnoreCase) ||
+            normalizedPath.Contains("\\windows\\syswow64\\", StringComparison.OrdinalIgnoreCase);
+        var knownSystemBinary = EventDataBoolTrue(
+                evt,
+                "signed", "isSigned", "signatureTrusted", "signedBinary", "knownWindowsBinary", "windowsNativeBinary", "isSystemBinary") ||
+            TextEqualsAny(FirstEventDataValue(evt, "signatureStatus") ?? string.Empty, "valid", "trusted", "signed");
+        if ((!hasPolicyReason && !systemImage && !knownSystemBinary) ||
+            !BenignWindowsDiscoveryUtilityNames.Contains(processName, StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !HasHighSignalDiscoveryOverride(evt);
+    }
+
+    private static bool HasHighSignalDiscoveryOverride(SandboxEvent evt)
+    {
+        foreach (var key in new[]
+        {
+            "persistenceCandidate", "servicePersistenceCandidate", "startupRegistryCandidate",
+            "injectionCandidate", "remoteInjection", "remoteThread", "defenseEvasionCandidate",
+            "downloadCandidate", "downloadExecute", "maliciousNetwork", "maliciousNetworkCandidate"
+        })
+        {
+            if (EventDataBoolTrue(evt, key))
+            {
+                return true;
+            }
+        }
+
+        var commandLine = FirstEventDataValue(evt, "commandLine") ?? evt.CommandLine ?? string.Empty;
+        return TextContainsAny(
+            commandLine,
+            "-enc", "-encodedcommand", "invoke-webrequest", "downloadstring", "start-bitstransfer",
+            "rundll32", "regsvr32", "mshta", "schtasks /create", "sc create", "reg add");
     }
 
     private static bool FindingTextSuggestsDiagnostic(BehaviorFinding finding)
@@ -9918,12 +10001,17 @@ html[lang="en"] .localized-evidence-field{display:none}
     /// </summary>
     private static string CopyButton(string label, string copyText)
     {
-        return $"<button type=\"button\" class=\"copy-btn\" data-copy=\"{A(copyText)}\" data-copy-button=\"true\">{E(label)}</button>";
+        return CopyIconButton(copyText, label);
     }
 
     private static string CopyIconButton(string copyText)
     {
-        return $"<button type=\"button\" class=\"copy-btn copy-icon\" data-copy=\"{A(copyText)}\" data-copy-button=\"true\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"8\" y=\"8\" width=\"11\" height=\"11\" rx=\"1\"></rect><path d=\"M5 15V5a2 2 0 0 1 2-2h10\"></path></svg><span class=\"sr-only\">Copy</span></button>";
+        return CopyIconButton(copyText, "Copy");
+    }
+
+    private static string CopyIconButton(string copyText, string accessibleLabel)
+    {
+        return $"<button type=\"button\" class=\"copy-btn copy-icon\" aria-label=\"{A(accessibleLabel)}\" title=\"{A(accessibleLabel)}\" data-copy=\"{A(copyText)}\" data-copy-button=\"true\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"8\" y=\"8\" width=\"11\" height=\"11\" rx=\"1\"></rect><path d=\"M5 15V5a2 2 0 0 1 2-2h10\"></path></svg><span class=\"sr-only\">{E(accessibleLabel)}</span></button>";
     }
 
     /// <summary>

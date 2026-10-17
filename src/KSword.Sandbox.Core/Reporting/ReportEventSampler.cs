@@ -1110,6 +1110,7 @@ public static class ReportEventSampler
         string? jobRoot = null,
         string? eventsPath = null,
         string? driverEventsPath = null,
+        IReadOnlyCollection<string>? driverEventsPaths = null,
         IEnumerable<BehaviorFinding>? findings = null)
     {
         var resolvedOptions = options ?? DefaultOptions;
@@ -1144,7 +1145,7 @@ public static class ReportEventSampler
 
         if (result.WasSampled)
         {
-            result.Events.Insert(0, BuildSamplingMarker(result, resolvedOptions, jobRoot, eventsPath, driverEventsPath, orderedEvents));
+            result.Events.Insert(0, BuildSamplingMarker(result, resolvedOptions, jobRoot, eventsPath, driverEventsPath, driverEventsPaths, orderedEvents));
         }
 
         return result;
@@ -1258,7 +1259,21 @@ public static class ReportEventSampler
                 : options.MaxInlineEvents;
             var selectedForBucket = 0;
 
-            foreach (var candidate in inlineCandidates.Where(candidate => candidate.Bucket == bucket))
+            var bucketCandidates = inlineCandidates.Where(candidate => candidate.Bucket == bucket);
+            if (isDynamicActionBucket)
+            {
+                // Dynamic rows share one hard budget, but they do not share
+                // the same evidentiary value.  Timestamp order alone lets an
+                // early environment/unknown burst consume the entire lane
+                // before later confirmed sample behavior is considered.
+                // Keep high-confidence sample rows first, then preserve raw
+                // order within each confidence tier for deterministic output.
+                bucketCandidates = bucketCandidates
+                    .OrderBy(candidate => DynamicActionPriority(candidate.Event))
+                    .ThenBy(candidate => candidate.Index);
+            }
+
+            foreach (var candidate in bucketCandidates)
             {
                 if ((!isDynamicActionBucket && boundedSelectedCount >= options.MaxInlineEvents) ||
                     selectedForBucket >= bucketQuota)
@@ -1581,6 +1596,25 @@ public static class ReportEventSampler
             type.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
             (type.StartsWith("service.", StringComparison.OrdinalIgnoreCase) &&
                 !type.Contains("snapshot", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static int DynamicActionPriority(SandboxEvent evt)
+    {
+        if (IsStrongSampleBehaviorEvent(evt))
+        {
+            return 0;
+        }
+
+        if (IsProbableSampleEvidenceEvent(evt))
+        {
+            return 1;
+        }
+
+        // Some imported rows carry an explicit disposition without the
+        // behaviorCounted marker. Preserve those candidate rows ahead of
+        // environment/unknown telemetry so the omission count reflects the
+        // lower-value spill rather than hiding attributable evidence.
+        return IsBehaviorCandidateMarker(evt) ? 2 : 3;
     }
 
     private static bool IsDriverSampleActivityEvent(SandboxEvent evt)
@@ -2063,6 +2097,7 @@ public static class ReportEventSampler
         string? jobRoot,
         string? eventsPath,
         string? driverEventsPath,
+        IReadOnlyCollection<string>? driverEventsPaths,
         IReadOnlyList<SandboxEvent> orderedEvents)
     {
         var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -2123,6 +2158,17 @@ public static class ReportEventSampler
         if (!string.IsNullOrWhiteSpace(driverEventsPath))
         {
             data["driverEventsPath"] = driverEventsPath;
+        }
+
+        var allDriverPaths = driverEventsPaths?
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+        if (allDriverPaths.Length > 0)
+        {
+            // Keep the legacy singular key for the active canonical stream,
+            // while exposing every rotated segment to prevent evidence loss.
+            data["driverEventsPaths"] = string.Join(";", allDriverPaths);
         }
 
         return new SandboxEvent
@@ -2230,7 +2276,7 @@ public static class ReportEventSampler
                 "maxDynamicActionEvents", "dynamicActionEventsAlwaysRetained",
                 "maxInlineEventsExcludesDynamicActions", "dynamicActionSelectedCount",
                 "dynamicActionOmittedCount", "dynamicActionSpillPolicy",
-                "rawEventsPath", "driverEventsPath"
+                "rawEventsPath", "driverEventsPath", "driverEventsPaths"
             })
             {
                 yield return key;

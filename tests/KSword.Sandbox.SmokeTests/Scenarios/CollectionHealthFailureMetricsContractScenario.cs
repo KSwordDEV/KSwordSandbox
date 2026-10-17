@@ -295,6 +295,28 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
     private static void AssertExpectedDisabledProducerSuppression()
     {
         var timestamp = DateTimeOffset.UtcNow;
+        var noSupportedProducer = CollectionHealthSummaryBuilder.Build(
+        [
+            new SandboxEvent
+            {
+                EventType = "r0collector.driverStatus",
+                Source = "r0collector",
+                Timestamp = timestamp,
+                Data =
+                {
+                    ["statusPhase"] = "final",
+                    ["finalStatusAvailable"] = "true",
+                    ["remainingQueueDepth"] = "0",
+                    ["producerSuppressedMask"] = "64",
+                    ["supportedProducerMask"] = "0",
+                    ["activeProducerMask"] = "0"
+                }
+            }
+        ]);
+
+        RequireEqual(1, noSupportedProducer.DriverUnsupportedProducerRows, "A zero supported mask must keep a suppressed producer bit in the unsupported lane.");
+        RequireEqual(64, noSupportedProducer.DriverUnsupportedProducerMask, "A zero supported mask must preserve the unsupported producer bit.");
+
         var expected = CollectionHealthSummaryBuilder.Build(
         [
             new SandboxEvent
@@ -310,6 +332,7 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
                     ["producerSuppressedMask"] = "64",
                     ["producerEnableMask"] = "63",
                     ["supportedProducerMask"] = "127",
+                    ["activeProducerMask"] = "63",
                     ["totalEventsSuppressed"] = "4440"
                 }
             }
@@ -320,6 +343,8 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
         RequireEqual(1, expected.DriverExpectedSuppressedRows, "Disabled producer suppression must be classified as expected.");
         RequireEqual(0, expected.DriverUnexpectedSuppressedRows, "Expected disabled suppression must not be classified as unexpected.");
         RequireEqual(64, expected.DriverExpectedSuppressedMask, "Expected suppression mask must preserve the disabled producer bit.");
+        RequireEqual(0, expected.DriverUnsupportedProducerRows, "A supported but inactive producer must not be classified as unsupported.");
+        RequireEqual(0, expected.DriverUnsupportedProducerMask, "A supported but inactive producer must not contribute to the unsupported mask.");
         RequireTrue(expected.StateReasons.Contains("driver-expected-disabled-producer"), "Expected disabled producer capability gaps must remain visible in state reasons.");
 
         var unexpected = CollectionHealthSummaryBuilder.Build(

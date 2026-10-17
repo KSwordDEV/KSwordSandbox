@@ -62,6 +62,12 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
         File.WriteAllText(Path.Combine(etw, "hex.xml"), """
             <Events><Event><System><Provider Name="Microsoft-Windows-Kernel-Image"/><EventID>5</EventID><TimeCreated SystemTime="2026-01-01T00:00:03Z"/><Execution ProcessID="0x10" ThreadID="0x11"/></System><RenderingInfo><Task>Image</Task><Opcode>UnLoad</Opcode><EventName>Image</EventName></RenderingInfo><EventData><Data Name="ProcessId">0x10</Data><Data Name="ImageFileName">payload.dll</Data></EventData></Event></Events>
             """);
+        // tracerpt may omit RenderingInfo for a kernel row. The fallback
+        // importer must use the payload's process/lineage shape just like the
+        // live decoder, otherwise this row is reduced to etw.event and lost.
+        File.WriteAllText(Path.Combine(etw, "payload-only.xml"), """
+            <Events><Event><System><Provider Name="Microsoft-Windows-Kernel-Process"/><EventID>99</EventID><TimeCreated SystemTime="2026-01-01T00:00:04Z"/><Execution ProcessID="4242" ThreadID="11"/></System><EventData><Data Name="ProcessId">4242</Data><Data Name="ParentProcessId">4</Data><Data Name="ImageFileName">payload-only.exe</Data></EventData></Event></Events>
+            """);
 
         var failures = GuestFailureArtifactImporter.Import(root);
         SmokeAssert.True(failures.Any(evt => evt.EventType == "agent.run.failed"), "Agent status/stderr/exit must produce a structured failure row.");
@@ -109,6 +115,9 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
         SmokeAssert.True(etwRows.All(evt => evt.Data.TryGetValue("captureSource", out var source) && source == "etw-live-tracerpt"), "ETW fallback rows must retain source provenance.");
         var hexUnload = etwRows.Single(evt => evt.EventType == "image.unload");
         SmokeAssert.True(hexUnload.ProcessId == 16 && hexUnload.ParentProcessId is null, "ETW fallback must parse hexadecimal process IDs from tracerpt XML.");
+        var payloadOnly = etwRows.Single(evt => evt.EventType == "process.event");
+        SmokeAssert.True(payloadOnly.ProcessId == 4242 && payloadOnly.ParentProcessId == 4 && payloadOnly.ProcessName == "payload-only.exe",
+            "ETW fallback must preserve process-shaped rows when tracerpt omits RenderingInfo.");
 
         // A captured ETL with parsedEventCount=0 is a collection gap even if
         // the raw XML fallback happens to contain rows. The shared import path

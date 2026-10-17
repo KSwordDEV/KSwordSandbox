@@ -536,7 +536,7 @@ internal static class GuestArtifactEventQuality
             "dropped-files",
             "dropped-file",
             "artifacts/dropped-files/**",
-            "explicit-opt-in-copy-working-directory-new-files",
+            "explicit-opt-in-copy-approved-user-write-roots",
             "dropped-file",
             "droppedFile");
 

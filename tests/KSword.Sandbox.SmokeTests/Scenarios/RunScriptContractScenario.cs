@@ -57,6 +57,13 @@ internal sealed class RunScriptContractScenario : ISmokeTestScenario
         RequireContains(runScript, "Resolve-KSwordPortableTool", "run.ps1 should resolve the provider-neutral JobTool target.");
         RequireContains(runScript, "Invoke-RunJobToolCaptured", "run.ps1 should delegate one-shot analysis to JobTool.");
         RequireContains(runScript, "'--provider', $provider", "run.ps1 should forward the selected provider to JobTool.");
+        RequireContains(runScript, "Get-EffectiveRunStepTimeoutSeconds", "run.ps1 should derive a live step timeout that covers the selected guest and analysis deadlines.");
+        RequireContains(runScript, "$guestReadySeconds", "run.ps1 timeout derivation should include the guest readiness deadline.");
+        RequireContains(runScript, "$configuredMaxDuration", "run.ps1 timeout derivation should use the same configured duration cap as JobTool.");
+        RequireContains(runScript, "$NoR0Collector -or -not $driverEnabled", "run.ps1 should avoid adding an R0 drain grace period when R0 collection is disabled.");
+        RequireContains(runScript, "$syncMinimumSeconds = $durationSeconds + $drainGraceSeconds + 60", "run.ps1 timeout derivation should include analysis duration, R0 drain grace, and live-sync margin.");
+        RequireContains(runScript, "[Math]::Max([int]$ExecutionTimeoutSeconds, $minimumSeconds)", "run.ps1 should raise an undersized finite timeout instead of killing live guest output sync early.");
+        RequireContains(runScript, "'--step-timeout-seconds', ([string]$effectiveStepTimeoutSeconds)", "run.ps1 should pass the derived timeout to JobTool.");
         RequireContains(runScript, "@('--vm', $VmName.Trim())", "run.ps1 should forward a per-job VM override.");
         RequireContains(runScript, "@('--baseline', $BaselineName.Trim())", "run.ps1 should forward the provider-neutral clean baseline override.");
         RequireContains(runScript, "@('--machine-definition-path', $MachineDefinitionPath.Trim())", "run.ps1 should forward VMware VMX or QEMU base-disk overrides.");

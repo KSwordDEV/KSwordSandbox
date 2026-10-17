@@ -45,6 +45,15 @@ internal static class AgentProgram
 
     private const string DroppedFileSelectorVersion = "artifact-selectors-v1";
 
+    // Dropped-file extraction is explicitly opt-in. Keep the copy bounded even
+    // when a sample writes a large number of files or fills a user-writable
+    // directory. These limits apply to copied evidence, not to raw file events.
+    internal const int MaxDroppedFileArtifacts = 256;
+
+    internal const long MaxDroppedFileSizeBytes = 64L * 1024L * 1024L;
+
+    internal const long MaxDroppedFileTotalBytes = 256L * 1024L * 1024L;
+
     internal const int DefaultR0CollectorMaxEventsPerRead = 8192;
 
     internal const int DefaultR0CollectorMaxReadBatches = 0;
@@ -2284,8 +2293,9 @@ internal static class AgentProgram
     }
 
     /// <summary>
-    /// Copies newly-created files from the sample working directory into the
-    /// guest output artifact tree when explicitly enabled.
+    /// Copies newly-created files from the sample working directory and
+    /// approved user-writable roots into the guest output artifact tree when
+    /// explicitly enabled.
     /// Inputs are parsed options and collected file events; processing copies
     /// file.created paths outside --out into artifacts/dropped-files and emits
     /// copy/skip events; the method returns metadata keyed by manifest-relative
@@ -2317,10 +2327,13 @@ internal static class AgentProgram
         }
 
         var workingDirectory = Path.GetFullPath(Path.GetDirectoryName(options.SamplePath) ?? Environment.CurrentDirectory);
+        var approvedDroppedFileRoots = GetApprovedDroppedFileRoots(workingDirectory);
         var outputDirectory = Path.GetFullPath(options.OutputDirectory);
         var artifactsRoot = Path.Combine(outputDirectory, GuestArtifactWriter.ArtifactsDirectoryName);
         var droppedFilesRoot = Path.Combine(artifactsRoot, DroppedFilesArtifactDirectoryName);
         var copyOutcomeStartIndex = events.Count;
+        var copiedFileCount = 0;
+        long copiedTotalBytes = 0;
 
         foreach (var candidate in candidates)
         {
@@ -2341,22 +2354,23 @@ internal static class AgentProgram
                 continue;
             }
 
-            if (!IsSameOrUnderDirectory(sourcePath, workingDirectory))
+            if (IsSameOrUnderDirectory(sourcePath, outputDirectory))
             {
                 events.Add(CreateDroppedFileSkippedEvent(
                     candidate,
-                    reason: "outsideWorkingDirectory",
+                    reason: "underOutputDirectory",
                     sourcePath: sourcePath,
                     sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
                     processContext: processContext));
                 continue;
             }
 
-            if (IsSameOrUnderDirectory(sourcePath, outputDirectory))
+            var approvedRoot = FindApprovedDroppedFileRoot(sourcePath, approvedDroppedFileRoots);
+            if (approvedRoot is null)
             {
                 events.Add(CreateDroppedFileSkippedEvent(
                     candidate,
-                    reason: "underOutputDirectory",
+                    reason: "outsideApprovedWriteRoot",
                     sourcePath: sourcePath,
                     sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
                     processContext: processContext));
@@ -2370,6 +2384,66 @@ internal static class AgentProgram
                     reason: "sourceFileMissing",
                     sourcePath: sourcePath,
                     sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
+                    processContext: processContext));
+                continue;
+            }
+
+            if (HasReparsePoint(sourcePath))
+            {
+                events.Add(CreateDroppedFileSkippedEvent(
+                    candidate,
+                    reason: "sourceReparsePoint",
+                    sourcePath: sourcePath,
+                    sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
+                    processContext: processContext));
+                continue;
+            }
+
+            if (copiedFileCount >= MaxDroppedFileArtifacts)
+            {
+                events.Add(CreateDroppedFileSkippedEvent(
+                    candidate,
+                    reason: "artifactFileLimitExceeded",
+                    sourcePath: sourcePath,
+                    sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
+                    processContext: processContext));
+                continue;
+            }
+
+            FileInfo sourceInfo;
+            try
+            {
+                sourceInfo = new FileInfo(sourcePath);
+                if (sourceInfo.Length > MaxDroppedFileSizeBytes)
+                {
+                    events.Add(CreateDroppedFileSkippedEvent(
+                        candidate,
+                        reason: "artifactFileTooLarge",
+                        sourcePath: sourcePath,
+                        sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
+                        processContext: processContext));
+                    continue;
+                }
+
+                if (sourceInfo.Length > MaxDroppedFileTotalBytes - copiedTotalBytes)
+                {
+                    events.Add(CreateDroppedFileSkippedEvent(
+                        candidate,
+                        reason: "artifactTotalSizeLimitExceeded",
+                        sourcePath: sourcePath,
+                        sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
+                        processContext: processContext));
+                    continue;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+            {
+                events.Add(CreateDroppedFileSkippedEvent(
+                    candidate,
+                    reason: "sourceMetadataFailed",
+                    sourcePath: sourcePath,
+                    sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
+                    exception: ex,
                     processContext: processContext));
                 continue;
             }
@@ -2407,13 +2481,14 @@ internal static class AgentProgram
                     continue;
                 }
 
-                var sourceInfo = new FileInfo(sourcePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination.FullPath) ?? droppedFilesRoot);
                 CopyFileSharedRead(sourcePath, destination.FullPath);
                 var copiedInfo = new FileInfo(destination.FullPath);
                 var copiedHash = ComputeSha256BestEffort(destination.FullPath);
                 var copiedAtUtc = DateTimeOffset.UtcNow;
                 usedArtifactRelativePaths.Add(destination.ArtifactRelativePath);
+                copiedFileCount++;
+                copiedTotalBytes += copiedInfo.Length;
                 metadataByRelativePath[destination.ArtifactRelativePath] = new DroppedFileArtifactMetadata(
                     sourcePath,
                     originalRelativePath,
@@ -2436,7 +2511,8 @@ internal static class AgentProgram
                     copiedAtUtc,
                     processContext,
                     sourceEvidence,
-                    copiedHash));
+                    copiedHash,
+                    approvedRoot));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
             {
@@ -2626,7 +2702,8 @@ internal static class AgentProgram
         DateTimeOffset copiedAtUtc,
         DroppedFileProcessContext processContext,
         DroppedFileSourceEvidence sourceEvidence,
-        DroppedFileHashResult copiedHash)
+        DroppedFileHashResult copiedHash,
+        string approvedRoot)
     {
         var evt = new SandboxEvent
         {
@@ -2666,7 +2743,8 @@ internal static class AgentProgram
                 ["evidenceRole"] = "dropped-file",
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
-                ["capturePolicy"] = "explicit-opt-in-copy-working-directory-new-files",
+                ["capturePolicy"] = "explicit-opt-in-copy-approved-user-write-roots",
+                ["approvedSourceRoot"] = approvedRoot,
                 ["artifactRelativePathStatus"] = "captured",
                 ["captureState"] = "captured",
                 ["status"] = "captured",
@@ -2775,7 +2853,7 @@ internal static class AgentProgram
                 ["evidenceRole"] = "dropped-file",
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
-                ["capturePolicy"] = "explicit-opt-in-copy-working-directory-new-files",
+                ["capturePolicy"] = "explicit-opt-in-copy-approved-user-write-roots",
                 ["captureState"] = "skipped",
                 ["status"] = "skipped",
                 ["nonfatal"] = "true",
@@ -2846,7 +2924,7 @@ internal static class AgentProgram
                 ["evidenceRole"] = "dropped-file",
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
-                ["capturePolicy"] = "explicit-opt-in-copy-working-directory-new-files",
+                ["capturePolicy"] = "explicit-opt-in-copy-approved-user-write-roots",
                 ["captureState"] = status,
                 ["status"] = status,
                 ["reason"] = reason,
@@ -2924,7 +3002,7 @@ internal static class AgentProgram
                 ["evidenceRole"] = "dropped-file",
                 ["captureEnabled"] = "false",
                 ["implemented"] = "true",
-                ["capturePolicy"] = "explicit-opt-in-copy-working-directory-new-files",
+                ["capturePolicy"] = "explicit-opt-in-copy-approved-user-write-roots",
                 ["captureState"] = "disabled",
                 ["status"] = "disabled",
                 ["nonfatal"] = "true",
@@ -3075,7 +3153,13 @@ internal static class AgentProgram
             "sourcePathMissing" => "源事件没有可复制路径；请查看原始 file.created 事件。",
             "sourcePathInvalid" => "源路径无法规范化，可能包含非法路径字符或过长路径。",
             "sourceFileMissing" => "复制时源文件已经不存在，可能被样本删除或移动。",
-            "outsideWorkingDirectory" => "为避免越界采集，默认只复制样本工作目录下的新建文件。",
+            "outsideApprovedWriteRoot" => "源文件不在样本目录或受控用户可写目录内，按策略跳过复制。",
+            "outsideWorkingDirectory" => "源文件不在样本目录或受控用户可写目录内，按策略跳过复制。",
+            "sourceReparsePoint" => "源文件是重解析点，按策略跳过以避免路径穿越。",
+            "artifactFileLimitExceeded" => $"已达到掉落文件复制上限（{MaxDroppedFileArtifacts} 个）。",
+            "artifactFileTooLarge" => $"源文件超过单文件证据大小上限（{MaxDroppedFileSizeBytes / (1024 * 1024)} MiB）。",
+            "artifactTotalSizeLimitExceeded" => $"已达到掉落文件证据总大小上限（{MaxDroppedFileTotalBytes / (1024 * 1024)} MiB）。",
+            "sourceMetadataFailed" => "无法读取源文件元数据，已跳过复制。",
             "underOutputDirectory" => "源文件位于输出目录下，跳过以避免把采集产物再次作为样本掉落物复制。",
             "destinationPathInvalid" => "无法在 artifacts/dropped-files 下生成安全目标路径。",
             "copyFailed" => "复制失败；请检查文件锁、权限、路径长度和磁盘空间。",
@@ -3090,7 +3174,13 @@ internal static class AgentProgram
             "sourcePathMissing" => "源事件缺少路径。",
             "sourcePathInvalid" => "源路径无效。",
             "sourceFileMissing" => "源文件已不存在。",
-            "outsideWorkingDirectory" => "源文件不在样本工作目录内。",
+            "outsideApprovedWriteRoot" => "源文件不在样本目录或受控用户可写目录内。",
+            "outsideWorkingDirectory" => "源文件不在样本目录或受控用户可写目录内。",
+            "sourceReparsePoint" => "源文件是重解析点，已跳过以防止路径穿越。",
+            "artifactFileLimitExceeded" => "超过掉落文件数量上限。",
+            "artifactFileTooLarge" => "超过单文件大小上限。",
+            "artifactTotalSizeLimitExceeded" => "超过掉落文件证据总大小上限。",
+            "sourceMetadataFailed" => "读取源文件元数据失败。",
             "underOutputDirectory" => "源文件位于输出目录内。",
             "destinationPathInvalid" => "目标证据路径无效。",
             "copyFailed" => "复制失败。",
@@ -3105,7 +3195,8 @@ internal static class AgentProgram
         {
             "sourcePathMissing" or "sourcePathInvalid" => "source-path",
             "sourceFileMissing" => "source-missing",
-            "outsideWorkingDirectory" or "underOutputDirectory" => "policy",
+            "outsideApprovedWriteRoot" or "outsideWorkingDirectory" or "sourceReparsePoint" or "artifactFileLimitExceeded" or "artifactFileTooLarge" or "artifactTotalSizeLimitExceeded" or "underOutputDirectory" => "policy",
+            "sourceMetadataFailed" => "source-metadata",
             "destinationPathInvalid" => "destination-path",
             "copyFailed" => "copy-io",
             "collectDroppedFilesNotRequested" => "disabled",
@@ -3699,6 +3790,81 @@ internal static class AgentProgram
     private static string NormalizeArtifactRelativePath(string path)
     {
         return path.Replace('\\', '/');
+    }
+
+    /// <summary>
+    /// Builds the bounded set of guest locations where a sample may normally
+    /// drop user artifacts. The sample directory remains allowed; broad system
+    /// roots are deliberately excluded. Inputs are the normalized sample
+    /// working directory; processing de-duplicates roots and ignores malformed
+    /// environment values; the method returns normalized roots.
+    /// </summary>
+    private static IReadOnlyList<string> GetApprovedDroppedFileRoots(string workingDirectory)
+    {
+        var candidates = new List<string> { workingDirectory };
+        AddDroppedFileRoot(candidates, Environment.GetEnvironmentVariable("TEMP"));
+        AddDroppedFileRoot(candidates, Environment.GetEnvironmentVariable("TMP"));
+        AddDroppedFileRoot(candidates, Environment.GetEnvironmentVariable("APPDATA"));
+        AddDroppedFileRoot(candidates, Environment.GetEnvironmentVariable("LOCALAPPDATA"));
+        AddDroppedFileRoot(candidates, Environment.GetEnvironmentVariable("PUBLIC"));
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(userProfile))
+        {
+            AddDroppedFileRoot(candidates, Path.Combine(userProfile, "Downloads"));
+        }
+
+        var publicRoot = Environment.GetEnvironmentVariable("PUBLIC");
+        if (!string.IsNullOrWhiteSpace(publicRoot))
+        {
+            AddDroppedFileRoot(candidates, Path.Combine(publicRoot, "Downloads"));
+        }
+
+        return candidates
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static void AddDroppedFileRoot(List<string> roots, string? root)
+    {
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            return;
+        }
+
+        try
+        {
+            roots.Add(Path.GetFullPath(root));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            // An invalid environment variable must not prevent collection.
+        }
+    }
+
+    private static string? FindApprovedDroppedFileRoot(string sourcePath, IReadOnlyList<string> roots)
+    {
+        foreach (var root in roots)
+        {
+            if (IsSameOrUnderDirectory(sourcePath, root))
+            {
+                return root;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool HasReparsePoint(string path)
+    {
+        try
+        {
+            return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            return true;
+        }
     }
 
     /// <summary>

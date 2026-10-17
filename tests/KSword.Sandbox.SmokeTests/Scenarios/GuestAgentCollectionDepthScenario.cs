@@ -308,6 +308,15 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("skippedReasonCountsJson", StringComparison.Ordinal), "Dropped-file summaries must expose skipped reason counts.");
         SmokeAssert.True(programText.Contains("reasonCategory", StringComparison.Ordinal), "Dropped-file skipped events must expose stable reason categories.");
         SmokeAssert.True(programText.Contains("DroppedFileReasonTaxonomy", StringComparison.Ordinal), "Dropped-file events must expose a stable reason taxonomy.");
+        SmokeAssert.True(programText.Contains("GetApprovedDroppedFileRoots", StringComparison.Ordinal), "Dropped-file collection must include approved user-writable roots beyond the sample directory.");
+        SmokeAssert.True(programText.Contains("Environment.GetEnvironmentVariable(\"TEMP\")", StringComparison.Ordinal), "Dropped-file collection must cover the guest TEMP root.");
+        SmokeAssert.True(programText.Contains("Environment.GetEnvironmentVariable(\"APPDATA\")", StringComparison.Ordinal), "Dropped-file collection must cover the guest APPDATA root.");
+        SmokeAssert.True(programText.Contains("Environment.GetEnvironmentVariable(\"LOCALAPPDATA\")", StringComparison.Ordinal), "Dropped-file collection must cover the guest LOCALAPPDATA root.");
+        SmokeAssert.True(programText.Contains("outsideApprovedWriteRoot", StringComparison.Ordinal), "Dropped-file policy must report when a source is outside approved roots.");
+        SmokeAssert.True(programText.Contains("sourceReparsePoint", StringComparison.Ordinal), "Dropped-file policy must reject reparse points to prevent path traversal.");
+        SmokeAssert.True(programText.Contains("MaxDroppedFileArtifacts", StringComparison.Ordinal), "Dropped-file collection must bound the number of copied artifacts.");
+        SmokeAssert.True(programText.Contains("MaxDroppedFileSizeBytes", StringComparison.Ordinal), "Dropped-file collection must bound the size of each copied artifact.");
+        SmokeAssert.True(programText.Contains("MaxDroppedFileTotalBytes", StringComparison.Ordinal), "Dropped-file collection must bound total copied evidence size.");
         SmokeAssert.True(programText.Contains("artifactSelector", StringComparison.Ordinal), "Dropped-file events must expose safe artifact selectors.");
         SmokeAssert.True(programText.Contains("firstArtifactSelector", StringComparison.Ordinal), "Dropped-file summaries must expose first copied artifact selectors.");
         SmokeAssert.True(programText.Contains("lastArtifactSelector", StringComparison.Ordinal), "Dropped-file summaries must expose last copied artifact selectors.");

@@ -4324,10 +4324,10 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
         producerMaskReplySizeCompatible;
     const bool processHandleAccessCapabilityAdvertised =
         (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT) != 0;
-    const bool processHandleAccessTelemetryAvailable =
+    const bool processHandleAccessTelemetrySupported =
         processHandleAccessCapabilityAdvertised &&
         (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0;
-    const bool tokenPrivilegeTelemetryAvailable =
+    const bool tokenPrivilegeCapabilityAdvertised =
         (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_TOKEN_PRIVILEGE_DRAFT) != 0;
 
     std::string abiMismatchReasons;
@@ -4467,33 +4467,54 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
     data.AddBool(
         "processHandleAccessProducerSupported",
         (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0);
-    data.AddBool("processHandleAccessTelemetrySupported", processHandleAccessTelemetryAvailable);
-    data.AddBool("tokenPrivilegeDraftCapable", tokenPrivilegeTelemetryAvailable);
+    data.AddBool("processHandleAccessTelemetrySupported", processHandleAccessTelemetrySupported);
+    data.AddBool("processHandleAccessActiveKnown", false);
+    data.AddBool("processHandleAccessActive", false);
+    data.AddUtf8(
+        "processHandleAccessRuntimeState",
+        processHandleAccessTelemetrySupported ? "supported-awaiting-status" : "unsupported");
+    data.AddBool("tokenPrivilegeDraftCapable", tokenPrivilegeCapabilityAdvertised);
+    data.AddBool("tokenPrivilegeTelemetrySupported", tokenPrivilegeCapabilityAdvertised);
+    data.AddBool("tokenPrivilegeActiveKnown", false);
+    data.AddBool("tokenPrivilegeActive", false);
+    data.AddUtf8(
+        "tokenPrivilegeRuntimeState",
+        tokenPrivilegeCapabilityAdvertised ? "supported-awaiting-status" : "unsupported");
     AddR0EtwCapabilityContractFields(
         data,
         "driver-capabilities",
         "live-get-capabilities-flags-and-supported-producer-mask",
-        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_CREATE_EXIT) != 0 &&
-            (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS) != 0,
-        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_IMAGE_LOAD) != 0 &&
-            (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE) != 0,
-        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_FILE_MINIFILTER) != 0 &&
-            (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_FILE) != 0,
-        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_REGISTRY_CALLBACK) != 0 &&
-            (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY) != 0,
-        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE) != 0 &&
-            (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK) != 0,
-        processHandleAccessTelemetryAvailable,
-        tokenPrivilegeTelemetryAvailable);
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false);
     AddR0ReadinessCoverageFields(
         data,
         "live-get-capabilities-supported-producer-mask",
         "capabilities-supported-producer-mask",
         reply.SupportedProducerMask,
         (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_QUEUE_STATUS_COUNTERS) != 0,
-        processHandleAccessTelemetryAvailable,
-        tokenPrivilegeTelemetryAvailable,
+        false,
+        false,
         false);
+    data.AddUtf8(
+        "r0EtwFallbackPolicy",
+        "Capabilities advertise supported lanes only; R0 direct observation requires a matching active/effective producer status.");
+    data.AddUtf8(
+        "processHandleAccessObservation",
+        processHandleAccessTelemetrySupported ? "status-active-mask-required" : "unsupported");
+    data.AddUtf8(
+        "processHandleAccessObservationSource",
+        processHandleAccessTelemetrySupported ? "driver-status-active-effective-mask" : "etw-object-access-or-kernel-provider");
+    data.AddUtf8(
+        "tokenPrivilegeObservation",
+        tokenPrivilegeCapabilityAdvertised ? "status-active-capability-required" : "etw-fallback-required");
+    data.AddUtf8(
+        "tokenPrivilegeObservationSource",
+        tokenPrivilegeCapabilityAdvertised ? "driver-status-active-capability" : "etw-security-audit-or-kernel-provider");
     data.AddUnsigned("supportedProducerMask", reply.SupportedProducerMask);
     data.AddUtf8("supportedProducerMaskHex", HexUnsignedLongLong(reply.SupportedProducerMask, 8));
     data.AddUtf8("supportedProducerMaskNames", ProducerMaskNames(reply.SupportedProducerMask));

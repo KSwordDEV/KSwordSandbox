@@ -78,7 +78,13 @@ internal sealed class R0JsonlReportSamplingRegressionScenario : ISmokeTestScenar
         SmokeAssert.True(
             samplingMarker.Data.TryGetValue("driverEventsPath", out var driverEventsPath) &&
             driverEventsPath.EndsWith("driver-events.jsonl", StringComparison.OrdinalIgnoreCase),
-            "Sampling marker should retain the complete driver-events.jsonl source path.");
+            "Sampling marker should retain the active canonical driver-events.jsonl source path.");
+        SmokeAssert.True(
+            samplingMarker.Data.TryGetValue("driverEventsPaths", out var driverEventsPaths) &&
+            driverEventsPaths.Contains("driver-events.part-000001.jsonl", StringComparison.OrdinalIgnoreCase) &&
+            driverEventsPaths.Contains("driver-events.part-000002.jsonl", StringComparison.OrdinalIgnoreCase) &&
+            driverEventsPaths.Contains("driver-events.jsonl", StringComparison.OrdinalIgnoreCase),
+            "Sampling marker should expose every canonical and rotated driver JSONL source path.");
         SmokeAssert.True(
             report.Metrics.TryGetValue("events.omittedFromReport", out var omittedMetric) && omittedMetric == omittedEventCount,
             "Report metrics should carry the omitted-from-report count.");
@@ -93,6 +99,14 @@ internal sealed class R0JsonlReportSamplingRegressionScenario : ISmokeTestScenar
             html,
             "driver-events.jsonl",
             "Rendered report should still point operators to the complete R0 JSONL artifact/source.");
+        RequireContains(
+            html,
+            "driver-events.part-000001.jsonl",
+            "Rendered report should expose the first rotated R0 JSONL segment.");
+        RequireContains(
+            html,
+            "driver-events.part-000002.jsonl",
+            "Rendered report should expose the second rotated R0 JSONL segment.");
         RequireNotContains(
             html,
             "r0-jsonl-volume-1499.bin",
@@ -141,6 +155,26 @@ internal sealed class R0JsonlReportSamplingRegressionScenario : ISmokeTestScenar
         }));
 
         var driverEventsPath = Path.Combine(guestRoot, "driver-events.jsonl");
+        foreach (var segment in new[] { "000001", "000002" })
+        {
+            var segmentPath = Path.Combine(guestRoot, $"driver-events.part-{segment}.jsonl");
+            var segmentEvent = new SandboxEvent
+            {
+                EventType = "driver.telemetry",
+                Timestamp = timestamp.AddMilliseconds(-2 - int.Parse(segment)),
+                Source = "driver",
+                ProcessName = "r0collector.exe",
+                ProcessId = 8400,
+                Path = $@"C:\KSwordSandbox\out\r0-jsonl-segment-{segment}.bin",
+                Data =
+                {
+                    ["sequence"] = $"segment-{segment}",
+                    ["driverEventPath"] = Path.GetFileName(segmentPath)
+                }
+            };
+            File.WriteAllText(segmentPath, JsonSerializer.Serialize(segmentEvent) + Environment.NewLine);
+        }
+
         using var writer = new StreamWriter(driverEventsPath);
         for (var index = 0; index < ImportedR0EventCount; index++)
         {

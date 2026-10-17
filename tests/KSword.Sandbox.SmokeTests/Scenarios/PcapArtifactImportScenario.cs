@@ -379,6 +379,7 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         var guestRoot = Path.Combine(jobRoot, "guest", job.JobId.ToString("N"));
         var packetRoot = Path.Combine(guestRoot, "packet-captures");
         Directory.CreateDirectory(packetRoot);
+        var pcapPath = Path.Combine(packetRoot, "sample.pcap");
 
         var eventsPath = Path.Combine(guestRoot, "events.json");
         await File.WriteAllTextAsync(
@@ -392,10 +393,51 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
                     ProcessName = "sample.exe",
                     ProcessId = 4242,
                     Path = samplePath
+                },
+                new SandboxEvent
+                {
+                    EventType = "packet_capture.captured",
+                    Source = "guest",
+                    Path = pcapPath,
+                    Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["collectionName"] = "packet-captures",
+                        ["captureState"] = "captured",
+                        ["status"] = "captured",
+                        ["protocolSummaryAvailable"] = "false",
+                        ["protocolSummaryState"] = "capture-metadata-only",
+                        ["protocolSummaryStatus"] = "skipped",
+                        ["protocolSummaryReason"] = "protocolParserNotImplemented",
+                        ["protocolsObserved"] = "not-parsed",
+                        ["dnsSummaryState"] = "not-parsed",
+                        ["httpSummaryState"] = "not-parsed",
+                        ["tlsSummaryState"] = "not-parsed"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "packet_capture.protocol_summary",
+                    Source = "guest",
+                    Path = pcapPath,
+                    Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["collectionName"] = "packet-captures",
+                        ["captureState"] = "captured",
+                        ["status"] = "captured",
+                        ["reason"] = "protocolParserNotImplemented",
+                        ["protocolSummaryAvailable"] = "false",
+                        ["protocolSummaryState"] = "capture-metadata-only",
+                        ["protocolSummaryStatus"] = "skipped",
+                        ["protocolSummaryReason"] = "protocolParserNotImplemented",
+                        ["protocolsObserved"] = "not-parsed",
+                        ["dnsSummaryState"] = "not-parsed",
+                        ["httpSummaryState"] = "not-parsed",
+                        ["tlsSummaryState"] = "not-parsed"
+                    }
                 }
             }),
             cancellationToken);
-        await File.WriteAllBytesAsync(Path.Combine(packetRoot, "sample.pcap"), BuildSyntheticPcap(), cancellationToken);
+        await File.WriteAllBytesAsync(pcapPath, BuildSyntheticPcap(), cancellationToken);
         await File.WriteAllLinesAsync(
             Path.Combine(packetRoot, "sample.conn.jsonl"),
             [
@@ -432,7 +474,7 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
             ?? throw new InvalidOperationException("report should deserialize");
 
         SmokeAssert.True(
-            report.Metrics.TryGetValue("events.sources.primaryEvents", out var primaryEventCount) && primaryEventCount == 1,
+            report.Metrics.TryGetValue("events.sources.primaryEvents", out var primaryEventCount) && primaryEventCount == 3,
             "Primary source metrics should count only the events.json rows, excluding normalized PCAP and sidecar rows appended during import.");
 
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase)), "Imported report should include pcap.summary.");
@@ -445,6 +487,22 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "dns.query", StringComparison.OrdinalIgnoreCase)), "Imported report should include standardized dns.query.");
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "http.request", StringComparison.OrdinalIgnoreCase)), "Imported report should include standardized http.request.");
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "tls.connection", StringComparison.OrdinalIgnoreCase)), "Imported report should include standardized tls.connection.");
+        var importedCapture = report.Events.First(evt => string.Equals(evt.EventType, "packet_capture.captured", StringComparison.OrdinalIgnoreCase));
+        var importedProtocolSummary = report.Events.First(evt => string.Equals(evt.EventType, "packet_capture.protocol_summary", StringComparison.OrdinalIgnoreCase));
+        foreach (var packetEvent in new[] { importedCapture, importedProtocolSummary })
+        {
+            RequireData(packetEvent, "protocolSummaryAvailable", "true");
+            RequireData(packetEvent, "protocolSummaryState", "parsed");
+            RequireData(packetEvent, "protocolSummaryStatus", "ok");
+            RequireData(packetEvent, "protocolSummaryReason", "nativePcapParser");
+            RequireData(packetEvent, "protocolsObserved", "dns,flow,http,tls");
+            RequireData(packetEvent, "protocol", "dns,flow,http,tls");
+            RequireData(packetEvent, "protocols", "dns,flow,http,tls");
+            RequireData(packetEvent, "dnsSummaryState", "parsed");
+            RequireData(packetEvent, "httpSummaryState", "parsed");
+            RequireData(packetEvent, "tlsSummaryState", "parsed");
+        }
+        RequireData(importedProtocolSummary, "reason", "nativePcapParser");
         var importedPcapSummary = report.Events.First(evt => string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase));
         foreach (var importedPcapEvent in report.Events.Where(evt => evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase)))
         {

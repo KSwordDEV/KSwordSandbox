@@ -680,6 +680,52 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         SmokeAssert.True(boundedDynamic.SelectedRawEventCount == 5,
             "Dynamic evidence selection must obey MaxDynamicActionEvents.");
 
+        // Unknown/environment dynamic rows can arrive before the submitted
+        // sample's confirmed actions. They must not consume the dedicated
+        // action budget ahead of higher-confidence sample evidence.
+        var mixedAttribution = Enumerable.Range(0, 4)
+            .Select(index => new SandboxEvent
+            {
+                EventType = "network.udp",
+                Timestamp = timestamp.AddSeconds(33).AddMilliseconds(index),
+                Source = "guest",
+                Data =
+                {
+                    ["sampleCorrelation"] = "unknown",
+                    ["sampleCorrelationStatus"] = "unknown",
+                    ["behaviorCounted"] = "false",
+                    ["sampleBehaviorCandidate"] = "false"
+                }
+            })
+            .Concat(Enumerable.Range(0, 2).Select(index => new SandboxEvent
+            {
+                EventType = "file.write",
+                Timestamp = timestamp.AddSeconds(34).AddMilliseconds(index),
+                Source = "guest",
+                Data =
+                {
+                    ["sampleCorrelation"] = "confirmed",
+                    ["sampleCorrelationStatus"] = "confirmed",
+                    ["behaviorCounted"] = "true",
+                    ["sampleBehaviorCandidate"] = "true"
+                }
+            }))
+            .ToList();
+        var mixedAttributionResult = ReportEventSampler.SampleForReport(
+            mixedAttribution,
+            new ReportEventSamplingOptions
+            {
+                MaxInlineEvents = 0,
+                MaxDynamicActionEvents = 2,
+                MaxDiagnosticEvents = 0
+            });
+        SmokeAssert.True(
+            mixedAttributionResult.Events.Count(evt => string.Equals(evt.EventType, "file.write", StringComparison.OrdinalIgnoreCase)) == 2,
+            "Confirmed sample actions must take precedence over earlier unknown dynamic rows within the dedicated budget.");
+        SmokeAssert.True(
+            mixedAttributionResult.OmittedBehaviorCandidateCount == 0,
+            "Confirmed sample actions retained by priority must not be reported as omitted behavior candidates.");
+
         // A single high-volume dynamic type must be allowed to consume the
         // dedicated lane while budget remains. The ordinary 80-row high-value
         // type cap applies to the bounded general lane; applying it here
