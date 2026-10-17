@@ -27,6 +27,7 @@ internal sealed class VmwareWinRmReconnectContractScenario : ISmokeTestScenario
 
         Require(builder, "$existingEvents = Test-Path", "Guest launch must check events.json before retrying.");
         Require(builder, "$existingExit = Test-Path", "Guest launch must check agent.exit before retrying.");
+        Require(builder, "$existingPidFile = Test-Path", "Guest launch must preserve any existing agent.pid marker before retrying.");
         Require(builder, "Get-Process -Id $existingPid", "Guest launch must preserve a still-running Agent process.");
         Require(builder, "KSWORDBOX_AGENT_MARKERS_PRESENT", "Guest launch must report preserved markers to the host executor.");
 

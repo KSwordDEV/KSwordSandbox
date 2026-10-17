@@ -47,7 +47,7 @@ listener。不要让 KSwordSandbox 在每次运行时修改宿主机 `TrustedHos
 
 VMware provider 按以下顺序执行：校验 `vmrun`/VMX/快照，停止 VM，
 `revertToSnapshot`，以 GUI 或 `nogui` 启动，等待 WinRM，运行共用 Guest Agent 流程，最后
-hard stop。每次 `vmrun start`/`stop` 后都会在 60 秒内轮询目标 VMX 的实际运行状态；超时会
+hard stop 并再次 `revertToSnapshot` 恢复 clean snapshot。每次 `vmrun start`/`stop`/`revertToSnapshot` 后都会在 60 秒内轮询目标 VMX 的实际运行状态；超时会
 令步骤失败，不会在电源状态未收敛时继续恢复、执行或清理。完整适配固定使用 Workstation Pro
 和 `vmType=ws`。旧版 `vmType=player` 配置会以
 `VMWARE_WORKSTATION_PRO_REQUIRED` 失败准备度检查，不会进入 Live；这是为了保证 snapshot 生命周期、
