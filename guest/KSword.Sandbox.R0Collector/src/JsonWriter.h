@@ -433,6 +433,7 @@ private:
         int streamState = 0;
         int errnoCode = 0;
         DWORD win32Error = ERROR_SUCCESS;
+        int exitCode = kExitRuntimeFailure;
         bool finalStatusAvailable = false;
         bool queueDepthAtStopKnown = false;
         unsigned long long queueDepthAtStop = 0;

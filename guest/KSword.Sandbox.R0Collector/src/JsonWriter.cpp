@@ -118,6 +118,7 @@ void EventWriter::RecordFailure(const char* stage, const std::string& message) {
 
     failure_.failed = true;
     failure_.stage = stage == nullptr ? "unknown" : stage;
+    failure_.exitCode = failure_.stage == "open" ? kExitOutputUnavailable : kExitRuntimeFailure;
     failure_.message = message;
     failure_.streamState = stream_ == nullptr ? 0 : static_cast<int>(stream_->rdstate());
     failure_.errnoCode = errno;
@@ -126,7 +127,9 @@ void EventWriter::RecordFailure(const char* stage, const std::string& message) {
 }
 
 std::string EventWriter::BuildFailureDiagnosticJson() const {
-    std::string json = "{\"schema\":\"ksword.sandbox.r0.output-failure\",\"failureType\":\"outputWriteFailure\"";
+    const bool writeFailure = failure_.stage != "open";
+    std::string json = "{\"schema\":\"ksword.sandbox.r0.output-failure\",\"failureType\":";
+    json += JsonStringFromUtf8(writeFailure ? "outputWriteFailure" : "outputOpenFailure");
     json += ",\"outputPath\":" + JsonStringFromWide(outputPath_);
     json += ",\"failurePath\":" + JsonStringFromWide(failurePath_);
     json += ",\"stage\":" + JsonStringFromUtf8(failure_.stage);
@@ -144,7 +147,7 @@ std::string EventWriter::BuildFailureDiagnosticJson() const {
     json += ",\"queueDepthAtStopKnown\":" + std::string(failure_.queueDepthAtStopKnown ? "true" : "false");
     json += ",\"queueDepthAtStopUnknown\":" + std::string(failure_.queueDepthAtStopKnown ? "false" : "true");
     json += ",\"queueDepthAtStop\":" + std::to_string(failure_.queueDepthAtStop);
-    json += ",\"exitCode\":70,\"captureState\":\"failed\"}";
+    json += ",\"exitCode\":" + std::to_string(failure_.exitCode) + ",\"captureState\":\"failed\"}";
     return json;
 }
 
