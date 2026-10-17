@@ -326,9 +326,10 @@ semantics from Guest/PCAP imports.
 
 ## Synthetic event-quality 与 backpressure 契约
 
-The event ring is bounded and non-blocking. The default capacity is 1024 records,
-with build-time guard rails of 64..4096 slots. Producers must not wait on
-user-mode collector throughput. When the queue reaches the backpressure
+The event ring is bounded and non-blocking. The default capacity is 65536
+records (about 14.5 MiB of non-paged memory at the current 232-byte record
+size), with build-time guard rails of 64..65536 slots. Producers must not wait
+on user-mode collector throughput. When the queue reaches the backpressure
 threshold, `TotalEventsBackpressured` and `ProducerBackpressureMask` preserve
 pressure evidence. When the ring is full, the oldest unread record may be
 overwritten, `TotalEventsDropped` and `ProducerDroppedMask` increase, and

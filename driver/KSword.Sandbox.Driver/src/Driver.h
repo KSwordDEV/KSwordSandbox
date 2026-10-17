@@ -20,20 +20,22 @@
  *
  * Inputs : KSWORD_SANDBOX_EVENT_RING_CAPACITY may be overridden at build time
  *          for stress runs; the default is sized for bursty file/registry/image
- *          telemetry without materially increasing non-paged pool pressure.
+ *          telemetry and bounded for a disposable analysis VM's non-paged pool.
  * Logic  : keeping the array inside the IoCreateDevice extension places it in
  *          non-paged kernel memory and avoids dynamic allocation in callbacks.
- *          At the current 232-byte event record size, 4096 slots consume about
- *          928 KiB of non-paged memory; the guard rails below prevent accidental
- *          multi-megabyte lab builds.
+ *          At the current 232-byte event record size, 65536 slots consume about
+ *          14.5 MiB of non-paged memory. This deliberate burst buffer prevents
+ *          short, high-volume samples from overflowing the ring while the
+ *          user-mode collector is draining it. The guard rails below still
+ *          prevent accidental, materially larger lab builds.
  * Return : not applicable.
  */
 #if !defined(KSWORD_SANDBOX_EVENT_RING_CAPACITY)
-#define KSWORD_SANDBOX_EVENT_RING_CAPACITY 4096UL
+#define KSWORD_SANDBOX_EVENT_RING_CAPACITY 65536UL
 #endif
 
 #define KSWORD_SANDBOX_EVENT_RING_CAPACITY_MINIMUM 64UL
-#define KSWORD_SANDBOX_EVENT_RING_CAPACITY_MAXIMUM 4096UL
+#define KSWORD_SANDBOX_EVENT_RING_CAPACITY_MAXIMUM 65536UL
 #define KSWORD_SANDBOX_EVENT_RING_BACKPRESSURE_PERCENT 75UL
 #define KSWORD_SANDBOX_EVENT_RING_BACKPRESSURE_THRESHOLD \
     ((KSWORD_SANDBOX_EVENT_RING_CAPACITY * \

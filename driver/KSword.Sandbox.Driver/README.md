@@ -148,9 +148,10 @@ the call also returns an empty batch rather than writing a partial record.
 
 ## Synthetic event-quality and backpressure contract
 
-The event ring is non-blocking and defaults to 1024 records. Producers should
-not wait for user-mode collector throughput; under backpressure the ring
-preserves diagnostics instead of blocking kernel callbacks. If the ring is full,
+The event ring is non-blocking and defaults to 65536 records (about 14.5 MiB
+of non-paged memory at the current 232-byte record size). Producers should not
+wait for user-mode collector throughput; under backpressure the ring preserves
+diagnostics instead of blocking kernel callbacks. If the ring is full,
 the oldest unread record can be overwritten, `TotalEventsDropped` and
 `ProducerDroppedMask` increase, and collectors can derive lost records from
 `EventsDropped`, `NextSequence`, and per-record `sequence` gaps.
