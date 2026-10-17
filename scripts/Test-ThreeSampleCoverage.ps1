@@ -20,11 +20,6 @@ function Get-Count([object]$Object, [string[]]$Names) {
     if ($null -eq $value) { return $null }
     try { return [int64]$value } catch { return $null }
 }
-function Get-RequiredCount([object]$Object, [string[]]$Names) {
-    $value = Get-Count $Object $Names
-    if ($null -eq $value) { return $null }
-    return $value
-}
 function Get-Boolean([object]$Object, [string[]]$Names) {
     $value = Get-Value $Object $Names
     if ($null -eq $value) { return $null }
