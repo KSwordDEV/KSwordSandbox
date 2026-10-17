@@ -206,7 +206,7 @@ public sealed class HtmlReportRenderer
     };
 
     private static readonly Regex ChineseRawEvidenceFragmentRegex = new(
-        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<option\\b[^>]*>[A-Za-z][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]*</option>|(?<![A-Za-z0-9_])(?:agent|guest|static|process|file|registry|network|r0|driver|artifact|startup|environment|service|scheduled_task|dns|vt|packet_capture|screenshot|memory_dump|api|security|etw|download)\\.[a-z0-9_.-]+|(?<![A-Za-z0-9_])report\\.(?:generated)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:behaviorCounted|nonbehavior|notSampleBehavior|collectorSelfNoise|collectorNoise|collectionHealthRows|vtQuietStates|r0HealthRows|sampleBehaviorEvents|excludedFromBehaviorStory|correlationConfirmed|correlationProbable|correlationEnvironment|correlationUnknown|retainedNotPromoted|normalInteractiveGuiBaseline|evidenceDispositionRetainedNotPromoted)(?![A-Za-z0-9_])|<[^>]+>|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
+        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<option\\b[^>]*>[A-Za-z][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]*</option>|(?<![A-Za-z0-9_])(?:agent|guest|static|process|file|registry|network|r0|r0collector|driver|artifact|startup|environment|service|scheduled_task|dns|vt|packet_capture|screenshot|memory_dump|api|security|security_eventlog|etw|etwLive|windowsBehaviorEventLog|download)\\.[A-Za-z0-9_.-]+|(?<![A-Za-z0-9_])report\\.(?:generated)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:behaviorCounted|nonbehavior|notSampleBehavior|collectorSelfNoise|collectorNoise|collectionHealthRows|vtQuietStates|r0HealthRows|sampleBehaviorEvents|excludedFromBehaviorStory|correlationConfirmed|correlationProbable|correlationEnvironment|correlationUnknown|retainedNotPromoted|normalInteractiveGuiBaseline|evidenceDispositionRetainedNotPromoted)(?![A-Za-z0-9_])|<[^>]+>|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
@@ -500,7 +500,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .event-explorer-toolbar input,.modern-sandbox-report .event-explorer-toolbar select{border:0;border-radius:0;box-shadow:inset 0 0 0 1px #c9e0ef;min-height:36px;padding:7px 10px}
 .modern-sandbox-report .event-explorer-toolbar input:focus,.modern-sandbox-report .event-explorer-toolbar select:focus{box-shadow:0 0 0 3px rgba(47,143,189,.2);outline:0}
 .modern-sandbox-report .event-explorer-wrap{background:#eef4f8;border:0;border-radius:0;max-height:70vh;padding:10px}
-.modern-sandbox-report .event-explorer-table{border-collapse:separate;border-spacing:0 2px;min-width:960px;table-layout:fixed}
+.modern-sandbox-report .event-explorer-table{border-collapse:separate;border-spacing:0 2px;min-width:0;width:100%;table-layout:fixed}
 .modern-sandbox-report .event-explorer-table th{background:#dbeef8;border:0;color:#24516b;padding:7px 9px;text-transform:none;white-space:nowrap}
 .modern-sandbox-report .event-explorer-table td{background:#fff;border:0;line-height:1.3;padding:6px 9px;vertical-align:top}
 .modern-sandbox-report .event-explorer-table tbody tr[data-severity="critical"] td,.modern-sandbox-report .event-explorer-table tbody tr[data-severity="high"] td{background:#fff2f0}
@@ -509,17 +509,18 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .event-explorer-table tbody tr td:first-child{border-radius:0}
 .modern-sandbox-report .event-explorer-table tbody tr td:last-child{border-radius:0}
 .modern-sandbox-report .event-explorer-details{display:block;min-width:0;width:100%}
-.modern-sandbox-report .event-explorer-details summary{background:#eaf5fb;border:0;border-radius:0;color:#1f5e7b;min-height:0;overflow:hidden;padding:6px 8px;text-overflow:ellipsis;white-space:nowrap}
-.modern-sandbox-report .event-explorer-detail{background:#f7fbfe;border:0;border-radius:0;margin-top:3px;max-height:42vh;min-height:0;min-width:0;overflow:auto;padding:8px 10px;width:100%}
+.modern-sandbox-report .event-explorer-details summary{background:#eaf5fb;border:0;border-radius:0;color:#1f5e7b;min-height:0;overflow-wrap:anywhere;padding:4px 7px;white-space:normal}
+.modern-sandbox-report .event-explorer-detail{background:#f7fbfe;border:0;border-radius:0;margin-top:2px;max-height:34vh;min-height:0;min-width:0;overflow:auto;padding:6px 8px;width:100%}
 .modern-sandbox-report .event-explorer-detail pre,.modern-sandbox-report .event-explorer-detail code{font-size:12px;line-height:1.4}
 .modern-sandbox-report .ui-field-label{font-weight:800;color:#24516b;white-space:nowrap}
 .modern-sandbox-report .event-explorer-detail .event-evidence-fields{max-height:none;overflow:visible}
-.modern-sandbox-report .event-explorer-table td:nth-child(1){width:10.5rem;white-space:nowrap}
-.modern-sandbox-report .event-explorer-table td:nth-child(2){width:9rem}
-.modern-sandbox-report .event-explorer-table td:nth-child(3){width:6rem}
+.modern-sandbox-report .event-explorer-table td:nth-child(1){width:8.5rem;white-space:nowrap}
+.modern-sandbox-report .event-explorer-table td:nth-child(2){width:7.5rem;overflow-wrap:anywhere}
+.modern-sandbox-report .event-explorer-table td:nth-child(3){width:5rem;overflow-wrap:anywhere}
 .modern-sandbox-report .event-explorer-table td:nth-child(4),.modern-sandbox-report .event-explorer-table td:nth-child(5),.modern-sandbox-report .event-explorer-table td:nth-child(6){min-width:4.5rem;width:4.5rem;white-space:nowrap;word-break:keep-all;overflow-wrap:normal;writing-mode:horizontal-tb}
-.modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:360px;width:38%}
+.modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:0;width:auto}
 .modern-sandbox-report .event-explorer-table .chip{align-items:center;display:inline-flex;justify-content:center;line-height:1.2;min-width:3.2em;text-align:center;white-space:nowrap;word-break:keep-all;overflow-wrap:normal}
+.modern-sandbox-report .coverage-stats{display:flex;flex-wrap:wrap;gap:5px;margin:5px 0}.modern-sandbox-report .coverage-stats span{background:#e7f2fb;border-radius:999px;padding:3px 7px;white-space:nowrap}.modern-sandbox-report .coverage-source{display:block;margin-top:4px}.modern-sandbox-report .source-artifact-link{display:inline-flex;margin:5px 5px 0 0}
 .modern-sandbox-report .event-evidence-fields>summary,.modern-sandbox-report .raw-technical-fields>summary,.modern-sandbox-report .raw-technical-field>summary{line-height:1.25;padding:3px 0;white-space:nowrap}
 .modern-sandbox-report .event-evidence-fields,.modern-sandbox-report .raw-technical-fields,.modern-sandbox-report .raw-technical-field{margin-top:4px;padding-top:2px}
 .modern-sandbox-report .event-evidence-fields .raw-field-list{margin-top:3px}
@@ -543,7 +544,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 .modern-sandbox-report .raw-events-shell>summary,.modern-sandbox-report .raw-event-page>summary{background:#eaf4fa;border-radius:0}
 .modern-sandbox-report .language-entry{background:#e8f3f9;box-shadow:none}
 .modern-sandbox-report .language-entry .hint{display:none}
-@media(max-width:1000px){.modern-sandbox-report .report-layout{grid-template-columns:1fr}.modern-sandbox-report .report-sidebar{position:static}.modern-sandbox-report .event-explorer-details{min-width:320px}}
+@media(max-width:1000px){.modern-sandbox-report .report-layout{grid-template-columns:1fr}.modern-sandbox-report .report-sidebar{position:static}.modern-sandbox-report .event-explorer-details{min-width:0}}
 @media(max-width:640px){.modern-sandbox-report .card,.modern-sandbox-report section.card{border-radius:0;padding:18px}.modern-sandbox-report .event-explorer-table{min-width:0;width:100%}.modern-sandbox-report .event-explorer-table th:nth-child(-n+6),.modern-sandbox-report .event-explorer-table td:nth-child(-n+6){display:none}.modern-sandbox-report .event-explorer-table th:nth-child(7),.modern-sandbox-report .event-explorer-table td:nth-child(7){display:table-cell;min-width:100%;width:100%}.modern-sandbox-report .event-explorer-details{min-width:0;width:100%}}
 """);
         html.AppendLine("</style></head>");
@@ -949,7 +950,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         var families = rows.Select(row => row.Family).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
         var severities = rows.Select(row => row.Severity).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(SeverityRank).ToList();
 
-        html.AppendLine("<section id=\"event-explorer\" class=\"card\"><h2>Key event explorer</h2>");
+        html.AppendLine("<span id=\"events\" class=\"anchor-offset\"></span><section id=\"event-explorer\" class=\"card\"><h2>Key event explorer</h2>");
         AppendCollectionCoverageBanner(html, report, explorerEvents);
         html.AppendLine("<div class=\"event-explorer-toolbar\">");
         html.AppendLine("<label>Search <input type=\"search\" data-event-search placeholder=\"type, path, process, target\"></label>");
@@ -1003,6 +1004,106 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         html.AppendLine("</section>");
     }
+
+    private static string DisplayExplorerLabel(string value)
+    {
+        return value switch
+        {
+            "Event type" => "事件类型",
+            "Source" => "来源",
+            "Behavior family" => "行为族",
+            "Stage" => "阶段",
+            "Severity" => "严重性",
+            "Disposition" => "归因状态",
+            "Search" => "搜索",
+            "All" => "全部",
+            "Yes" => "是",
+            "No" => "否",
+            "unknown" => "未知",
+            "unattributed" => "未归因",
+            "confirmed" => "已确认",
+            "probable" => "可能",
+            "environment" => "环境",
+            "diagnostic" => "诊断",
+            "info" => "信息",
+            "low" => "低",
+            "medium" => "中",
+            "high" => "高",
+            "critical" => "严重",
+            _ => value
+        };
+    }
+
+    private static string DisplayExplorerOptionLabel(string attribute, string value)
+    {
+        if (attribute.Contains("event-type", StringComparison.OrdinalIgnoreCase))
+        {
+            return DisplayEventTypeLabel(value);
+        }
+
+        if (attribute.Contains("event-source", StringComparison.OrdinalIgnoreCase))
+        {
+            return DisplayEventSourceLabel(value);
+        }
+
+        if (attribute.Contains("event-family", StringComparison.OrdinalIgnoreCase))
+        {
+            return DisplayEventFamilyLabel(value);
+        }
+
+        return DisplayExplorerLabel(value);
+    }
+
+    private static string DisplayEventTypeLabel(string value)
+    {
+        var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["process.start"] = "进程启动", ["process.exit"] = "进程退出", ["process.new"] = "进程创建",
+            ["process.tree"] = "进程树", ["process.tree_unavailable"] = "进程树不可用", ["driver.file"] = "驱动·文件",
+            ["driver.registry"] = "驱动·注册表", ["driver.network"] = "驱动·网络", ["driver.process"] = "驱动·进程",
+            ["image.load"] = "映像加载", ["file.created"] = "文件创建", ["file.modified"] = "文件修改",
+            ["file.deleted"] = "文件删除", ["registry.modified"] = "注册表修改", ["network.tcp"] = "网络连接",
+            ["dns.query"] = "DNS 查询", ["http.request"] = "HTTP 请求", ["tls.connection"] = "TLS 连接",
+            ["etw_live.captured"] = "ETW 实时采集", ["etw_live.decode_failed"] = "ETW 解码失败",
+            ["pcap.summary"] = "PCAP 摘要", ["artifact.dropped_file.copied"] = "落地文件已复制",
+            ["artifact.dropped_file.skipped"] = "落地文件未采集", ["collection-health.summary"] = "采集健康摘要"
+        };
+        if (labels.TryGetValue(value, out var label)) return label;
+        var prefix = value;
+        foreach (var pair in new[] { ("driver.", "驱动·"), ("process.", "进程·"), ("file.", "文件·"), ("registry.", "注册表·"), ("network.", "网络·"), ("etw_security.", "ETW 安全·"), ("security_eventlog.", "安全日志·"), ("artifact.", "证据·") })
+        {
+            if (prefix.StartsWith(pair.Item1, StringComparison.OrdinalIgnoreCase))
+                return pair.Item2 + prefix[pair.Item1.Length..];
+        }
+        return value;
+    }
+
+    private static string DisplayEventSourceLabel(string value)
+    {
+        return value switch
+        {
+            "etwLive" => "ETW 实时",
+            "guest" => "来宾",
+            "driver" => "内核驱动",
+            "r0collector" => "R0 采集器",
+            "host" => "宿主",
+            "windows行为EventLog" => "Windows 行为日志",
+            "unknown" => "未知",
+            _ => value
+        };
+    }
+
+    private static string DisplayEventFamilyLabel(string value)
+    {
+        return value switch
+        {
+            "file" => "文件", "process" => "进程", "network" => "网络", "registry" => "注册表",
+            "image" => "映像", "service" => "服务", "startup" => "启动项", "artifact" => "证据",
+            "security" => "安全", "diagnostic" => "诊断", _ => value
+        };
+    }
+
+    private static string DisplayDispositionLabel(string value) => DisplayExplorerLabel(value);
 
     private static void AppendEventExplorerSelect(StringBuilder html, string label, string attribute, IEnumerable<string> values)
     {
@@ -1108,9 +1209,9 @@ html[lang="en"] .localized-evidence-field{display:none}
         if (reasons.Count == 0) reasons.Add($"collection state={FirstNonEmpty(health.State, "unknown")}");
 
         html.AppendLine("<div class=\"collection-gap-banner\" role=\"status\">");
-        html.AppendLine("<strong>Evidence coverage warning.</strong> Collection quality has an unresolved gap; this does not by itself indicate malicious sample behavior.");
+        html.AppendLine("<strong>Evidence coverage warning</strong>");
         html.AppendLine($"<span>{E(string.Join("; ", reasons))}</span>");
-        html.AppendLine("<a href=\"#collection-health\">Review collection health</a> <a href=\"#failure\">Review execution and collection diagnostics</a>");
+        html.AppendLine("<a href=\"#collection-health\">Collection health</a><a href=\"#failure\">Diagnostics</a>");
         html.AppendLine("</div>");
     }
 
@@ -1583,7 +1684,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         return
             $"<span class=\"inline-actions\">{CopyIconButton(full)}</span>" +
-            $"<details class=\"flat-details\"><summary>Evidence</summary><pre class=\"copyable\" data-copy=\"{A(full)}\">{E(compact)}</pre></details>";
+            $"<details open class=\"flat-details\"><summary>Evidence</summary><pre class=\"copyable\" data-copy=\"{A(full)}\">{E(compact)}</pre></details>";
     }
 
     /// <summary>
@@ -1784,7 +1885,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         if (resourceEvents.Count > 0)
         {
             var evidenceText = string.Join(Environment.NewLine, resourceEvents.Take(12).Select(EventOneLine));
-            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>static.pe.resource normalized evidence ({E(Math.Min(resourceEvents.Count, 12).ToString(CultureInfo.InvariantCulture))}/{E(resourceEvents.Count.ToString(CultureInfo.InvariantCulture))})</summary><pre class=\"copyable\" data-copy=\"{A(evidenceText)}\">{E(evidenceText)}</pre></details>");
+            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence ({E(Math.Min(resourceEvents.Count, 12).ToString(CultureInfo.InvariantCulture))}/{E(resourceEvents.Count.ToString(CultureInfo.InvariantCulture))})</summary><pre class=\"copyable\" data-copy=\"{A(evidenceText)}\">{E(evidenceText)}</pre></details>");
         }
     }
 
@@ -2146,7 +2247,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             "Copy-only external VirusTotal GUI/API link; use it for analyst pivoting outside the local report.",
             string.Equals(permalink, "-", StringComparison.Ordinal) ? "risk-low" : "risk-info");
         html.AppendLine("</div>");
-        html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Copy VirusTotal official evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
     }
 
     private static string FormatVirusTotalEngineStats(SandboxEvent evt)
@@ -2273,7 +2374,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(edge.From)}\"><code>{E(edge.From)}</code></td>");
                 html.AppendLine($"<td><span class=\"badge badge-info\">{E(edge.Relation)}</span></td>");
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(edge.To)}\"><code>{E(edge.To)}</code></td>");
-                html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy graph edge", copy)}</span><details class=\"evidence-expansion-card\"><summary>Expand edge evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details></td>");
+                html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy graph edge", copy)}</span><details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details></td>");
                 html.AppendLine("</tr>");
             }
 
@@ -2670,7 +2771,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         {
             html.AppendLine("<li>");
             html.AppendLine($"<code>{E(edge.From)}</code> <span class=\"badge badge-info\">{E(edge.Relation)}</span> <code>{E(edge.To)}</code>");
-            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand edge evidence</summary><pre class=\"copyable\" data-copy=\"{A(edge.Evidence)}\">{E(edge.Evidence)}</pre></details>");
+            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(edge.Evidence)}\">{E(edge.Evidence)}</pre></details>");
             html.AppendLine("</li>");
         }
 
@@ -2717,7 +2818,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine($"<span class=\"summary-value\">{E(card.Value)}</span>");
             html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
             html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy evidence summary", card.CopyText)}</div>");
-            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand evidence card details</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
+            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
             html.AppendLine("</article>");
         }
 
@@ -2817,7 +2918,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy story lane", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand bounded story evidence ({E(shownEvidenceCount.ToString(CultureInfo.InvariantCulture))}/{E(observedEvidenceCount.ToString(CultureInfo.InvariantCulture))} observed rows)</summary>");
+            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence ({E(shownEvidenceCount.ToString(CultureInfo.InvariantCulture))}/{E(observedEvidenceCount.ToString(CultureInfo.InvariantCulture))} observed rows)</summary>");
             AppendEvidenceExpansionSummary(html, "Story evidence expansion summary", shownEvidenceCount, observedEvidenceCount, "Sampled report view and indexed source JSON/JSONL artifacts", card.EvidenceLines);
             html.AppendLine("<ol class=\"story-evidence-list\">");
             foreach (var line in card.EvidenceLines.Take(12))
@@ -3660,7 +3761,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine($"<h3>{E(gap.Name)}</h3><span class=\"badge badge-{E(css)}\">coverage gap · {E(gap.State)}</span>");
             html.AppendLine("</div>");
             html.AppendLine($"<p class=\"muted\">{E(gap.Detail)}</p>");
-            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand coverage gap evidence</summary><pre class=\"copyable\" data-copy=\"{A(evidence)}\">{E(evidence)}</pre></details>");
+            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(evidence)}\">{E(evidence)}</pre></details>");
             html.AppendLine("</article>");
         }
 
@@ -3854,7 +3955,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine($"<td>{E(FormatArtifactSize(artifact.SizeBytes))}</td>");
             html.AppendLine($"<td><code>{E(ArtifactSha256(artifact))}</code></td>");
             html.AppendLine($"<td>{E(string.IsNullOrWhiteSpace(artifact.MimeType) ? "-" : artifact.MimeType)}</td>");
-            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}<details class=\"evidence-expansion-card\"><summary>Expand artifact evidence</summary><pre class=\"copyable\" data-copy=\"{A(plain)}\">{E(plain)}</pre></details>{RenderArtifactPreview(artifact)}</td>");
+            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(plain)}\">{E(plain)}</pre></details>{RenderArtifactPreview(artifact)}</td>");
             html.AppendLine("</tr>");
         }
 
@@ -3921,7 +4022,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             rows.Any(row => !string.IsNullOrWhiteSpace(row.Selectors)) ? "risk-info" : "risk-low");
         html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy artifact matrix narrative", copy)}</div>");
         html.AppendLine("</div>");
-        html.AppendLine("<details class=\"evidence-expansion-card\"><summary>Artifact evidence matrix narrative rows</summary>");
+        html.AppendLine("<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary>");
         AppendEvidenceExpansionSummary(html, "Artifact matrix expansion summary", rows.Count, rows.Count, "Artifact links and indexed source JSON/JSONL", matrixLines);
         html.AppendLine("<ol class=\"compact-list\">");
         foreach (var line in matrixLines.Take(EvidenceStoryInlineLimit))
@@ -4012,7 +4113,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 : $"Top-level guest artifact manifest jobId is all-zero while report/runbook JobId is {report.JobId:D}; original evidence is preserved.",
             manifestMismatches.Count == 0 ? "risk-low" : "risk-medium");
         html.AppendLine("</div>");
-        html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Artifact index selector/duplicate/rejection evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
     }
 
     private static IReadOnlyList<ArtifactManifestJobIdMismatch> FindArtifactManifestJobIdMismatches(
@@ -4131,7 +4232,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 html,
                 $"Artifact lane health: collection={card.Name}; status={card.Status}; artifacts={card.ArtifactCount}; events={card.EventCount}; detail={card.Detail}",
                 "Copy compact summary");
-            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand collection evidence</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
+            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
             html.AppendLine("</article>");
         }
 
@@ -4892,16 +4993,20 @@ html[lang="en"] .localized-evidence-field{display:none}
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var telemetryEvents = report.Events.Where(IsSampleBehaviorR0Event).ToList();
+        var healthEvents = report.Events.Where(IsR0CollectionHealthEvent).ToList();
+        var networkStatusEvents = report.Events.Where(IsNetworkImportSummaryEvent).ToList();
         html.AppendLine("<section id=\"r0\" class=\"card\"><h2>R0 / driver events</h2>");
         if (telemetryEvents.Count == 0)
         {
             Empty(html, "No sample-attributed driver behavior was captured.");
+            AppendR0CollectionHealthStatus(html, healthEvents, networkStatusEvents, artifactLookup, artifacts);
             html.AppendLine("</section>");
             return;
         }
 
         html.AppendLine("<h3>Driver telemetry evidence</h3>");
         AppendEventRows(html, telemetryEvents, artifactLookup, artifacts);
+        AppendR0CollectionHealthStatus(html, healthEvents, networkStatusEvents, artifactLookup, artifacts);
 
         html.AppendLine("</section>");
     }
@@ -4951,7 +5056,6 @@ html[lang="en"] .localized-evidence-field{display:none}
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         html.AppendLine("<h3 id=\"collection-health\" class=\"anchor-offset\">Collection health status</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Collection health status.</strong> R0 unavailable, driver health, queue backpressure, and dropped-event counters describe collection quality and are not malicious sample behavior.</div>");
         html.AppendLine("<div class=\"grid\">");
         Metric(html, "Health/status rows", healthEvents.Count.ToString(), "risk-info");
         Metric(html, "Device unavailable", healthEvents.Count(IsDeviceUnavailableHealthEvent).ToString(), healthEvents.Any(IsDeviceUnavailableHealthEvent) ? "risk-medium" : "risk-info");
@@ -4959,7 +5063,6 @@ html[lang="en"] .localized-evidence-field{display:none}
         Metric(html, "Driver health polls", healthEvents.Count(IsDriverHealthPollEvent).ToString(), "risk-info");
         html.AppendLine("</div>");
         AppendR0DriverNetworkStatusStory(html, networkStatusEvents);
-        AppendR0HealthAvailabilityOverview(html, healthEvents);
 
         if (healthEvents.Count == 0)
         {
@@ -4972,8 +5075,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Take(R0HealthEvidenceInlineLimit)
             .ToList();
         var hiddenHealthEvents = Math.Max(0, healthEvents.Count - inlineHealthEvents.Count);
-        html.AppendLine($"<details class=\"relationship-details r0-health-evidence\"><summary>R0 health evidence examples ({E(inlineHealthEvents.Count.ToString())}/{E(healthEvents.Count.ToString())}; {E(hiddenHealthEvents.ToString())} hidden)</summary>");
-        html.AppendLine("<div class=\"section-note\"><strong>R0 health rows are folded by default.</strong> Open this evidence only when diagnosing driver readiness, queue loss, or unavailable device state.</div>");
+        html.AppendLine($"<details open class=\"relationship-details r0-health-evidence\"><summary>R0 health evidence ({E(inlineHealthEvents.Count.ToString())}/{E(healthEvents.Count.ToString())}; {E(hiddenHealthEvents.ToString())} hidden)</summary>");
         AppendEventRows(html, inlineHealthEvents, artifactLookup, artifacts);
         html.AppendLine("</details>");
     }
@@ -5039,7 +5141,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             counters,
             HasR0NetworkFailureCounters(latest) ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
-        html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Copy WFP/ALE network status evidence ({E(statusEvents.Count.ToString(CultureInfo.InvariantCulture))})</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence ({E(statusEvents.Count.ToString(CultureInfo.InvariantCulture))})</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
     }
 
     /// <summary>
@@ -5212,8 +5314,9 @@ html[lang="en"] .localized-evidence-field{display:none}
             artifact.SizeBytes > 0);
         var boundaryClass = omittedCount > 0 || sourceNonEmptyCount == 0 ? "risk-medium" : "risk-info";
         var sourceState = sourceNonEmptyCount == 0
-            ? "No indexed guest/driver source artifact; the report view cannot prove that no additional raw rows existed."
-            : $"{sourceNonEmptyCount} non-empty indexed guest/driver source artifact(s) provide the complete raw source, including rotated driver JSONL segments.";
+            ? "No raw source indexed"
+            : $"{sourceNonEmptyCount} raw source file(s) indexed";
+        var sourceLinks = RenderCoverageSourceLinks(artifacts);
         var copy = string.Join(
             Environment.NewLine,
             [
@@ -5231,7 +5334,28 @@ html[lang="en"] .localized-evidence-field{display:none}
                 "reportJsonRole=sampled-normalized-view",
                 "completeSource=guest-events.json and driver-events*.jsonl artifacts when indexed"
             ]);
-        html.AppendLine($"<div class=\"section-note coverage-boundary {boundaryClass} copyable\" data-copy=\"{A(copy)}\"><strong>Evidence completeness.</strong> Raw normalized rows: {E(rawCount.ToString(CultureInfo.InvariantCulture))}; sampled report rows: {E(reportCount.ToString(CultureInfo.InvariantCulture))}; quota omitted: {E(omittedCount.ToString(CultureInfo.InvariantCulture))}; policy excluded: {E(policyExcluded.ToString(CultureInfo.InvariantCulture))}; high-signal omitted: {E(highSignalOmitted.ToString(CultureInfo.InvariantCulture))}; unknown omitted: {E(unknownOmitted.ToString(CultureInfo.InvariantCulture))}; dynamic omitted: {E(dynamicOmitted.ToString(CultureInfo.InvariantCulture))}; R0 omitted: {E(r0Omitted.ToString(CultureInfo.InvariantCulture))}. report.json is a sampled normalized view. {E(sourceState)}</div>");
+        html.AppendLine($"<div class=\"section-note coverage-boundary {boundaryClass} copyable\" data-copy=\"{A(copy)}\"><strong>Evidence completeness</strong><span class=\"coverage-stats\"><span><b>Raw</b> {E(rawCount.ToString(CultureInfo.InvariantCulture))}</span><span><b>Report</b> {E(reportCount.ToString(CultureInfo.InvariantCulture))}</span><span><b>Omitted</b> {E(omittedCount.ToString(CultureInfo.InvariantCulture))}</span><span><b>Policy</b> {E(policyExcluded.ToString(CultureInfo.InvariantCulture))}</span><span><b>High signal</b> {E(highSignalOmitted.ToString(CultureInfo.InvariantCulture))}</span><span><b>Unknown</b> {E(unknownOmitted.ToString(CultureInfo.InvariantCulture))}</span><span><b>Dynamic</b> {E(dynamicOmitted.ToString(CultureInfo.InvariantCulture))}</span><span><b>R0</b> {E(r0Omitted.ToString(CultureInfo.InvariantCulture))}</span></span><span class=\"coverage-source\">report.json = sampled view; {E(sourceState)}</span>{sourceLinks}{CopyIconButton(copy)}</div>");
+    }
+
+    private static string RenderCoverageSourceLinks(IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var html = new StringBuilder();
+        foreach (var artifact in artifacts
+            .Where(artifact => artifact.SizeBytes > 0 && (artifact.Kind is ArtifactKind.GuestEventsJson or ArtifactKind.DriverEventsJsonLines))
+            .OrderBy(artifact => artifact.Kind)
+            .ThenBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase))
+        {
+            var href = ArtifactHref(artifact);
+            if (!IsSafeReportRelativeHref(href))
+            {
+                continue;
+            }
+
+            var label = artifact.Kind == ArtifactKind.DriverEventsJsonLines ? "Driver JSONL" : "Guest events JSON";
+            html.Append($"<a class=\"artifact-btn source-artifact-link\" href=\"{A(href)}\" title=\"{E(artifact.RelativePath)}\">{E(label)}</a>");
+        }
+
+        return html.ToString();
     }
 
     private static int ParseEventMetric(SandboxEvent? evt, string key)
@@ -5267,7 +5391,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         Metric(html, "Inline pages", RawEventPageCount(inlineEvents.Count).ToString(), "risk-info");
         Metric(html, "Hidden raw events", hiddenCount.ToString(), hiddenCount > 0 ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"section-note\"><strong>Slim report-event sample.</strong> Report events are collapsed by default. Key process, guest import, artifact, and failure rows are promoted into the inline sample before lower-signal rows. Report rows shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Raw evidence height limit: 58vh. Hidden report rows: {hiddenCount}. Inline pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row. report.json contains the sampled normalized view; indexed source JSON/JSONL artifacts are the complete raw source when available.</div>");
+        html.AppendLine($"<div class=\"section-note\"><strong>Report view.</strong> {inlineEvents.Count}/{orderedEvents.Count} rows shown; {hiddenCount} hidden. Full raw evidence is linked above as JSON/JSONL.</div>");
         AppendRawEventReadingGuide(html, orderedEvents, inlineEvents.Count, hiddenCount);
         AppendRawEventSlimmingCards(html, orderedEvents, inlineEvents.Count, hiddenCount);
         AppendRawSourceHints(html, report, artifacts);
@@ -5394,7 +5518,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             ]);
 
         html.AppendLine("<h3>Raw event slimming story</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Raw event slimming story.</strong> These cards summarize the bounded report view before any dense row expansion: visible pages are bounded, long technical payloads stay folded, and indexed source JSON/JSONL artifacts remain the complete raw record.");
+        html.AppendLine("<div class=\"section-note\"><strong>Raw event view.</strong> The page keeps representative rows compact; complete rows remain in the linked JSON/JSONL source.</div>");
         html.AppendLine("<div class=\"overview-strip raw-slimming-story\">");
         AppendOverviewItem(
             html,
@@ -5402,12 +5526,6 @@ html[lang="en"] .localized-evidence-field{display:none}
             $"{inlineEventCount}/{orderedEvents.Count}",
             $"Rows are split into {RawEventPageCount(inlineEventCount)} native page(s), {RawEventPageSize} rows per page.",
             "risk-info");
-        AppendOverviewItem(
-            html,
-            "Folded technical payloads",
-            foldedTechnicalFields.ToString(CultureInfo.InvariantCulture),
-            "Command lines, stdout/stderr, PowerShell, script blocks, and bulky values stay behind nested details.",
-            foldedTechnicalFields > 0 ? "risk-medium" : "risk-low");
         AppendOverviewItem(
             html,
             "Report-only tail",
@@ -6351,7 +6469,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy process card", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine("<details class=\"evidence-expansion-card\"><summary>Expand top process evidence</summary>");
+            html.AppendLine("<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary>");
             AppendEvidenceExpansionSummary(html, "Process evidence expansion summary", card.EvidenceLines.Count, card.EventCount, "Sampled report view and indexed source JSON/JSONL", card.EvidenceLines);
             html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
             html.AppendLine("</article>");
@@ -6567,7 +6685,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy network card", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine("<details class=\"evidence-expansion-card\"><summary>Expand top network evidence</summary>");
+            html.AppendLine("<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary>");
             AppendEvidenceExpansionSummary(html, "Network evidence expansion summary", card.EvidenceLines.Count, card.EventCount, "Sampled report view, indexed source JSON/JSONL, and packet artifacts", card.EvidenceLines);
             html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
             html.AppendLine("</article>");
@@ -7034,7 +7152,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         var shown = artifacts.Take(RelationshipArtifactInlineLimit).ToList();
         var hidden = Math.Max(0, artifacts.Count - shown.Count);
         var copy = string.Join(Environment.NewLine, shown.Select(ArtifactCompactLine));
-        html.AppendLine($"<details class=\"relationship-details related-artifacts-flat\"><summary>{E(title)} ({E(shown.Count.ToString(CultureInfo.InvariantCulture))}/{E(artifacts.Count.ToString(CultureInfo.InvariantCulture))})</summary>");
+        html.AppendLine($"<details open class=\"relationship-details related-artifacts-flat\"><summary>{E(title)} ({E(shown.Count.ToString(CultureInfo.InvariantCulture))}/{E(artifacts.Count.ToString(CultureInfo.InvariantCulture))})</summary>");
         html.AppendLine("<ul class=\"artifact-list\">");
         foreach (var artifact in shown)
         {
@@ -7331,7 +7449,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             return string.Empty;
         }
 
-        return $"<details class=\"technical-metadata\"><summary>{E(summary)}</summary><code class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</code></details>";
+        return $"<details open class=\"technical-metadata\"><summary>{E(summary)}</summary><code class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</code></details>";
     }
 
     private static string SafePathLeaf(string value)
@@ -10070,11 +10188,15 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static string CopyIconButton(string copyText)
     {
-        return CopyIconButton(copyText, "Copy");
+        return CopyIconButton(copyText, "复制");
     }
 
     private static string CopyIconButton(string copyText, string accessibleLabel)
     {
+        // Copy controls are intentionally icon-only.  Use one short Chinese
+        // label for both tooltip and accessibility text instead of leaking
+        // long English action names into every evidence row.
+        accessibleLabel = "复制";
         return $"<button type=\"button\" class=\"copy-btn copy-icon\" aria-label=\"{A(accessibleLabel)}\" title=\"{A(accessibleLabel)}\" data-copy=\"{A(copyText)}\" data-copy-button=\"true\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"8\" y=\"8\" width=\"11\" height=\"11\" rx=\"1\"></rect><path d=\"M5 15V5a2 2 0 0 1 2-2h10\"></path></svg><span class=\"sr-only\">{E(accessibleLabel)}</span></button>";
     }
 
@@ -10239,7 +10361,11 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         var displayLabel = TechnicalFieldLabel(label);
-        var prefix = string.Equals(displayLabel, "Command line", StringComparison.OrdinalIgnoreCase) ? "Execute: " : $"{displayLabel}: ";
+        var prefix = string.Equals(displayLabel, "Command line", StringComparison.OrdinalIgnoreCase)
+            ? "Execute: "
+            : string.Equals(displayLabel, "Evidence", StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : $"{displayLabel}: ";
         return $"<div class=\"technical-field\"><span class=\"ui-field-label\">{E(prefix)}</span><pre class=\"copyable\" data-copy=\"{A(value)}\">{E(VisibleEvidenceFieldValue(label, value, 1_200))}</pre></div>";
     }
 
@@ -10260,7 +10386,8 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Select(pair => (Label: pair.Key, Value: pair.Value))
             .ToList();
 
-        if (!string.IsNullOrWhiteSpace(evt.CommandLine))
+        if (!string.IsNullOrWhiteSpace(evt.CommandLine) &&
+            !technicalFields.Any(field => string.Equals(field.Label, "commandLine", StringComparison.OrdinalIgnoreCase)))
         {
             technicalFields.Insert(0, ("commandLine", evt.CommandLine!));
         }
@@ -10307,7 +10434,11 @@ html[lang="en"] .localized-evidence-field{display:none}
                     var copy = $"{field.Label}={field.Value}";
                     var localizedClass = IsLocalizedEvidenceField(field.Label) ? " localized-evidence-field" : string.Empty;
                     var label = TechnicalFieldLabel(field.Label);
-                    var prefix = string.Equals(label, "Command line", StringComparison.OrdinalIgnoreCase) ? "Execute: " : $"{label}: ";
+                    var prefix = string.Equals(label, "Command line", StringComparison.OrdinalIgnoreCase)
+                        ? "Execute: "
+                        : string.Equals(label, "Evidence", StringComparison.OrdinalIgnoreCase)
+                            ? string.Empty
+                            : $"{label}: ";
                     html.Append($"<div class=\"raw-technical-field{localizedClass}\"><span class=\"ui-field-label\">{E(prefix)}</span><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(boundedValue)}</code></div>");
                 }
 
@@ -10336,7 +10467,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         if (normalized.Contains("stderr", StringComparison.Ordinal)) return "Standard error";
         if (normalized.Contains("command", StringComparison.Ordinal) || normalized.Contains("cmdline", StringComparison.Ordinal)) return "Command line";
         if (normalized.Contains("encoded", StringComparison.Ordinal)) return "Encoded command";
-        return "Technical evidence";
+        return "Evidence";
     }
 
     private static string DisplayEventTarget(SandboxEvent evt, string? target)
@@ -10625,6 +10756,9 @@ html[lang="en"] .localized-evidence-field{display:none}
         // operator-facing search hint after those fragments are restored.
         html = html.Replace("placeholder=\"type, path, process, target\"", "placeholder=\"事件类型、路径、进程或目标\"", StringComparison.Ordinal);
         html = html.Replace(">Copy</button>", ">复制</button>", StringComparison.Ordinal);
+        html = html.Replace(">Diagnostics<", ">诊断<", StringComparison.Ordinal);
+        html = html.Replace("R0 健康状态 evidence", "R0 健康状态证据", StringComparison.Ordinal);
+        html = html.Replace("R0 health evidence", "R0 健康状态证据", StringComparison.Ordinal);
         // The cover status value is wrapped explicitly so this replacement
         // localizes the UI label without touching same-named evidence values.
         html = html.Replace("ui-status-value\">Failed", "ui-status-value\">失败", StringComparison.Ordinal);
@@ -10650,6 +10784,13 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
         var replacements = new (string English, string Chinese)[]
         {
+            (">Raw<", ">原始<"),
+            (">Report<", ">报告<"),
+            (">Omitted<", ">省略<"),
+            (">Policy<", ">策略<"),
+            (">High signal<", ">高信号<"),
+            (">Unknown<", ">未知<"),
+            (">Dynamic<", ">动态<"),
             (">1 indexed<", ">1 已索引<"),
             (">0 items<", ">0 项<"),
             (">Title<", ">标题<"),
@@ -10725,6 +10866,60 @@ html[lang="en"] .localized-evidence-field{display:none}
             html = Regex.Replace(
                 html,
                 $"(<option\\b[^>]*\\bvalue=\\\"{Regex.Escape(value)}\\\"[^>]*>){Regex.Escape(value)}(</option>)",
+                $"$1{chinese}$2",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        // Event explorer values are stable machine identifiers, while the
+        // visible labels in a Chinese report should remain readable and
+        // compact. Apply exact option-element replacements after the broad
+        // chrome pass so r0collector/ETW labels do not collapse to "驱动".
+        foreach (var (value, chinese) in new (string Value, string Chinese)[]
+        {
+            ("artifact.dropped_file.copied", "落地文件已复制"),
+            ("artifact.dropped_file.skipped", "落地文件未采集"),
+            ("artifact.host_imported", "主机已导入"),
+            ("artifact.import_summary", "证据导入摘要"),
+            ("driver.file", "驱动·文件"),
+            ("driver.network", "驱动·网络"),
+            ("driver.process", "驱动·进程"),
+            ("driver.registry", "驱动·注册表"),
+            ("environment.detail", "环境详情"),
+            ("eventlog.powershell.script_block", "PowerShell 脚本块"),
+            ("network.netstat", "网络·连接快照"),
+            ("network.netstat.added", "网络·新增连接"),
+            ("network.netstat.removed", "网络·关闭连接"),
+            ("network.tcp", "网络·TCP"),
+            ("network.tcp.closed", "网络·TCP 关闭"),
+            ("process.new", "进程·创建"),
+            ("process.observed", "进程·观察"),
+            ("process.tree_unavailable", "进程树不可用"),
+            ("r0collector.deviceOpened", "R0·设备打开"),
+            ("r0collector.driverHealth", "R0·驱动健康"),
+            ("r0collector.driverReadEvents", "R0·读取事件"),
+            ("r0collector.driverStatus", "R0·驱动状态"),
+            ("r0collector.started", "R0·启动"),
+            ("service.modified", "服务·修改"),
+            ("startup.modified", "启动项·修改"),
+            ("thread.exit", "线程·退出"),
+            ("thread.start", "线程·启动"),
+            ("driver", "内核驱动"),
+            ("etwLive", "ETW 实时"),
+            ("guest", "来宾"),
+            ("host", "主机"),
+            ("r0collector", "R0 采集器"),
+            ("windowsBehaviorEventLog", "Windows 行为日志"),
+            ("file", "文件"),
+            ("network", "网络"),
+            ("other", "其他"),
+            ("process", "进程"),
+            ("r0", "R0"),
+            ("registry", "注册表")
+        })
+        {
+            html = Regex.Replace(
+                html,
+                $"(<option\\b[^>]*\\bvalue=\\\"{Regex.Escape(value)}\\\"[^>]*>)[^<]*(</option>)",
                 $"$1{chinese}$2",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
@@ -11007,6 +11202,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Evidence disposition separates confirmed/probable sample links, unattributed observations, and collection diagnostics.", "证据归因状态会区分已确认/可能关联的样本行为、未归因观察和采集诊断。"),
         ("Unattributed observations remain in raw evidence and appear when that disposition is selected.", "未归因观察会保留在原始证据中，选择该归因状态后即可显示。"),
         ("Evidence coverage warning.", "证据覆盖警告。"),
+        ("Evidence coverage warning", "证据覆盖警告"),
         ("Collection quality has an unresolved gap; this does not by itself indicate malicious sample behavior.", "采集质量存在未解决缺口；这本身不代表样本存在恶意行为。"),
         ("diagnostic rows=", "诊断行数="),
         ("driver output failures=", "驱动输出失败="),
@@ -11020,6 +11216,39 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Review collection health", "查看采集健康"),
         ("Review execution and collection diagnostics", "查看执行与采集诊断"),
         ("Disposition", "归因状态"),
+        (">driver.file<", ">驱动·文件<"),
+        (">driver.registry<", ">驱动·注册表<"),
+        (">driver.network<", ">驱动·网络<"),
+        (">driver.process<", ">驱动·进程<"),
+        (">process.start<", ">进程启动<"),
+        (">process.exit<", ">进程退出<"),
+        (">process.new<", ">进程创建<"),
+        (">process.tree_unavailable<", ">进程树不可用<"),
+        (">image.load<", ">映像加载<"),
+        (">file.created<", ">文件创建<"),
+        (">file.modified<", ">文件修改<"),
+        (">file.deleted<", ">文件删除<"),
+        (">network.tcp<", ">网络连接<"),
+        (">dns.query<", ">DNS 查询<"),
+        (">etw_live.captured<", ">ETW 实时采集<"),
+        (">etw_live.decode_failed<", ">ETW 解码失败<"),
+        (">pcap.summary<", ">PCAP 摘要<"),
+        (">artifact.dropped_file.copied<", ">落地文件已复制<"),
+        (">artifact.dropped_file.skipped<", ">落地文件未采集<"),
+        (">etwLive<", ">ETW 实时<"),
+        (">guest<", ">来宾<"),
+        (">driver<", ">内核驱动<"),
+        (">r0collector<", ">R0 采集器<"),
+        (">windows行为EventLog<", ">Windows 行为日志<"),
+        (">file<", ">文件<"),
+        (">process<", ">进程<"),
+        (">network<", ">网络<"),
+        (">registry<", ">注册表<"),
+        (">image<", ">映像<"),
+        (">diagnostic<", ">诊断<"),
+        (">All<", ">全部<"),
+        (">Yes<", ">是<"),
+        (">No<", ">否<"),
         ("placeholder=\"type, path, process, target\"", "placeholder=\"事件类型、路径、进程或目标\""),
         ("confirmed", "已确认"),
         ("probable", "可能关联"),
@@ -11062,6 +11291,24 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("Reset filters", "重置筛选"),
         ("visible rows", "可见行"),
         ("Execute: ", "执行："),
+        ("Evidence completeness", "证据完整性"),
+        ("<b>Raw</b>", "<b>原始</b>"),
+        ("<b>Report</b>", "<b>报告</b>"),
+        ("<b>Omitted</b>", "<b>省略</b>"),
+        ("<b>Policy</b>", "<b>策略</b>"),
+        ("<b>High signal</b>", "<b>高信号</b>"),
+        ("<b>Unknown</b>", "<b>未知</b>"),
+        ("<b>Dynamic</b>", "<b>动态</b>"),
+        ("<b>R0</b>", "<b>R0</b>"),
+        ("report.json = sampled view;", "report.json = 采样视图；"),
+        ("No raw source indexed", "未索引原始来源"),
+        ("raw source file(s) indexed", "个原始来源文件已索引"),
+        ("Guest events JSON", "来宾事件 JSON"),
+        ("Driver JSONL", "驱动 JSONL"),
+        ("Collection health</a>", "采集健康</a>"),
+        ("Diagnostics</a>", "诊断</a>"),
+        ("Report view.", "报告视图。"),
+        ("Full raw evidence is linked above as JSON/JSONL.", "完整原始证据见上方 JSON/JSONL 链接。"),
         ("visible rows; ", "可见行；"),
         ("visible evidence rows; ", "可见证据行；"),
         ("more evidence rows are available in the report.", "报告中还有更多证据行。"),
@@ -13477,7 +13724,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         var html = new StringBuilder();
-        html.AppendLine($"<details class=\"flat-details related-artifacts-flat\"><summary>Related artifacts ({artifacts.Count})</summary><ul class=\"artifact-list\">");
+        html.AppendLine($"<details open class=\"flat-details related-artifacts-flat\"><summary>Related artifacts ({artifacts.Count})</summary><ul class=\"artifact-list\">");
         foreach (var artifact in artifacts)
         {
             var plain = ArtifactToPlainText(artifact);
@@ -14004,7 +14251,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         // Selector/import/rejection fields are troubleshooting metadata. Keep
         // them in one collapsed block so the row defaults to a readable name,
         // hash, and safe action.
-        html.Append($"<details class=\"flat-details artifact-index-fields\"><summary>Download selector / duplicate / rejection diagnostics</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        html.Append($"<details open class=\"flat-details artifact-index-fields\"><summary>Download selector / duplicate / rejection diagnostics</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
         return html.ToString();
     }
 
@@ -14098,7 +14345,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         var href = ArtifactHref(artifact);
         if (artifact.Kind == ArtifactKind.Screenshot && !string.IsNullOrWhiteSpace(href))
         {
-            return $"<details class=\"artifact-preview\"><summary>Screenshot preview</summary><a href=\"{A(href)}\"><img alt=\"{A(artifact.Name)}\" src=\"{A(href)}\"></a></details>";
+            return $"<details open class=\"artifact-preview\"><summary>Screenshot preview</summary><a href=\"{A(href)}\"><img alt=\"{A(artifact.Name)}\" src=\"{A(href)}\"></a></details>";
         }
 
         var preview = TryReadTextArtifactPreview(artifact);
@@ -14114,7 +14361,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             ArtifactKind.GuestEventsJson => "Events JSON preview",
             _ => "Text preview"
         };
-        return $"<details class=\"flat-details\"><summary>{E(title)}</summary><pre class=\"copyable\" data-copy=\"{A(preview)}\">{E(preview)}</pre></details>";
+        return $"<details open class=\"flat-details\"><summary>{E(title)}</summary><pre class=\"copyable\" data-copy=\"{A(preview)}\">{E(preview)}</pre></details>";
     }
 
     private static string ArtifactToPlainText(ArtifactDescriptor artifact)

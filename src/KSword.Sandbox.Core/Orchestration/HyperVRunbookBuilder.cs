@@ -1764,18 +1764,15 @@ public sealed class HyperVRunbookBuilder
             "catch {",
             "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue;",
             "Write-Warning 'Interactive desktop is unavailable; starting Guest Agent in the remoting session.';",
-            "$fallbackArgs = @('-NoLogo', '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand);",
-            // Run the remoting fallback synchronously. A detached PowerShell
-            // process can disappear from the remoting process table before
-            // the live-sync step observes it, leaving only the pid marker and
-            // no guest events. The encoded command publishes its own PID and
-            // exit marker, so the synchronous call preserves the real result.
-            // The fallback is intentionally synchronous so the remoting
-            // session owns the process, but a non-zero Agent exit must not stop
-            // the next live-sync/collect steps.  Those steps copy the complete
-            // guest diagnostics and make the final step fail with the real
-            // exit code and artifact paths.
-            "& powershell.exe @fallbackArgs; $fallbackExitCode = $LASTEXITCODE; if ($fallbackExitCode -ne 0) { Write-Warning \"Guest Agent fallback PowerShell exited with code $fallbackExitCode; continuing to collect guest diagnostics.\" }",
+            // A WinRM child process can be placed in the remoting job and be
+            // terminated when this step returns.  A local S4U scheduled task
+            // gives the fallback an independent lifetime while remaining
+            // noninteractive; sync-live-output still owns the bounded wait
+            // and exit-marker validation.
+            "Register-ScheduledTask -TaskName $taskName -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $actionArguments -WorkingDirectory $workingDirectory) -Principal (New-ScheduledTaskPrincipal -UserId $guestUserName -LogonType S4U -RunLevel Highest) -Settings $settings -Force | Out-Null; Start-ScheduledTask -TaskName $taskName -ErrorAction Stop;",
+            "$fallbackDeadline=(Get-Date).AddSeconds(30); do { Start-Sleep -Milliseconds 250 } while (-not (Test-Path -LiteralPath $pidPath -PathType Leaf) -and (Get-Date) -lt $fallbackDeadline);",
+            "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw \"S4U fallback did not create pid marker: $pidPath\" };",
+            "Write-Host \"Guest Agent S4U fallback started; live sync will wait for agent.exit.\";",
             "} ",
             $"}} -ArgumentList {Q(agentTaskName)}, {Q(config.Guest.UserName)}, {Q(guestRoot)}, {Q(agentPidPath)}, {Q(encodedCommand)} -ErrorAction Stop;",
             "}",

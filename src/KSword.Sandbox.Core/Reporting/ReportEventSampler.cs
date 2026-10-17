@@ -411,7 +411,15 @@ public static class ReportEventSampler
         "driverEvents",
         "driverRecordsProcessed",
         "collectorSuppressedEvents",
-        "collectorSkippedEvents"
+        "collectorSkippedEvents",
+        "supportedProducerMaskNames",
+        "enabledSupportedProducerMaskNames",
+        "effectiveProducerMask",
+        "producerEnableMask",
+        "r0CoverageKnownGaps",
+        "r0FallbackRequiredScope",
+        "expectedSuppressedMask",
+        "unexpectedSuppressedMask"
     ];
 
     // ETW rows carry the decoded provider/event identity and a trace-artifact
@@ -423,6 +431,23 @@ public static class ReportEventSampler
     private static readonly string[] EtwKernelEventPriorityDataKeys =
     [
         "captureSource",
+        "coverageState",
+        "coverageSource",
+        "auditPolicyCoverageState",
+        "zeroRowInterpretation",
+        "parsedEventCount",
+        "decodedRawEventCount",
+        "filteredEventCount",
+        "observationWindowEventCount",
+        "sampleTreeEventCount",
+        "etlDecodeRequired",
+        "coverage.processLifecycle",
+        "coverage.threadLifecycle",
+        "coverage.moduleLoad",
+        "coverage.security",
+        "coverage.token",
+        "coverage.remoteThread",
+        "coverage.fileRegistry",
         "eventName",
         "opcode",
         "eventId",
@@ -450,6 +475,15 @@ public static class ReportEventSampler
         "operationName",
         "processOperationName",
         "fileOperationName",
+        "fileIntent",
+        "operationFailed",
+        "desiredAccess",
+        "createOptions",
+        "writeIntent",
+        "fileWrite",
+        "deleteIntent",
+        "renameIntent",
+        "droppedFileCandidate",
         "registryOperationName",
         "imageOperationName",
         "activityKind",
@@ -479,7 +513,15 @@ public static class ReportEventSampler
         "r0CoverageState",
         "lostCount",
         "lossObserved",
-        "backpressureObserved"
+        "backpressureObserved",
+        "supportedProducerMaskNames",
+        "enabledSupportedProducerMaskNames",
+        "effectiveProducerMask",
+        "producerEnableMask",
+        "r0CoverageKnownGaps",
+        "r0FallbackRequiredScope",
+        "expectedSuppressedMask",
+        "unexpectedSuppressedMask"
     ];
 
     private static readonly string[] PriorityDataKeys =
@@ -1488,6 +1530,15 @@ public static class ReportEventSampler
             return ReportSamplingBucket.FindingEvidence;
         }
 
+        // Readiness and audit-policy rows are the evidence boundary for
+        // Security/ETW coverage.  They must remain visible even when the
+        // policy is disabled or the query returned zero rows; otherwise the
+        // report falsely looks like the provider was never attempted.
+        if (IsSecurityCoverageGapEvent(evt))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
         // Route every dynamic action through the dedicated lane before the
         // lifecycle/diagnostic buckets. Some dynamic rows also carry
         // nonbehavior or operational metadata; evaluating those buckets first
@@ -2114,6 +2165,20 @@ public static class ReportEventSampler
                 "uri") ?? string.Empty);
     }
 
+    private static string BuildStableSamplingKey(SandboxEvent evt)
+    {
+        return string.Join(
+            '\u001f',
+            evt.Timestamp.UtcTicks.ToString(),
+            NormalizeEventType(evt.EventType),
+            evt.Source ?? string.Empty,
+            evt.ProcessName ?? string.Empty,
+            evt.ProcessId?.ToString() ?? string.Empty,
+            evt.ParentProcessId?.ToString() ?? string.Empty,
+            evt.Path ?? string.Empty,
+            evt.CommandLine ?? string.Empty);
+    }
+
     private static bool IsLowValueOperationalInlineEvent(SandboxEvent evt)
     {
         var eventType = NormalizeEventType(evt.EventType);
@@ -2262,9 +2327,12 @@ public static class ReportEventSampler
         var rawR0DriverEventCount = orderedEvents.Count(CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow);
         var selectedR0DriverEventCount = result.Events.Count(CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow);
         var r0DriverEventOmittedCount = Math.Max(0, rawR0DriverEventCount - selectedR0DriverEventCount);
-        var selectedEvidenceKeys = result.Events.Select(BuildEventEvidenceKey).ToHashSet(StringComparer.Ordinal);
+        // Use only envelope fields for this diagnostic comparison. The
+        // sampled result intentionally removes low-priority Data pairs, so a
+        // full evidence key would make every sanitized row look omitted.
+        var selectedEvidenceKeys = result.Events.Select(BuildStableSamplingKey).ToHashSet(StringComparer.Ordinal);
         var dynamicPolicyExcludedTypeCounts = orderedEvents
-            .Where(evt => IsDynamicActionEvidenceEvent(evt) && !selectedEvidenceKeys.Contains(BuildEventEvidenceKey(evt)))
+            .Where(evt => IsDynamicActionEvidenceEvent(evt) && !selectedEvidenceKeys.Contains(BuildStableSamplingKey(evt)))
             .GroupBy(evt => NormalizeEventType(evt.EventType), StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(group => group.Count())
             .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
@@ -2718,6 +2786,31 @@ public static class ReportEventSampler
         }
 
         return false;
+    }
+
+    private static bool IsSecurityCoverageGapEvent(SandboxEvent evt)
+    {
+        var eventType = NormalizeEventType(evt.EventType);
+        if (eventType.StartsWith("etw_security.", StringComparison.OrdinalIgnoreCase))
+        {
+            return IsReadinessOrStatusEvent(evt) ||
+                EventDataBoolTrue(evt, "readinessOnly", "statusOnly", "coverageGap", "auditPolicyDisabled") ||
+                eventType.Contains("surface", StringComparison.OrdinalIgnoreCase) ||
+                eventType.Contains("provider", StringComparison.OrdinalIgnoreCase) ||
+                eventType.Contains("coverage", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!eventType.StartsWith("security_eventlog.", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return IsReadinessOrStatusEvent(evt) ||
+            eventType.Contains("audit_policy", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("query.summary", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("fallback_surface", StringComparison.OrdinalIgnoreCase) ||
+            EventDataBoolTrue(evt, "coverageGap", "auditPolicyDisabled", "readinessOnly", "statusOnly") ||
+            EventDataBoolFalse(evt, "queryCompleted", "querySucceeded");
     }
 
     private static bool EventDataBoolFalse(SandboxEvent evt, params string[] keys)

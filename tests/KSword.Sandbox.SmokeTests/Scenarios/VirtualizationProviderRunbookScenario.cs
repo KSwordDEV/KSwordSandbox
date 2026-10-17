@@ -72,7 +72,12 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         // collection so stdout/stderr/exit evidence is available to diagnose
         // the real failure.  This is a synthetic runbook contract; it never
         // starts VMware or executes a sample.
-        RequireStepContains(vmware, "run-agent", "continuing to collect guest diagnostics");
+        RequireStepContains(vmware, "run-agent", "New-ScheduledTaskPrincipal -UserId $guestUserName -LogonType S4U -RunLevel Highest");
+        RequireStepContains(vmware, "run-agent", "Start-ScheduledTask -TaskName $taskName -ErrorAction Stop");
+        SmokeAssert.True(
+            !RequireStep(vmware, "run-agent").PowerShell.Contains("& powershell.exe @fallbackArgs", StringComparison.Ordinal),
+            "VMware remoting fallback must detach Guest Agent and return control to sync-live-output instead of waiting synchronously.");
+        RequireStepContains(vmware, "run-agent", "live sync will wait for agent.exit");
         RequireStepContains(vmware, "check-sample-runtime", "mscoree\\.dll");
         RequireStepContains(vmware, "check-sample-runtime", "_CorExeMain");
         RequireStepContains(vmware, "check-sample-runtime", "v2\\.0\\.50727");

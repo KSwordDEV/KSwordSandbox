@@ -15,6 +15,30 @@ public sealed class RuleEngine
 {
     private const int MaxEvidenceEventsPerRule = 50;
 
+    // These are ordinary Windows discovery tools.  A sample submitted from
+    // the guest System32 directory can be a host utility copied into the
+    // guest by the runbook; its PE strings/imports must remain visible, but
+    // static-only clues must not become medium/high risk by themselves.
+    // Keep this list deliberately narrow so an arbitrary user sample placed
+    // under System32 still receives its normal static triage.
+    private static readonly HashSet<string> NativeDiscoveryUtilityNames =
+    [
+        "arp.exe",
+        "driverquery.exe",
+        "getmac.exe",
+        "hostname.exe",
+        "ipconfig.exe",
+        "nslookup.exe",
+        "pathping.exe",
+        "query.exe",
+        "route.exe",
+        "systeminfo.exe",
+        "tasklist.exe",
+        "tracert.exe",
+        "ver.exe",
+        "whoami.exe"
+    ];
+
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(100);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -74,6 +98,7 @@ public sealed class RuleEngine
         // fallback for one-shot enumerables.
         var eventList = events as IReadOnlyList<SandboxEvent> ?? events.ToList();
         var findings = new List<BehaviorFinding>();
+        var nativeUtilityStaticPaths = FindNativeUtilityStaticPaths(eventList);
 
         foreach (var rule in ruleSet.Rules)
         {
@@ -110,13 +135,27 @@ public sealed class RuleEngine
                     : $"{summaryZh} 已显示证据：{evidence.Count} / {matchedCount} 条匹配事件。";
             }
 
+            var findingSeverity = rule.Severity;
+            var findingConfidence = rule.Confidence;
+            if (IsNativeUtilityStaticFinding(rule, evidence, nativeUtilityStaticPaths) &&
+                IsMediumOrHigherSeverity(findingSeverity))
+            {
+                // Preserve the finding and its evidence, while making the
+                // static-only boundary explicit in the risk level.  Runtime
+                // events can still produce the original rule severity.
+                findingSeverity = "low";
+                findingConfidence = "low";
+                summary = $"{summary} Static-only evidence from a known Windows discovery utility is retained for context and does not establish runtime behavior.";
+                summaryZh = $"{summaryZh} 已知 Windows 原生发现工具的静态证据仅保留为上下文，不能证明运行期行为。";
+            }
+
             findings.Add(new BehaviorFinding
             {
                 RuleId = rule.Id,
                 Title = rule.Title,
                 TitleZh = NullIfWhiteSpace(rule.TitleZh),
-                Severity = rule.Severity,
-                Confidence = rule.Confidence,
+                Severity = findingSeverity,
+                Confidence = findingConfidence,
                 Summary = summary,
                 SummaryZh = NullIfWhiteSpace(summaryZh),
                 MitreTechniqueId = rule.MitreTechniqueId,
@@ -127,6 +166,89 @@ public sealed class RuleEngine
         }
 
         return findings;
+    }
+
+    private static IReadOnlySet<string> FindNativeUtilityStaticPaths(IReadOnlyList<SandboxEvent> events)
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var evt in events)
+        {
+            if (!string.Equals(evt.EventType, "static.analysis.completed", StringComparison.OrdinalIgnoreCase) ||
+                !HasHostSystemPathContext(evt) ||
+                !IsNativeDiscoveryUtilityPath(evt.Path))
+            {
+                continue;
+            }
+
+            var normalized = NormalizePath(evt.Path);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                paths.Add(normalized);
+            }
+        }
+
+        return paths;
+    }
+
+    private static bool IsNativeUtilityStaticFinding(
+        BehaviorRule rule,
+        IReadOnlyList<SandboxEvent> evidence,
+        IReadOnlySet<string> nativeUtilityStaticPaths)
+    {
+        if (!IsStaticRule(rule) || nativeUtilityStaticPaths.Count == 0 || evidence.Count == 0)
+        {
+            return false;
+        }
+
+        // A static finding is scoped to the same path as the context-bearing
+        // summary event. Mixed runtime evidence must never be demoted.
+        return evidence.All(evt =>
+            evt.EventType.StartsWith("static.", StringComparison.OrdinalIgnoreCase) &&
+            nativeUtilityStaticPaths.Contains(NormalizePath(evt.Path)));
+    }
+
+    private static bool IsStaticRule(BehaviorRule rule)
+    {
+        return rule.Id.StartsWith("static-", StringComparison.OrdinalIgnoreCase) ||
+            rule.Tags.Any(tag => string.Equals(tag, "static", StringComparison.OrdinalIgnoreCase)) ||
+            rule.EventTypes.Any(type => type.StartsWith("static.", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsMediumOrHigherSeverity(string? severity)
+    {
+        return string.Equals(severity, "medium", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(severity, "high", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(severity, "critical", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasHostSystemPathContext(SandboxEvent evt)
+    {
+        return TryGetRuleFieldValue(evt, "tags", out var tags) &&
+            tags.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Any(tag => string.Equals(tag, "host_system_path_context", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsNativeDiscoveryUtilityPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        var normalized = NormalizePath(path);
+        var fileName = normalized[(normalized.LastIndexOf('/') + 1)..];
+        if (!NativeDiscoveryUtilityNames.Contains(fileName))
+        {
+            return false;
+        }
+
+        return normalized.Contains("/windows/system32/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("/windows/syswow64/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizePath(string? path)
+    {
+        return (path ?? string.Empty).Trim().Replace('\\', '/');
     }
 
     private static string? NullIfWhiteSpace(string? value)

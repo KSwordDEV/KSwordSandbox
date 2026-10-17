@@ -436,7 +436,7 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
 
         RequireContains(html, "data-copy", "Report sections must expose copyable evidence fields.");
         RequireContains(html, "contextmenu", "Report must support right-click copy.");
-        RequireContains(html, "Copy event", "Report raw evidence rows must include explicit copy actions.");
+        RequireContains(html, "data-copy-button=\"true\"", "Report raw evidence rows must include icon copy actions.");
         RequireContains(html, "KSWORD_SANDBOX_FILE_EVENT_PAYLOAD", "Report must preserve R0 payload-schema evidence in raw events.");
     }
 

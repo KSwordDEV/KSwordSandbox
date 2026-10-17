@@ -121,7 +121,7 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(html, "Network evidence expansion summary", "Network relationship expansions should summarize shown/hidden evidence.");
         RequireContains(html, "Raw event slimming story", "Raw event section should explain visible/folded/report-only evidence before row expansion.");
         RequireContains(html, "Artifact / network / R0 anchors", "Raw event slimming cards should preserve artifact/network/R0 evidence anchors.");
-        RequireContains(html, "Copy raw slimming story", "Raw event slimming story should be explicitly copyable.");
+        RequireContains(html, "data-copy-button=\"true\"", "Raw event slimming story should be explicitly copyable.");
         RequireContains(html, "data-copy=", "New evidence cards should remain copyable.");
 
         return Task.FromResult(new SmokeTestResult

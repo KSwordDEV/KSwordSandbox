@@ -135,9 +135,9 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         RequireContains(rendererSource, "RawEventPageSize = 25", "Raw events should keep compact bounded native pages.");
         RequireContains(rendererSource, "raw-events-shell", "Raw events should render inside a collapsed details shell.");
         RequireContains(rendererSource, "raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto", "Expanded raw events should have a finite scroll height.");
-        RequireContains(rendererSource, "Raw events are collapsed by default.", "Rendered reports should explain the raw-event collapse.");
+        RequireContains(rendererSource, "Report view.", "Rendered reports should explain the compact raw-event view.");
         RequireContains(rendererSource, "IsUserFacingEvent", "Renderer should filter the primary event explorer to sample-facing evidence.");
-        RequireContains(rendererSource, "Raw evidence height limit: 58vh", "Renderer should state the raw evidence height cap.");
+        RequireContains(rendererSource, "--raw-evidence-max:58vh", "Renderer should keep a finite raw evidence height cap.");
         RequireContains(rendererSource, "IsVirusTotalStatusIssue", "Renderer should explicitly separate VT status issues.");
         RequireContains(rendererSource, "Missing keys, rate limits, or not-found responses are enrichment status", "Renderer should describe VT status rows as enrichment status.");
         RequireContains(rendererSource, "PrimaryBehaviorFindings", "Renderer should keep a primary behavior filter.");
@@ -194,7 +194,7 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
 
         var r0Section = ExtractSection(englishHtml, "r0");
         RequireContains(r0Section, "No sample-attributed driver behavior was captured.", "R0 health-only evidence should not create a sample behavior section.");
-        RequireNotContains(r0Section, "Collection health status.", "R0 collection health should stay out of the primary report UI.");
+        RequireContains(r0Section, "Collection health status", "R0 collection health should remain visible in its dedicated R0 section.");
 
         var vtSection = ExtractSection(englishHtml, "vt");
         RequireContains(vtSection, "Hash-only enrichment.", "VT section should describe reputation enrichment.");
@@ -209,7 +209,7 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         RequireContains(rawSection, "<details class=\"raw-events-shell\"><summary><span class=\"fold-label\">Closed by default</span>", "Raw events should be collapsed even for small reports.");
         RequireContains(rawSection, "Show inline raw events (3/3; 0 hidden; 1 native pages)", "Raw event summary should include bounded native pagination.");
         RequireContains(rawSection, "<div class=\"raw-events-panel\">", "Raw events should expand into the bounded panel.");
-        RequireContains(rawSection, "Raw evidence height limit: 58vh", "Raw event guidance should disclose the bounded height.");
+        RequireContains(rawSection, "Report view.", "Raw event guidance should disclose the compact bounded view.");
 
         RequireContains(chineseHtml, "<html lang=\"zh-CN\">", "Chinese report should keep zh-CN metadata.");
         RequireContains(chineseHtml, "R0 / 驱动事件", "Chinese report should include the localized R0 section.");

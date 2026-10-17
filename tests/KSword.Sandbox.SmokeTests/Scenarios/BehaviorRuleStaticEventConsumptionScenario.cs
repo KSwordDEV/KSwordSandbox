@@ -116,6 +116,7 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
 
         AssertStaticTriageBoundary(findings);
         AssertReferenceIndicatorsRemainEvidenceOnly(engine);
+        AssertNativeSystemUtilityStaticBoundary(engine);
 
         return Task.FromResult(new SmokeTestResult
         {
@@ -607,5 +608,73 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
         var findingIds = findings.Select(finding => finding.RuleId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         SmokeAssert.True(!findingIds.Contains("static-embedded-url"), "Reference-only URL strings should not trigger embedded URL triage.");
         SmokeAssert.True(!findingIds.Contains("static-domain-indicator"), "Reference-only domain strings should not trigger domain indicator triage.");
+    }
+
+    /// <summary>
+    /// Ensures host System32 context for ordinary discovery utilities cannot
+    /// turn static-only clues into medium/high findings, while an arbitrary
+    /// user sample in the same directory keeps its normal static severity.
+    /// </summary>
+    private static void AssertNativeSystemUtilityStaticBoundary(RuleEngine engine)
+    {
+        var utilityPath = @"C:\Windows\System32\ipconfig.exe";
+        var utilityEvents = new SandboxEvent[]
+        {
+            new()
+            {
+                EventType = "static.analysis.completed",
+                Source = "host",
+                Path = utilityPath,
+                Data =
+                {
+                    ["tags"] = "host_system_path_context,persistence_string,imports_present"
+                }
+            },
+            new()
+            {
+                EventType = "static.pe.section",
+                Source = "host",
+                Path = utilityPath,
+                Data =
+                {
+                    ["tags"] = "low_entropy_section,writable_executable_section",
+                    ["entropy"] = "0.30"
+                }
+            },
+            new()
+            {
+                EventType = "static.string.suspicious",
+                Source = "host",
+                Path = utilityPath,
+                Data =
+                {
+                    ["tags"] = "persistence_string,service_string",
+                    ["value"] = @"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\"
+                }
+            }
+        };
+
+        var utilityFindings = engine.Classify(utilityEvents);
+        SmokeAssert.True(utilityFindings.Count > 0, "System32 utility static evidence should remain visible as findings.");
+        SmokeAssert.True(
+            utilityFindings.All(finding => !IsMediumOrHigher(finding.Severity)),
+            "Known System32 discovery utilities must not produce medium/high static findings: " +
+            string.Join(", ", utilityFindings.Where(finding => IsMediumOrHigher(finding.Severity)).Select(finding => finding.RuleId)));
+
+        var userSampleEvents = utilityEvents
+            .Select(evt => evt with { Path = @"C:\Windows\System32\customer_payload.exe" })
+            .ToArray();
+        var userSampleFindings = engine.Classify(userSampleEvents);
+        SmokeAssert.True(
+            userSampleFindings.Any(finding => string.Equals(finding.RuleId, "static-section-writable-executable", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(finding.Severity, "medium", StringComparison.OrdinalIgnoreCase)),
+            "An arbitrary user sample in System32 must retain its medium static triage severity.");
+    }
+
+    private static bool IsMediumOrHigher(string? severity)
+    {
+        return string.Equals(severity, "medium", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(severity, "high", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(severity, "critical", StringComparison.OrdinalIgnoreCase);
     }
 }

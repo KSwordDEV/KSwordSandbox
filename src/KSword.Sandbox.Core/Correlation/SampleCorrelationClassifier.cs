@@ -244,6 +244,23 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Environment("row-belongs-to-guest-sample-staging-process", "processImagePath");
         }
 
+        // The submitted file is staged below the incoming directory before
+        // execution.  R0 can report the launcher and the sample's ordinary
+        // DLL/resource probes with the sample PID, so PID matching alone is
+        // not enough to call these mutations.  Keep explicit writes,
+        // renames, deletes and other high-signal intents eligible; demote
+        // create/open/read probes in this controlled staging location.
+        if (IsFileEvidence(evt) &&
+            IsSandboxIncomingPath(FirstNonEmpty(
+                evt.Path,
+                Value(data, "path"),
+                Value(data, "filePath"),
+                Value(data, "targetPath"))) &&
+            !IsHighSignalMutation(evt, data))
+        {
+            return CorrelationDisposition.Environment("incoming-staging-observation-not-a-file-mutation", "path/operationName");
+        }
+
         if (IsExpectedSystemCacheArtifact(evt, data))
         {
             return CorrelationDisposition.Environment("driver-row-targets-expected-windows-cache-artifact", "path");
@@ -398,18 +415,32 @@ public static class SampleCorrelationClassifier
 
     private static CorrelationDisposition ClassifyNetworkEvidence(
         SandboxEvent evt,
-        IReadOnlyDictionary<string, string> data,
+        Dictionary<string, string> data,
         CorrelationContext context)
     {
         var ownerPid = EventProcessId(evt, data);
+        var joinedFromR0 = false;
         if (ownerPid is null && TryGetJoinedNetworkOwnerPid(data, context, out var joinedOwner))
         {
             ownerPid = joinedOwner;
+            // PCAP protocol rows have no kernel owner PID of their own.  Copy
+            // the joined R0 identity into the normalized row so the report can
+            // show the concrete process that justified attribution instead of
+            // only showing a textual correlation reason.
+            data["owningProcessId"] = joinedOwner.ToString(CultureInfo.InvariantCulture);
+            data["ownerPid"] = joinedOwner.ToString(CultureInfo.InvariantCulture);
+            data["networkOwnerJoinSource"] = "r0-flow-or-endpoint";
+            data["networkOwnerJoinStatus"] = "joined";
+            joinedFromR0 = true;
         }
 
         if (ownerPid is not null && context.SampleProcessIds.Contains(ownerPid.Value))
         {
-            return CorrelationDisposition.Confirmed("network-owner-pid-matched-sample-process-tree", "owningProcessId");
+            return CorrelationDisposition.Confirmed(
+                joinedFromR0
+                    ? "network-owner-pid-joined-from-r0-and-matched-sample-process-tree"
+                    : "network-owner-pid-matched-sample-process-tree",
+                "owningProcessId");
         }
 
         var ownerImageOrCommand = FirstNonEmpty(
@@ -1259,7 +1290,10 @@ public static class SampleCorrelationClassifier
         var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var evt in events)
         {
-            if (!evt.EventType.StartsWith("network.netstat", StringComparison.OrdinalIgnoreCase))
+            var isNetstat = evt.EventType.StartsWith("network.netstat", StringComparison.OrdinalIgnoreCase);
+            var isR0Network = evt.EventType.Equals("driver.network", StringComparison.OrdinalIgnoreCase) ||
+                evt.EventType.StartsWith("driver.network.", StringComparison.OrdinalIgnoreCase);
+            if (!isNetstat && !isR0Network)
             {
                 continue;
             }
@@ -1274,6 +1308,47 @@ public static class SampleCorrelationClassifier
             AddEndpointOwner(map, Value(evt.Data, "protocol"), FormatLocalEndpoint(evt.Data), pid.Value);
             AddEndpointOwner(map, Value(evt.Data, "transport"), Value(evt.Data, "localEndpoint"), pid.Value);
             AddEndpointOwner(map, Value(evt.Data, "protocol"), Value(evt.Data, "localEndpoint"), pid.Value);
+
+            // WFP/R0 rows are the authoritative owner source for short-lived
+            // connections, while PCAP protocol rows deliberately have no PID.
+            // Preserve both the flow key and either endpoint so a later PCAP
+            // row can join the concrete R0 owner before IOC/time-window
+            // heuristics run.  This closes the common ``R0 has PID, PCAP does
+            // not'' attribution gap without promoting an ownerless row.
+            if (isR0Network)
+            {
+                foreach (var flow in new[]
+                {
+                    Value(evt.Data, "flowKey"),
+                    Value(evt.Data, "pcapFlowKeyCandidate"),
+                    Value(evt.Data, "pcapCorrelationKey")
+                })
+                {
+                    AddNetworkFlowOwner(map, flow, pid.Value);
+                }
+
+                var protocol = FirstNonEmpty(
+                    Value(evt.Data, "protocol"),
+                    Value(evt.Data, "transport"),
+                    Value(evt.Data, "protocolName"),
+                    FlowProtocol(Value(evt.Data, "flowKey")));
+                foreach (var endpoint in new[]
+                {
+                    Value(evt.Data, "local"),
+                    Value(evt.Data, "localEndpoint"),
+                    Value(evt.Data, "remote"),
+                    Value(evt.Data, "remoteEndpoint"),
+                    Value(evt.Data, "sourceEndpoint"),
+                    Value(evt.Data, "destinationEndpoint"),
+                    FormatAddressPort(evt.Data, "localAddress", "localPort"),
+                    FormatAddressPort(evt.Data, "remoteAddress", "remotePort"),
+                    FormatAddressPort(evt.Data, "sourceAddress", "sourcePort"),
+                    FormatAddressPort(evt.Data, "destinationAddress", "destinationPort")
+                })
+                {
+                    AddEndpointOwner(map, protocol, endpoint, pid.Value);
+                }
+            }
         }
 
         return map;
@@ -1307,16 +1382,39 @@ public static class SampleCorrelationClassifier
 
     private static IEnumerable<string> CandidateEndpointKeys(IReadOnlyDictionary<string, string> data)
     {
+        foreach (var flow in new[]
+        {
+            Value(data, "flowKey"),
+            Value(data, "pcapFlowKeyCandidate"),
+            Value(data, "pcapCorrelationKey")
+        })
+        {
+            var flowKey = NetworkFlowOwnerKey(flow);
+            if (!string.IsNullOrWhiteSpace(flowKey))
+            {
+                yield return flowKey;
+            }
+        }
+
         var protocols = new[]
         {
             Value(data, "protocol"),
-            Value(data, "transport")
+            Value(data, "transport"),
+            Value(data, "protocolName"),
+            FlowProtocol(Value(data, "flowKey"))
         };
         var locals = new[]
         {
             Value(data, "local"),
             Value(data, "localEndpoint"),
-            FormatLocalEndpoint(data)
+            Value(data, "remote"),
+            Value(data, "remoteEndpoint"),
+            Value(data, "sourceEndpoint"),
+            Value(data, "destinationEndpoint"),
+            FormatLocalEndpoint(data),
+            FormatAddressPort(data, "remoteAddress", "remotePort"),
+            FormatAddressPort(data, "sourceAddress", "sourcePort"),
+            FormatAddressPort(data, "destinationAddress", "destinationPort")
         };
 
         foreach (var protocol in protocols)
@@ -1330,6 +1428,42 @@ public static class SampleCorrelationClassifier
                 }
             }
         }
+    }
+
+    private static void AddNetworkFlowOwner(IDictionary<string, int> map, string? flowKey, int pid)
+    {
+        var key = NetworkFlowOwnerKey(flowKey);
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            map[key] = pid;
+        }
+    }
+
+    private static string NetworkFlowOwnerKey(string? flowKey)
+    {
+        return string.IsNullOrWhiteSpace(flowKey)
+            ? string.Empty
+            : "FLOW|" + flowKey.Trim().ToUpperInvariant();
+    }
+
+    private static string FlowProtocol(string? flowKey)
+    {
+        if (string.IsNullOrWhiteSpace(flowKey))
+        {
+            return string.Empty;
+        }
+
+        var separator = flowKey.IndexOf('|');
+        return separator > 0 ? flowKey[..separator] : string.Empty;
+    }
+
+    private static string FormatAddressPort(IReadOnlyDictionary<string, string> data, string addressKey, string portKey)
+    {
+        var address = Value(data, addressKey);
+        var port = Value(data, portKey);
+        return string.IsNullOrWhiteSpace(address) || string.IsNullOrWhiteSpace(port)
+            ? string.Empty
+            : $"{address}:{port}";
     }
 
     private static void ApplyDisposition(Dictionary<string, string> data, CorrelationDisposition disposition)
@@ -2071,6 +2205,45 @@ public static class SampleCorrelationClassifier
             Value(data, "registryOperationName"),
             Value(data, "operation"),
             evt.EventType);
+        var target = FirstNonEmpty(
+            Value(data, "path"),
+            Value(data, "targetPath"),
+            Value(data, "filePath"),
+            evt.Path);
+
+        // A failed CreateFile probe is observation evidence, even when the
+        // kernel marks it as a dropped-file candidate.  Likewise, the
+        // runner's incoming directory contains the submitted sample and its
+        // DLL/resource lookup traffic; ordinary create/open probes there are
+        // staging noise.  Real writes, renames, deletes, and explicit
+        // persistence markers still pass through the signal checks below.
+        if (IsFileEvidence(evt) &&
+            (TextEqualsAny(Value(data, "fileIntent"), "failed-access", "failed", "probe") ||
+             IsTruthy(Value(data, "operationFailed")) ||
+             (IsSandboxIncomingPath(target) &&
+              !ContainsAny(operation, "write", "setinfo", "rename", "delete"))))
+        {
+            return false;
+        }
+
+        var explicitFileMutation =
+            IsTruthy(Value(data, "deleteIntent")) ||
+            IsTruthy(Value(data, "renameIntent")) ||
+            IsTruthy(Value(data, "writeIntent")) ||
+            IsTruthy(Value(data, "fileWrite")) ||
+            ContainsAny(operation, "write", "setinfo", "rename", "delete");
+        if (IsFileEvidence(evt) &&
+            IsTruthy(Value(data, "droppedFileCandidate")) &&
+            !explicitFileMutation &&
+            !LooksUserWritableOrPersistenceTarget(target))
+        {
+            // The candidate bit is intentionally broad: it also marks a
+            // successful CreateFile probe in System32/Prefetch.  Candidate
+            // creates become behavior only in a user-writable/drop or
+            // persistence surface; ordinary OS probes remain evidence.
+            return false;
+        }
+
         if (IsTruthy(Value(data, "deleteIntent")) ||
             IsTruthy(Value(data, "renameIntent")) ||
             IsTruthy(Value(data, "droppedFileCandidate")) ||
@@ -2097,15 +2270,30 @@ public static class SampleCorrelationClassifier
             // `create`, while the same value is used for ordinary opens in
             // System32/Windows cache paths.  Preserve the mutation signal
             // only when the target itself is a writable/persistence location.
-            var target = FirstNonEmpty(
-                Value(data, "path"),
-                Value(data, "targetPath"),
-                Value(data, "filePath"),
-                evt.Path);
-            return ContainsAny(operation, "create", "set") && LooksUserWritableOrPersistenceTarget(target);
+            // The guest wrapper stages the submitted file and its support
+            // metadata below the sandbox incoming directory.  Those creates
+            // are setup/observation work, even though the directory is
+            // technically writable.  Keep explicit write/drop/persistence
+            // markers above authoritative, but do not promote ordinary
+            // staging creates into sample behavior.
+            return ContainsAny(operation, "create", "set") &&
+                !IsSandboxIncomingPath(target) &&
+                LooksUserWritableOrPersistenceTarget(target);
         }
 
         return ContainsAny(operation, "write", "create", "set", "rename", "delete", "setValue", "createKey", "setinfo");
+    }
+
+    private static bool IsSandboxIncomingPath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = NormalizeSlashes(value).ToLowerInvariant();
+        return normalized.Contains(@"\kswordsandbox\incoming\", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains(@"\ksword\sandbox\incoming\", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsPathTruncated(IReadOnlyDictionary<string, string> data)
