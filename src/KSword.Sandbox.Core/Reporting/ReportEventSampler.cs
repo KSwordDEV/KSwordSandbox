@@ -1510,11 +1510,14 @@ public static class ReportEventSampler
     {
         if (bucket == ReportSamplingBucket.DynamicActionEvidence)
         {
-            // Dynamic action evidence has its own finite total budget, but a
-            // single event type must not consume the entire lane. The same
-            // high-value per-type ceiling used by the bounded report lane
-            // keeps the spill deterministic and visible in the marker.
-            return Math.Max(1, options.MaxHighValueEventsPerType);
+            // Dynamic action evidence already has a dedicated hard total
+            // budget. Applying the ordinary high-value per-type cap here
+            // silently dropped sample-attributed file/registry/image rows
+            // even while the dedicated budget still had room. Let every
+            // dynamic type use that same finite budget; the global cap keeps
+            // report generation bounded while preserving complete behavior
+            // coverage up to MaxDynamicActionEvents.
+            return Math.Max(1, options.MaxDynamicActionEvents);
         }
 
         if (bucket == ReportSamplingBucket.Diagnostics)

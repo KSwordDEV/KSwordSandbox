@@ -581,9 +581,6 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         SmokeAssert.True(
             retainedNetworkRows <= priorityOptions.MaxDynamicActionEvents,
             "Dynamic action evidence must obey the dedicated total budget.");
-        SmokeAssert.True(
-            retainedNetworkRows <= priorityOptions.MaxHighValueEventsPerType + 1,
-            "Dynamic action evidence must obey the per-type high-value cap (with one unknown correlation row allowance).");
         var unknownNetwork = result.Events.Single(evt =>
             string.Equals(evt.EventType, "network.udp", StringComparison.OrdinalIgnoreCase) &&
             evt.Data.TryGetValue("sampleCorrelation", out var correlation) &&
@@ -682,6 +679,40 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(boundedDynamicMarker, "markerOverheadEventCount", "1");
         SmokeAssert.True(boundedDynamic.SelectedRawEventCount == 5,
             "Dynamic evidence selection must obey MaxDynamicActionEvents.");
+
+        // A single high-volume dynamic type must be allowed to consume the
+        // dedicated lane while budget remains. The ordinary 80-row high-value
+        // type cap applies to the bounded general lane; applying it here
+        // silently drops sample-attributed file/registry/image behavior even
+        // when MaxDynamicActionEvents has capacity.
+        var sameTypeDynamic = Enumerable.Range(0, 200)
+            .Select(index => new SandboxEvent
+            {
+                EventType = "driver.file",
+                Timestamp = timestamp.AddSeconds(35).AddMilliseconds(index),
+                Source = "driver",
+                Path = $@"C:\Users\Public\drop-{index}.bin",
+                Data =
+                {
+                    ["behaviorCounted"] = "true",
+                    ["sampleCorrelation"] = "confirmed",
+                    ["sampleBehaviorCandidate"] = "true"
+                }
+            })
+            .ToList();
+        var sameTypeResult = ReportEventSampler.SampleForReport(
+            sameTypeDynamic,
+            new ReportEventSamplingOptions
+            {
+                MaxInlineEvents = 1,
+                MaxDynamicActionEvents = 200,
+                MaxHighValueEventsPerType = 80,
+                MaxDiagnosticEvents = 0
+            });
+        SmokeAssert.True(sameTypeResult.DynamicActionSelectedCount == 200,
+            "Dynamic action selection must not apply the general 80-row type cap while the dedicated budget has room.");
+        SmokeAssert.True(sameTypeResult.DynamicActionOmittedCount == 0 && sameTypeResult.SelectedRawEventCount == 200,
+            "Sample-attributed dynamic rows must remain complete up to MaxDynamicActionEvents.");
 
         // Confirmed/probable dispositions remain visible in omission coverage
         // even when producers do not set behaviorCounted/sampleBehaviorCandidate.
