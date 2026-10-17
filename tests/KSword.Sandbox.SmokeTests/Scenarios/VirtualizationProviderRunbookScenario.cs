@@ -64,6 +64,8 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         RequireStepContains(vmware, "open-vm-desktop", "VMware console window verified");
         RequireStepContains(vmware, "open-vm-desktop", "target-associated VMware console window");
         RequireStepContains(vmware, "stop-vm-before-restore", "did not reach stopped state after vmrun stop within 60 seconds");
+        RequireStepContains(vmware, "stop-vm", "cleanup revertToSnapshot");
+        RequireStepContains(vmware, "stop-vm", "cleanup snapshot restore");
         RequireStepContains(vmware, "start-vm", "did not reach running state after vmrun start within 60 seconds");
         // A failed guest process must still flow through live-sync and final
         // collection so stdout/stderr/exit evidence is available to diagnose
