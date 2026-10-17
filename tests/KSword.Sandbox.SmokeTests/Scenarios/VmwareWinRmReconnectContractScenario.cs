@@ -24,6 +24,11 @@ internal sealed class VmwareWinRmReconnectContractScenario : ISmokeTestScenario
         Require(executor, "MergeTransientVmwareRetryResult", "The first failed attempt must remain in the retry diagnostic.");
         Require(executor, "Task.Delay(TimeSpan.FromSeconds(3)", "Reconnect retry must back off before creating a fresh session.");
         Require(executor, "KSWORDBOX_AGENT_MARKERS_PRESENT", "Retry must honor the guest marker-preservation handshake.");
+        Require(executor, "ShouldAttemptVmwareRecoveryStep", "VMware run-agent failures must attempt post-failure evidence recovery.");
+        Require(executor, "VMware evidence recovery", "Recovery progress must remain visible before cleanup.");
+        Require(executor, "AnnotateVmwareRecoveryFailure", "Unavailable WinRM/guest markers must produce an explicit recovery diagnostic.");
+        Require(executor, "sync-live-output", "Recovery must include live output synchronization.");
+        Require(executor, "collect-output", "Recovery must include final guest output collection.");
 
         Require(builder, "$existingEvents = Test-Path", "Guest launch must check events.json before retrying.");
         Require(builder, "$existingExit = Test-Path", "Guest launch must check agent.exit before retrying.");

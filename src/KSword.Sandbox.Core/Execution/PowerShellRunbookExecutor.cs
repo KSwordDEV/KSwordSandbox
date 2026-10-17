@@ -180,7 +180,8 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         {
             var step = runbook.Steps[index];
 
-            if (failedStepIndex is not null && !IsCleanupStep(step))
+            var recoveryStep = ShouldAttemptVmwareRecoveryStep(runbook, step, primaryFailureResult);
+            if (failedStepIndex is not null && !IsCleanupStep(step) && !recoveryStep)
             {
                 liveResults.Add(CreateSkippedAfterFailureStepResult(step, index, primaryFailureResult));
                 continue;
@@ -242,7 +243,9 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 liveResults,
                 index,
                 success: null,
-                message: cleanupMode
+                message: recoveryStep
+                    ? BuildRunningRecoveryStepMessage(step, index, runbook.Steps.Count, primaryFailureResult)
+                    : cleanupMode
                     ? BuildRunningCleanupStepMessage(step, index, runbook.Steps.Count, primaryFailureResult)
                     : BuildRunningStepMessage(step, index, runbook.Steps.Count, options.StepTimeout));
 
@@ -312,6 +315,11 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
 
                 stepResult = MergeTransientVmwareRetryResult(stepResult, retryResult);
             }
+            if (recoveryStep && !stepResult.Success)
+            {
+                stepResult = AnnotateVmwareRecoveryFailure(stepResult);
+            }
+
             liveResults.Add(stepResult);
 
             if (!stepResult.Success)
@@ -677,6 +685,23 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     }
 
     /// <summary>
+    /// Builds the progress sentence for a VMware evidence-recovery step.
+    /// Inputs are the recovery step and primary run-agent failure; processing
+    /// makes the attempted post-failure collection visible before cleanup.
+    /// </summary>
+    private static string BuildRunningRecoveryStepMessage(
+        SandboxRunbookStep step,
+        int stepIndex,
+        int totalSteps,
+        SandboxRunbookStepExecutionResult? primaryFailure)
+    {
+        var failureText = primaryFailure is null
+            ? "the earlier run-agent failure"
+            : $"step {primaryFailure.StepIndex + 1} ({primaryFailure.Title})";
+        return $"VMware evidence recovery {RunbookProgressFacts.BuildStepPrefix(step, stepIndex, totalSteps)}: attempting to preserve guest output after {failureText}; cleanup will run afterward.";
+    }
+
+    /// <summary>
     /// Builds a sparse heartbeat message for a still-running step.
     /// Inputs are the step, elapsed time, and optional timeout; processing
     /// describes the current wait without dumping command text or streams; the
@@ -794,6 +819,44 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     private static bool IsCleanupStepId(string? stepId)
     {
         return RunbookProgressFacts.IsCleanupStepId(stepId);
+    }
+
+    /// <summary>
+    /// Determines whether a VMware collection step should be attempted after
+    /// run-agent failed. Inputs are the source runbook, current step, and
+    /// primary failure; processing allows sync/collect only for a VMware
+    /// run-agent failure so other providers retain first-failure semantics.
+    /// </summary>
+    private static bool ShouldAttemptVmwareRecoveryStep(
+        SandboxRunbook runbook,
+        SandboxRunbookStep step,
+        SandboxRunbookStepExecutionResult? primaryFailure)
+    {
+        if (runbook.Provider is not VirtualizationProvider.VMware ||
+            primaryFailure is null ||
+            !string.Equals(primaryFailure.StepId, "run-agent", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return string.Equals(step.Id, "sync-live-output", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(step.Id, "collect-output", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Annotates a failed post-run-agent recovery step. Input is the captured
+    /// PowerShell result; processing preserves streams/exit code and adds a
+    /// stable reason that WinRM or guest markers were unavailable, so cleanup
+    /// cannot make the missing-evidence path look like a silent skip.
+    /// </summary>
+    private static SandboxRunbookStepExecutionResult AnnotateVmwareRecoveryFailure(
+        SandboxRunbookStepExecutionResult result)
+    {
+        var detail = result.Message ?? "the guest recovery step failed without a message";
+        return result with
+        {
+            Message = $"VMware evidence recovery was attempted after run-agent failure but could not reach the guest or locate its markers; partial evidence was preserved before cleanup. Detail: {detail}"
+        };
     }
 
     /// <summary>
