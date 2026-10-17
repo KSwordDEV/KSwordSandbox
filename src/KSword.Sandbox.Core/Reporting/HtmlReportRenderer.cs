@@ -1527,7 +1527,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         {
             if (isStaticTriage)
             {
-                html.AppendLine($"<tr><td><span class=\"badge static-only-badge\">Static-only / unverified</span></td><td><strong>{E(StaticFindingTitle(finding))}</strong></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
+                html.AppendLine($"<tr><td><span class=\"badge static-only-badge\">Static-only / unverified</span></td><td><strong>{E(StaticFindingTitle(finding))}</strong><br><span class=\"muted static-boundary\">{E(StaticFindingSummary(finding))}</span></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
             }
             else
             {
@@ -1557,7 +1557,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     private static string StaticFindingSummary(BehaviorFinding finding)
     {
         const string boundary = " Static evidence only: imports, API-like strings, URLs, YARA matches, entropy, and PE metadata do not prove execution, credential access, anti-analysis, download, persistence, or exfiltration; require correlated runtime evidence.";
-        return $"{finding.Summary}{boundary}";
+        return boundary;
     }
 
     /// <summary>
