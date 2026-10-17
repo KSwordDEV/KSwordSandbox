@@ -122,7 +122,10 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
 
         RequireContains(agentProgram, "--driver-events", "Guest Agent must accept the driver JSONL path.");
         RequireContains(agentProgram, "DriverJsonLinesReader", "Guest Agent must keep a dedicated driver JSONL read path.");
-        RequireContains(agentProgram, "ReadDriverEvents(options.DriverEventsPath, executionProcessId)", "Guest Agent must merge driver JSONL into guest output and bound it to the sample process tree.");
+        SmokeAssert.True(
+            agentProgram.Contains("ReadDriverEvents(driverEventPaths, executionProcessId)", StringComparison.Ordinal) ||
+            agentProgram.Contains("ReadDriverEvents(options.DriverEventsPath, executionProcessId)", StringComparison.Ordinal),
+            "Guest Agent must merge canonical/rotated driver JSONL into guest output and bound it to the sample process tree.");
         RequireContains(agentProgram, "driverJsonLinesReader.Read", "Guest Agent driver JSONL wrapper must delegate to DriverJsonLinesReader.");
         RequireContains(agentProgram, "events.json", "Guest Agent must continue writing canonical events.json.");
         RequireContains(agentProgram, "DriverEventsPath", "Guest Agent must consume the host-supplied driver JSONL path.");
