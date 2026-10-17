@@ -6034,7 +6034,8 @@ html[lang="en"] .localized-evidence-field{display:none}
                 html.AppendLine("<div class=\"section-note\">");
                 if (!string.IsNullOrWhiteSpace(card.Path))
                 {
-                    html.AppendLine($"<strong>Path</strong><br><code class=\"copyable\" data-copy=\"{A(card.Path)}\">{E(card.Path)}</code><br>");
+                    var displayPath = DisplayStandaloneTarget(card.Path);
+                    html.AppendLine($"<strong>Path</strong><br><code class=\"copyable\" data-copy=\"{A(card.Path)}\">{E(displayPath)}</code><br>");
                 }
 
                 if (!string.IsNullOrWhiteSpace(card.CommandLine))
@@ -7067,6 +7068,24 @@ html[lang="en"] .localized-evidence-field{display:none}
         {
             return string.Empty;
         }
+    }
+
+    private static string DisplayStandaloneTarget(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        if (!IsAbsolutePath(value))
+        {
+            return value;
+        }
+
+        var leaf = SafePathLeaf(value);
+        return string.IsNullOrWhiteSpace(leaf)
+            ? "Host path hidden"
+            : $"Host path hidden ({leaf})";
     }
 
     /// <summary>
@@ -9824,24 +9843,11 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static bool IsHostTechnicalPath(SandboxEvent evt, string target)
     {
-        if (!IsAbsolutePath(target))
-        {
-            return false;
-        }
-
-        var normalized = target.Replace('/', '\\');
-        var source = evt.Source ?? string.Empty;
-        if (TextEqualsAny(source, "host", "static", "static-analysis"))
-        {
-            return true;
-        }
-
-        return normalized.Contains("\\KSwordSandbox\\", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("\\jobs\\", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("\\malware-sample\\", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("\\dynamic-vmware-inputs\\", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("\\VMs\\", StringComparison.OrdinalIgnoreCase) ||
-            normalized.EndsWith(".vmx", StringComparison.OrdinalIgnoreCase);
+        // Absolute filesystem paths are implementation details regardless of
+        // whether they came from the host, guest, or a synthetic fixture. Keep
+        // only a safe leaf in the visible report; the original value remains
+        // available through the explicit technical disclosure/copy action.
+        return IsAbsolutePath(target);
     }
 
     private static bool IsAbsolutePath(string value)
