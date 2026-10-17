@@ -1771,7 +1771,9 @@ public sealed class HyperVRunbookBuilder
             "--r0-driver-event-sample-stride",
             "1",
             "--r0-drain-grace-ms",
-            config.Driver.R0CollectorDrainGraceMs.ToString(CultureInfo.InvariantCulture)
+            config.Driver.R0CollectorDrainGraceMs.ToString(CultureInfo.InvariantCulture),
+            "--max-output-bytes",
+            config.Driver.R0CollectorMaxOutputBytes.ToString(CultureInfo.InvariantCulture)
         };
 
         if (config.Driver.UseMockCollector)

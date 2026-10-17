@@ -89,6 +89,7 @@
     "eventJsonLinesPath": "C:\\KSwordSandbox\\out\\driver-events.jsonl",
     "r0CollectorPathInGuest": "C:\\KSwordSandbox\\r0collector\\KSword.Sandbox.R0Collector.exe",
     "devicePath": "\\\\.\\KSwordSandboxDriver",
+    "r0CollectorMaxOutputBytes": 67108864,
     "useMockCollector": false
   }
 }

@@ -303,5 +303,11 @@ public sealed record DriverConfig
     /// </summary>
     public int R0CollectorDrainGraceMs { get; init; } = 120_000;
 
+    /// <summary>
+    /// Keeps live R0 rotation below the guest disk reserve so closed parts
+    /// can be copied and reclaimed before a single segment grows too large.
+    /// </summary>
+    public int R0CollectorMaxOutputBytes { get; init; } = 64 * 1024 * 1024;
+
     public bool UseMockCollector { get; init; }
 }

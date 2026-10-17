@@ -336,6 +336,7 @@ internal static class SmokeTestProgram
         Assert(decodedGuestAgentCommand.Contains("--r0collector", StringComparison.Ordinal), "runbook should pass R0Collector path in the encoded guest command");
         Assert(decodedGuestAgentCommand.Contains("--driver-device", StringComparison.Ordinal), "runbook should pass driver device path in the encoded guest command");
         Assert(decodedGuestAgentCommand.Contains("--r0-enable-mask 0x3F", StringComparison.Ordinal), "runbook should request all stable R0 producers in the encoded guest command");
+        Assert(decodedGuestAgentCommand.Contains("--max-output-bytes 67108864", StringComparison.Ordinal), "runbook should cap live R0 segments at 64 MiB so closed parts are reclaimed before the guest reserve is exhausted");
         var liveSyncStep = runbook.Steps.Single(step => step.Id == "sync-live-output");
         Assert(liveSyncStep.PowerShell.Contains("Copy-Item -FromSession", StringComparison.Ordinal), "runbook should sync guest output through PowerShell Direct");
         Assert(liveSyncStep.PowerShell.Contains($"{job.JobId:N}", StringComparison.Ordinal), "live sync should target the job-specific guest output directory");

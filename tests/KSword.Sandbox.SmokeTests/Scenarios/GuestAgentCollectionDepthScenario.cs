@@ -337,6 +337,8 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("--enable-mask", StringComparison.Ordinal), "Agent must forward the requested producer mask to R0Collector.");
         SmokeAssert.True(programText.Contains("R0CollectorDrainGraceMs", StringComparison.Ordinal), "Agent options must carry the bounded R0 post-window drain grace.");
         SmokeAssert.True(programText.Contains("--drain-grace-ms", StringComparison.Ordinal), "Agent must forward the R0 post-window drain grace to R0Collector.");
+        SmokeAssert.True(programText.Contains("R0CollectorMaxOutputBytes", StringComparison.Ordinal), "Agent options must carry the live R0 output rotation limit.");
+        SmokeAssert.True(programText.Contains("--max-output-bytes", StringComparison.Ordinal), "Agent must forward the live R0 output rotation limit to R0Collector.");
         SmokeAssert.True(programText.Contains("GracefulStopTimeout", StringComparison.Ordinal), "Agent must wait through the configured R0 drain grace before forcing sidecar shutdown.");
         SmokeAssert.True(programText.Contains("DriverEventsInlineThresholdBytes", StringComparison.Ordinal), "Guest agent must bound inline duplication of large driver JSONL streams.");
         SmokeAssert.True(programText.Contains("ShouldDeferDriverEvents", StringComparison.Ordinal), "Guest agent must defer high-volume driver JSONL to host-side merge.");

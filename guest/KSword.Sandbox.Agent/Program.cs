@@ -49,6 +49,8 @@ internal static class AgentProgram
 
     internal const int DefaultR0CollectorMaxReadBatches = 0;
 
+    internal const int DefaultR0CollectorMaxOutputBytes = 64 * 1024 * 1024;
+
     // Timed collection continues draining already queued kernel records after
     // the sample window; this bounded grace period is operator-configurable.
     internal const int DefaultR0CollectorDrainGraceMs = 120_000;
@@ -679,6 +681,8 @@ internal static class AgentProgram
             startInfo.ArgumentList.Add(options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture));
             startInfo.ArgumentList.Add("--max-read-batches");
             startInfo.ArgumentList.Add(options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("--max-output-bytes");
+            startInfo.ArgumentList.Add(options.R0CollectorMaxOutputBytes.ToString(CultureInfo.InvariantCulture));
             startInfo.ArgumentList.Add("--driver-event-sample-stride");
             startInfo.ArgumentList.Add(options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture));
             if (options.R0CollectorEnableMask is uint enableMask)
@@ -1065,6 +1069,7 @@ internal static class AgentProgram
                 ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
                 ["r0MaxEventsPerRead"] = options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture),
                 ["r0MaxReadBatches"] = options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture),
+                ["r0MaxOutputBytes"] = options.R0CollectorMaxOutputBytes.ToString(CultureInfo.InvariantCulture),
                 ["r0DrainGraceMs"] = options.R0CollectorDrainGraceMs.ToString(CultureInfo.InvariantCulture),
                 ["r0DriverEventSampleStride"] = options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture),
                 ["r0EnableMask"] = options.R0CollectorEnableMask is uint enableMask ? $"0x{enableMask:X8}" : string.Empty,
@@ -1524,6 +1529,8 @@ internal static class AgentProgram
             options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture),
             "--max-read-batches",
             options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture),
+            "--max-output-bytes",
+            options.R0CollectorMaxOutputBytes.ToString(CultureInfo.InvariantCulture),
             "--driver-event-sample-stride",
             options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture)
         };
@@ -3763,6 +3770,8 @@ internal sealed record AgentOptions
 
     public int R0CollectorMaxReadBatches { get; init; } = AgentProgram.DefaultR0CollectorMaxReadBatches;
 
+    public int R0CollectorMaxOutputBytes { get; init; } = AgentProgram.DefaultR0CollectorMaxOutputBytes;
+
     public int R0CollectorDrainGraceMs { get; init; } = AgentProgram.DefaultR0CollectorDrainGraceMs;
 
     public int R0CollectorDriverEventSampleStride { get; init; } = AgentProgram.DefaultR0CollectorDriverEventSampleStride;
@@ -3868,6 +3877,7 @@ internal sealed record AgentOptions
         var captureScreenshots = flags.Contains("screenshot") || flags.Contains("screenshots");
         var r0MaxEventsPerRead = ParseBoundedOption(values, 1, 8192, AgentProgram.DefaultR0CollectorMaxEventsPerRead, "r0-max-events", "r0-read-events-max-events", "driver-max-events");
         var r0MaxReadBatches = ParseBoundedOption(values, 0, 1_000_000, AgentProgram.DefaultR0CollectorMaxReadBatches, "r0-max-read-batches", "driver-max-read-batches");
+        var r0MaxOutputBytes = ParseBoundedOption(values, 0, 512 * 1024 * 1024, AgentProgram.DefaultR0CollectorMaxOutputBytes, "max-output-bytes", "r0-max-output-bytes", "r0-output-max-bytes", "driver-max-output-bytes");
         var r0DrainGraceMs = ParseBoundedOption(values, 0, 600_000, AgentProgram.DefaultR0CollectorDrainGraceMs, "r0-drain-grace-ms", "driver-drain-grace-ms");
         var r0DriverEventSampleStride = ParseBoundedOption(values, 1, 1_000_000, AgentProgram.DefaultR0CollectorDriverEventSampleStride, "r0-driver-event-sample-stride", "driver-event-sample-stride", "r0-event-sample-stride");
         uint? r0EnableMask = null;
@@ -3896,6 +3906,7 @@ internal sealed record AgentOptions
             R0Mock = flags.Contains("r0-mock"),
             R0CollectorMaxEventsPerRead = r0MaxEventsPerRead,
             R0CollectorMaxReadBatches = r0MaxReadBatches,
+            R0CollectorMaxOutputBytes = r0MaxOutputBytes,
             R0CollectorDrainGraceMs = r0DrainGraceMs,
             R0CollectorDriverEventSampleStride = r0DriverEventSampleStride,
             R0CollectorEnableMask = r0EnableMask,
