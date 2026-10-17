@@ -20,6 +20,30 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
 
         var rawEvents = BuildEvents();
         var reportEvents = rawEvents.Take(3).ToList();
+        RequireTrue(
+            CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow(new SandboxEvent
+            {
+                EventType = "image.load",
+                Source = "driver",
+                Timestamp = DateTimeOffset.UtcNow
+            }),
+            "A source=driver image.load row is direct R0 telemetry and must be included in driver coverage.");
+        RequireTrue(
+            !CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow(new SandboxEvent
+            {
+                EventType = "image.load",
+                Source = "etwLive",
+                Timestamp = DateTimeOffset.UtcNow
+            }),
+            "An ETW image.load row must remain in the ETW lane and must not inflate driver coverage.");
+        RequireTrue(
+            !CollectionHealthSummaryBuilder.IsR0DriverTelemetryRow(new SandboxEvent
+            {
+                EventType = "driver.events.deferred",
+                Source = "guest",
+                Timestamp = DateTimeOffset.UtcNow
+            }),
+            "The deferred driver summary is a control marker and must not count as a driver payload row.");
         var summary = CollectionHealthSummaryBuilder.Build(rawEvents, reportEvents);
         RequireEqual(6, summary.RawRows, "All collection-health diagnostics should remain in the raw summary.");
         RequireEqual(3, summary.ReportRows, "Report row count should reflect sampled health rows.");
@@ -162,5 +186,10 @@ internal sealed class CollectionHealthFailureMetricsContractScenario : ISmokeTes
     private static void RequireEqual(int expected, int actual, string message)
     {
         SmokeAssert.True(expected == actual, $"{message} Expected {expected}, got {actual}.");
+    }
+
+    private static void RequireTrue(bool value, string message)
+    {
+        SmokeAssert.True(value, message);
     }
 }

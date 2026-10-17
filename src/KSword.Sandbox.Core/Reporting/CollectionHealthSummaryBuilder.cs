@@ -219,10 +219,16 @@ public static class CollectionHealthSummaryBuilder
     /// guest-side driver.events.deferred summary are deliberately excluded;
     /// their evidence is accounted for in their own lanes.
     /// </summary>
-    private static bool IsR0DriverTelemetryRow(SandboxEvent evt)
+    /// <summary>
+    /// Returns whether an event is a driver producer row for coverage
+    /// accounting. Source=driver image-load rows are real R0 telemetry; ETW
+    /// image.load rows and the deferred guest summary are separate lanes.
+    /// </summary>
+    public static bool IsR0DriverTelemetryRow(SandboxEvent evt)
     {
         var type = evt.EventType ?? string.Empty;
-        if (!type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+        if ((!type.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) &&
+             !type.StartsWith("image.", StringComparison.OrdinalIgnoreCase)) ||
             string.Equals(type, "driver.events.deferred", StringComparison.OrdinalIgnoreCase))
         {
             return false;
