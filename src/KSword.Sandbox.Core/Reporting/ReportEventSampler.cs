@@ -1325,6 +1325,7 @@ public static class ReportEventSampler
         var perType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var boundedSelectedCount = 0;
         var dynamicActionSelectedCount = 0;
+        var dynamicEnvironmentSelectedCount = 0;
 
         foreach (var bucket in ReportSamplingBucketPriority)
         {
@@ -1342,21 +1343,25 @@ public static class ReportEventSampler
             var bucketCandidates = inlineCandidates.Where(candidate => candidate.Bucket == bucket);
             if (isDynamicActionBucket)
             {
-                // Dynamic rows share one hard budget, but they do not share
-                // the same evidentiary value.  Timestamp order alone lets an
-                // early environment/unknown burst consume the entire lane
-                // before later confirmed sample behavior is considered.
-                // Keep high-confidence sample rows first, then preserve raw
+                // Dynamic rows share an environment hard budget, but explicit
+                // sample attribution is always retained. Timestamp order
+                // alone lets an early environment/unknown burst consume the
+                // entire lane before later confirmed sample behavior is
+                // considered. Keep attributed rows first, then preserve raw
                 // order within each confidence tier for deterministic output.
                 bucketCandidates = bucketCandidates
-                    .OrderBy(candidate => DynamicActionPriority(candidate.Event))
+                    .OrderByDescending(candidate => IsBehaviorCandidateMarker(candidate.Event))
+                    .ThenBy(candidate => DynamicActionPriority(candidate.Event))
                     .ThenBy(candidate => candidate.Index);
             }
 
             foreach (var candidate in bucketCandidates)
             {
                 if ((!isDynamicActionBucket && !isCoverageEvidenceBucket && boundedSelectedCount >= options.MaxInlineEvents) ||
-                    selectedForBucket >= bucketQuota)
+                    (isDynamicActionBucket && dynamicEnvironmentSelectedCount >= bucketQuota &&
+                     !IsBehaviorCandidateMarker(candidate.Event) &&
+                     !IsStrongSampleBehaviorEvent(candidate.Event)) ||
+                    (!isDynamicActionBucket && selectedForBucket >= bucketQuota))
                 {
                     break;
                 }
@@ -1375,6 +1380,11 @@ public static class ReportEventSampler
                 if (isDynamicActionBucket)
                 {
                     dynamicActionSelectedCount++;
+                    if (!IsBehaviorCandidateMarker(candidate.Event) &&
+                        !IsStrongSampleBehaviorEvent(candidate.Event))
+                    {
+                        dynamicEnvironmentSelectedCount++;
+                    }
                 }
                 else if (!isCoverageEvidenceBucket)
                 {
@@ -1385,26 +1395,37 @@ public static class ReportEventSampler
         }
 
         // A dynamic row can also satisfy a higher-priority lifecycle or
-        // coverage predicate. If that predicate was capped, the row must
-        // still consume the dedicated dynamic quota rather than becoming an
-        // unexplained policy omission. Fill any remaining dynamic capacity
-        // from the complete dynamic candidate set before calculating the
-        // omission ledger.
-        if (dynamicActionSelectedCount < dynamicActionQuota)
+        // coverage predicate. If that predicate was capped, explicitly
+        // attributed rows must still be retained. Fill remaining environment
+        // capacity from the complete dynamic candidate set before calculating
+        // the omission ledger.
+        if (dynamicEnvironmentSelectedCount < dynamicActionQuota ||
+            inlineCandidates.Any(candidate =>
+                IsDynamicActionEvidenceEvent(candidate.Event) &&
+                IsBehaviorCandidateMarker(candidate.Event) &&
+                !selectedIndexes.Contains(candidate.Index)))
         {
             foreach (var candidate in inlineCandidates
                          .Where(candidate => IsDynamicActionEvidenceEvent(candidate.Event) &&
                                              !selectedIndexes.Contains(candidate.Index))
-                         .OrderBy(candidate => DynamicActionPriority(candidate.Event))
+                         .OrderByDescending(candidate => IsBehaviorCandidateMarker(candidate.Event))
+                         .ThenBy(candidate => DynamicActionPriority(candidate.Event))
                          .ThenBy(candidate => candidate.Index))
             {
-                if (dynamicActionSelectedCount >= dynamicActionQuota)
+                if (dynamicEnvironmentSelectedCount >= dynamicActionQuota &&
+                    !IsBehaviorCandidateMarker(candidate.Event) &&
+                    !IsStrongSampleBehaviorEvent(candidate.Event))
                 {
                     break;
                 }
 
                 selectedIndexes.Add(candidate.Index);
                 dynamicActionSelectedCount++;
+                if (!IsBehaviorCandidateMarker(candidate.Event) &&
+                    !IsStrongSampleBehaviorEvent(candidate.Event))
+                {
+                    dynamicEnvironmentSelectedCount++;
+                }
             }
         }
 
@@ -2436,14 +2457,16 @@ public static class ReportEventSampler
             ["omittedEventCount"] = result.OmittedEventCount.ToString(),
             ["maxInlineEvents"] = options.MaxInlineEvents.ToString(),
             ["maxDynamicActionEvents"] = options.MaxDynamicActionEvents.ToString(),
+            ["dynamicActionEnvironmentQuota"] = options.MaxDynamicActionEvents.ToString(),
             ["maxEventsPerType"] = options.MaxEventsPerType.ToString(),
             ["maxHighValueEventsPerType"] = options.MaxHighValueEventsPerType.ToString(),
             ["maxDiagnosticEvents"] = options.MaxDiagnosticEvents.ToString(),
-            ["dynamicActionEventsAlwaysRetained"] = "false",
+            ["dynamicActionEventsAlwaysRetained"] = "true",
+            ["dynamicActionAttributedAlwaysRetained"] = "true",
             ["maxInlineEventsExcludesDynamicActions"] = "false",
             ["dynamicActionSelectedCount"] = result.DynamicActionSelectedCount.ToString(),
             ["dynamicActionOmittedCount"] = result.DynamicActionOmittedCount.ToString(),
-            ["dynamicActionSpillPolicy"] = "hard-budget",
+            ["dynamicActionSpillPolicy"] = "environment-only-hard-budget",
             ["omittedBehaviorCandidateCount"] = result.OmittedBehaviorCandidateCount.ToString(),
             ["omittedHighSignalCount"] = result.OmittedHighSignalCount.ToString(),
             ["omittedEventTypeCounts"] = FormatOmittedEventTypeCounts(result.OmittedEventTypeCounts)
@@ -2625,7 +2648,8 @@ public static class ReportEventSampler
                 "reportEventCount", "omittedEventCount", "omittedBehaviorCandidateCount",
                 "omittedHighSignalCount", "omittedEventTypeCounts", "maxInlineEvents",
                 "maxEventsPerType", "maxHighValueEventsPerType", "maxDiagnosticEvents",
-                "maxDynamicActionEvents", "dynamicActionEventsAlwaysRetained",
+                "maxDynamicActionEvents", "dynamicActionEnvironmentQuota", "dynamicActionEventsAlwaysRetained",
+                "dynamicActionAttributedAlwaysRetained",
                 "maxInlineEventsExcludesDynamicActions", "dynamicActionSelectedCount",
                 "dynamicActionOmittedCount", "dynamicActionSpillPolicy",
                 "rawDynamicActionCount", "selectedDynamicActionCount",

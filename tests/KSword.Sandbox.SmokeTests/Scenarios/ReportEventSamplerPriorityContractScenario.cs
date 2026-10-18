@@ -564,9 +564,10 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         var samplingMarker = RequireEvent(result.Events, "report.events.sampled");
         RequireData(samplingMarker, "wmiCaptureFailedCount", "2");
         RequireData(samplingMarker, "wmiCaptureFailedPhases", "before-start, after-run");
-        RequireData(samplingMarker, "dynamicActionEventsAlwaysRetained", "false");
+        RequireData(samplingMarker, "dynamicActionEventsAlwaysRetained", "true");
+        RequireData(samplingMarker, "dynamicActionAttributedAlwaysRetained", "true");
         RequireData(samplingMarker, "maxInlineEventsExcludesDynamicActions", "false");
-        RequireData(samplingMarker, "dynamicActionSpillPolicy", "hard-budget");
+        RequireData(samplingMarker, "dynamicActionSpillPolicy", "environment-only-hard-budget");
 
         var artifactEvent = RequireEvent(result.Events, "artifact.host_imported");
         RequireData(artifactEvent, "downloadSelector", "artifacts/drop.bin");
@@ -693,9 +694,9 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
                 Source = "guest",
                 Data =
                 {
-                    ["sampleCorrelation"] = "confirmed",
-                    ["behaviorCounted"] = "true",
-                    ["sampleBehaviorCandidate"] = "true"
+                    ["sampleCorrelation"] = "unknown",
+                    ["behaviorCounted"] = "false",
+                    ["sampleBehaviorCandidate"] = "false"
                 }
             })
             .ToList();
@@ -719,6 +720,47 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(boundedDynamicMarker, "markerOverheadEventCount", "1");
         SmokeAssert.True(boundedDynamic.SelectedRawEventCount == 5,
             "Dynamic evidence selection must obey MaxDynamicActionEvents.");
+
+        // The environment quota must never spill explicitly attributed sample
+        // actions. Only un-attributed rows are allowed to consume the bounded
+        // environment budget.
+        var attributedBeyondQuota = Enumerable.Range(0, 8)
+            .Select(index => new SandboxEvent
+            {
+                EventType = "file.write",
+                Timestamp = timestamp.AddSeconds(30).AddMilliseconds(index),
+                Source = "guest",
+                Data =
+                {
+                    ["sampleCorrelation"] = "confirmed",
+                    ["behaviorCounted"] = "true",
+                    ["sampleBehaviorCandidate"] = "true"
+                }
+            })
+            .Concat(Enumerable.Range(0, 4).Select(index => new SandboxEvent
+            {
+                EventType = "network.tcp",
+                Timestamp = timestamp.AddSeconds(30).AddMilliseconds(20 + index),
+                Source = "guest",
+                Data = { }
+            }))
+            .ToList();
+        var attributedBeyondQuotaResult = ReportEventSampler.SampleForReport(
+            attributedBeyondQuota,
+            new ReportEventSamplingOptions
+            {
+                MaxInlineEvents = 0,
+                MaxDynamicActionEvents = 2,
+                MaxDiagnosticEvents = 0
+            });
+        SmokeAssert.True(
+            attributedBeyondQuotaResult.Events.Count(evt => evt.EventType == "file.write") == 8,
+            "All explicitly attributed dynamic actions must remain in the report beyond the environment quota.");
+        SmokeAssert.True(attributedBeyondQuotaResult.DynamicActionSelectedCount == 10 &&
+            attributedBeyondQuotaResult.DynamicActionOmittedCount == 2,
+            $"Dynamic selection should retain all attributed rows and bound only un-attributed environment rows (selected={attributedBeyondQuotaResult.DynamicActionSelectedCount}, omitted={attributedBeyondQuotaResult.DynamicActionOmittedCount}).");
+        SmokeAssert.True(attributedBeyondQuotaResult.OmittedBehaviorCandidateCount == 0,
+            "Explicitly attributed rows must never be reported as omitted behavior candidates.");
 
         // Process lifecycle rows are promoted to FindingEvidence before the
         // dedicated dynamic lane.  Marker counts must still reconcile them as
@@ -755,12 +797,9 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
             MaxDynamicActionEvents = 1,
             MaxDiagnosticEvents = 0
         });
-        var mixedLifecycleMarker = RequireEvent(mixedLifecycleDynamic.Events, "report.events.sampled");
-        var mixedLifecycleSelected = int.Parse(mixedLifecycleMarker.Data["selectedDynamicActionCount"]);
-        var mixedLifecycleOmitted = int.Parse(mixedLifecycleMarker.Data["dynamicActionOmittedCount"]);
-        var mixedLifecycleRaw = int.Parse(mixedLifecycleMarker.Data["rawDynamicActionCount"]);
-        SmokeAssert.True(mixedLifecycleSelected + mixedLifecycleOmitted == mixedLifecycleRaw,
-            "Dynamic marker counts must reconcile process lifecycle rows promoted through FindingEvidence.");
+        SmokeAssert.True(mixedLifecycleDynamic.Events.Count(evt => evt.EventType is "process.start" or "process.exit" or "file.write") == 3 &&
+            mixedLifecycleDynamic.DynamicActionOmittedCount == 0,
+            "Process lifecycle and file actions attributed to the sample must remain complete beyond the environment quota.");
 
         // Unknown/environment dynamic rows can arrive before the submitted
         // sample's confirmed actions. They must not consume the dedicated
@@ -842,8 +881,9 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         SmokeAssert.True(sameTypeResult.DynamicActionOmittedCount == 0 && sameTypeResult.SelectedRawEventCount == 200,
             "Sample-attributed dynamic rows must remain complete up to MaxDynamicActionEvents.");
 
-        // Confirmed/probable dispositions remain visible in omission coverage
-        // even when producers do not set behaviorCounted/sampleBehaviorCandidate.
+        // Confirmed/probable dispositions are explicit attribution even when
+        // producers do not set behaviorCounted/sampleBehaviorCandidate. Keep
+        // every such row despite the environment quota.
         var dispositionRows = Enumerable.Range(0, 4)
             .Select(index => new SandboxEvent
             {
@@ -859,8 +899,9 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         var dispositionResult = ReportEventSampler.SampleForReport(
             dispositionRows,
             new ReportEventSamplingOptions { MaxDynamicActionEvents = 1 });
-        var dispositionMarker = RequireEvent(dispositionResult.Events, "report.events.sampled");
-        RequireData(dispositionMarker, "omittedBehaviorCandidateCount", "3");
+        SmokeAssert.True(dispositionResult.Events.Count(evt => evt.EventType == "network.tcp") == 4 &&
+            dispositionResult.DynamicActionOmittedCount == 0,
+            "Confirmed/probable dynamic rows must remain complete beyond the environment quota.");
 
         // A host row that merely adopts a driver/image event type must not be
         // treated as real R0 dynamic telemetry without source/schema proof.
@@ -1018,11 +1059,9 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
             persistenceBounded.QuotaOmittedEventCount +
             persistenceBounded.PolicyExcludedEventCount,
             "Persistence sampling must reconcile raw, selected, quota omitted, and policy excluded rows.");
-        var persistenceMarker = RequireEvent(persistenceBounded.Events, "report.events.sampled");
-        SmokeAssert.True(persistenceMarker.Data.TryGetValue("omittedEventTypeCounts", out var persistenceOmittedTypes) &&
-            persistenceOmittedTypes.Contains("startup_item.deleted=", StringComparison.OrdinalIgnoreCase) &&
-            persistenceOmittedTypes.Contains("registry.run.deleted=", StringComparison.OrdinalIgnoreCase),
-            $"Persistence omission marker must identify omitted create/delete event types; got '{(persistenceMarker.Data.TryGetValue("omittedEventTypeCounts", out var omitted) ? omitted : "<missing>")}'.");
+        SmokeAssert.True(persistenceBounded.Events.Count == persistenceRows.Count &&
+            persistenceBounded.DynamicActionOmittedCount == 0,
+            "Explicitly attributed persistence create/delete rows must remain complete beyond the environment quota.");
 
         return Task.FromResult(new SmokeTestResult
         {
