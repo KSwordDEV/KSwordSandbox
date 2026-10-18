@@ -1771,6 +1771,13 @@ public sealed class HyperVRunbookBuilder
             "try {",
             "Invoke-Command -Session $session -ScriptBlock {",
             "param($taskName, $guestUserName, $workingDirectory, $pidPath, $encodedCommand)",
+            // Task Scheduler resolves a local account more reliably when the
+            // guest machine name is explicit.  WinRM credentials may use the
+            // .\ alias, but that alias is not consistently accepted by the
+            // Interactive/S4U principal constructors.  The argument passed
+            // below strips only .\; qualify the remaining bare local name in
+            // the guest before either principal is created.
+            "$guestUserName = $guestUserName.Trim(); if (-not $guestUserName.Contains('\\') -and -not $guestUserName.Contains('@')) { $guestUserName = \"$env:COMPUTERNAME\\$guestUserName\" };",
             // Keep a reconnect retry idempotent.  If the first remoting stream
             // died after scheduling/starting the Agent, return without
             // unregistering its task or deleting its markers.
