@@ -11062,9 +11062,8 @@ html[lang="en"] .localized-evidence-field{display:none}
             }
         }
 
-        var builder = new StringBuilder(html.Length);
+        var matches = new List<TranslationMatch>();
         var state = 0;
-        var copiedThrough = 0;
         for (var index = 0; index < html.Length; index++)
         {
             var character = html[index];
@@ -11088,21 +11087,38 @@ html[lang="en"] .localized-evidence-field{display:none}
                 continue;
             }
 
-            var matchStart = index - node.MatchLength + 1;
-            if (matchStart < copiedThrough)
+            matches.Add(new TranslationMatch(
+                index - node.MatchLength + 1,
+                index + 1,
+                node.MatchLength,
+                node.Replacement));
+        }
+
+        matches.Sort(static (left, right) =>
+        {
+            var start = left.Start.CompareTo(right.Start);
+            return start != 0 ? start : right.Length.CompareTo(left.Length);
+        });
+
+        var builder = new StringBuilder(html.Length);
+        var copiedThrough = 0;
+        foreach (var match in matches)
+        {
+            if (match.Start < copiedThrough)
             {
                 continue;
             }
 
-            builder.Append(html, copiedThrough, matchStart - copiedThrough);
-            builder.Append(node.Replacement);
-            copiedThrough = index + 1;
-            state = 0;
+            builder.Append(html, copiedThrough, match.Start - copiedThrough);
+            builder.Append(match.Replacement);
+            copiedThrough = match.End;
         }
 
         builder.Append(html, copiedThrough, html.Length - copiedThrough);
         return builder.ToString();
     }
+
+    private readonly record struct TranslationMatch(int Start, int End, int Length, string Replacement);
 
     private sealed class TranslationTrieNode
     {
