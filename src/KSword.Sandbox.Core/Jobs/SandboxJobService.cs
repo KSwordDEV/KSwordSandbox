@@ -2119,9 +2119,13 @@ public sealed partial class SandboxJobService
             }
 
             var providerPrefix = provider.ToString().ToLowerInvariant();
-            var fallbackWarning = result.FallbackWarning ?? string.Empty;
+            var fallbackWarning = result.FallbackWarning ?? DetectS4UFallbackWarning(result) ?? string.Empty;
+            var launchContext = string.Equals(result.LaunchContext, "s4u-fallback", StringComparison.OrdinalIgnoreCase) ||
+                !string.IsNullOrWhiteSpace(fallbackWarning)
+                ? "s4u-fallback"
+                : result.LaunchContext;
             var fallbackUsed = !string.IsNullOrWhiteSpace(fallbackWarning) ||
-                string.Equals(result.LaunchContext, "s4u-fallback", StringComparison.OrdinalIgnoreCase);
+                string.Equals(launchContext, "s4u-fallback", StringComparison.OrdinalIgnoreCase);
             var runbookData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["provider"] = provider.ToString(),
@@ -2134,8 +2138,8 @@ public sealed partial class SandboxJobService
                 ["resultPath"] = resultPath,
                 ["message"] = result.Message ?? string.Empty,
                 ["failureHint"] = BuildSafeRunbookFailureHint(result),
-                ["launchContext"] = string.IsNullOrWhiteSpace(result.LaunchContext) ? "unknown" : result.LaunchContext,
-                ["fallbackWarning"] = fallbackWarning,
+                ["launchContext"] = string.IsNullOrWhiteSpace(launchContext) ? "unknown" : launchContext,
+                ["fallbackWarning"] = fallbackWarning ?? string.Empty,
                 ["fallbackUsed"] = fallbackUsed.ToString()
             };
             if (fallbackUsed)
@@ -2179,6 +2183,18 @@ public sealed partial class SandboxJobService
                 })
             });
         }
+    }
+
+    private static string? DetectS4UFallbackWarning(SandboxRunbookExecutionResult result)
+    {
+        var runAgentOutput = result.StepResults
+            .Where(step => string.Equals(step.StepId, "run-agent", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(step => new[] { step.StandardOutput, step.StandardError, step.Message ?? string.Empty });
+        return runAgentOutput.Any(output =>
+                output.Contains("Interactive desktop is unavailable", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("S4U fallback started", StringComparison.OrdinalIgnoreCase))
+            ? "Interactive desktop unavailable; Guest Agent started by S4U scheduled task fallback."
+            : null;
     }
 
     private static string BuildSafeRunbookFailureHint(SandboxRunbookExecutionResult result)
