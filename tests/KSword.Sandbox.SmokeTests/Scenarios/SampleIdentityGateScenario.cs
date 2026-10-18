@@ -121,7 +121,7 @@ internal sealed class SampleIdentityGateScenario : ISmokeTestScenario
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         SmokeAssert.True(rebuilt?.SampleIdentityStatus == "mismatch", "Rebuilt report must explicitly mark sample identity mismatch.");
         SmokeAssert.True(rebuilt?.SampleIdentityIssues.Contains("report-sha256-mismatch") == true, "Rebuilt report must retain the stale report hash issue.");
-        SmokeAssert.True(rebuilt?.Events.Any(evt => string.Equals(evt.EventType, "sample.identity_mismatch", StringComparison.OrdinalIgnoreCase)) == true, "Identity mismatch must remain visible as a diagnostic event.");
+        SmokeAssert.True(rebuilt?.Events?.Any(evt => string.Equals(evt.EventType, "sample.identity_mismatch", StringComparison.OrdinalIgnoreCase)) == true, "Identity mismatch must remain visible as a diagnostic event.");
     }
 
     private static SampleIdentity CreateIdentity(string path, string seed, long size) => new()
