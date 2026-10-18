@@ -906,6 +906,22 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
     [
         new ArtifactDescriptor
         {
+            Kind = ArtifactKind.Screenshot,
+            Category = "screenshot",
+            Name = "contract-screen.png",
+            RelativePath = "artifacts/contract-screen.png",
+            MimeType = "image/png",
+            SizeBytes = 64,
+            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                // Production indexes can carry an explicit false duplicate
+                // marker without a duplicate group count. The copyable
+                // artifact summary must not render groupCount=- for that row.
+                ["isDuplicate"] = "false"
+            }
+        },
+        new ArtifactDescriptor
+        {
             Kind = ArtifactKind.DroppedFile,
             Category = "dropped-file",
             Name = "contract-drop.bin",

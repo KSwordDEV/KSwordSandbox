@@ -3720,8 +3720,11 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Where(item => item.Gap)
             .OrderBy(item => item.State, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
+        var etwLiveFailureEvents = etwEvents
+            .Where(IsEtwLiveCaptureFailureEvent)
+            .ToList();
         var etwEventGap = etwEvents.Any(IsEtwLiveCaptureDisabledEvent) ||
-            etwEvents.Any(evt => TextContainsAny(evt.EventType, "etw_live.failed", "etw_live.capture_failed")) ||
+            etwLiveFailureEvents.Count > 0 ||
             etwEvents.Any(evt => EventDataBoolTrue(evt, "captureWasNotStarted", "etwCaptureWasNotStarted"));
         if (etwManifestGap is not null || etwEventGap)
         {
@@ -3729,17 +3732,44 @@ html[lang="en"] .localized-evidence-field{display:none}
                 TextEqualsAny(FirstEventDataValue(evt, "reason", "failureReason", "captureState") ?? string.Empty, "captureWasNotStarted"));
             var state = etwManifestGap?.State ?? (eventCaptureWasNotStarted
                 ? "captureWasNotStarted"
-                : etwEvents.Any(evt => TextContainsAny(evt.EventType, "etw_live.failed", "etw_live.capture_failed")) ? "failed" : "disabled");
+                : etwLiveFailureEvents.Count > 0 ? "failed" : "disabled");
             // Keep the machine-oriented "manifest enabled=" shape in the
             // source contract while rendering a readable sentence below.
             var manifestDetail = etwManifestGap is null
                 ? "ETW manifest: not observed"
                 : $"ETW manifest: {CollectionBooleanLabel(etwManifestGap.Collection.Enabled)}; status: {CollectionStatusLabel(etwManifestGap.Collection.Status)}; reason: {CollectionGapStateLabel(etwManifestGap.Collection.Reason)}; capture state: {(etwManifestGap.CaptureWasNotStarted ? "not started" : "failed or disabled")}";
+            var etwEvidence = etwEvents
+                .Where(evt => IsEtwLiveCaptureDisabledEvent(evt) || IsEtwLiveCaptureFailureEvent(evt) ||
+                    EventDataBoolTrue(evt, "captureWasNotStarted", "etwCaptureWasNotStarted"))
+                .Take(4)
+                .ToList();
+            if (etwEvidence.Count == 0)
+            {
+                etwEvidence = etwEvents.Take(4).ToList();
+            }
             gaps.Add((
                 "ETW live capture",
                 state,
                 $"ETW live collection gap: {manifestDetail}. Provider/readiness metadata does not represent a complete live trace.",
-                string.Join("; ", etwEvents.Take(4).Select(EventOneLine))));
+                string.Join("; ", etwEvidence.Select(EventOneLine))));
+        }
+
+        var etwSecuritySurfaceGaps = etwEvents
+            .Where(IsEtwSecuritySurfaceReadinessGap)
+            .ToList();
+        if (etwSecuritySurfaceGaps.Count > 0)
+        {
+            var surfaceKeys = etwSecuritySurfaceGaps
+                .Select(evt => FirstEventDataValue(evt, "surfaceKey", "surfaceName") ?? string.Empty)
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .ToList();
+            gaps.Add((
+                "ETW/Security surface subscription",
+                "not-subscribed",
+                $"Security/ETW surfaces are not subscribed to live ETW; readiness only{(surfaceKeys.Count == 0 ? string.Empty : $": {string.Join(", ", surfaceKeys)}") }.",
+                string.Join("; ", etwSecuritySurfaceGaps.Take(4).Select(EventOneLine))));
         }
 
         var auditPartial = report.Events
@@ -3807,7 +3837,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("<div class=\"evidence-summary-grid collection-coverage-gap-grid copyable\" data-copy=\"" + A(copy) + "\">");
         foreach (var gap in gaps)
         {
-            var css = TextEqualsAny(gap.State, "partial", "capture_failed", "failed", "disabled", "disabled/missing", "missing", "job-id mismatch") ? "medium" : "info";
+            var css = TextEqualsAny(gap.State, "partial", "capture_failed", "failed", "disabled", "disabled/missing", "missing", "not-subscribed", "job-id mismatch") ? "medium" : "info";
             var evidence = string.IsNullOrWhiteSpace(gap.Evidence) ? "-" : gap.Evidence;
             html.AppendLine("<article class=\"evidence-summary-card\">");
             html.AppendLine("<div class=\"relationship-title\">");
@@ -3832,6 +3862,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         return state switch
         {
             "captureWasNotStarted" => "capture not started",
+            "not-subscribed" => "not subscribed",
             "disabled/missing" => "disabled or missing",
             "job-id mismatch" => "manifest identity mismatch",
             "capture_failed" => "capture failed",
@@ -3865,13 +3896,47 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static bool IsEtwLiveCaptureDisabledEvent(SandboxEvent evt)
     {
-        if (!TextContainsAny(evt.EventType, "etw", "security_eventlog"))
+        // `etw_live.captured` is emitted after the owned session is stopped,
+        // so etwSessionStarted=false is the expected terminal state. A
+        // successful started/captured row must never become a disabled gap.
+        if (!evt.EventType.StartsWith("etw_live.", StringComparison.OrdinalIgnoreCase) ||
+            TextEqualsAny(evt.EventType, "etw_live.started", "etw_live.captured"))
         {
             return false;
         }
 
-        return EventDataBoolFalse(evt, "etwLiveCaptureEnabled", "etwSessionStarted", "liveEtwEnabled") ||
-            TextEqualsAny(FirstEventDataValue(evt, "etwLiveCaptureState", "etwCaptureState") ?? string.Empty, "disabled", "not-enabled", "readiness-only");
+        return TextEqualsAny(evt.EventType, "etw_live.disabled") ||
+            EventDataBoolFalse(evt, "etwLiveCaptureEnabled", "liveEtwEnabled") ||
+            TextEqualsAny(FirstEventDataValue(evt, "etwLiveCaptureState", "etwCaptureState", "captureState", "status") ?? string.Empty, "disabled", "not-enabled", "readiness-only");
+    }
+
+    private static bool IsEtwLiveCaptureFailureEvent(SandboxEvent evt)
+    {
+        if (!evt.EventType.StartsWith("etw_live.", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return TextEqualsAny(evt.EventType, "etw_live.failed", "etw_live.capture_failed", "etw_live.decode_failed") ||
+            TextEqualsAny(FirstEventDataValue(evt, "captureState", "status", "decodeState", "decodeStatus") ?? string.Empty, "failed", "failure", "error");
+    }
+
+    private static bool IsEtwSecuritySurfaceReadinessGap(SandboxEvent evt)
+    {
+        if (!string.Equals(evt.EventType, "etw_security.surface.readiness", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // A surface readiness row describes provider metadata only. It is a
+        // separate coverage gap when no live subscription was made; it must
+        // not be folded into the ETW kernel capture card.
+        if (EventDataBoolTrue(evt, "surfaceSubscribed", "etwSurfaceSubscribed", "liveEtwSubscribed", "etwSessionStarted"))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static bool IsAuditPolicyPartialEvent(SandboxEvent evt)
@@ -10035,7 +10100,10 @@ html[lang="en"] .localized-evidence-field{display:none}
             health.AgentFailureRows > 0 ||
             TextEqualsAny(health.State, "partial", "degraded", "failed", "unknown");
         var explicitGap = report.Events.Any(evt =>
-            EventDataBoolFalse(evt, "userInteractive", "interactiveDesktop", "etwLiveCaptureEnabled", "etwSessionStarted") ||
+            EventDataBoolFalse(evt, "userInteractive", "interactiveDesktop") ||
+            IsEtwLiveCaptureDisabledEvent(evt) ||
+            IsEtwLiveCaptureFailureEvent(evt) ||
+            IsEtwSecuritySurfaceReadinessGap(evt) ||
             TextEqualsAny(evt.EventType,
                 "packet_capture.disabled",
                 "screenshot.disabled",
@@ -12235,6 +12303,9 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("coverage gap · disabled", "覆盖缺口 · 已禁用"),
         ("coverage gap · not run", "覆盖缺口 · 未运行"),
         ("capture not started", "未启动采集"),
+        ("not subscribed", "未订阅"),
+        ("ETW/Security surface subscription", "ETW/Security 安全面订阅"),
+        ("Security/ETW surfaces are not subscribed to live ETW; readiness only", "Security/ETW 安全面未订阅实时 ETW；仅记录就绪度"),
         ("disabled or missing", "已禁用或缺失"),
         ("manifest identity mismatch", "清单身份不一致"),
         ("enabled but empty", "已启用但为空"),
@@ -15055,7 +15126,18 @@ html[lang="en"] .localized-evidence-field{display:none}
             return null;
         }
 
-        return $"isDuplicate={FirstNonEmpty(isDuplicate, "false")}; groupCount={FirstNonEmpty(groupCount, "-")}; primary={FirstNonEmpty(primary, "-")}";
+        var parts = new List<string> { $"isDuplicate={FirstNonEmpty(isDuplicate, "false")}" };
+        if (!string.IsNullOrWhiteSpace(groupCount))
+        {
+            parts.Add($"groupCount={groupCount}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(primary))
+        {
+            parts.Add($"primary={primary}");
+        }
+
+        return string.Join("; ", parts);
     }
 
     private static string? ArtifactRejectionLabel(ArtifactDescriptor artifact)

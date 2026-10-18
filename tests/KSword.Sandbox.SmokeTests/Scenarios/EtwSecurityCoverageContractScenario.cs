@@ -74,6 +74,71 @@ internal sealed class EtwSecurityCoverageContractScenario : ISmokeTestScenario
             retained.Data.ContainsKey("r0CoverageGap") && retained.Data.ContainsKey("fallbackSurfaceKeys"),
             "ETW Security readiness matrix fields must survive report sanitization alongside the summary row.");
 
+        var renderer = new HtmlReportRenderer();
+        var lifecycleReport = new AnalysisReport
+        {
+            JobId = Guid.Parse("11111111-2222-3333-4444-555555555555"),
+            Sample = new SampleIdentity
+            {
+                FileName = "etw-contract.exe",
+                FullPath = @"C:\Samples\etw-contract.exe",
+                Sha256 = new string('a', 64),
+                Sha1 = new string('b', 40),
+                Md5 = new string('c', 32),
+                Crc32 = "1234abcd"
+            },
+            Events =
+            [
+                new SandboxEvent
+                {
+                    EventType = "etw_live.started",
+                    Source = "etwLive",
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Data =
+                    {
+                        ["captureState"] = "started",
+                        ["etwSessionStarted"] = "true",
+                        ["etwLiveCaptureEnabled"] = "true"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "etw_live.captured",
+                    Source = "etwLive",
+                    Timestamp = DateTimeOffset.UtcNow.AddSeconds(1),
+                    Data =
+                    {
+                        ["captureState"] = "captured",
+                        ["status"] = "captured",
+                        ["etwSessionStarted"] = "false",
+                        ["etwLiveCaptureEnabled"] = "true"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "etw_security.surface.readiness",
+                    Source = "etwSecurityReadiness",
+                    Timestamp = DateTimeOffset.UtcNow.AddSeconds(2),
+                    Data =
+                    {
+                        ["surfaceKey"] = "process-access",
+                        ["etwSessionStarted"] = "false",
+                        ["etwLiveCaptureEnabled"] = "false",
+                        ["collectionHealth"] = "true",
+                        ["nonbehavior"] = "true"
+                    }
+                }
+            ]
+        };
+        var lifecycleHtml = renderer.RenderEnglish(lifecycleReport, []);
+        SmokeAssert.True(
+            !lifecycleHtml.Contains("ETW live collection gap:", StringComparison.Ordinal),
+            "Successful ETW started/captured rows, including captured etwSessionStarted=false after stop, must not raise a live-capture gap.");
+        SmokeAssert.True(
+            lifecycleHtml.Contains("ETW/Security surface subscription", StringComparison.Ordinal) &&
+            lifecycleHtml.Contains("not subscribed", StringComparison.Ordinal),
+            "ETW Security surface readiness must expose a compact not-subscribed coverage gap separately from live ETW capture.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
