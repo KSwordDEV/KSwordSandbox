@@ -109,12 +109,32 @@ internal sealed class BehaviorRuleReleasePrepR0SemanticsScenario : ISmokeTestSce
             SmokeAssert.True(!noiseFindingIds.Contains(ruleId), $"Collection/VT/self-noise should not match release-prep rule '{ruleId}'.");
         }
 
+        AssertScheduledTaskSwitchBoundary(engine);
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
             Message = $"{RequiredRuleIds.Length} release-prep rules match constrained evidence and suppress collection, VT, and R0 self-noise."
         });
+    }
+
+    private static void AssertScheduledTaskSwitchBoundary(RuleEngine engine)
+    {
+        var localTaskFindings = engine.Classify(
+        [
+            new SandboxEvent
+            {
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = "schtasks.exe",
+                CommandLine = @"schtasks.exe /Create /TN LocalTask /TR cmd.exe /SC ONCE /ST 23:59"
+            }
+        ]);
+
+        SmokeAssert.True(
+            localTaskFindings.All(finding => !string.Equals(finding.RuleId, "lateral-remote-schtasks-create-or-run", StringComparison.OrdinalIgnoreCase)),
+            "A local schtasks /SC switch must not satisfy the remote /S scheduled-task rule.");
     }
 
     private static void AssertReleasePrepRuleContract(BehaviorRule rule)
