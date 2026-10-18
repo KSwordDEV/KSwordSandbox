@@ -14225,10 +14225,10 @@ html[lang="en"] .localized-evidence-field{display:none}
     }
 
     /// <summary>
-    /// Removes absolute host/guest path prefixes from visible bounded evidence.
-    /// Inputs are copyable evidence text; processing keeps the original text in
-    /// data-copy while replacing path tokens in the visible preview with their
-    /// file names; return is safe analyst-facing text.
+    /// Removes known host path prefixes from visible bounded evidence while
+    /// retaining common Windows guest paths. Inputs are copyable evidence text;
+    /// processing keeps guest paths useful for analysts and replaces report
+    /// storage paths with their file names; return is safe analyst-facing text.
     /// </summary>
     private static string VisibleEvidenceText(string value)
     {
@@ -14243,10 +14243,38 @@ html[lang="en"] .localized-evidence-field{display:none}
             match =>
             {
                 var token = match.Value.TrimEnd('.', ',', ';', ')', ']');
+                if (!ShouldHideVisiblePath(token))
+                {
+                    return match.Value;
+                }
+
                 var leaf = SafePathLeaf(token);
                 return string.IsNullOrWhiteSpace(leaf) ? "path" : leaf;
             },
             RegexOptions.CultureInvariant);
+    }
+
+    private static bool ShouldHideVisiblePath(string value)
+    {
+        var normalized = value.Replace('\\', '/').ToLowerInvariant();
+        if (normalized.StartsWith("c:/users/", StringComparison.Ordinal) ||
+            normalized.StartsWith("c:/windows/", StringComparison.Ordinal) ||
+            normalized.StartsWith("c:/program files", StringComparison.Ordinal) ||
+            normalized.StartsWith("c:/programdata/", StringComparison.Ordinal) ||
+            normalized.StartsWith("c:/temp/", StringComparison.Ordinal) ||
+            normalized.StartsWith("c:/perflogs/", StringComparison.Ordinal) ||
+            normalized.StartsWith("c:/inetpub/", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return normalized.Contains("/kswordsandbox/", StringComparison.Ordinal) ||
+            normalized.Contains("/vms/", StringComparison.Ordinal) ||
+            normalized.Contains("/jobs/", StringComparison.Ordinal) ||
+            normalized.Contains("/samples/", StringComparison.Ordinal) ||
+            normalized.Contains("/projects/", StringComparison.Ordinal) ||
+            normalized.Contains("/temp/", StringComparison.Ordinal) ||
+            normalized.Contains("/artifacts/", StringComparison.Ordinal);
     }
 
     private static string AbbreviateEvidenceValue(string value, int maxLength)
