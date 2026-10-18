@@ -101,6 +101,8 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
         Require(webApiE2E, "'-StrictUrl'", "Web API E2E must bind the child WebUI to the exact URL it will poll.");
         Require(webApiE2E, "$BaseUrl = [string]$startedHost.Url", "Web API E2E must poll the effective child URL after port selection.");
         Require(webApiE2E, "$script:StartedJobId", "Web API E2E must retain the active background job while tearing down its child WebUI.");
+        Require(webApiE2E, "ExecutionTransportForCleanup", "Web API E2E cleanup must distinguish blocking and background transports so blocking runs do not wait on an unused background store.");
+        Require(webApiE2E, "Equals($script:ExecutionTransportForCleanup, 'Background'", "Web API E2E should only wait for background terminal state when the background transport was used.");
         Require(webApiE2E, "leaving WebUI PID", "Web API E2E must leave the child WebUI alive when a runbook is still active during cleanup.");
         Require(webApiE2E, "/runbook/start", "Web API E2E should cover the preferred background runbook start endpoint.");
         Require(webApiE2E, "/runbook/background", "Web API E2E should wait for the background terminal state before reading reports.");

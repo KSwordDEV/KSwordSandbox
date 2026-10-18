@@ -90,6 +90,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $script:StartedWebUIProcess = $null
 $script:StartedJobId = $null
+$script:ExecutionTransportForCleanup = $ExecutionTransport
 $script:StartedWebUIUrl = $null
 
 function Write-E2EStep {
@@ -568,7 +569,8 @@ function Test-E2EReportEndpoint {
 
 function Stop-E2EStartedWebUI {
     if ($script:StartedWebUIProcess -and -not $script:StartedWebUIProcess.HasExited -and
-        -not [string]::IsNullOrWhiteSpace($script:StartedJobId)) {
+        -not [string]::IsNullOrWhiteSpace($script:StartedJobId) -and
+        [string]::Equals($script:ExecutionTransportForCleanup, 'Background', [StringComparison]::OrdinalIgnoreCase)) {
         # A transient API/browser disconnect must not tear down the host while
         # the provider runbook is still in sync-live-output or collect-output.
         # Give the background runner a short recovery window; on timeout leave
