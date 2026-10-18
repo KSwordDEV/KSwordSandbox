@@ -1265,7 +1265,10 @@ html[lang="en"] .localized-evidence-field{display:none}
             health.PcapFailureRows > 0 ||
             health.AgentFailureRows > 0 ||
             TextEqualsAny(health.State, "partial", "degraded", "failed", "unknown");
-        if (!healthAlert && diagnosticRows == 0)
+        // Diagnostic rows can be ordinary probe/status observations. Keep
+        // the warning reserved for an actual loss, failure, disabled channel,
+        // or degraded health state; diagnostics remain available in the table.
+        if (!healthAlert)
         {
             return;
         }
@@ -1755,9 +1758,10 @@ html[lang="en"] .localized-evidence-field{display:none}
             compact += Environment.NewLine + "…";
         }
 
+        var visibleFull = VisibleEvidenceText(full);
         return
-            $"<span class=\"inline-actions\">{CopyIconButton(full)}</span>" +
-            $"<div class=\"flat-details\"><pre class=\"copyable\" data-copy=\"{A(full)}\">{E(compact)}</pre></div>";
+            $"<span class=\"inline-actions\">{CopyIconButton(visibleFull)}</span>" +
+            $"<div class=\"flat-details\"><pre class=\"copyable\" data-copy=\"{A(visibleFull)}\">{E(VisibleEvidenceText(compact))}</pre></div>";
     }
 
     /// <summary>
@@ -2891,7 +2895,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine($"<span class=\"summary-value\">{E(card.Value)}</span>");
             html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
             html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy evidence summary", card.CopyText)}</div>");
-            html.AppendLine($"<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></div>");
+            html.AppendLine($"<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(VisibleEvidenceText(card.CopyText))}</pre></div>");
             html.AppendLine("</article>");
         }
 
@@ -6082,14 +6086,15 @@ html[lang="en"] .localized-evidence-field{display:none}
         foreach (var evt in inlineEvents)
         {
             var plain = EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300);
+            var visiblePlain = VisibleEvidenceText(plain);
             var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
             html.AppendLine("<tr>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.EventType)}\">{E(evt.EventType)}</td>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Source)}\">{E(evt.Source)}</td>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A((evt.ProcessName ?? "-") + " (" + (evt.ProcessId?.ToString() ?? "-") + ")")}\">{E(evt.ProcessName ?? "-")} ({E(evt.ProcessId?.ToString() ?? "-")})</td>");
-            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(ExtractReadableEventTarget(evt))}\">{RenderEventPathAndCommand(evt, relatedArtifacts)}</td>");
-            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy event", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>{RenderEventEvidenceDetails(evt)}{RenderRelatedArtifacts(relatedArtifacts)}</td>");
+            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(VisibleEvidenceText(ExtractReadableEventTarget(evt)))}\">{RenderEventPathAndCommand(evt, relatedArtifacts)}</td>");
+            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy event", visiblePlain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>{RenderEventEvidenceDetails(evt)}{RenderRelatedArtifacts(relatedArtifacts)}</td>");
             html.AppendLine("</tr>");
         }
 
@@ -10011,17 +10016,31 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static bool HasRuntimeCoverageGap(AnalysisReport report)
     {
-        return report.Events.Any(evt =>
-                EventDataBoolFalse(evt, "userInteractive", "interactiveDesktop", "etwLiveCaptureEnabled", "etwSessionStarted") ||
-                TextEqualsAny(evt.EventType,
-                    "packet_capture.disabled",
-                    "screenshot.disabled",
-                    "memory_dump.disabled",
-                    "dropped_file.disabled",
-                    "etw_live.disabled") ||
-                evt.EventType.Contains("capture_failed", StringComparison.OrdinalIgnoreCase) ||
-                evt.EventType.Contains("probe.timeout", StringComparison.OrdinalIgnoreCase)) ||
-            !report.Events.Any(evt => IsSampleBehaviorNetworkEvent(evt) || IsSampleBehaviorFileEvent(evt) || IsSampleBehaviorRegistryEvent(evt));
+        var health = report.CollectionHealth;
+        var healthGap = health.FailureRows > 0 ||
+            health.LossRows > 0 ||
+            health.DriverLostCount > 0 ||
+            health.EtwEventsLost > 0 ||
+            health.DriverMalformedRows > 0 ||
+            health.DriverOutputWriteFailureRows > 0 ||
+            health.DriverRemainingUnread > 0 ||
+            health.DriverDrainStoppedAtDeadlineRows > 0 ||
+            health.DriverQualityWarningRows > 0 ||
+            health.EtwFailureRows > 0 ||
+            health.PcapFailureRows > 0 ||
+            health.AgentFailureRows > 0 ||
+            TextEqualsAny(health.State, "partial", "degraded", "failed", "unknown");
+        var explicitGap = report.Events.Any(evt =>
+            EventDataBoolFalse(evt, "userInteractive", "interactiveDesktop", "etwLiveCaptureEnabled", "etwSessionStarted") ||
+            TextEqualsAny(evt.EventType,
+                "packet_capture.disabled",
+                "screenshot.disabled",
+                "memory_dump.disabled",
+                "dropped_file.disabled",
+                "etw_live.disabled") ||
+            evt.EventType.Contains("capture_failed", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Contains("probe.timeout", StringComparison.OrdinalIgnoreCase));
+        return healthGap || explicitGap;
     }
 
     private static bool IsExecutionBoundaryEvent(SandboxEvent evt)
@@ -10509,7 +10528,8 @@ html[lang="en"] .localized-evidence-field{display:none}
             : string.Equals(displayLabel, "Evidence", StringComparison.OrdinalIgnoreCase)
                 ? string.Empty
                 : $"{displayLabel}: ";
-        return $"<div class=\"technical-field\"><span class=\"ui-field-label\">{E(prefix)}</span><pre class=\"copyable\" data-copy=\"{A(value)}\">{E(VisibleEvidenceText(VisibleEvidenceFieldValue(label, value, 1_200)))}</pre></div>";
+        var visible = VisibleEvidenceText(VisibleEvidenceFieldValue(label, value, 1_200));
+        return $"<div class=\"technical-field\"><span class=\"ui-field-label\">{E(prefix)}</span><pre class=\"copyable\" data-copy=\"{A(visible)}\">{E(visible)}</pre></div>";
     }
 
     /// <summary>
@@ -10536,7 +10556,8 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         var html = new StringBuilder();
-        html.Append($"<div class=\"event-evidence-fields\" data-copy=\"{A(EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300))}\">");
+        var boundedEventCopy = VisibleEvidenceText(EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300));
+        html.Append($"<div class=\"event-evidence-fields\" data-copy=\"{A(boundedEventCopy)}\">");
         var processExitContext = BuildProcessExitCodeContext(evt);
         if (!string.IsNullOrWhiteSpace(processExitContext))
         {
@@ -10556,8 +10577,8 @@ html[lang="en"] .localized-evidence-field{display:none}
                 html.Append("<ul class=\"raw-field-list\">");
                 foreach (var pair in inlineCompactFields)
                 {
-                    var copy = $"{pair.Key}={pair.Value}";
                     var displayValue = VisibleEvidenceFieldValue(pair.Key, pair.Value, EventCompactFieldValueLimit);
+                    var copy = $"{pair.Key}={VisibleEvidenceText(displayValue)}";
                     var localizedClass = IsLocalizedEvidenceField(pair.Key) ? " localized-evidence-field" : string.Empty;
                     // Keep the label outside the protected evidence <code> block so
                     // the Chinese renderer can localize chrome while the original
@@ -10574,9 +10595,9 @@ html[lang="en"] .localized-evidence-field{display:none}
                 foreach (var field in technicalFields)
                 {
                     var boundedValue = VisibleEvidenceFieldValue(field.Label, field.Value, 1_200);
-                    var copy = $"{field.Label}={field.Value}";
                     var localizedClass = IsLocalizedEvidenceField(field.Label) ? " localized-evidence-field" : string.Empty;
                     var label = TechnicalFieldLabel(field.Label);
+                    var copy = $"{field.Label}={VisibleEvidenceText(boundedValue)}";
                     var prefix = string.Equals(label, "Command line", StringComparison.OrdinalIgnoreCase)
                         ? "Execute: "
                         : string.Equals(label, "Evidence", StringComparison.OrdinalIgnoreCase)
