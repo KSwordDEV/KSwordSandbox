@@ -1603,6 +1603,8 @@ public static class SampleCorrelationClassifier
         var eventType = evt.EventType ?? string.Empty;
         var evidenceRole = Value(data, "evidenceRole");
         if (eventType.EndsWith(".summary", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".parse_failed", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".skipped", StringComparison.OrdinalIgnoreCase) ||
             eventType.Contains(".collection.", StringComparison.OrdinalIgnoreCase) ||
             eventType.Contains(".readiness.", StringComparison.OrdinalIgnoreCase))
         {
