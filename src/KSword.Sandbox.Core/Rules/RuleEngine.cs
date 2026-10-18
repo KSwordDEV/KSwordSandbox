@@ -97,27 +97,74 @@ public sealed class RuleEngine
         // post-processing of driver JSONL while retaining the materialization
         // fallback for one-shot enumerables.
         var eventList = events as IReadOnlyList<SandboxEvent> ?? events.ToList();
-        var findings = new List<BehaviorFinding>();
         var nativeUtilityStaticPaths = FindNativeUtilityStaticPaths(eventList);
+        var ruleList = ruleSet.Rules;
+        var ruleStates = ruleList.Select(static rule => new RuleMatchState(rule)).ToArray();
+        var exactRuleIndices = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+        var wildcardRuleIndices = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+        var unscopedRuleIndices = new List<int>();
 
-        foreach (var rule in ruleSet.Rules)
+        for (var ruleIndex = 0; ruleIndex < ruleList.Count; ruleIndex++)
         {
-            var evidence = new List<SandboxEvent>();
-            var matchedCount = 0;
-            foreach (var evt in eventList)
+            var eventTypes = ruleList[ruleIndex].EventTypes;
+            if (eventTypes.Count == 0)
             {
-                if (!IsEligibleForRule(rule, evt) || !Matches(rule, evt))
+                unscopedRuleIndices.Add(ruleIndex);
+                continue;
+            }
+
+            foreach (var eventType in eventTypes)
+            {
+                if (eventType.EndsWith("*", StringComparison.Ordinal) && eventType.Length > 1)
+                {
+                    AddRuleIndex(wildcardRuleIndices, eventType[..^1], ruleIndex);
+                }
+                else
+                {
+                    AddRuleIndex(exactRuleIndices, eventType, ruleIndex);
+                }
+            }
+        }
+
+        foreach (var evt in eventList)
+        {
+            var candidateRuleIndices = new HashSet<int>();
+            if (exactRuleIndices.TryGetValue(evt.EventType, out var exactMatches))
+            {
+                candidateRuleIndices.UnionWith(exactMatches);
+            }
+
+            foreach (var wildcard in wildcardRuleIndices)
+            {
+                if (evt.EventType.StartsWith(wildcard.Key, StringComparison.OrdinalIgnoreCase))
+                {
+                    candidateRuleIndices.UnionWith(wildcard.Value);
+                }
+            }
+
+            candidateRuleIndices.UnionWith(unscopedRuleIndices);
+            foreach (var ruleIndex in candidateRuleIndices)
+            {
+                var state = ruleStates[ruleIndex];
+                if (!IsEligibleForRule(state.Rule, evt) || !Matches(state.Rule, evt))
                 {
                     continue;
                 }
 
-                matchedCount++;
-                if (evidence.Count < MaxEvidenceEventsPerRule)
+                state.MatchedCount++;
+                if (state.Evidence.Count < MaxEvidenceEventsPerRule)
                 {
-                    evidence.Add(evt);
+                    state.Evidence.Add(evt);
                 }
             }
+        }
 
+        var findings = new List<BehaviorFinding>();
+        foreach (var state in ruleStates)
+        {
+            var rule = state.Rule;
+            var matchedCount = state.MatchedCount;
+            var evidence = state.Evidence;
             if (matchedCount == 0)
             {
                 continue;
@@ -166,6 +213,32 @@ public sealed class RuleEngine
         }
 
         return findings;
+    }
+
+    private static void AddRuleIndex(
+        IDictionary<string, List<int>> index,
+        string key,
+        int ruleIndex)
+    {
+        if (!index.TryGetValue(key, out var indices))
+        {
+            indices = [];
+            index[key] = indices;
+        }
+
+        if (!indices.Contains(ruleIndex))
+        {
+            indices.Add(ruleIndex);
+        }
+    }
+
+    private sealed class RuleMatchState(BehaviorRule rule)
+    {
+        public BehaviorRule Rule { get; } = rule;
+
+        public List<SandboxEvent> Evidence { get; } = [];
+
+        public int MatchedCount { get; set; }
     }
 
     private static IReadOnlySet<string> FindNativeUtilityStaticPaths(IReadOnlyList<SandboxEvent> events)
