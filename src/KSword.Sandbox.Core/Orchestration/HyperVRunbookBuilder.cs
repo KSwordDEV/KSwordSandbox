@@ -24,8 +24,17 @@ public sealed class HyperVRunbookBuilder
 
         var guestRoot = config.Guest.WorkingDirectory.TrimEnd('\\');
         var guestSample = $"{guestRoot}\\incoming\\{sample.FileName}";
-        var guestOut = $"{guestRoot}\\out\\{jobId:N}";
         var hostOut = Path.Combine(config.Paths.RuntimeRoot, "jobs", jobId.ToString("N"), "guest");
+
+        // A VMware shared folder makes the host output folder the guest's
+        // output directory, so the Guest Agent writes evidence straight to the
+        // host. Real samples frequently kill the WinRM listener, and a
+        // remoting-only run then produces nothing after the sample executed.
+        var hostOutputShare = ResolveHostOutputShare(config, provider);
+        var guestOut = hostOutputShare is null
+            ? $"{guestRoot}\\out\\{jobId:N}"
+            : $"\\\\vmware-host\\Shared Folders\\{hostOutputShare.Value.Name}";
+
         var steps = new List<SandboxRunbookStep>();
 
         AddPrerequisiteSteps(steps, config, provider);
@@ -52,8 +61,8 @@ public sealed class HyperVRunbookBuilder
                 throw new ArgumentOutOfRangeException(nameof(config), provider, "Unsupported virtualization provider.");
         }
 
-        AddGuestExecutionSteps(steps, config, provider, targetVmName, jobId, sample, guestSample, guestOut, hostOut);
-        AddCleanupSteps(steps, config, provider, usesTemporaryVm, targetVmName, jobId);
+        AddGuestExecutionSteps(steps, config, provider, targetVmName, jobId, sample, guestSample, guestOut, hostOut, hostOutputShare);
+        AddCleanupSteps(steps, config, provider, usesTemporaryVm, targetVmName, jobId, hostOutputShare);
 
         if (provider is not VirtualizationProvider.HyperV)
         {
@@ -407,9 +416,26 @@ public sealed class HyperVRunbookBuilder
         var startCommand = string.Join(" ", new[]
         {
             preamble,
+            // Workstation returns "-1 Unknown error" when the Workstation UI
+            // is still tearing down after the hard stop in the previous step,
+            // so start has to be attempted a few times before it is fatal.
+            // Each failed attempt is also reconciled against vmrun list, so a
+            // refusal that happens because the VM came up anyway is not an
+            // error.
+            "$startAttempt = 0;",
+            "$startExitCode = -1;",
+            "$startOutput = @();",
+            "while ($startAttempt -lt 3 -and $startExitCode -ne 0) {",
+            "$startAttempt++;",
             $"$startOutput = @(& $vmrun -T $vmType start $vmxPath {startMode} 2>&1);",
             "$startExitCode = $LASTEXITCODE;",
-            "if ($startExitCode -ne 0) { throw \"vmrun start failed with exit code $startExitCode. $($startOutput -join ' ')\" };",
+            "if ($startExitCode -ne 0 -and $startAttempt -lt 3) {",
+            "$startListOutput = @(& $vmrun -T $vmType list 2>&1);",
+            "if (@($startListOutput | Where-Object { ([string]$_).Trim() -eq $vmxPath }).Count -gt 0) { $startExitCode = 0; break };",
+            "Start-Sleep -Seconds (5 * $startAttempt);",
+            "}",
+            "}",
+            "if ($startExitCode -ne 0) { throw \"vmrun start failed with exit code $startExitCode after $startAttempt attempts. $($startOutput -join ' ')\" };",
             BuildVMwarePowerStateWaitCommand(expectedRunning: true, operation: "start"),
             $"Write-Host 'VMware VM started in {startMode} mode.';"
         });
@@ -1083,6 +1109,85 @@ public sealed class HyperVRunbookBuilder
     /// processing appends provider-neutral guest-session commands with
     /// job-specific output paths; the method returns no value.
     /// </summary>
+    /// <summary>
+    /// Resolves the optional host output share for one run. Inputs are the
+    /// sandbox config and provider; processing returns a share name plus host
+    /// folder only for VMware live runs that opted in, and null otherwise.
+    /// </summary>
+    private static (string Name, string HostPath)? ResolveHostOutputShare(SandboxConfig config, VirtualizationProvider provider)
+    {
+        if (provider is not VirtualizationProvider.VMware || !config.VMware.UseHostOutputShare)
+        {
+            return null;
+        }
+
+        var name = (config.VMware.OutputShareName ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new InvalidOperationException("vmware.useHostOutputShare requires a non-empty vmware.outputShareName.");
+        }
+
+        return (name, string.Empty);
+    }
+
+    /// <summary>
+    /// Builds the host-side command that maps one job output folder into the
+    /// guest. Inputs are the config, host folder, and share name; processing
+    /// re-points any leftover share from an earlier job, enables shared folders,
+    /// and adds the mapping so the guest output directory is host-owned.
+    /// </summary>
+    private static string BuildEnableHostOutputShareCommand(SandboxConfig config, string hostOut, string shareName)
+    {
+        var command = string.Join(" ", new[]
+        {
+            BuildClearGuestSecretEnvironment(config),
+            BuildNativeToolResolution("vmrun", config.VMware.VmrunPath, "VMware vmrun"),
+            $"$vmxPath = {Q(config.VMware.VmxPath)};",
+            "if (Test-Path -LiteralPath $vmxPath -PathType Leaf) { $vmxPath = (Resolve-Path -LiteralPath $vmxPath).ProviderPath };",
+            $"$vmType = {Q(config.VMware.VmType)};",
+            $"$shareName = {Q(shareName)};",
+            "$hostOut = (Resolve-Path -LiteralPath " + Q(hostOut) + " -ErrorAction Stop).ProviderPath;",
+            // A snapshot revert restores the guest disk, not the VMX, so a
+            // mapping from an earlier job survives into this one. Re-adding it
+            // keeps the guest pointed at the current job folder instead of a
+            // stale directory.
+            "$removeOutput = @(& $vmrun -T $vmType removeSharedFolder $vmxPath $shareName 2>&1);",
+            "$removeExitCode = $LASTEXITCODE;",
+            "if ($removeExitCode -ne 0) { Write-Host \"No previous '$shareName' mapping had to be removed: $($removeOutput -join ' ')\" };",
+            "$enableOutput = @(& $vmrun -T $vmType enableSharedFolders $vmxPath 2>&1);",
+            "$enableExitCode = $LASTEXITCODE;",
+            "if ($enableExitCode -ne 0) { throw \"vmrun enableSharedFolders failed with exit code $enableExitCode. $($enableOutput -join ' ')\" };",
+            "$addOutput = @(& $vmrun -T $vmType addSharedFolder $vmxPath $shareName $hostOut 2>&1);",
+            "$addExitCode = $LASTEXITCODE;",
+            "if ($addExitCode -ne 0) { throw \"vmrun addSharedFolder failed with exit code $addExitCode. $($addOutput -join ' ')\" };",
+            $"Write-Host \"Host output folder $hostOut is mapped into the guest as '\\\\vmware-host\\Shared Folders\\{shareName}'; guest evidence no longer depends on WinRM.\";"
+        });
+
+        return command;
+    }
+
+    /// <summary>
+    /// Builds the host-side command that drops the shared folder mapping during
+    /// cleanup. Inputs are config and share name; processing returns a best-effort
+    /// command so a finished job does not leave the VMX pointing at its output
+    /// folder.
+    /// </summary>
+    private static string BuildRemoveHostOutputShareCommand(SandboxConfig config, string shareName)
+    {
+        return string.Join(" ", new[]
+        {
+            BuildClearGuestSecretEnvironment(config),
+            BuildNativeToolResolution("vmrun", config.VMware.VmrunPath, "VMware vmrun"),
+            $"$vmxPath = {Q(config.VMware.VmxPath)};",
+            "if (Test-Path -LiteralPath $vmxPath -PathType Leaf) { $vmxPath = (Resolve-Path -LiteralPath $vmxPath).ProviderPath };",
+            $"$vmType = {Q(config.VMware.VmType)};",
+            $"$shareName = {Q(shareName)};",
+            "$removeOutput = @(& $vmrun -T $vmType removeSharedFolder $vmxPath $shareName 2>&1);",
+            "$removeExitCode = $LASTEXITCODE;",
+            "if ($removeExitCode -ne 0) { Write-Host \"Shared folder mapping '$shareName' was already gone: $($removeOutput -join ' ')\" } else { Write-Host \"Shared folder mapping '$shareName' removed.\" };"
+        });
+    }
+
     private static void AddGuestExecutionSteps(
         List<SandboxRunbookStep> steps,
         SandboxConfig config,
@@ -1092,18 +1197,30 @@ public sealed class HyperVRunbookBuilder
         SampleIdentity sample,
         string guestSample,
         string guestOut,
-        string hostOut)
+        string hostOut,
+        (string Name, string HostPath)? hostOutputShare = null)
     {
         var guestRoot = config.Guest.WorkingDirectory.TrimEnd('\\');
         var agentPath = $"{guestRoot}\\agent\\{config.Guest.AgentExecutableName}";
         var driverEventsPath = $"{guestOut}\\driver-events.jsonl";
         var agentPidPath = $"{guestOut}\\agent.pid";
         var agentExitPath = $"{guestOut}\\agent.exit";
-        var agentTaskName = $"KSwordSandbox-{Path.GetFileName(guestOut)}";
+        var agentTaskName = hostOutputShare is null
+            ? $"KSwordSandbox-{Path.GetFileName(guestOut)}"
+            : $"KSwordSandbox-{jobId:N}";
 
         steps.Add(Step("stage-guest-payload", "Stage Guest Agent and R0Collector into guest", BuildStageGuestPayloadCommand(config, provider, targetVmName)));
         steps.Add(Step("copy-sample", "Copy submitted sample into guest", BuildCopySampleCommand(config, provider, targetVmName, sample.FullPath, guestSample)));
         steps.Add(Step("make-host-output", "Create host output folder", $"New-Item -ItemType Directory -Force -Path {Q(hostOut)} | Out-Null", mutatesVmState: false));
+        if (hostOutputShare is { } share)
+        {
+            steps.Add(Step(
+                "enable-vmware-output-share",
+                "Map the host output folder into the guest as a shared folder",
+                BuildEnableHostOutputShareCommand(config, hostOut, share.Name),
+                requiresElevation: false,
+                mutatesVmState: false));
+        }
         steps.Add(Step("record-artifact-policy", "Record artifact collection policy", BuildRecordArtifactCollectionPolicyCommand(config, hostOut), requiresElevation: false, mutatesVmState: false));
         steps.Add(Step("prepare-guest-output", "Prepare job-specific guest output folder", BuildPrepareGuestOutputCommand(config, provider, targetVmName, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
         if (!config.Driver.Enabled)
@@ -1144,7 +1261,7 @@ public sealed class HyperVRunbookBuilder
         }
 
         steps.Add(Step("run-agent", "Start guest collector and sample on the interactive desktop", BuildStartGuestAgentCommand(config, provider, targetVmName, jobId, guestRoot, agentPath, guestSample, guestOut, driverEventsPath, agentPidPath, agentExitPath, agentTaskName)));
-        steps.Add(Step("sync-live-output", "Live-sync guest events while sample runs", BuildLiveOutputSyncCommand(config, provider, targetVmName, guestOut, hostOut, agentPidPath, agentExitPath, agentTaskName)));
+        steps.Add(Step("sync-live-output", "Live-sync guest events while sample runs", BuildLiveOutputSyncCommand(config, provider, targetVmName, guestOut, hostOut, agentPidPath, agentExitPath, agentTaskName, writesDirectlyToHost: hostOutputShare is not null)));
         steps.Add(Step("collect-output", "Collect final guest JSON output", BuildCollectOutputCommand(config, provider, targetVmName, guestOut, hostOut)));
     }
 
@@ -1985,7 +2102,8 @@ public sealed class HyperVRunbookBuilder
         string hostOut,
         string agentPidPath,
         string agentExitPath,
-        string agentTaskName)
+        string agentTaskName,
+        bool writesDirectlyToHost = false)
     {
         var hasSyncDeadline = !config.Analysis.DurationUnlimited && config.Analysis.DefaultDurationSeconds > 0;
         var drainGraceSeconds = config.Driver.Enabled
@@ -1998,6 +2116,13 @@ public sealed class HyperVRunbookBuilder
             : 0;
         var command = string.Join(" ", new[]
         {
+            // With the output folder mapped as a shared folder the Guest Agent
+            // is already writing into the host job folder, so this step must
+            // not open a WinRM session: a sample that takes the listener down
+            // would otherwise turn a completed run into a failed one.
+            writesDirectlyToHost
+                ? $"if (Test-Path -LiteralPath (Join-Path {Q(hostOut)} 'agent.pid') -PathType Leaf) {{ Write-Host 'Guest output is written directly into the host folder through the shared folder mapping; live remoting sync is not required.'; return }} else {{ Write-Host 'Shared folder output markers are not visible on the host yet; falling back to the remoting sync.' }};"
+                : string.Empty,
             "$session = $null;",
             BuildGuestSessionAssignment(config, provider, targetVmName),
             "try {",
@@ -2144,7 +2269,8 @@ public sealed class HyperVRunbookBuilder
         VirtualizationProvider provider,
         bool usesTemporaryVm,
         string targetVmName,
-        Guid jobId)
+        Guid jobId,
+        (string Name, string HostPath)? hostOutputShare = null)
     {
         if (provider is VirtualizationProvider.HyperV)
         {
@@ -2180,6 +2306,12 @@ public sealed class HyperVRunbookBuilder
                 "$restoreExitCode = $LASTEXITCODE;",
                 "if ($restoreExitCode -ne 0) { throw \"vmrun cleanup revertToSnapshot failed with exit code $restoreExitCode. $($restoreOutput -join ' ')\" };",
                 BuildVMwarePowerStateWaitCommand(expectedRunning: false, operation: "cleanup snapshot restore"),
+                // Drop the mapping before leaving the step: the VMX survives a
+                // snapshot revert, so a leftover mapping would keep pointing the
+                // next run's guest at this job's output folder.
+                hostOutputShare is { } share
+                    ? BuildRemoveHostOutputShareCommand(config, share.Name)
+                    : string.Empty,
                 "Write-Host \"VMware clean snapshot '$snapshotName' restored during cleanup.\";"
             });
             steps.Add(Step("stop-vm", "Stop VMware analysis VM and restore clean snapshot", command));

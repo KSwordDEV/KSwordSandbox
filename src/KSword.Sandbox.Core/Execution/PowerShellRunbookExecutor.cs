@@ -776,6 +776,8 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 $"{step.Title}; copying partial guest output while the Guest Agent runs",
             "collect-output" =>
                 $"{step.Title}; copying the final guest output tree to the host",
+            "enable-vmware-output-share" =>
+                $"{step.Title}; mapping the host output folder into the guest so evidence survives a lost WinRM listener",
             "stop-vm" or "remove-temp-vm" =>
                 $"{step.Title}; cleanup is best-effort and any cleanup error will be reported separately",
             _ => step.Title
@@ -801,6 +803,8 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 "Output copy failures are throttled; the final copy will report the first actionable error. 修复建议：检查 agent 标记文件、会话稳定性和宿主输出目录权限。",
             "collect-output" =>
                 "If this fails, check the guest output directory, guest PowerShell session, and required marker files. 修复建议：确认 events.json、agent.pid、agent.exit 均已生成。",
+            "enable-vmware-output-share" =>
+                "Shared folder mapping is host-side only. 修复建议：确认 vmrun 路径、VMX 路径、共享目录名唯一，且宿主作业输出目录可写。",
             _ => "No command output is streamed here; full stdout/stderr remains in the execution record. 修复建议：如步骤卡住，请检查宿主权限、VM 状态和完整执行记录。"
         };
     }
@@ -845,19 +849,34 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     }
 
     /// <summary>
-    /// Determines whether a VMware collection step should be attempted after
-    /// run-agent failed. Inputs are the source runbook, current step, and
-    /// primary failure; processing allows sync/collect only for a VMware
-    /// run-agent failure so other providers retain first-failure semantics.
+    /// Determines whether a VMware collection step should be attempted after an
+    /// earlier live-run failure. Inputs are the source runbook, current step,
+    /// and primary failure; processing keeps the final collection copy
+    /// reachable after either run-agent or sync-live-output failed, and leaves
+    /// other providers on first-failure semantics.
     /// </summary>
     private static bool ShouldAttemptVmwareRecoveryStep(
         SandboxRunbook runbook,
         SandboxRunbookStep step,
         SandboxRunbookStepExecutionResult? primaryFailure)
     {
-        if (runbook.Provider is not VirtualizationProvider.VMware ||
-            primaryFailure is null ||
-            !string.Equals(primaryFailure.StepId, "run-agent", StringComparison.OrdinalIgnoreCase))
+        if (runbook.Provider is not VirtualizationProvider.VMware || primaryFailure is null)
+        {
+            return false;
+        }
+
+        // collect-output is the authoritative, idempotent evidence hand-off.
+        // A live-sync failure is normally a mid-run WinRM drop (the guest
+        // rebooted, reset its network stack, or the sample rewrote the
+        // firewall), which says nothing about reachability a few seconds
+        // later.  Skipping it also destroys the whole run, because the very
+        // next step reverts the snapshot.
+        if (string.Equals(primaryFailure.StepId, "sync-live-output", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Equals(step.Id, "collect-output", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.Equals(primaryFailure.StepId, "run-agent", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -878,7 +897,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         var detail = result.Message ?? "the guest recovery step failed without a message";
         return result with
         {
-            Message = $"VMware evidence recovery was attempted after run-agent failure but could not reach the guest or locate its markers; partial evidence was preserved before cleanup. Detail: {detail}"
+            Message = $"VMware evidence recovery was attempted after an earlier live-run failure but could not reach the guest or locate its markers; partial evidence was preserved before cleanup. Detail: {detail}"
         };
     }
 

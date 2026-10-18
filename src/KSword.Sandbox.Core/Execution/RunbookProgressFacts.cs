@@ -468,6 +468,7 @@ internal static class RunbookProgressFacts
                 "enable-guest-service" or "start-temp-vm" or "start-golden" or "start-vm" or
                 "open-vm-desktop" or "wait-powershell-direct" or "wait-guest-remoting" => "vm-prepare",
             "stage-guest-payload" or "copy-sample" or "make-host-output" or "record-artifact-policy" or "prepare-guest-output" => "guest-prepare",
+            "enable-vmware-output-share" => "guest-prepare",
             "check-r0-driver-guest-readiness" or "install-driver-service" => "r0-driver",
             "run-agent" => "analysis",
             "sync-live-output" or "collect-output" => "collection",
@@ -492,6 +493,7 @@ internal static class RunbookProgressFacts
             "stage-guest-payload" => "payload",
             "copy-sample" => "sample",
             "make-host-output" or "record-artifact-policy" or "prepare-guest-output" => "artifact-output",
+            "enable-vmware-output-share" => "guest-output-share",
             "install-driver-service" => "driver-service",
             "run-agent" => "guest-agent",
             "sync-live-output" or "collect-output" => "guest-output",
@@ -521,6 +523,7 @@ internal static class RunbookProgressFacts
             "run-agent" => "确认 Guest Agent 可执行文件存在，样本路径和输出目录有效，采集参数与来宾权限匹配。",
             "sync-live-output" => "确认 agent.pid/agent.exit 标记文件可读，Guest PowerShell session 稳定，宿主输出目录可写。",
             "collect-output" => "确认 guest 输出目录存在，events.json、agent.pid、agent.exit 已生成，并重新执行最终复制。",
+            "enable-vmware-output-share" => "确认 vmrun 可用、宿主作业输出目录存在，且 VMware 共享文件夹功能可用；共享目录让来宾证据不再依赖 WinRM。",
             "stop-vm" or "remove-temp-vm" or "stop-vm-after-run" or "restore-checkpoint-after-run" => "检查 VM 是否仍存在/可访问；必要时按所选 provider 手动关闭 VM 并恢复干净基线后再重试。",
             _ => category switch
             {
@@ -528,7 +531,7 @@ internal static class RunbookProgressFacts
                 "powershell-direct" => "检查 PowerShell Direct、Guest Service Interface 和来宾账号可用性。",
                 "powershell-remoting" => "检查 WinRM 地址/端口/SSL/认证、宿主到来宾的网络可达性和来宾账号。",
                 "driver" or "driver-service" or "driver-readiness" => "检查驱动路径、签名、测试签名模式和服务状态。",
-                "guest-output" or "artifact-output" => "检查来宾/宿主输出目录、标记文件和复制权限。",
+                "guest-output" or "artifact-output" or "guest-output-share" => "检查来宾/宿主输出目录、标记文件和复制权限。",
                 _ => "查看对应步骤配置、宿主权限、VM 状态和完整执行记录中的原始输出。"
             }
         };

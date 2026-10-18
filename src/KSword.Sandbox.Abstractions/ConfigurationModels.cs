@@ -122,6 +122,22 @@ public sealed record VMwareConfig
     /// </summary>
     public bool DisableDefenderForLab { get; init; }
 
+    /// <summary>
+    /// Maps the per-job host output folder into the guest as a VMware shared
+    /// folder and points the Guest Agent output directory at it. Live samples
+    /// routinely take the WinRM listener down, and remoting-only collection
+    /// then loses the whole run; a shared folder keeps the evidence channel
+    /// alive because the guest writes straight into the host folder. This is
+    /// intentionally provider-specific and opt-in.
+    /// </summary>
+    public bool UseHostOutputShare { get; init; }
+
+    /// <summary>
+    /// Guest-visible share name used when <see cref="UseHostOutputShare"/> is
+    /// enabled. It must be unique per lab host and stable across a run.
+    /// </summary>
+    public string OutputShareName { get; init; } = "KSwordOutput";
+
     public GuestRemotingConfig GuestRemoting { get; init; } = new()
     {
         AddressMode = GuestRemotingAddressMode.VMwareTools,
