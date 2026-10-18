@@ -2005,6 +2005,15 @@ public sealed class HyperVRunbookBuilder
             "$deadline = if ($hasSyncDeadline) { (Get-Date).AddSeconds($maxSyncSeconds) } else { [datetime]::MaxValue };",
             "$nextHeartbeat = (Get-Date).AddSeconds(15);",
             "$requiredOutputNames = @('events.json', 'agent-summary.json', 'agent.pid', 'agent.exit');",
+            // events.json and rotated R0 JSONL can grow to hundreds of MB in a
+            // short live window. Copying the whole output tree every poll
+            // repeatedly retransmits those files over WinRM and can make the
+            // runbook look blocked after the sample has already exited. Keep
+            // lightweight markers/logs near-live and copy large streams only
+            // when they grew materially; collect-output still performs one
+            // final complete copy after the agent stops.
+            "$largeCopyThresholdBytes = 16777216;",
+            "$lastLargeLengths = @{};",
             "$copyWarningCount = 0;",
             "$firstCopyWarning = '';",
             "$segmentCleanupWarningCount = 0;",
@@ -2016,7 +2025,7 @@ public sealed class HyperVRunbookBuilder
             "if (-not [int]::TryParse([string]$pidText, [ref]$guestAgentPid)) { throw \"Guest Agent pid marker was not an integer: '$pidText' ($pidPath)\" };",
             "Write-Host \"Live output sync is watching Guest Agent pid $guestAgentPid and waiting for events.json, agent-summary.json, agent.pid, and agent.exit.\";",
             "do {",
-            "try { Copy-Item -FromSession $session -Path (Join-Path $guestOut '*') -Destination $hostOut -Recurse -Force -ErrorAction Stop } catch { if ($copyWarningCount -eq 0) { $firstCopyWarning = $_.Exception.Message }; $copyWarningCount++ };",
+            "try { Copy-Item -FromSession $session -Path (Join-Path $guestOut '*') -Destination $hostOut -Recurse -Force -Exclude @('events.json', 'driver-events*.jsonl') -ErrorAction Stop; $largeStates = @(Invoke-Command -Session $session -ScriptBlock { param($root) @(Get-ChildItem -LiteralPath $root -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq 'events.json' -or $_.Name -like 'driver-events*.jsonl' } | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Length = [int64]$_.Length } }) } -ArgumentList $guestOut -ErrorAction Stop); foreach ($largeState in $largeStates) { $largeName = [string]$largeState.Name; $largeLength = [int64]$largeState.Length; $largeHostPath = Join-Path $hostOut $largeName; $largeHostLength = if (Test-Path -LiteralPath $largeHostPath -PathType Leaf) { [int64](Get-Item -LiteralPath $largeHostPath).Length } else { -1 }; $lastLength = if ($lastLargeLengths.ContainsKey($largeName)) { [int64]$lastLargeLengths[$largeName] } else { -1 }; $shouldCopyLarge = $largeHostLength -lt 0 -or $largeLength -lt $largeHostLength -or ($largeLength - $lastLength) -ge $largeCopyThresholdBytes; if ($shouldCopyLarge) { Copy-Item -FromSession $session -Path (Join-Path $guestOut $largeName) -Destination $hostOut -Force -ErrorAction Stop }; $lastLargeLengths[$largeName] = $largeLength } } catch { if ($copyWarningCount -eq 0) { $firstCopyWarning = $_.Exception.Message }; $copyWarningCount++ };",
             // R0 keeps the canonical driver-events.jsonl as the active stream
             // after rotation; numbered parts are closed evidence segments.
             // Once the canonical stream exists, remove every numbered part

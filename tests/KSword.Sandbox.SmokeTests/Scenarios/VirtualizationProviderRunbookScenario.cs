@@ -105,6 +105,10 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         SmokeAssert.True(!mockLaunch.Contains("$fallback.Id | Set-Content -LiteralPath $pidPath", StringComparison.Ordinal), "Live sync must observe the Agent wrapper PID, never the detached launcher PID.");
         RequireStepContains(vmware, "sync-live-output", "continuing so collect-output can preserve stdout/stderr");
         RequireStepContains(vmware, "sync-live-output", "$maxSyncSeconds = 210");
+        RequireStepContains(vmware, "sync-live-output", "$largeCopyThresholdBytes = 16777216");
+        RequireStepContains(vmware, "sync-live-output", "-Exclude @('events.json', 'driver-events*.jsonl')");
+        RequireStepContains(vmware, "sync-live-output", "$lastLargeLengths");
+        RequireStepContains(vmware, "collect-output", "Copy-Item -FromSession $session -Path (Join-Path $guestOut '*') -Destination $hostOut -Recurse -Force");
         RequireStepContains(vmware, "collect-output", "guest-agent-run-status.json");
         RequireStepContains(vmware, "collect-output", "$statusPath = Join-Path $hostOut 'guest-agent-run-status.json'");
         RequireStepContains(vmware, "collect-output", "state = 'completed'");
