@@ -928,7 +928,8 @@ public static class SampleCorrelationClassifier
         var staticIocs = BuildStaticNetworkIndicators(events);
         var dnsCorroboratedTargets = BuildDnsCorroboratedTargets(events, staticIocs);
         var crossSourceEvidence = BuildCrossSourceSampleEvidence(events, samplePids, rootPids);
-        return new CorrelationContext(sampleFullPath, sampleFileName, sampleDirectory, processes, samplePids, networkOwners, lifecycles, staticIocs, dnsCorroboratedTargets, crossSourceEvidence);
+        var crossSourceEvidenceIndex = BuildCrossSourceEvidenceIndex(crossSourceEvidence);
+        return new CorrelationContext(sampleFullPath, sampleFileName, sampleDirectory, processes, samplePids, networkOwners, lifecycles, staticIocs, dnsCorroboratedTargets, crossSourceEvidenceIndex);
     }
 
     private static IReadOnlyList<CrossSourceEvidence> BuildCrossSourceSampleEvidence(
@@ -980,6 +981,31 @@ public static class SampleCorrelationClassifier
         return evidence;
     }
 
+    private static IReadOnlyDictionary<string, IReadOnlyList<CrossSourceEvidence>> BuildCrossSourceEvidenceIndex(
+        IEnumerable<CrossSourceEvidence> evidence)
+    {
+        var index = new Dictionary<string, List<CrossSourceEvidence>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in evidence)
+        {
+            var key = CrossSourceEvidenceKey(item.Family, item.Target);
+            if (!index.TryGetValue(key, out var bucket))
+            {
+                bucket = [];
+                index[key] = bucket;
+            }
+
+            bucket.Add(item);
+        }
+
+        return index.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<CrossSourceEvidence>)pair.Value,
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string CrossSourceEvidenceKey(string family, string target) =>
+        $"{family}\u001f{target}";
+
     private static bool HasIndependentSampleEvidence(
         SandboxEvent evt,
         string? target,
@@ -1006,11 +1032,26 @@ public static class SampleCorrelationClassifier
         var currentSource = IsDriverEvidence(evt) ? "r0" :
             IsPcapProtocolEvidence(evt, evt.Data) ? "pcap" :
             IsEtwEvidence(evt) ? "etw" : "guest";
-        return context.CrossSourceEvidence.Any(evidence =>
-            evidence.Family.Equals(family, StringComparison.OrdinalIgnoreCase) &&
-            !evidence.Source.Equals(currentSource, StringComparison.OrdinalIgnoreCase) &&
-            normalizedTargets.Contains(evidence.Target) &&
-            (evidence.Timestamp - evt.Timestamp).Duration() <= TimeSpan.FromSeconds(10));
+        foreach (var normalizedTarget in normalizedTargets)
+        {
+            if (!context.CrossSourceEvidenceIndex.TryGetValue(
+                    CrossSourceEvidenceKey(family, normalizedTarget),
+                    out var candidates))
+            {
+                continue;
+            }
+
+            foreach (var candidate in candidates)
+            {
+                if (!candidate.Source.Equals(currentSource, StringComparison.OrdinalIgnoreCase) &&
+                    (candidate.Timestamp - evt.Timestamp).Duration() <= TimeSpan.FromSeconds(10))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static IEnumerable<string> MutationTargets(SandboxEvent evt)
@@ -2572,7 +2613,7 @@ public static class SampleCorrelationClassifier
         IReadOnlyList<SampleLifecycleWindow> SampleLifecycles,
         IReadOnlySet<string> StaticNetworkIndicators,
         IReadOnlySet<string> DnsCorroboratedTargets,
-        IReadOnlyList<CrossSourceEvidence> CrossSourceEvidence);
+        IReadOnlyDictionary<string, IReadOnlyList<CrossSourceEvidence>> CrossSourceEvidenceIndex);
 
     private sealed record SampleLifecycleWindow(DateTimeOffset StartUtc, DateTimeOffset EndUtc);
 
