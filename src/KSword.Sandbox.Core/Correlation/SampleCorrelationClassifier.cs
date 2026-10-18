@@ -754,6 +754,18 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Confirmed("service-or-task-actor-pid-matched-sample-process-tree", "actorProcessId");
         }
 
+        // Task-store watcher edges have no actor PID and usually expose only
+        // taskName/taskStorePath. Join that identity before generic writable
+        // path handling so adjacent sample-owned ETW/R0 rows can promote it.
+        if (IsScheduledTaskEvidence(evt) &&
+            HasIndependentSampleEvidence(evt, target, context, "task"))
+        {
+            return CorrelationDisposition.Probable(
+                "scheduled-task-edge-joined-independent-sample-r0-or-etw-task-evidence",
+                "taskName/taskStorePath",
+                "probable-cross-source-mutation-boundary");
+        }
+
         if (LooksUserWritableOrPersistenceTarget(persistenceSurface, context))
         {
             if (HasIndependentSampleEvidence(evt, target, context, "mutation"))
@@ -791,7 +803,7 @@ public static class SampleCorrelationClassifier
             evt.EventType);
 
         var targetMatchesSample = IsUnattributedFileWatcherEvent(evt, data)
-            ? ExactSamplePathMatches(target, context)
+            ? MutationTargets(evt).Any(value => ExactSamplePathMatches(value, context))
             : PathOrCommandMatchesSample(target, context);
         if (targetMatchesSample)
         {
@@ -801,6 +813,22 @@ public static class SampleCorrelationClassifier
         if (IsUnattributedFileWatcherEvent(evt, data) && IsKnownCollectorFilesystemNoise(target))
         {
             return CorrelationDisposition.Environment("filesystem-watcher-row-matches-powerShell-or-windows-collection-noise", "path");
+        }
+
+        // FilesystemWatcher rows intentionally have no actor PID. Preserve a
+        // rename/delete edge when an independent ETW/R0/guest row owned by the
+        // sample reports the same path (including sourcePath/previousPath),
+        // even when the destination itself is outside the usual writable-path
+        // hints. The edge is a cross-source candidate rather than a confirmed
+        // actor attribution because the watcher cannot identify the caller.
+        if (IsUnattributedFileWatcherEvent(evt, data) &&
+            IsHighSignalMutation(evt, data) &&
+            HasIndependentSampleEvidence(evt, target, context, "mutation"))
+        {
+            return CorrelationDisposition.Probable(
+                "filesystem-watcher-mutation-joined-independent-sample-r0-or-etw-evidence",
+                "path/sourcePath/destinationPath",
+                "probable-cross-source-mutation-boundary");
         }
 
         if (LooksUserWritableOrPersistenceTarget(target, context) && IsHighSignalMutation(evt, data))
@@ -976,6 +1004,18 @@ public static class SampleCorrelationClassifier
                     evidence.Add(new CrossSourceEvidence(source, "network", normalizedTarget, evt.Timestamp));
                 }
             }
+
+            if (TaskTargets(evt).Any())
+            {
+                foreach (var task in TaskTargets(evt))
+                {
+                    var normalizedTask = NormalizeTaskTarget(task);
+                    if (!string.IsNullOrWhiteSpace(normalizedTask))
+                    {
+                        evidence.Add(new CrossSourceEvidence(source, "task", normalizedTask, evt.Timestamp));
+                    }
+                }
+            }
         }
 
         return evidence;
@@ -1014,14 +1054,18 @@ public static class SampleCorrelationClassifier
     {
         var targets = family.Equals("network", StringComparison.OrdinalIgnoreCase)
             ? NetworkTargets(evt.Data)
-            : MutationTargets(evt);
+            : family.Equals("task", StringComparison.OrdinalIgnoreCase)
+                ? TaskTargets(evt)
+                : MutationTargets(evt);
         if (!string.IsNullOrWhiteSpace(target))
         {
             targets = targets.Append(target);
         }
 
         var normalizedTargets = targets
-            .Select(NormalizeEvidenceTarget)
+            .Select(value => family.Equals("task", StringComparison.OrdinalIgnoreCase)
+                ? NormalizeTaskTarget(value)
+                : NormalizeEvidenceTarget(value))
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (normalizedTargets.Count == 0)
@@ -1073,9 +1117,30 @@ public static class SampleCorrelationClassifier
         }.Where(value => !string.IsNullOrWhiteSpace(value))!;
     }
 
+    private static IEnumerable<string> TaskTargets(SandboxEvent evt)
+    {
+        return new[]
+        {
+            Value(evt.Data, "taskName"),
+            Value(evt.Data, "oldTaskName"),
+            Value(evt.Data, "taskPath")
+        }.Where(value => !string.IsNullOrWhiteSpace(value))!;
+    }
+
     private static string NormalizeEvidenceTarget(string value)
     {
         var normalized = NormalizeSlashes(value.Trim().Trim('"', '\''));
+        return normalized.TrimEnd('\\', '/').ToLowerInvariant();
+    }
+
+    private static string NormalizeTaskTarget(string value)
+    {
+        var normalized = NormalizeSlashes(value.Trim().Trim('"', '\''));
+        if (normalized.StartsWith("/", StringComparison.Ordinal))
+        {
+            normalized = "\\" + normalized.TrimStart('/');
+        }
+
         return normalized.TrimEnd('\\', '/').ToLowerInvariant();
     }
 
@@ -2059,6 +2124,11 @@ public static class SampleCorrelationClassifier
             evt.EventType.StartsWith("startup.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("startup_item.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("registry.run.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsScheduledTaskEvidence(SandboxEvent evt)
+    {
+        return evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsProcessEvidence(SandboxEvent evt)

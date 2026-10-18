@@ -53,6 +53,11 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
             GuestService(start.AddSeconds(1), filePath),
             EtwFile(start.AddSeconds(1), filePath),
             EtwRegistry(start.AddSeconds(1), keyPath),
+            WatcherRename(start.AddSeconds(1), filePath, @"C:\Windows\System32\drop.exe"),
+            WatcherDelete(start.AddSeconds(1), @"C:\Windows\System32\drop.exe"),
+            EtwFile(start.AddSeconds(1), @"C:\Windows\System32\drop.exe"),
+            WatcherScheduledTask(start.AddSeconds(1), @"\SampleTask"),
+            EtwScheduledTask(start.AddSeconds(1), @"\SampleTask"),
             new SandboxEvent
             {
                 EventType = "process.tree.summary",
@@ -76,11 +81,21 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
         SmokeAssert.True(registry.Data["behaviorCounted"] == "true", "Cross-source R0 registry evidence should remain behavior-counted.");
         var service = Require(withCrossSource, "service.create", filePath);
         SmokeAssert.True(service.Data["sampleCorrelation"] == "probable", "Ownerless service persistence should require an independent sample-owned mutation join.");
+        var renamed = Require(withCrossSource, "file.renamed", @"C:\Windows\System32\drop.exe");
+        SmokeAssert.True(renamed.Data["sampleCorrelation"] == "probable", "Filesystem watcher rename should join an independent sample-owned ETW mutation even when the destination is a system path.");
+        SmokeAssert.True(renamed.Data["behaviorCounted"] == "true", "Cross-source watcher rename evidence should remain behavior-counted.");
+        var deleted = Require(withCrossSource, "file.deleted", @"C:\Windows\System32\drop.exe");
+        SmokeAssert.True(deleted.Data["sampleCorrelation"] == "probable", "Filesystem watcher delete should join an independent sample-owned ETW mutation.");
+        var scheduledTask = Require(withCrossSource, "scheduled_task.created", @"\SampleTask");
+        SmokeAssert.True(scheduledTask.Data["sampleCorrelation"] == "probable", "Scheduled task watcher edge should join an independent sample-owned ETW task row.");
+        SmokeAssert.True(scheduledTask.Data["behaviorCounted"] == "true", "Cross-source scheduled task evidence should remain behavior-counted.");
 
         var withoutCrossSource = SampleCorrelationClassifier.Apply(
             events.Where(evt => evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase) ||
                 evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
                 evt.EventType.StartsWith("service.", StringComparison.OrdinalIgnoreCase) ||
+                evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
+                evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
                 (string.Equals(evt.Source, "etwLive", StringComparison.OrdinalIgnoreCase) && evt.ProcessId == 200)),
             SamplePath);
         var ambientFile = Require(withoutCrossSource, "driver.file", filePath);
@@ -91,6 +106,10 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
         SmokeAssert.True(ambientRegistry.Data["behaviorCounted"] == "false", "Ownerless R0 registry mutation must stay out of primary behavior counts.");
         var ambientService = Require(withoutCrossSource, "service.create", filePath);
         SmokeAssert.True(ambientService.Data["sampleCorrelation"] == "unknown", "Ownerless service persistence must remain unknown without an independent source.");
+        var ambientRename = Require(withoutCrossSource, "file.renamed", @"C:\Windows\System32\drop.exe");
+        SmokeAssert.True(ambientRename.Data["sampleCorrelation"] == "unknown", "Ownerless watcher rename must remain unknown without an independent source.");
+        var ambientTask = Require(withoutCrossSource, "scheduled_task.created", @"\SampleTask");
+        SmokeAssert.True(ambientTask.Data["sampleCorrelation"] == "unknown", "Ownerless scheduled task watcher edge must remain unknown without an independent source.");
 
         SmokeAssert.True(withoutCrossSource.All(evt =>
             !evt.Data.TryGetValue("sampleCorrelation", out var value) ||
@@ -170,6 +189,68 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
         {
             ["imagePath"] = path,
             ["serviceName"] = "Updater",
+            ["operation"] = "create",
+            ["behaviorCounted"] = "true"
+        }
+    };
+
+    private static SandboxEvent WatcherRename(DateTimeOffset timestamp, string sourcePath, string destinationPath) => new()
+    {
+        EventType = "file.renamed",
+        Source = "guest",
+        Timestamp = timestamp,
+        Path = destinationPath,
+        Data = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["actorPidStatus"] = "unavailable-filesystem-watcher",
+            ["operation"] = "file.renamed",
+            ["sourcePath"] = sourcePath,
+            ["previousPath"] = sourcePath,
+            ["destinationPath"] = destinationPath,
+            ["behaviorCounted"] = "true"
+        }
+    };
+
+    private static SandboxEvent WatcherDelete(DateTimeOffset timestamp, string path) => new()
+    {
+        EventType = "file.deleted",
+        Source = "guest",
+        Timestamp = timestamp,
+        Path = path,
+        Data = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["actorPidStatus"] = "unavailable-filesystem-watcher",
+            ["operation"] = "file.deleted",
+            ["behaviorCounted"] = "true"
+        }
+    };
+
+    private static SandboxEvent WatcherScheduledTask(DateTimeOffset timestamp, string taskName) => new()
+    {
+        EventType = "scheduled_task.created",
+        Source = "guest",
+        Timestamp = timestamp,
+        Path = @"C:\Windows\System32\Tasks\SampleTask",
+        Data = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["taskName"] = taskName,
+            ["taskStorePath"] = @"C:\Windows\System32\Tasks\SampleTask",
+            ["captureSource"] = "scheduled-task-filesystem-watcher",
+            ["edgeCaptured"] = "true",
+            ["behaviorCounted"] = "true"
+        }
+    };
+
+    private static SandboxEvent EtwScheduledTask(DateTimeOffset timestamp, string taskName) => new()
+    {
+        EventType = "etw.task.registered",
+        Source = "etwLive",
+        Timestamp = timestamp,
+        ProcessId = 100,
+        Data = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["taskName"] = taskName,
+            ["captureSource"] = "etwLive",
             ["operation"] = "create",
             ["behaviorCounted"] = "true"
         }
