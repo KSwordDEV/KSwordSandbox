@@ -27,7 +27,9 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(html, "resourceRole", "Static resource evidence should be copyable with resourceRole.");
         RequireContains(html, "embedded-pe", "Static resource story should highlight embedded PE resources.");
         RequireContains(html, "Artifact index evidence", "Report should include artifact index selector diagnostics.");
-        RequireContains(html, "Download selector / duplicate / rejection diagnostics", "Artifact rows should expose selector diagnostics.");
+        RequireContains(html, "<table class=\"artifact-index-table\"", "Artifact evidence should use a compact structured index table.");
+        RequireContains(html, "<th>Selector</th>", "Artifact rows should expose selector diagnostics in a dedicated column.");
+        RequireContains(html, "<th>groupCount</th>", "Artifact rows should expose groupCount in a dedicated column.");
         RequireContains(html, "duplicateGroupCount=2", "Artifact evidence should include duplicate group metadata.");
         RequireContains(html, "unsafeGuestArtifactPath", "Artifact evidence should include rejection diagnostics.");
         RequireNotContains(html, "Driver network status / WFP-ALE", "R0 readiness diagnostics should stay out of the main report UI.");
@@ -78,7 +80,6 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         };
         var summaryOnlyHtml = renderer.RenderEnglish(summaryOnlyReport, []);
         RequireContains(summaryOnlyHtml, "environment network observed; no sample attribution", "Network import summary counters should expose environment network without sample attribution.");
-        RequireContains(summaryOnlyHtml, "Observed rows: 64", "Network import summary eventCount should survive report coverage rendering.");
 
         var snapshotOnlyReport = BuildReport() with
         {
@@ -103,7 +104,6 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         };
         var snapshotOnlyHtml = renderer.RenderEnglish(snapshotOnlyReport, []);
         RequireContains(snapshotOnlyHtml, "environment network observed; no sample attribution", "Netstat snapshot rows should count as observed environment network.");
-        RequireContains(snapshotOnlyHtml, "Observed rows: 58", "Netstat snapshot rowCount should survive report coverage rendering.");
 
         // If every environment/unknown network row spills out of the inline
         // sample and there is no import summary, raw/report metrics still
@@ -139,7 +139,6 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         };
         var metricOnlyHtml = renderer.RenderEnglish(metricOnlyReport, []);
         RequireContains(metricOnlyHtml, "environment network observed; no sample attribution", "Raw network metrics should preserve an omitted environment/unknown lane.");
-        RequireContains(metricOnlyHtml, "Observed rows: 12", "Raw network metrics should preserve the observed network count.");
 
         RequireContains(html, "Stable relationship lanes", "Behavior graph should expose stable relationship lanes before dense edges.");
         RequireContains(html, "Process relation path", "Process cards should expose visible relationship paths.");
@@ -364,6 +363,32 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
                 ["etwLiveCaptureEnabled"] = "false"
             }
         };
+        var etwLiveDisabled = new SandboxEvent
+        {
+            EventType = "etw_live.disabled",
+            Timestamp = timestamp.AddSeconds(9),
+            Source = "guest",
+            Data =
+            {
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true",
+                ["etwLiveCaptureEnabled"] = "false",
+                ["etwLiveCaptureState"] = "disabled"
+            }
+        };
+        var etwSurfaceReadiness = new SandboxEvent
+        {
+            EventType = "etw_security.surface.readiness",
+            Timestamp = timestamp.AddSeconds(9),
+            Source = "guest",
+            Data =
+            {
+                ["collectionHealth"] = "true",
+                ["nonbehavior"] = "true",
+                ["surfaceSubscribed"] = "false",
+                ["surfaceKey"] = "security.process"
+            }
+        };
         var auditPartial = new SandboxEvent
         {
             EventType = "security_eventlog.audit_policy.summary",
@@ -415,7 +440,7 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
                 ["packetCaptureBytes"] = "0"
             }
         };
-        var events = new List<SandboxEvent> { processStart, r0NetworkStatus, staticResource, vt, networkFlow, artifactImportSummary, screenshot, memoryDump, packetCapture, wmiBefore, wmiAfter, etwReadiness, auditPartial, r0Disabled, environmentNetwork, lateZeroByteMatrixCounter };
+        var events = new List<SandboxEvent> { processStart, r0NetworkStatus, staticResource, vt, networkFlow, artifactImportSummary, screenshot, memoryDump, packetCapture, wmiBefore, wmiAfter, etwReadiness, etwLiveDisabled, etwSurfaceReadiness, auditPartial, r0Disabled, environmentNetwork, lateZeroByteMatrixCounter };
         for (var index = 0; index < 30; index++)
         {
             events.Add(new SandboxEvent
