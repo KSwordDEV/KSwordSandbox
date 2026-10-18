@@ -90,13 +90,13 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
         SmokeAssert.True(scheduledTask.Data["sampleCorrelation"] == "probable", "Scheduled task watcher edge should join an independent sample-owned ETW task row.");
         SmokeAssert.True(scheduledTask.Data["behaviorCounted"] == "true", "Cross-source scheduled task evidence should remain behavior-counted.");
 
+        // Exercise each ownerless lane without placing another mutation for
+        // the same target in the input batch.  This proves a path/name alone
+        // cannot manufacture an independent cross-source join.
         var withoutCrossSource = SampleCorrelationClassifier.Apply(
             events.Where(evt => evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase) ||
-                evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
-                evt.EventType.StartsWith("service.", StringComparison.OrdinalIgnoreCase) ||
-                evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
-                evt.EventType.StartsWith("scheduled_task.", StringComparison.OrdinalIgnoreCase) ||
-                (string.Equals(evt.Source, "etwLive", StringComparison.OrdinalIgnoreCase) && evt.ProcessId == 200)),
+                evt.EventType.Equals("driver.file", StringComparison.OrdinalIgnoreCase) ||
+                evt.EventType.Equals("driver.registry", StringComparison.OrdinalIgnoreCase)),
             SamplePath);
         var ambientFile = Require(withoutCrossSource, "driver.file", filePath);
         SmokeAssert.True(ambientFile.Data["sampleCorrelation"] == "unknown", "Ownerless R0 file mutation must remain unknown without an independent source.");
@@ -104,11 +104,20 @@ internal sealed class UnattributedMutationCorrelationContractScenario : ISmokeTe
         var ambientRegistry = Require(withoutCrossSource, "driver.registry", keyPath);
         SmokeAssert.True(ambientRegistry.Data["sampleCorrelation"] == "unknown", "Ownerless R0 registry mutation must remain unknown without an independent source.");
         SmokeAssert.True(ambientRegistry.Data["behaviorCounted"] == "false", "Ownerless R0 registry mutation must stay out of primary behavior counts.");
-        var ambientService = Require(withoutCrossSource, "service.create", filePath);
+        var ambientService = Require(
+            SampleCorrelationClassifier.Apply(events.Where(evt => evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase) ||
+                evt.EventType.Equals("service.create", StringComparison.OrdinalIgnoreCase)), SamplePath),
+            "service.create", filePath);
         SmokeAssert.True(ambientService.Data["sampleCorrelation"] == "unknown", "Ownerless service persistence must remain unknown without an independent source.");
-        var ambientRename = Require(withoutCrossSource, "file.renamed", @"C:\Windows\System32\drop.exe");
+        var ambientRename = Require(
+            SampleCorrelationClassifier.Apply(events.Where(evt => evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase) ||
+                evt.EventType.Equals("file.renamed", StringComparison.OrdinalIgnoreCase)), SamplePath),
+            "file.renamed", @"C:\Windows\System32\drop.exe");
         SmokeAssert.True(ambientRename.Data["sampleCorrelation"] == "unknown", "Ownerless watcher rename must remain unknown without an independent source.");
-        var ambientTask = Require(withoutCrossSource, "scheduled_task.created", @"\SampleTask");
+        var ambientTask = Require(
+            SampleCorrelationClassifier.Apply(events.Where(evt => evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase) ||
+                evt.EventType.Equals("scheduled_task.created", StringComparison.OrdinalIgnoreCase)), SamplePath),
+            "scheduled_task.created", @"\SampleTask");
         SmokeAssert.True(ambientTask.Data["sampleCorrelation"] == "unknown", "Ownerless scheduled task watcher edge must remain unknown without an independent source.");
 
         SmokeAssert.True(withoutCrossSource.All(evt =>
