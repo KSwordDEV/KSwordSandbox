@@ -116,6 +116,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "IsEventExplorerPriority", "Event explorer should promote process exits and collection gaps into the visible evidence rows.");
         RequireContains(rendererSource, "ProcessExitCodeRaw", "Process exit evidence should retain exit codes from normalized and ETW payload fields.");
         RequireContains(rendererSource, "AppendCollectionCoverageBanner", "Event explorer should keep collection gaps visible beside dynamic evidence.");
+        RequireContains(rendererSource, "var health = report.CollectionHealth", "Coverage warnings should use collection-health state and counters.");
+        RequireNotContains(rendererSource, "!report.Events.Any(evt => IsSampleBehaviorNetworkEvent", "A bounded event mix must not be labeled incomplete solely because one behavior family is absent.");
         RequireContains(rendererSource, "IsReportCollectionDiagnosticEvent", "Collection helper failures such as WMI probes should remain visible as diagnostics.");
         RequireContains(rendererSource, "environment/unknown observations out of the default signal", "Event explorer should keep unattributed environment failures out of the default signal table.");
         RequireContains(rendererSource, "!string.Equals(row.Disposition, \"unattributed\"", "Event explorer should keep unattributed observations out of the default signal table while retaining filter access.");
