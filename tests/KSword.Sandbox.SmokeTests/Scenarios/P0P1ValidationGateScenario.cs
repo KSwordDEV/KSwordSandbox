@@ -125,6 +125,12 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         RequireContains(environmentalR0Helper, "selfProcess", "PostProcess R0 environment accounting must accept explicit self-process markers.");
         RequireNotContains(environmentalR0Helper, "nonbehavior", "Generic nonbehavior must remain unresolved attribution in PostProcess R0 metrics.");
         RequireNotContains(environmentalR0Helper, "notSampleBehavior", "Generic notSampleBehavior must remain unresolved attribution in PostProcess R0 metrics.");
+        var coreEnvironmentalR0Helper = ExtractMethod(jobService, "private static bool IsKnownEnvironmentalR0Row", "private static bool IsR0LossEvidenceEvent");
+        RequireContains(coreEnvironmentalR0Helper, "sampleCorrelation", "Core R0 environment accounting must accept explicit sample-correlation disposition.");
+        RequireContains(coreEnvironmentalR0Helper, "collectorSelfNoise", "Core R0 environment accounting must accept explicit collector self-noise markers.");
+        RequireContains(coreEnvironmentalR0Helper, "selfProcess", "Core R0 environment accounting must accept explicit self-process markers.");
+        RequireNotContains(coreEnvironmentalR0Helper, "nonbehavior", "Core generic nonbehavior must remain unresolved attribution in R0 metrics.");
+        RequireNotContains(coreEnvironmentalR0Helper, "notSampleBehavior", "Core generic notSampleBehavior must remain unresolved attribution in R0 metrics.");
 
         RequireContains(agentProgram, "--driver-events", "Guest Agent must accept the driver JSONL path.");
         RequireContains(agentProgram, "DriverJsonLinesReader", "Guest Agent must keep a dedicated driver JSONL read path.");

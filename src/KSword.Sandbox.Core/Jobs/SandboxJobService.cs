@@ -2797,15 +2797,19 @@ public sealed partial class SandboxJobService
             return true;
         }
 
+        // Generic negative flags are also stamped on unknown rows by the
+        // classifier. Treating either as environment collapses the two
+        // attribution boundaries and makes unresolved R0 rows look like
+        // known system noise. Only explicit collector/self-noise markers are
+        // safe environment evidence here; unknown rows remain visible in the
+        // unresolved counters.
         return EventDataTruthy(
             evt,
             "collectorSelfNoise",
             "collectorNoise",
             "collectionNoise",
             "selfNoise",
-            "selfProcess",
-            "nonbehavior",
-            "notSampleBehavior");
+            "selfProcess");
     }
 
     private static bool IsR0LossEvidenceEvent(SandboxEvent evt)
