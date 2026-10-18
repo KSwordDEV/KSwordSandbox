@@ -12154,6 +12154,11 @@ details[open]>summary:before{content:'–'}
         // payloads and attributes are restored unchanged below.
         html = NormalizeChineseVisibleFragments(html);
         html = RestoreChineseRawEvidenceFragments(html, protectedFragments);
+        // Empty-state sentences that embed a protected payload (a dotted event
+        // key) or an escaped entity are invisible to the whole-string
+        // dictionary, and the word-level passes leave a half-English mixture.
+        // They are rewritten here, once the payloads are back in place.
+        html = LocalizeChineseResidualSentences(html);
         // Tag-bearing translations (">high<", "<th>Name</th>", "<strong>Path</strong>")
         // could not match while every tag was a protected token. They run here
         // in a payload-only pass, so the second half of the chrome dictionary
@@ -12174,6 +12179,9 @@ details[open]>summary:before{content:'–'}
         html = LocalizeChineseFilterOptions(html);
         html = LocalizeChineseVisibleEventTokens(html);
         html = LocalizeChineseVisibleEvidenceValues(html);
+        // Collapsed row leads mix counts with short English unit words; they
+        // are assembled at render time, so they are localized last.
+        html = LocalizeChineseFactLeads(html);
         html = LocalizeChineseEventTypeChips(html);
         html = LocalizeChineseStatusValues(html);
         // Rule summaries in the rule set carry a boilerplate review hint that
@@ -13009,6 +13017,116 @@ details[open]>summary:before{content:'–'}
         return html;
     }
 
+    /// <summary>
+    /// Short count tokens printed inside a collapsed row lead. The lead is
+    /// assembled at render time from numbers plus English unit words, so the
+    /// exact-match chrome dictionary can never cover it.
+    /// </summary>
+    private static readonly (string Pattern, string Replacement)[] ChineseFactLeadPatterns =
+    [
+        (@"\bchildren (\d+)", "子进程 $1"),
+        (@"\bfiles (\d+)", "文件 $1"),
+        (@"\bregistry (\d+)", "注册表 $1"),
+        (@"\bnetwork (\d+)", "网络 $1"),
+        (@"\bartifacts (\d+)", "证据文件 $1"),
+        (@"\bprocesses (\d+)", "进程 $1"),
+        (@"\bdns (\d+)", "DNS $1"),
+        (@"\bhttp (\d+)", "HTTP $1"),
+        (@"\btls (\d+)", "TLS $1"),
+        (@"\bsize ", "大小 "),
+        (@"\bevidence rows\b", "条证据"),
+        (@"\bexamples\b", "个示例"),
+        (@"\bfields\b", "个字段"),
+        (@"No sample-attributed evidence", "无可归属样本的证据")
+    ];
+
+    private static readonly Regex ChineseFactLeadSpanRegex = new(
+        "<span class=\"fact-lead\">([^<]*)</span>",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    /// <summary>
+    /// Localizes the compact counters in a collapsed row lead. Inputs are the
+    /// rendered HTML; processing rewrites only the lead span so raw evidence
+    /// strings keep their original wording; return is the rewritten HTML.
+    /// </summary>
+    private static string LocalizeChineseFactLeads(string html)
+    {
+        return ChineseFactLeadSpanRegex.Replace(
+            html,
+            match =>
+            {
+                var text = match.Groups[1].Value;
+                foreach (var (pattern, replacement) in ChineseFactLeadPatterns)
+                {
+                    text = Regex.Replace(text, pattern, replacement, RegexOptions.CultureInvariant);
+                }
+
+                return $"<span class=\"fact-lead\">{text}</span>";
+            });
+    }
+
+    /// <summary>
+    /// Rewrites the few operator sentences that survive the dictionary pass
+    /// half-translated. Inputs are the rendered HTML after raw payloads are
+    /// restored; each pattern tolerates the English form and the partially
+    /// localized form so the pass is idempotent; the method returns the HTML.
+    /// </summary>
+    private static string LocalizeChineseResidualSentences(string html)
+    {
+        // Script literals keep both language branches on purpose; rewriting
+        // one of them would collapse the ternary that picks a message.
+        var scripts = new List<string>();
+        html = ChineseScriptBlockRegex.Replace(html, match =>
+        {
+            var token = $"__KSWORD_SCRIPT_BLOCK_{scripts.Count}__";
+            scripts.Add(match.Value);
+            return token;
+        });
+
+        foreach (var (pattern, replacement) in ChineseResidualSentencePatterns)
+        {
+            html = Regex.Replace(
+                html,
+                pattern,
+                replacement,
+                RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(2));
+        }
+
+        for (var index = 0; index < scripts.Count; index++)
+        {
+            html = html.Replace($"__KSWORD_SCRIPT_BLOCK_{index}__", scripts[index], StringComparison.Ordinal);
+        }
+
+        return html;
+    }
+
+    private static readonly Regex ChineseScriptBlockRegex = new(
+        "<script\\b[^>]*>.*?</script>",
+        RegexOptions.CultureInvariant | RegexOptions.Singleline,
+        TimeSpan.FromSeconds(2));
+
+    private static readonly (string Pattern, string Replacement)[] ChineseResidualSentencePatterns =
+    [
+        (
+            @"(?:No|否) matching evidence (?:rows|行)\. Clear a filter or open (?:Raw normalized events|原始规范化事件|原始事件)\.",
+            "没有匹配的证据行。请清除筛选条件或打开原始规范化事件。"
+        ),
+        (
+            @"(?:No|否) MITRE ATT&(?:amp;)?CK techniques mapped yet\.",
+            "尚未映射 MITRE ATT&CK 技术。"
+        ),
+        (
+            @"(?:No|否) structured PE resource entries or static\.pe\.resource events were recorded\.",
+            "未记录结构化 PE 资源条目或 static.pe.resource 事件。"
+        ),
+        (
+            @"Windows Security/ETW privilege (?:rows|行) and process-access style (?:rows|行) are (?:shown|已显示) as supporting evidence for sensitive access, token, privilege, or handle activity\.",
+            "Windows Security/ETW 特权行与进程访问类行，用于支撑敏感访问、令牌、特权或句柄活动。"
+        )
+    ];
+
     private static string NormalizeChineseVisibleFragments(string html)
     {
         var replacements = new (string English, string Chinese)[]
@@ -13063,7 +13181,10 @@ details[open]>summary:before{content:'–'}
             "事件",
             RegexOptions.CultureInvariant);
         html = Regex.Replace(html, "(?<![A-Za-z])Completed(?![A-Za-z])", "已完成", RegexOptions.CultureInvariant);
-        html = Regex.Replace(html, "(?<![A-Za-z])No(?![A-Za-z])", "否", RegexOptions.CultureInvariant);
+        // Status cells hold the bare word; a wider rule would rewrite the
+        // "No ..." sentence that opens every empty-state message into
+        // "否 sample-attributed evidence ..." and lose the sentence.
+        html = Regex.Replace(html, ">No<", ">否<", RegexOptions.CultureInvariant);
         html = Regex.Replace(html, "(?<=\\d) items\\b", " 项", RegexOptions.CultureInvariant);
         html = Regex.Replace(html, "(?<=\\d) indexed\\b", " 已索引", RegexOptions.CultureInvariant);
         html = Regex.Replace(html, "(?<=\\d) nodes\\b", " 个节点", RegexOptions.CultureInvariant);
