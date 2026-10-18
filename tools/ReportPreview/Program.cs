@@ -382,11 +382,13 @@ static AnalysisReport BuildReport()
             {
                 RuleId = "BHV-101",
                 Title = "Spawns PowerShell with encoded download cradle",
+                TitleZh = "派生隐藏的 PowerShell 进程并下载二阶段载荷",
                 Severity = "critical",
                 Confidence = "high",
                 MitreTechniqueId = "T1059.001",
                 MitreTechniqueName = "PowerShell",
                 Summary = "The sample launched a hidden PowerShell process with a base64-encoded command that downloads a second-stage script.",
+                SummaryZh = "样本以 base64 编码命令启动隐藏的 PowerShell 进程，并下载第二阶段脚本。",
                 Tags = ["execution", "download"],
                 Evidence = powershellEvidence
             },
@@ -394,11 +396,13 @@ static AnalysisReport BuildReport()
             {
                 RuleId = "BHV-204",
                 Title = "Establishes Run key persistence",
+                TitleZh = "写入 Run 键实现持久化",
                 Severity = "high",
                 Confidence = "high",
                 MitreTechniqueId = "T1547.001",
                 MitreTechniqueName = "Registry Run Keys",
                 Summary = "A HKCU Run value pointing at the dropped stage2 executable was created during the run.",
+                SummaryZh = "运行期间创建了指向落地 stage2 可执行文件的 HKCU Run 键值。",
                 Tags = ["persistence"],
                 Evidence = events.Where(e => e.EventType == "registry.run.created").ToList()
             },
@@ -406,11 +410,13 @@ static AnalysisReport BuildReport()
             {
                 RuleId = "BHV-310",
                 Title = "Contacts DGA-like domain over TLS",
+                TitleZh = "通过 TLS 连接疑似 DGA 域名",
                 Severity = "high",
                 Confidence = "medium",
                 MitreTechniqueId = "T1071.001",
                 MitreTechniqueName = "Web Protocols",
                 Summary = "rundll32 opened a TLS connection to 203.0.113.55 using SNI cdn.example-c2.top shortly after the encoded download.",
+                SummaryZh = "编码下载发生后不久，rundll32 使用 SNI cdn.example-c2.top 向 203.0.113.55 建立 TLS 连接。",
                 Tags = ["command-and-control"],
                 Evidence = rundllEvidence
             },
@@ -418,11 +424,13 @@ static AnalysisReport BuildReport()
             {
                 RuleId = "BHV-402",
                 Title = "Enables SeDebugPrivilege",
+                TitleZh = "启用 SeDebugPrivilege 特权",
                 Severity = "medium",
                 Confidence = "medium",
                 MitreTechniqueId = "T1134",
                 MitreTechniqueName = "Access Token Manipulation",
                 Summary = "The sample enabled SeDebugPrivilege, which is commonly used to inspect or inject into other processes.",
+                SummaryZh = "样本启用了 SeDebugPrivilege，该特权常用于检查或注入其他进程。",
                 Tags = ["privilege-escalation"],
                 Evidence = events.Where(e => e.EventType == "security.privilege").ToList()
             }

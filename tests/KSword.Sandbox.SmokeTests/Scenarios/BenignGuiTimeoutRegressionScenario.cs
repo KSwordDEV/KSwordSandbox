@@ -55,12 +55,12 @@ internal sealed class BenignGuiTimeoutRegressionScenario : ISmokeTestScenario
             "<span class=\"badge badge-info\">No high-risk behavior</span>",
             "Completed benign GUI timeout report should keep an info verdict.");
         SmokeAssert.True(
-            html.Contains("<span class=\"muted\">High risk</span><b class=\"risk-high\">0</b>", StringComparison.Ordinal) ||
-            html.Contains("<span class=\"muted\">Critical / high risk</span><b class=\"risk-high\">0</b>", StringComparison.Ordinal),
+            html.Contains("<span class=\"risk-tile-label\">High risk</span><b class=\"risk-tile-value risk-high\">0</b>", StringComparison.Ordinal) ||
+            html.Contains("<span class=\"risk-tile-label\">Critical / high risk</span><b class=\"risk-tile-value risk-high\">0</b>", StringComparison.Ordinal),
             "Completed benign GUI timeout report should count zero high-risk behavior findings.");
         RequireContains(
             html,
-            "<span class=\"muted\">Suspicious</span><b class=\"risk-medium\">0</b>",
+            "<span class=\"risk-tile-label\">Suspicious</span><b class=\"risk-tile-value risk-medium\">0</b>",
             "Completed benign GUI timeout report should count zero medium behavior findings.");
         RequireNotContains(
             html,

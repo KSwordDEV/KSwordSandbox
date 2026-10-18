@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Globalization;
 using System.Linq;
 using System.Text;
@@ -57,6 +57,22 @@ public sealed class HtmlReportRenderer
     private const int RelationshipCardInlineLimit = 24;
     private const int RelationshipArtifactInlineLimit = 6;
     private const int EvidenceStoryInlineLimit = 12;
+
+    // Behavior-fact lanes fold early: three rows establish the pattern, and a
+    // long IOC or lineage tail would otherwise make one card tower over the
+    // board and push the remaining lanes off screen.
+    private const int BehaviorFactInlineLines = 3;
+
+    // Story lanes show a bounded field slice per evidence row. A single
+    // artifact-matrix row can carry a dozen pairs; showing all of them inline
+    // made one lane taller than the viewport.
+    private const int StoryEvidenceSegmentBudget = 5;
+
+    // Graph edges and behavior chains repeat the same shape many times. Show a
+    // scannable head inline and fold the tail behind one disclosure instead of
+    // printing every edge at full width.
+    private const int GraphEdgeInlineLimit = 6;
+    private const int BehaviorChainInlineLimit = 8;
     private static readonly string[] BenignWindowsDiscoveryUtilityNames =
     [
         "arp", "getmac", "hostname", "ipconfig", "nbtstat", "netstat",
@@ -135,6 +151,7 @@ public sealed class HtmlReportRenderer
         string Css,
         int ArtifactCount,
         int EventCount,
+        string Description,
         string Detail,
         string CopyText);
 
@@ -206,12 +223,73 @@ public sealed class HtmlReportRenderer
     };
 
     private static readonly Regex ChineseRawEvidenceFragmentRegex = new(
-        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<option\\b[^>]*>[A-Za-z][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]*</option>|(?<![A-Za-z0-9_])(?:agent|guest|static|process|file|registry|network|r0|r0collector|driver|artifact|startup|environment|service|scheduled_task|dns|vt|packet_capture|screenshot|memory_dump|api|security|security_eventlog|etw|etwLive|windowsBehaviorEventLog|download)\\.[A-Za-z0-9_.-]+|(?<![A-Za-z0-9_])report\\.(?:generated)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:behaviorCounted|nonbehavior|notSampleBehavior|collectorSelfNoise|collectorNoise|collectionHealthRows|vtQuietStates|r0HealthRows|sampleBehaviorEvents|excludedFromBehaviorStory|correlationConfirmed|correlationProbable|correlationEnvironment|correlationUnknown|retainedNotPromoted|normalInteractiveGuiBaseline|evidenceDispositionRetainedNotPromoted)(?![A-Za-z0-9_])|<[^>]+>|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
+        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<option\\b[^>]*>[A-Za-z][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]*</option>|(?<![A-Za-z0-9_])(?:agent|guest|static|process|file|registry|network|r0|r0collector|driver|artifact|startup|environment|service|scheduled_task|dns|vt|packet_capture|screenshot|memory_dump|api|security|security_eventlog|etw|etwLive|windowsBehaviorEventLog|download)\\.[A-Za-z0-9_.-]+|(?<![A-Za-z0-9_])report\\.(?:generated)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:behaviorCounted|nonbehavior|notSampleBehavior|collectorSelfNoise|collectorNoise|collectionHealthRows|vtQuietStates|r0HealthRows|sampleBehaviorEvents|excludedFromBehaviorStory|correlationConfirmed|correlationProbable|correlationEnvironment|correlationUnknown|retainedNotPromoted|normalInteractiveGuiBaseline|evidenceDispositionRetainedNotPromoted)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]*\\.[A-Za-z0-9]{1,8}(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:dropped-files|memory-dumps|packet-captures|driver-events)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[a-z][a-z-]*=\\d+:[a-z]+:\\d+|<[^>]+>|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    // Same protection set as ChineseRawEvidenceFragmentRegex minus the generic
+    // tag alternative. Translations that carry their own markup (">high<",
+    // "<th>Name</th>", ...) can only match once tags are restored, so they run
+    // in a second pass that still keeps machine payloads byte-stable: code and
+    // pre blocks, dotted event keys, machine-valued options, and link payloads.
+    private static readonly Regex ChineseRawPayloadFragmentRegex = new(
+        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<option\\b[^>]*>[A-Za-z][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]*</option>|(?<![A-Za-z0-9_])(?:agent|guest|static|process|file|registry|network|r0|r0collector|driver|artifact|startup|environment|service|scheduled_task|dns|vt|packet_capture|screenshot|memory_dump|api|security|security_eventlog|etw|etwLive|windowsBehaviorEventLog|download)\\.[A-Za-z0-9_.-]+|(?<![A-Za-z0-9_])report\\.(?:generated)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:behaviorCounted|nonbehavior|notSampleBehavior|collectorSelfNoise|collectorNoise|collectionHealthRows|vtQuietStates|r0HealthRows|sampleBehaviorEvents|excludedFromBehaviorStory|correlationConfirmed|correlationProbable|correlationEnvironment|correlationUnknown|retainedNotPromoted|normalInteractiveGuiBaseline|evidenceDispositionRetainedNotPromoted)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]*\\.[A-Za-z0-9]{1,8}(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:dropped-files|memory-dumps|packet-captures|driver-events)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[a-z][a-z-]*=\\d+:[a-z]+:\\d+|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
     private static readonly Regex ChineseVisibleEventCountRegex = new(
         "(?<=\\d) events(?=</span>)",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    // Story lanes carry a shown/observed counter chip ("examples 3/9").
+    private static readonly Regex ChineseVisibleExampleCountRegex = new(
+        ">examples (?<count>\\d+/\\d+)<",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    // Event cards, behavior chips, and count badges carry raw machine text as
+    // visible content while data-copy keeps the payload. These spans are the
+    // only place where the value is operator chrome rather than raw evidence.
+    private static readonly Regex ChineseEventTypeChipRegex = new(
+        "(<span class=\"(?:evt-type|chip[^\"]*|badge[^\"]*)\"[^>]*>)([^<]+)(</span>)",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    private static readonly Regex ChineseBadgeCountRegex = new(
+        "^(\\d+) ([a-z]+)$",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    // Machine event types are lower-case dotted identifiers. Anything else in
+    // a badge/chip (a process label, a hash, an already localized label) must
+    // stay untouched so the pass cannot split "PowerShell" into "Power·Shell".
+    private static readonly Regex ChineseMachineTokenRegex = new(
+        "^[a-z0-9]+(?:[._-][a-z0-9]+)*$",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    // Evidence value cells keep the raw payload in data-copy and repeat it as
+    // visible text. State-like values are operator chrome, so they are
+    // translated only when the visible text matches the payload exactly and the
+    // field is a known state field.
+    private static readonly Regex ChineseStatusValueRegex = new(
+        "(<code class=\"copyable\" data-copy=\"([a-zA-Z]+)=([a-z][a-z-]*)\">)([a-z][a-z-]*)(</code>)",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    // Compact evidence flows render the value without a "key=" prefix in the
+    // copy payload, so the same state words need a bare-value pass.
+    private static readonly Regex ChineseBareStatusValueRegex = new(
+        "(<code class=\"copyable\" data-copy=\"([a-z][a-z-]*)\">)([a-z][a-z-]*)(</code>)",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    // Severity words are renderer chrome that sits inside styled badges and
+    // screen-reader spans, so the generic dictionary cannot reach them (the
+    // tags are protected while it runs). Match the localized prefix instead.
+    private static readonly Regex ChineseSeverityValueRegex = new(
+        "(?<=严重性 )(critical|high|medium|low|info)(?=<)",
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
@@ -418,259 +496,567 @@ public sealed class HtmlReportRenderer
         html.AppendLine("<head><meta charset=\"utf-8\"><title>KSword Sandbox Report</title>");
         html.AppendLine("<style>");
         html.AppendLine("""
-:root{--primary:#2f8fbd;--primary-deep:#1f5e7b;--accent:#43A0FF;--ink:#172033;--muted:#5b6b7f;--line:#d9e4ee;--band:#f2f7fb;--hot:#b42318;--warm:#b54708;--ok:#067647;--info:#175cd3;--raw-evidence-max:58vh}
-*{box-sizing:border-box}html{scroll-behavior:smooth}
-body{margin:0;background:#eef3f8;color:var(--ink);font-family:"Segoe UI",Arial,sans-serif;font-size:14px;line-height:1.45}
-.modern-sandbox-report{font-size:13px;line-height:1.35}
-body.modern-sandbox-report:before{background:var(--primary);content:'';display:block;height:4px;width:100%}
-header#cover{background:linear-gradient(135deg,#102a43,#185b83 58%,#147d92);color:#fff;padding:30px clamp(22px,4vw,64px)}
-header#cover h1{font-size:clamp(26px,3vw,38px);letter-spacing:-.03em;margin:0 0 4px}
-header#cover .muted{color:#c9e0f0;font-size:12.5px;margin:0}
+/* ==========================================================================
+   KSword Sandbox report stylesheet
+   Design rules: square corners (radius 0), no shadows, one container level,
+   summary-first reading order, hairline separators instead of nested frames.
+   ========================================================================== */
+
+:root{
+  --primary:#43A0FF;
+  --primary-deep:#1f5e7b;
+  --primary-ink:#0b5f8a;
+  --primary-soft:#eaf4fd;
+  --ink:#16202b;
+  --ink-2:#3a4a5c;
+  --muted:#667788;
+  --line:#dce4ee;
+  --line-soft:#edf2f8;
+  --surface:#ffffff;
+  --band:#f5f8fb;
+  --band-2:#eef4fa;
+  --hot:#b42318;
+  --warm:#b54708;
+  --ok:#067647;
+  --info:#175cd3;
+  --raw-evidence-max:58vh;
+  --ui:"Segoe UI","Microsoft YaHei","PingFang SC","Hiragino Sans GB","Noto Sans SC",system-ui,sans-serif;
+  --mono:"Cascadia Mono",Consolas,"SFMono-Regular","Courier New",monospace;
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:#eef2f7;color:var(--ink);font-family:var(--ui);font-size:14px;line-height:1.6}
+.modern-sandbox-report{font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+body.modern-sandbox-report:before{background:var(--primary);content:'';display:block;height:3px;width:100%}
+b,strong{font-weight:600}
+a{color:var(--primary-ink)}
+code,kbd,samp{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- cover ---------- */
+header#cover{background:linear-gradient(140deg,#0f2438,#17496b 62%,#1a6d86);color:#fff;padding:34px clamp(24px,4vw,56px) 30px}
+header#cover .cover-main{max-width:1120px}
+header#cover .eyebrow{color:#a9cfe6;font-size:11.5px;font-weight:600;letter-spacing:.14em;margin:0 0 8px;text-transform:uppercase}
+header#cover h1{font-size:clamp(24px,2.6vw,32px);font-weight:600;letter-spacing:-.01em;line-height:1.25;margin:0 0 14px}
+header#cover .muted{color:#b7d4e6;font-size:12.5px;margin:0}
 header#cover p{margin:0 0 6px}
-header#cover table{background:rgba(7,24,39,.32);border-collapse:collapse;margin-top:12px;max-width:980px}
-header#cover td,header#cover th{border-bottom:1px solid rgba(255,255,255,.14);color:#fff;padding:6px 12px;text-align:left;font-size:13px;line-height:1.35}
-header#cover th{background:rgba(255,255,255,.07);font-weight:700;width:210px;white-space:nowrap}
+header#cover .cover-verdict{align-items:center;display:flex;flex-wrap:wrap;gap:8px;margin:0 0 22px}
+header#cover .cover-meta{color:#a9cfe6;font-size:12.5px;margin-left:4px}
+header#cover table{background:rgba(7,24,39,.28);border-collapse:collapse;margin-top:14px;max-width:1000px;width:100%}
+header#cover td,header#cover th{border-bottom:1px solid rgba(255,255,255,.13);color:#fff;font-size:13px;line-height:1.55;padding:8px 14px;text-align:left;vertical-align:top}
+header#cover th{background:rgba(255,255,255,.06);font-weight:600;white-space:nowrap;width:190px}
 header#cover tr:last-child td,header#cover tr:last-child th{border-bottom:0}
-.triage-verdict{font-size:13px}
-.badge{border-radius:0;display:inline-block;font-size:12px;font-weight:800;padding:4px 9px;white-space:nowrap}
-.badge-critical,.chip-critical{background:#fee4e2;color:#7a271a}
-.badge-high,.chip-high{background:#fef0c7;color:#93370d}
-.badge-medium,.chip-medium{background:#fef0c7;color:#93370d}
-.badge-low,.chip-low{background:#d1fadf;color:#085d3a}
-.badge-info,.chip-info{background:#dbeafe;color:#1e40af}
-.static-only-badge{background:#e0e7ff;color:#3730a3}
-.chip{display:inline-block;font-size:11.5px;font-weight:700;margin:2px 4px 2px 0;padding:3px 7px}
-.language-entry,.no-js-fallback{max-width:1720px;margin:14px auto 0;padding:10px 20px}
+header#cover code{background:rgba(255,255,255,.1);color:#eaf6ff;font-size:12.5px;padding:1px 5px}
+header#cover .cover-facts{display:grid;gap:0 40px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin:0;max-width:1120px}
+header#cover .cover-fact{border-bottom:1px solid rgba(255,255,255,.13);display:grid;gap:0 18px;grid-template-columns:104px minmax(0,1fr);padding:8px 0}
+header#cover .cover-fact dt{color:#a9cfe6;font-size:12.5px;line-height:1.55;margin:0}
+header#cover .cover-fact dd{color:#fff;font-size:13px;line-height:1.55;margin:0;overflow-wrap:anywhere}
+header#cover .cover-fact dd code{background:rgba(255,255,255,.1);color:#eaf6ff;display:inline-block;max-width:100%;overflow-wrap:anywhere;vertical-align:bottom;white-space:normal}
+.triage-verdict{font-size:12.5px}
+
+/* ---------- badges / chips ---------- */
+.badge{border-radius:0;display:inline-block;font-size:11.5px;font-weight:600;line-height:1.5;padding:3px 8px;white-space:nowrap}
+.badge-critical,.chip-critical{background:#fde8e6;color:#8a1c12}
+.badge-high,.chip-high{background:#fdeeda;color:#8a3c05}
+.badge-medium,.chip-medium{background:#fdf3d6;color:#7a4a06}
+.badge-low,.chip-low{background:#e3f6e9;color:#04543a}
+.badge-info,.chip-info{background:#e6effc;color:#144a9e}
+.static-only-badge{background:#eceafd;color:#3a2f8f}
+.chip{border-radius:0;display:inline-block;font-size:11px;font-weight:600;line-height:1.5;margin:0 4px 0 0;padding:2px 7px;white-space:nowrap}
+
+/* ---------- language bar / fallbacks ---------- */
+.language-entry,.no-js-fallback{max-width:1600px;margin:16px auto 0;padding:10px 24px}
 .language-entry{align-items:center;display:flex;flex-wrap:wrap;gap:8px}
-.language-entry strong{color:#075985;font-size:13px}
-.language-entry a{background:var(--primary);color:#fff;font-size:12.5px;font-weight:800;padding:6px 11px;text-decoration:none}
-.language-entry a.secondary{background:#334155}
-.language-entry a:hover{filter:brightness(1.08)}
+.language-entry strong{color:var(--ink-2);font-size:12.5px;font-weight:600}
+.language-entry a{background:var(--primary);color:#fff;font-size:12.5px;font-weight:600;padding:5px 11px;text-decoration:none}
+.language-entry a.secondary{background:#fff;border:1px solid var(--line);color:var(--ink-2)}
+.language-entry a:hover{filter:brightness(1.05)}
+.language-entry a.secondary:hover{background:var(--band);filter:none}
 .language-entry .hint,.copy-hint{display:none}
 .modern-sandbox-report .section-note{display:block}
 .section-note:not(.failure-note):not(.coverage-boundary):not(.collection-health-note){display:none}
-.report-layout{align-items:start;display:grid;gap:18px;grid-template-columns:minmax(248px,280px) minmax(0,1fr);margin:16px auto;max-width:1720px;padding:0 20px}
-.report-sidebar{background:#fff;border:1px solid var(--line);border-left:3px solid var(--primary);max-height:calc(100vh - 32px);overflow:auto;position:sticky;scrollbar-width:thin;top:18px}
-.sidebar-heading{align-items:center;border-bottom:1px solid var(--line);display:flex;gap:10px;justify-content:space-between;padding:12px 14px}
-.sidebar-heading strong{display:block;font-size:14px}
-.sidebar-heading div>span{color:var(--muted);display:block;font-size:11px;font-weight:700;margin-top:2px}
-.sidebar-toggle{align-items:center;background:#fff;border:1px solid #bfdbfe;color:#075985;cursor:pointer;display:none;font-size:12px;font-weight:800;gap:6px;min-height:32px;padding:5px 9px}
+
+/* ---------- shell ---------- */
+.report-layout{align-items:start;display:grid;gap:26px;grid-template-columns:minmax(248px,280px) minmax(0,1fr);margin:18px auto;max-width:1600px;padding:0 24px}
+.report-sidebar{background:var(--surface);border:1px solid var(--line);max-height:calc(100vh - 32px);overflow:auto;position:sticky;scrollbar-width:thin;top:18px}
+.sidebar-heading{align-items:center;border-bottom:1px solid var(--line);display:flex;gap:10px;justify-content:space-between;padding:14px 16px}
+.sidebar-heading strong{display:block;font-size:13.5px;font-weight:600;line-height:1.4}
+.sidebar-heading div>span{color:var(--muted);display:block;font-size:11.5px;margin-top:2px}
+.sidebar-toggle{align-items:center;background:#fff;border:1px solid var(--line);color:var(--primary-ink);cursor:pointer;display:none;font-size:12px;font-weight:600;gap:6px;min-height:30px;padding:4px 9px}
 .sidebar-navigation{display:block}
-.sidebar-section{padding:10px 10px}
-.sidebar-section+.sidebar-section{border-top:1px solid var(--line)}
-.sidebar-section h2{color:#334155;font-size:11px;font-weight:800;letter-spacing:.06em;margin:0 4px 6px;text-transform:uppercase}
+.sidebar-section{padding:12px 12px 14px}
+.sidebar-section+.sidebar-section{border-top:1px solid var(--line-soft)}
+.sidebar-section h2{color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.1em;margin:0 6px 8px;text-transform:uppercase}
 .quick-links,.toc-links{display:grid;gap:1px}
-.quick-link,.toc-link{align-items:center;border-left:3px solid transparent;color:#334155;display:grid;gap:8px;grid-template-columns:minmax(0,1fr) auto;min-height:30px;padding:6px 8px;text-decoration:none;font-size:12.5px}
-.quick-link strong{font-size:12.5px;font-weight:650;overflow-wrap:anywhere}
-.quick-link small{background:var(--band);color:#075985;font-size:11px;font-weight:800;min-width:22px;padding:2px 5px;text-align:center}
-.toc-link{display:block;font-weight:650;line-height:1.3}
-.quick-link:hover,.toc-link:hover{background:#f4f9fd;border-left-color:#93c5fd;color:#075985}
-.quick-link.is-active,.toc-link.is-active{background:#e8f2fa;border-left-color:var(--primary);color:#075985}
+.quick-link,.toc-link{align-items:center;border-left:2px solid transparent;color:var(--ink-2);display:grid;font-size:12.5px;gap:10px;grid-template-columns:minmax(0,1fr) auto;line-height:1.4;min-height:30px;padding:5px 8px 5px 10px;text-decoration:none}
+.quick-link strong{font-size:12.5px;font-weight:400;overflow-wrap:anywhere}
+.quick-link small{color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums;min-width:22px;text-align:right}
+.toc-link{display:block;padding-left:10px}
+.quick-link:hover,.toc-link:hover{background:var(--band);color:var(--primary-ink)}
+.quick-link.is-active,.toc-link.is-active{background:var(--primary-soft);border-left-color:var(--primary);color:var(--primary-ink);font-weight:600}
+.quick-link.is-active small{color:var(--primary-ink)}
 .report-content{counter-reset:report-section;min-width:0}
+
+/* ---------- section chrome ---------- */
 section.card{scroll-margin-top:56px}
-.card{background:#fff;border:1px solid var(--line);border-radius:0;box-shadow:none;margin:0 0 14px;padding:16px 20px}
-section.card>h2{align-items:center;background:var(--band);border-bottom:1px solid var(--line);display:flex;font-size:16px;gap:10px;margin:-16px -20px 14px;padding:11px 20px;position:sticky;top:0;z-index:5}
-section.card>h2:before{background:var(--primary);content:'';display:inline-block;flex:0 0 auto;height:11px;width:11px}
-section.card>h2:after{background:var(--primary);color:#fff;content:'Section ' counter(report-section);counter-increment:report-section;font-size:10.5px;font-weight:800;margin-left:auto;padding:3px 8px;text-transform:uppercase;white-space:nowrap}
-.card h3{font-size:13.5px;margin:14px 0 6px}
-.grid{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:10px 0}
-.metric{background:var(--band);border-left:3px solid var(--primary);padding:8px 11px;min-width:0}
-.metric .muted{display:block;font-size:11.5px;font-weight:700;line-height:1.25}
-.metric b{display:block;font-size:22px;font-weight:800;line-height:1.1;margin-top:2px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:0;box-shadow:none;margin:0 0 18px;padding:20px 24px 22px}
+section.card>h2{align-items:center;background:var(--surface);border-bottom:1px solid var(--line);display:flex;font-size:16px;font-weight:600;gap:10px;line-height:1.4;margin:-20px -24px 18px;padding:12px 24px;position:sticky;top:0;z-index:5}
+section.card>h2:before{background:var(--primary);content:'';display:inline-block;flex:0 0 auto;height:14px;width:3px}
+section.card>h2:after{background:var(--band);border:1px solid var(--line-soft);color:var(--muted);content:'Section ' counter(report-section);counter-increment:report-section;font-size:10.5px;font-weight:600;letter-spacing:.06em;margin-left:auto;padding:1px 7px;text-transform:uppercase;white-space:nowrap}
+.card h3{align-items:baseline;display:flex;font-size:14px;font-weight:600;gap:8px;line-height:1.45;margin:22px 0 8px}
+.card h3:first-child{margin-top:0}
+.card>h3:after{background:var(--line-soft);content:'';flex:1 1 auto;height:1px}
+.card p{margin:8px 0}
 .muted{color:var(--muted)}
-.risk-critical{color:var(--hot)}.risk-high{color:var(--hot)}.risk-medium{color:var(--warm)}.risk-low{color:var(--ok)}.risk-info{color:var(--info)}
-.focus-panel{background:linear-gradient(180deg,#fff,#f6fafd)}
-.focus-heading{align-items:flex-start;display:flex;gap:14px;justify-content:space-between}
-.focus-heading h2{margin:0 0 2px}
-.eyebrow{color:#075985;font-size:10.5px;font-weight:800;letter-spacing:.12em;margin:0 0 2px;text-transform:uppercase}
-.section-lead{color:var(--muted);font-size:12.5px;line-height:1.4;margin:0}
-.focus-grid{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-top:12px}
-.focus-metric{background:var(--band);border-left:3px solid var(--primary);display:grid;gap:2px;padding:8px 11px}
-.focus-metric>span{color:#42506a;font-size:11.5px;font-weight:700}
-.focus-metric>strong{font-size:21px;line-height:1.1}
-.focus-next{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-.focus-action{background:var(--primary);color:#fff;font-size:12px;font-weight:800;padding:6px 11px;text-decoration:none}
-.focus-action.secondary{background:#fff;border:1px solid #bfdbfe;color:#075985}
-.focus-coverage-warning,.collection-gap-banner{background:#fffaeb;border-left:4px solid #d97706;color:#7c2d12;display:flex;flex-wrap:wrap;font-size:12.5px;gap:4px 12px;line-height:1.4;margin:10px 0;padding:8px 12px}
-.focus-coverage-warning strong,.collection-gap-banner strong{color:#9a3412}
-.collection-gap-banner a{color:#075985;font-weight:700}
-.event-explorer-toolbar{align-items:end;background:var(--band);display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;padding:10px 12px}
-.event-explorer-toolbar label{color:#42506a;display:grid;font-size:11px;font-weight:700;gap:3px}
-.event-explorer-toolbar input,.event-explorer-toolbar select{background:#fff;border:1px solid #c9dcea;border-radius:0;font-size:12.5px;min-height:30px;padding:5px 8px}
-.event-explorer-toolbar input:focus,.event-explorer-toolbar select:focus{border-color:var(--primary);outline:0}
-.event-explorer-status{color:var(--muted);font-size:11.5px;margin:4px 2px}
-.event-table-wrap{border:1px solid var(--line);margin:10px 0}
-.event-explorer-wrap{max-height:75vh;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;contain:layout paint;isolation:isolate}
-.event-table-wrap table{margin:0}
-.event-table-wrap th,.raw-events-panel th,.raw-event-page th{position:sticky;top:0;z-index:1}
-table{border-collapse:collapse;margin:10px 0;width:100%}
-th{background:var(--band);border-bottom:1px solid var(--line);color:#3c4c5e;font-size:11px;font-weight:800;letter-spacing:.04em;padding:7px 10px;text-align:left;text-transform:uppercase;white-space:nowrap}
-td{border-bottom:1px solid #e8eef5;line-height:1.35;padding:7px 10px;vertical-align:top}
-tbody tr:hover td{background:#f7fbfe}
+.eyebrow{color:var(--primary-ink);font-size:11px;font-weight:600;letter-spacing:.12em;margin:0 0 4px;text-transform:uppercase}
+.section-lead{color:var(--muted);font-size:13px;line-height:1.6;margin:2px 0 0}
+.section-subtitle{color:var(--muted);display:block;font-size:12.5px;margin:-10px 0 12px}
+.section-note{background:var(--band);border-left:2px solid var(--line);color:var(--ink-2);font-size:12.5px;line-height:1.6;margin:12px 0;padding:10px 14px}
+.section-note strong{color:var(--ink)}
+.anchor-offset{display:block;height:0;overflow:hidden;position:relative;top:-56px;visibility:hidden}
+.sr-only{clip:rect(0,0,0,0);height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;white-space:nowrap;width:1px}
+
+/* ---------- metrics ---------- */
+.grid{display:grid;gap:1px;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));margin:12px 0}
+.metric{background:var(--band);border-left:2px solid var(--primary);display:flex;flex-direction:column;gap:2px;min-width:0;padding:10px 14px}
+.metric .muted{display:block;font-size:12px;font-weight:400;line-height:1.4;order:2}
+.metric b{display:block;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.2;order:1}
+.risk-critical{color:var(--hot)}
+.risk-high{color:var(--hot)}
+.risk-medium{color:var(--warm)}
+.risk-low{color:var(--ok)}
+.risk-info{color:var(--info)}
+
+/* risk summary: verdict tiles + aligned metric table */
+.risk-tiles{display:grid;gap:1px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin:0 0 4px}
+.risk-tile{background:var(--band);border-top:2px solid var(--primary);padding:14px 16px}
+.risk-tile-label{color:var(--ink-2);display:block;font-size:12.5px;line-height:1.4}
+.risk-tile-value{display:block;font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.15;margin:2px 0 0}
+.risk-tile-hint{color:var(--muted);display:block;font-size:11.5px;line-height:1.45}
+.risk-tile.tone-high{border-top-color:var(--hot)}
+.risk-tile.tone-medium{border-top-color:var(--warm)}
+.risk-tile.tone-info{border-top-color:var(--info)}
+.risk-tile.tone-ok{border-top-color:var(--ok)}
+.metric-table{border-top:1px solid var(--line);display:grid;gap:0 32px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin:16px 0 0}
+.metric-row{align-items:baseline;border-bottom:1px solid var(--line-soft);display:flex;gap:12px;justify-content:space-between;padding:7px 0}
+.metric-row dt{color:var(--ink-2);font-size:12.5px;line-height:1.5;margin:0}
+.metric-row dd{font-size:13px;font-variant-numeric:tabular-nums;font-weight:600;margin:0;white-space:nowrap}
+
+/* analyst focus */
+.focus-panel{background:var(--surface)}
+.focus-heading{align-items:flex-start;display:flex;gap:16px;justify-content:space-between;margin-bottom:4px}
+.focus-heading h2{margin:0}
+.focus-verdict{font-size:12.5px}
+.focus-grid{display:grid;gap:1px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:16px}
+.focus-metric{background:var(--band);border-left:2px solid var(--primary);display:flex;flex-direction:column;gap:2px;padding:10px 14px}
+.focus-metric>span{color:var(--ink-2);font-size:12px;line-height:1.4;order:2}
+.focus-metric>strong{font-size:22px;font-variant-numeric:tabular-nums;font-weight:600;line-height:1.2;order:1}
+.focus-next{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.focus-action{background:var(--primary);color:#fff;font-size:12.5px;font-weight:600;padding:6px 12px;text-decoration:none}
+.focus-action.secondary{background:#fff;border:1px solid var(--line);color:var(--primary-ink)}
+.focus-action:hover{filter:brightness(1.05)}
+.focus-action.secondary:hover{background:var(--band);filter:none}
+.focus-coverage-warning,.collection-gap-banner{background:#fdf6e8;border-left:2px solid #d97706;color:#6f3410;display:flex;flex-wrap:wrap;font-size:12.5px;gap:4px 12px;line-height:1.6;margin:14px 0;padding:10px 14px}
+.focus-coverage-warning strong,.collection-gap-banner strong{color:#8a3c05}
+.collection-gap-banner a{color:var(--primary-ink);font-weight:600}
+
+/* ---------- tables ---------- */
+table{border-collapse:collapse;font-variant-numeric:tabular-nums;margin:12px 0;width:100%}
+th{background:var(--band);border-bottom:1px solid var(--line);color:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.04em;padding:9px 14px;text-align:left;vertical-align:bottom;white-space:nowrap}
+td{border-bottom:1px solid var(--line-soft);line-height:1.55;padding:10px 14px;text-align:left;vertical-align:top}
+tbody tr:hover td{background:#fafcfe}
 table.kv-table th{width:230px}
 .event-table,.event-explorer-table{table-layout:fixed;min-width:0;width:100%}
 .event-explorer-table{min-width:0;width:100%}
-.event-table th:nth-child(1),.event-table td:nth-child(1){width:10.5rem;white-space:nowrap;font-variant-numeric:tabular-nums}
-.event-table th:nth-child(2),.event-table td:nth-child(2){width:9.5rem;overflow-wrap:anywhere}
-.event-table th:nth-child(3),.event-table td:nth-child(3){width:9rem;overflow-wrap:anywhere}
-.event-table th:nth-child(4),.event-table td:nth-child(4){width:21rem;overflow-wrap:anywhere}
-.event-explorer-table th:nth-child(1),.event-explorer-table td:nth-child(1){width:10.5rem;white-space:nowrap;font-variant-numeric:tabular-nums}
-.event-explorer-table th:nth-child(2),.event-explorer-table td:nth-child(2){width:11rem;overflow-wrap:anywhere}
+.event-table th:nth-child(1),.event-table td:nth-child(1){font-variant-numeric:tabular-nums;white-space:nowrap;width:10.5rem}
+.event-table th:nth-child(2),.event-table td:nth-child(2){overflow-wrap:anywhere;width:9.5rem}
+.event-table th:nth-child(3),.event-table td:nth-child(3){overflow-wrap:anywhere;width:9rem}
+.event-table th:nth-child(4),.event-table td:nth-child(4){overflow-wrap:anywhere;width:21rem}
+.event-explorer-table th:nth-child(1),.event-explorer-table td:nth-child(1){color:var(--ink-2);font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap;width:11.5rem}
+.event-explorer-table th:nth-child(2),.event-explorer-table td:nth-child(2){width:15rem}
 .event-explorer-table th:nth-child(3),.event-explorer-table td:nth-child(3){width:6.5rem;white-space:nowrap}
-.event-explorer-table th:nth-child(4),.event-explorer-table td:nth-child(4){width:auto;min-width:0}
-.event-explorer-table tbody tr[data-severity="critical"] td,.event-explorer-table tbody tr[data-severity="high"] td{background:#fff5f3}
-.event-explorer-table tbody tr[data-severity="medium"] td{background:#fffcf2}
-.event-explorer-table .chip{display:inline-block;min-width:3.4em;text-align:center}
-.modern-sandbox-report .event-explorer-table td{line-height:1.2;padding:4px 7px}
-.event-evidence-cell{align-items:flex-start;display:flex;gap:8px;min-width:0;width:100%}
-.event-evidence-cell>.event-evidence-fields,.event-evidence-cell>.event-explorer-detail,.event-evidence-cell>.flat-details{flex:1 1 auto;min-width:0}
+.event-explorer-table th:nth-child(4),.event-explorer-table td:nth-child(4){min-width:0;width:auto}
+.event-explorer-table tbody tr[data-severity="critical"] td{box-shadow:inset 2px 0 0 var(--hot)}
+.event-explorer-table tbody tr[data-severity="high"] td{box-shadow:inset 2px 0 0 #d97706}
+.event-explorer-table tbody tr[data-severity="medium"] td{box-shadow:inset 2px 0 0 #b9a12a}
+.event-explorer-table tbody tr[data-severity="critical"] td,.event-explorer-table tbody tr[data-severity="high"] td{background:#fffbfa}
+.event-explorer-table .chip{min-width:0;text-align:left}
+.modern-sandbox-report .event-explorer-table td{line-height:1.55;padding:9px 14px}
+
+/* event explorer toolbar */
+.event-explorer-toolbar{align-items:end;background:var(--band);border:1px solid var(--line-soft);display:flex;flex-wrap:wrap;gap:10px 14px;margin:14px 0 10px;padding:12px 14px}
+.event-explorer-toolbar label{color:var(--muted);display:grid;font-size:11.5px;font-weight:600;gap:4px}
+.event-explorer-toolbar .event-search{flex:1 1 300px}
+.event-explorer-toolbar .event-search input{width:100%}
+.event-explorer-toolbar input,.event-explorer-toolbar select{background:#fff;border:1px solid var(--line);border-radius:0;color:var(--ink);font-family:var(--ui);font-size:12.5px;min-height:30px;padding:4px 8px}
+.event-explorer-toolbar input:focus,.event-explorer-toolbar select:focus{border-color:var(--primary);outline:2px solid rgba(67,160,255,.18)}
+.event-explorer-status{color:var(--muted);font-size:12px;margin:6px 2px 2px}
+.event-table-wrap{border:1px solid var(--line);margin:10px 0}
+.event-explorer-wrap{contain:layout paint;isolation:isolate;max-height:75vh;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.event-table-wrap table{margin:0}
+.event-table-wrap th,.raw-events-panel th,.raw-event-page th{position:sticky;top:0;z-index:1}
+.event-evidence-cell{align-items:flex-start;display:flex;flex-wrap:wrap;gap:8px 10px;min-width:0;width:100%}
+.event-evidence-cell>.event-evidence-fields,.event-evidence-cell>.event-explorer-detail,.event-evidence-cell>.flat-details{flex:1 1 20rem;min-width:12rem}
 .event-evidence-cell>.inline-actions{flex:0 0 auto;margin:0 0 0 auto;order:2;white-space:nowrap}
 .event-evidence-cell pre,.event-evidence-cell code{max-width:100%;overflow-wrap:anywhere;white-space:pre-wrap}
-.event-evidence-title{color:#1f5e7b;display:block;font-size:12px;font-weight:800;margin-bottom:2px;overflow-wrap:anywhere}
+.event-evidence-title{color:var(--ink);display:block;font-size:12.5px;font-weight:600;line-height:1.5;margin:0 0 3px;overflow-wrap:anywhere}
 .event-explorer-detail{min-width:0;width:100%}
-.event-explorer-details summary{background:#e8f2fa;font-size:11.5px;padding:4px 8px}
+.event-explorer-details summary{background:var(--band);font-size:11.5px;padding:4px 8px}
 .event-evidence-fields{display:block;min-width:0;width:100%}
-.raw-field-list{display:flex;flex-wrap:wrap;gap:2px 14px;list-style:none;margin:2px 0 0;padding-left:0}
-.raw-field-list li{align-items:baseline;display:inline-flex;gap:5px;max-width:100%;min-width:0}
-.raw-field-list li>.ui-field-label{flex:0 0 auto}
-.raw-technical-fields{display:flex;flex-wrap:wrap;gap:3px 14px;margin-top:4px}
-.raw-technical-field{align-items:baseline;display:inline-flex;gap:5px;max-width:100%;min-width:0}
-.raw-technical-field .ui-field-label{flex:0 0 auto;max-width:12rem;white-space:normal}
-.ui-field-label{color:#3c4c5e;font-size:12px;font-weight:700}
-code{background:#eef4f9;border-radius:0;font-family:Consolas,monospace;font-size:12.5px;overflow-wrap:anywhere;padding:1px 4px;word-break:normal}
-code[data-token-kind=type]{background:#e8f2fa;color:#175cd3;font-weight:700}
-pre{background:#f6f9fc;border-left:3px solid #cfe0ec;font-family:Consolas,monospace;font-size:12px;line-height:1.4;margin:8px 0;max-height:300px;overflow:auto;padding:8px 10px;white-space:pre-wrap;word-break:break-word}
+
+/* event explorer rows as cards: stacked time/type on the left, evidence wide */
+.event-list{display:grid}
+.event-card{border-bottom:1px solid var(--line-soft);border-left:2px solid transparent;display:grid;gap:0 22px;grid-template-columns:9.5rem minmax(0,1fr);padding:12px 16px 12px 14px}
+.event-card:last-child{border-bottom:0}
+.event-card:hover{background:#fafcfe}
+.event-card[data-severity="critical"]{background:#fffafa;border-left-color:var(--hot)}
+.event-card[data-severity="high"]{background:#fffcf7;border-left-color:#d97706}
+.event-card[data-severity="medium"]{border-left-color:#c2a72f}
+.event-card[data-severity="low"]{border-left-color:var(--ok)}
+.event-card[data-severity="info"]{border-left-color:var(--line)}
+.event-card-meta{align-content:start;display:grid;gap:3px;min-width:0}
+.event-time{color:var(--muted);font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;line-height:1.5;white-space:nowrap}
+.event-type{background:none;color:var(--primary-ink);font-family:var(--mono);font-size:11.5px;line-height:1.5;overflow-wrap:anywhere;padding:0}
+.event-card-body{min-width:0}
+.event-card-target{font-size:12px;line-height:1.6;margin:0 0 4px;overflow-wrap:anywhere}
+.event-card-target code{background:var(--band);font-size:11.5px;padding:1px 6px}
+/* Command evidence hugs its text instead of stretching an empty full-width box */
+.event-card-target .technical-field{align-items:baseline;display:flex;flex-wrap:wrap;gap:2px 8px;margin:3px 0 0}
+.event-card-target .technical-field>pre{background:var(--band);border-left:2px solid var(--line-soft);display:inline-block;flex:1 1 16rem;margin:0;max-height:120px;max-width:100%;padding:3px 9px}
+.event-table-card+.event-table-card{border-top:1px solid var(--line-soft)}
+.event-table-card:first-child{border-top:0}
+
+/* behavior-fact lanes fold their tail instead of growing without bound */
+.story-more{margin:4px 0 0}
+.story-more>summary{color:var(--primary-ink);cursor:pointer;font-size:11.5px;padding:3px 0}
+.story-more>summary:hover{text-decoration:underline}
+.story-more .story-evidence-list{margin-top:4px}
+
+/* behavior chain: one line per edge, payload folded */
+.chain-item{border-bottom:1px solid var(--line-soft);padding:5px 0}
+.chain-item:last-child{border-bottom:0}
+.chain-head{align-items:baseline;display:flex;flex-wrap:wrap;gap:2px 8px;min-width:0}
+.chain-head code{overflow-wrap:anywhere}
+.chain-evidence{margin:2px 0 0}
+.chain-evidence>summary{color:var(--muted);cursor:pointer;font-size:11px;padding:1px 0}
+.chain-evidence>summary:hover{color:var(--primary-ink)}
+.relation-evidence{margin:6px 0 0}
+.relation-evidence>summary{color:var(--primary-ink);cursor:pointer;font-size:11.5px;padding:2px 0}
+.relation-evidence>summary:hover{text-decoration:underline}
+.relation-evidence>.kv-flow{margin-top:4px}
+
+/* reference rows: short records that never need a table grid */
+.ref-list{display:grid;margin:8px 0}
+.ref-row{align-items:baseline;border-bottom:1px solid var(--line-soft);display:flex;flex-wrap:wrap;gap:3px 14px;min-width:0;padding:8px 0}
+.ref-row:last-child{border-bottom:0}
+.ref-key{color:var(--primary-ink);flex:0 0 auto;font-family:var(--mono);font-size:11.5px;white-space:nowrap}
+.ref-lead{color:var(--ink);flex:1 1 18rem;font-size:12.5px;line-height:1.55;min-width:0;overflow-wrap:anywhere}
+.ref-meta{color:var(--muted);flex:0 1 auto;font-size:11.5px;line-height:1.55;overflow-wrap:anywhere}
+.ref-tail{color:var(--ink-2);flex:0 0 auto;font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ref-path{background:var(--band);color:var(--ink-2);flex:1 1 16rem;font-family:var(--mono);font-size:11.5px;min-width:0;overflow-wrap:anywhere;padding:0 5px}
+/* shared selector legend above the artifact matrix rows */
+.matrix-legend{align-items:baseline;display:flex;flex-wrap:wrap;font-size:11.5px;gap:2px 10px;line-height:1.7;margin:10px 0 2px}
+.matrix-legend strong{color:var(--ink-2);font-weight:600}
+.matrix-legend code{flex:0 1 auto;max-width:100%}
+.matrix-legend span{color:var(--muted)}
+/* matrix lanes share one grid so lane/kind/files/state/bytes line up */
+.matrix-rows{column-gap:22px;display:grid;grid-template-columns:max-content max-content max-content max-content max-content minmax(6rem,1fr)}
+.matrix-rows .ref-row{display:contents}
+.matrix-rows .ref-row>*{border-bottom:1px solid var(--line-soft);font-size:11.5px;line-height:1.6;min-width:0;overflow-wrap:anywhere;padding:6px 0}
+.matrix-rows .ref-tail{color:var(--ink-2);font-variant-numeric:tabular-nums;text-align:left}
+/* definition grid: label/value pairs flow into columns instead of one long table */
+.kv-grid{display:grid;gap:0 30px;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));margin:6px 0}
+/* The label column is sized by its longest label (max-content) and can shrink,
+   while the value column keeps a readable floor. A fixed 8.5rem label left the
+   left half of every row empty and squeezed the value into a one-character
+   strip whenever the row sat inside a narrow card. */
+.kv-row{align-items:baseline;border-bottom:1px solid var(--line-soft);display:grid;gap:0 12px;grid-template-columns:minmax(0,max-content) minmax(9rem,1fr);min-width:0;padding:6px 0}
+.kv-label{color:var(--muted);font-size:11.5px;line-height:1.55;overflow-wrap:anywhere}
+.kv-label:after{content:':'}
+.kv-value{color:var(--ink);font-size:12px;line-height:1.55;min-width:0;overflow-wrap:anywhere}
+
+/* aligned key/value evidence fields */
+/* Rows share one grid instead of each row owning a fixed 11.5rem label cell:
+   a fixed label cell spent most of its width on padding and could starve the
+   value column down to a single character per line inside narrow cards. */
+.raw-field-list{display:grid;gap:3px 10px;grid-template-columns:minmax(0,max-content) minmax(7rem,1fr);list-style:none;margin:2px 0 0;padding:0}
+.raw-field-list li{display:contents}
+.raw-field-list li>.ui-field-label{max-width:100%;overflow-wrap:anywhere;white-space:normal}
+.raw-field-list li>.ui-field-label:after{content:':'}
+.raw-field-list li>code,.raw-technical-field>code{justify-self:start;max-width:100%}
+.raw-technical-fields{display:grid;gap:3px 10px;grid-template-columns:minmax(0,max-content) minmax(7rem,1fr);margin-top:6px}
+.raw-technical-field{display:contents}
+.raw-technical-field .ui-field-label{max-width:100%;overflow-wrap:anywhere;white-space:normal}
+.raw-technical-field .ui-field-label:after{content:':'}
+.ui-field-label{color:var(--muted);font-size:12px;line-height:1.5}
+code{background:var(--band-2);border-radius:0;font-family:var(--mono);font-size:12.5px;overflow-wrap:anywhere;padding:1px 5px;word-break:normal}
+code[data-token-kind=type]{background:var(--primary-soft);color:var(--primary-ink);font-weight:600}
+pre{background:var(--band);border-left:2px solid var(--line);font-family:var(--mono);font-size:12px;line-height:1.6;margin:8px 0;max-height:300px;overflow:auto;padding:10px 12px;white-space:pre-wrap;word-break:break-word}
 pre code{background:none;padding:0}
+
+/* ---------- copy actions ---------- */
 .copyable{cursor:copy}
-.copy-btn,.artifact-btn{background:#e6f2f9;border:0;border-radius:0;color:#1e6385;cursor:pointer;display:inline-block;font-size:11.5px;font-weight:700;padding:4px 9px;text-decoration:none}
-.copy-btn:hover,.artifact-btn:hover{background:#d5e9f4}
+.copy-btn,.artifact-btn{background:var(--band);border:1px solid var(--line-soft);border-radius:0;color:var(--primary-ink);cursor:pointer;display:inline-block;font-family:var(--ui);font-size:11.5px;font-weight:600;line-height:1.5;padding:3px 9px;text-decoration:none}
+.copy-btn:hover,.artifact-btn:hover{background:var(--primary-soft);border-color:#c8e2f8}
 .copy-btn.copy-icon,.copy-icon{align-items:center;display:inline-flex;height:24px;justify-content:center;padding:2px;width:24px}
-.copy-icon svg{fill:none;height:14px;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8;width:14px}
-.toolbar,.inline-actions{align-items:center;display:inline-flex;flex-wrap:wrap;gap:5px;margin:4px 0}
-.exit-code{background:#fef0c7;color:#93370d;font-weight:700}
-.empty{background:var(--band);border:1px dashed #b9d7f3;color:var(--muted);font-size:12.5px;margin:8px 0;padding:8px 12px}
-.fold-label{background:#e8f2fa;border:1px solid #cfe0ec;color:#075985;font-size:11px;font-weight:800;margin-right:6px;padding:2px 6px}
-details{margin:6px 0}
-summary{cursor:pointer;font-weight:700;list-style:none}
+.copy-icon svg{fill:none;height:13px;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8;width:13px}
+.toolbar,.inline-actions{align-items:center;display:inline-flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.exit-code{background:#fdf3d6;color:#7a4a06;font-weight:600}
+.empty{background:var(--band);border:1px dashed var(--line);color:var(--muted);font-size:12.5px;line-height:1.6;margin:12px 0;padding:10px 14px}
+.fold-label{background:var(--band-2);border:1px solid var(--line-soft);color:var(--primary-ink);font-size:11px;font-weight:600;margin-right:6px;padding:1px 6px}
+details{margin:8px 0}
+summary{cursor:pointer;font-weight:600;list-style:none}
 summary::-webkit-details-marker{display:none}
-summary:before{color:var(--primary-deep);content:'▸';display:inline-block;font-weight:800;margin-right:6px}
-details[open]>summary:before{content:'▾'}
+summary:before{color:var(--primary);content:'+';display:inline-block;font-family:var(--mono);font-weight:600;margin-right:7px;width:9px}
+details[open]>summary:before{content:'–'}
+
+/* ---------- behavior findings (cards) ---------- */
+.finding-list{display:grid;gap:10px;margin:14px 0}
+.finding-card{border:1px solid var(--line);border-left:3px solid var(--line);padding:14px 16px}
+.finding-card.sev-critical,.finding-card.sev-high{border-left-color:var(--hot)}
+.finding-card.sev-medium{border-left-color:var(--warm)}
+.finding-card.sev-low{border-left-color:var(--ok)}
+.finding-card.sev-info{border-left-color:var(--info)}
+.finding-head{align-items:baseline;display:flex;flex-wrap:wrap;gap:8px 12px;justify-content:space-between}
+.finding-title{font-size:14px;font-weight:600;line-height:1.5;margin:0;overflow-wrap:anywhere}
+.finding-meta{color:var(--muted);display:flex;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;gap:4px 14px}
+.finding-body{color:var(--ink-2);font-size:12.5px;line-height:1.65;margin:6px 0 0}
+.finding-evidence{margin:8px 0 0;min-width:0}
+.finding-evidence .flat-details pre{background:var(--band);border-left:2px solid var(--line);font-size:11.5px;line-height:1.7;margin:0;max-height:220px;padding:8px 12px}
+.finding-evidence .inline-actions{margin:4px 0 0}
+.finding-more{color:var(--muted);font-size:11.5px;margin:4px 0 0}
+.finding-full{margin:6px 0 0}
+.finding-full-row{align-items:flex-start;display:flex;gap:10px;justify-content:space-between}
+.finding-full-row>.finding-full{flex:1 1 auto;min-width:0}
+.finding-full-row>.inline-actions{flex:0 0 auto;margin:4px 0 0}
+.finding-full summary{color:var(--primary-ink);font-size:12px}
+.finding-full pre{background:var(--band);border-left:2px solid var(--line);font-size:11.5px;line-height:1.7;margin:6px 0 0;max-height:260px;padding:8px 12px}
 .behavior-findings-table{table-layout:fixed}
 .behavior-findings-table th:first-child{width:92px}
-.behavior-findings-table th:nth-child(2){width:30%;min-width:220px}
-.flat-details pre{font-size:12px;line-height:1.35;margin:4px 0 0}
-.evidence-summary-grid,.relation-grid,.overview-strip,.evidence-story-board,.ioc-grid,.graph-map{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));margin:10px 0}
-.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane,.ioc-card,.graph-node{background:var(--band);border-left:3px solid var(--primary);max-height:none;min-width:0;overflow:visible;overflow-wrap:anywhere;padding:11px 13px;position:relative}
-.evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3,.ioc-card h3{font-size:13.5px;margin:0 0 6px}
-.summary-value,.overview-value{color:#075985;display:block;font-size:24px;font-weight:800;letter-spacing:-.03em;line-height:1.05}
-.overview-value.risk-medium{color:var(--warm)}.overview-value.risk-high{color:var(--hot)}.overview-value.risk-low{color:var(--ok)}.overview-value.risk-info{color:var(--info)}
-.overview-item p,.story-lead{color:var(--muted);font-size:12px;line-height:1.4;margin:6px 0 0}
-.relationship-title{align-items:center;display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;margin-bottom:6px}
+.behavior-findings-table th:nth-child(2){min-width:220px;width:30%}
+.flat-details pre{font-size:11.5px;line-height:1.7;margin:4px 0 0}
+.secondary-group-empty{align-items:baseline;color:var(--muted);display:flex;font-size:12.5px;gap:10px;margin:10px 0;padding:8px 0}
+.secondary-group-empty strong{color:var(--ink-2);font-weight:600}
+
+/* lane counters: one aligned strip instead of a repeated prose summary */
+.lane-health{align-items:baseline;border-top:1px solid var(--line-soft);display:flex;flex-wrap:wrap;font-size:11.5px;gap:2px 16px;line-height:1.6;margin:10px 0 0;padding-top:7px}
+.lane-health>span{color:var(--ink-2)}
+.lane-health-key{color:var(--muted);font-weight:600}
+.lane-health b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:600;margin-left:5px}
+.lane-actions{align-items:center;display:inline-flex;gap:6px}
+.lane-actions .copy-icon{height:22px;width:22px}
+/* folded tail of a long, repetitive list */
+.fold-block{margin:10px 0}
+.fold-block>summary{background:var(--band);border:1px solid var(--line-soft);font-size:12px;padding:7px 12px}
+.fold-block[open]>summary{margin-bottom:8px}
+
+/* ---------- panels ---------- */
+.evidence-summary-grid,.relation-grid,.overview-strip,.ioc-grid,.graph-map{align-items:start;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin:12px 0}
+/* relation cards carry uneven disclosures, so they pack like masonry too */
+.relation-grid{column-gap:10px;columns:3;display:block}
+.relation-grid>.relation-card{break-inside:avoid;display:block;margin:0 0 10px;page-break-inside:avoid}
+@media (max-width:1280px){.relation-grid{columns:2}}
+@media (max-width:820px){.relation-grid{columns:1}}
+.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane,.ioc-card,.graph-node{background:var(--band);border-left:2px solid var(--primary);max-height:none;min-width:0;overflow:visible;overflow-wrap:anywhere;padding:13px 15px;position:relative}
+.graph-node strong{display:block;font-size:12.5px;line-height:1.5;margin-bottom:4px;overflow-wrap:anywhere}
+.graph-node .node-flow{gap:2px 12px}
+.evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3,.ioc-card h3{font-size:13px;font-weight:600;line-height:1.5;margin:0 0 6px}
+.artifact-status-grid{grid-template-columns:repeat(auto-fit,minmax(420px,1fr))}
+/* Boards pack like masonry instead of a grid. Lanes and status cards have very
+   different heights, and a grid row stretched every short card down to the
+   tallest card beside it, leaving dead bands under each row. */
+.evidence-story-board,.artifact-status-grid{column-gap:10px;columns:3;display:block;margin:12px 0}
+.evidence-story-board>*,.artifact-status-grid>*{break-inside:avoid;display:block;margin:0 0 10px;page-break-inside:avoid}
+@media (max-width:1280px){.evidence-story-board,.artifact-status-grid{columns:2}}
+@media (max-width:820px){.evidence-story-board,.artifact-status-grid{columns:1}}
+.evidence-story-lane h3{display:block}
+.evidence-story-lane h3:after{display:none}
+.summary-value,.overview-value{color:var(--primary-ink);display:block;font-size:22px;font-variant-numeric:tabular-nums;font-weight:600;letter-spacing:-.01em;line-height:1.2}
+.overview-value.risk-medium{color:var(--warm)}
+.overview-value.risk-high{color:var(--hot)}
+.overview-value.risk-low{color:var(--ok)}
+.overview-value.risk-info{color:var(--info)}
+.overview-item p,.story-lead{color:var(--muted);font-size:12px;line-height:1.6;margin:6px 0 0}
+.relationship-title{align-items:baseline;display:flex;flex-wrap:wrap;gap:6px 12px;justify-content:space-between;margin-bottom:8px}
 .relationship-title h3{margin:0}
-.relationship-meta{display:flex;flex-wrap:wrap;gap:2px 14px;font-size:12px;line-height:1.5}
-.relationship-meta span{color:#42506a;white-space:nowrap}
+.relationship-meta{display:flex;flex-wrap:wrap;font-size:12px;gap:2px 16px;line-height:1.6}
+.relationship-meta span{color:var(--ink-2);white-space:nowrap}
 .relationship-tags{margin:6px 0}
-.relation-flow{background:#fff;border-left:3px solid var(--primary);font-size:12px;line-height:1.45;margin:6px 0;max-width:100%;overflow-wrap:anywhere;padding:6px 10px}
+.relation-flow{background:#fff;border-left:2px solid var(--primary);font-size:12px;line-height:1.65;margin:6px 0;max-width:100%;overflow-wrap:anywhere;padding:7px 10px}
 .relationship-details summary{font-size:12.5px}
 .mono-list{list-style:none;margin:4px 0;padding-left:0}
 .mono-list li{margin:3px 0}
-.compact-evidence-summary{background:#f6f9fc;border-left:3px solid #cfe0ec;font-size:12px;line-height:1.4;margin:8px 0;padding:8px 10px;overflow-wrap:anywhere}
+.compact-evidence-summary{background:#fff;border-left:2px solid var(--line);font-size:12px;line-height:1.6;margin:8px 0;overflow-wrap:anywhere;padding:8px 12px}
 .compact-evidence-summary pre{background:none;border-left:0;margin:6px 0 0;max-height:220px;padding:0}
 .evidence-expansion-card pre{max-height:260px}
-.story-metrics{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
-.story-metrics span{background:#fff;border:1px solid #dbe7f0;font-size:11.5px;padding:2px 7px}
-.story-evidence-list{line-height:1.45;margin:6px 0 0;padding-left:18px}
-.story-evidence-list li{margin:3px 0}
+.story-metrics{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.story-metrics span{background:#fff;border:1px solid var(--line-soft);color:var(--ink-2);font-size:11.5px;padding:1px 7px}
+.story-evidence-list{line-height:1.6;margin:8px 0 0;padding-left:0;list-style:none}
+.story-evidence-list li{border-top:1px solid rgba(22,32,43,.07);padding:4px 0}
+.story-evidence-list li:first-child{border-top:0}
 .story-evidence-list .kv-flow{margin:0}
+/* numbered evidence lists need a visible seam between items; without it a
+   run of chip rows reads as one unbroken block of text */
+.compact-list{list-style-position:outside;margin:6px 0;padding-left:26px}
+.compact-list>li{border-top:1px solid var(--line-soft);padding:7px 0}
+.compact-list>li:first-child{border-top:0}
+.compact-list>li::marker{color:var(--muted);font-variant-numeric:tabular-nums}
 .compact-list .kv-flow{margin:0}
-.narrative-spine{counter-reset:narrative-step;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin:10px 0}
-.narrative-spine-lead{background:var(--band);border-left:3px solid var(--primary);font-size:12.5px;line-height:1.4;margin:8px 0;padding:8px 12px}
-.narrative-step{background:var(--band);border-left:3px solid var(--primary);max-height:none;overflow:hidden;padding:11px 13px}
-.narrative-step-index{background:var(--primary);color:#fff;display:inline-flex;font-weight:800;height:22px;justify-content:center;margin-right:8px;width:22px}
-.narrative-step h3{display:inline;font-size:13.5px;margin:0}
-.narrative-step .overview-value{font-size:20px;margin:4px 0 2px}
-.narrative-step p{color:var(--muted);font-size:12px;line-height:1.4;margin:0}
-.timeline-groups{display:grid;gap:8px;margin:10px 0}
+
+/* structured evidence lines inside fact lanes */
+.evt-line{align-items:baseline;display:flex;flex-wrap:wrap;font-size:12px;gap:2px 10px}
+.evt-time{color:var(--muted);font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.evt-type{color:var(--primary-ink);font-family:var(--mono);font-size:11.5px;overflow-wrap:anywhere}
+.evt-body{color:var(--ink-2);flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
+.evt-body strong{color:var(--ink);font-weight:600}
+.evt-target{color:var(--muted);display:block;font-size:11.5px;overflow-wrap:anywhere}
+.lane-value{align-items:baseline;display:flex;gap:6px;margin:0 0 2px}
+.lane-unit{color:var(--muted);font-size:12px}
+
+.narrative-spine{counter-reset:narrative-step;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin:12px 0}
+.narrative-spine-lead{background:var(--band);border-left:2px solid var(--primary);font-size:12.5px;line-height:1.65;margin:10px 0;padding:10px 14px}
+.narrative-step{background:var(--band);border-left:2px solid var(--primary);max-height:none;overflow:hidden;padding:13px 15px}
+.narrative-step-index{background:var(--primary);color:#fff;display:inline-flex;font-size:11.5px;font-weight:600;height:20px;justify-content:center;line-height:20px;margin-right:8px;width:20px}
+.narrative-step h3{display:inline;font-size:13px;margin:0}
+.narrative-step .overview-value{font-size:20px;margin:6px 0 2px}
+.narrative-step p{color:var(--muted);font-size:12px;line-height:1.6;margin:0}
+
+/* ---------- timeline ---------- */
+.timeline-groups{display:grid;gap:10px;margin:12px 0}
 .timeline-group{border:1px solid var(--line);overflow:hidden}
-.timeline-group>summary{align-items:flex-start;background:var(--band);display:flex;gap:10px;justify-content:space-between;padding:9px 12px}
-.timeline-group small{color:var(--muted);display:block;font-size:11.5px;line-height:1.4;margin-top:2px}
-.timeline{border-left:2px solid #b8d4e6;margin:0 12px 10px 18px;padding:10px 0 0 14px}
-.timeline-item{border:1px solid var(--line);margin:0 0 6px;padding:8px 10px;position:relative}
-.timeline-item:before{background:var(--primary);border:2px solid #dff0fa;border-radius:50%;content:'';height:9px;left:-21px;position:absolute;top:12px;width:9px}
-.timeline-overflow{background:#f1f7ff;border:1px dashed #b9d7f3;color:var(--muted);font-size:12px;margin:0 0 8px;padding:7px 10px}
-.tree{font-family:Consolas,monospace;font-size:12.5px;line-height:1.5;margin:10px 0}
-.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 16px;padding-left:12px}
+.timeline-group>summary{align-items:flex-start;background:var(--band);display:flex;gap:12px;justify-content:space-between;padding:10px 14px}
+.timeline-group small{color:var(--muted);display:block;font-size:12px;line-height:1.55;margin-top:2px}
+.timeline{border-left:1px solid var(--line);margin:0 14px 12px 20px;padding:12px 0 0 16px}
+.timeline-item{border:1px solid var(--line-soft);margin:0 0 8px;padding:9px 12px;position:relative}
+.timeline-item:before{background:var(--primary);content:'';height:7px;left:-20px;position:absolute;top:14px;width:7px}
+.timeline-overflow{background:var(--band);border:1px dashed var(--line);color:var(--muted);font-size:12px;margin:0 0 8px;padding:8px 12px}
+
+/* ---------- process tree ---------- */
+.tree{font-family:var(--mono);font-size:12.5px;line-height:1.65;margin:12px 0}
+.tree ul{border-left:1px dashed var(--line);list-style:none;margin:0 0 0 16px;padding-left:12px}
 .tree li{margin:4px 0}
-.process-tree{border:1px solid var(--line);padding:10px 12px}
+.process-tree{border:1px solid var(--line);padding:12px 14px}
 .process-tree summary,.process-tree-leaf{align-items:flex-start;cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;list-style:none}
 .process-tree-line{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
-.process-tree-label{font-weight:800}
+.process-tree-label{font-weight:600}
 .process-tree-path{color:var(--muted);font-size:12px;max-width:56ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tree-badge{background:#e8f2fa;border:1px solid #cfe0ec;font-size:11px;font-weight:700;padding:2px 6px}
-.process-tree-sparkline{align-items:center;display:inline-grid;gap:2px;grid-template-columns:repeat(4,18px);height:13px;margin-top:2px}
-.process-tree-sparkline span{background:#dbeafe;border:1px solid #bfdbfe;display:block;height:11px}
-.process-tree-sparkline .hot{background:#43A0FF;border-color:#1f5e7b}
-.modern-sandbox-report ::selection{background:#43A0FF;color:#fff}
+.tree-badge{background:var(--band-2);border:1px solid var(--line-soft);color:var(--ink-2);font-size:11px;font-weight:600;padding:1px 6px}
+.process-tree-sparkline{align-items:center;display:inline-grid;gap:2px;grid-template-columns:repeat(4,16px);height:12px;margin-top:2px}
+.process-tree-sparkline span{background:#e2ecf7;display:block;height:10px}
+.process-tree-sparkline .hot{background:var(--primary)}
+.modern-sandbox-report ::selection{background:var(--primary);color:#fff}
 .process-tree-sparkline-label{color:var(--muted);font-size:11px;margin-left:2px}
-.columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}
-.artifact-ref{font-weight:700}
-.artifact-list{list-style:none;margin:6px 0 0;padding:0}
-.artifact-list li{border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px}
+
+.columns{display:grid;gap:20px;grid-template-columns:1fr 1fr}
+
+/* ---------- artifacts ---------- */
+.artifact-ref{font-weight:600}
+.artifact-list{list-style:none;margin:8px 0 0;padding:0}
+.artifact-list li{border-top:1px solid var(--line-soft);margin-top:8px;padding-top:8px}
 .artifact-list li:first-child{border-top:0;margin-top:0;padding-top:0}
-.artifact-actions,.artifact-actions-inline{display:inline-flex;flex-wrap:wrap;gap:5px;margin-top:3px;vertical-align:middle}
-.artifact-no-link{background:#fff;border:1px dashed #cbd5e1;color:var(--muted);display:inline-block;font-size:11.5px;font-weight:700;padding:3px 8px}
-.artifact-copy-path{background:#fff;border:1px solid var(--line);padding:7px 9px}
+.artifact-actions,.artifact-actions-inline{display:inline-flex;flex-wrap:wrap;gap:6px;margin-top:4px;vertical-align:middle}
+.artifact-no-link{background:#fff;border:1px dashed var(--line);color:var(--muted);display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px}
+.artifact-copy-path{background:#fff;border:1px solid var(--line);padding:8px 10px}
 .artifact-preview{max-height:52vh;overflow:auto}
-.artifact-preview img{border:1px solid #cbd5e1;max-height:260px;max-width:100%;object-fit:contain}
+.artifact-preview img{border:1px solid var(--line);max-height:260px;max-width:100%;object-fit:contain}
 .artifact-index-table{table-layout:fixed;min-width:760px}
-.artifact-index-table th:nth-child(1){width:17%}.artifact-index-table th:nth-child(2){width:17%}.artifact-index-table th:nth-child(3){width:36%}.artifact-index-table th:nth-child(4){width:11%}.artifact-index-table th:nth-child(5){width:19%}
+.artifact-index-table th:nth-child(1){width:17%}
+.artifact-index-table th:nth-child(2){width:17%}
+.artifact-index-table th:nth-child(3){width:36%}
+.artifact-index-table th:nth-child(4){width:11%}
+.artifact-index-table th:nth-child(5){width:19%}
 .artifact-index-detail{min-width:0}
-.raw-events-shell{border:1px solid var(--line);margin:10px 0}
-.raw-events-shell>summary{background:var(--band);font-size:12.5px;padding:9px 12px}
-.raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto;padding:10px 12px}
+.artifact-cards{display:grid;gap:10px;margin:14px 0}
+.artifact-card{border:1px solid var(--line);display:grid;gap:4px 20px;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);padding:13px 16px}
+.artifact-card-main{min-width:0}
+.artifact-card-head{align-items:baseline;display:flex;flex-wrap:wrap;gap:4px 10px;min-width:0}
+.artifact-card-name{font-size:13.5px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
+.artifact-card-kind{color:var(--muted);font-size:11.5px}
+.artifact-card-meta{color:var(--muted);display:flex;flex-wrap:wrap;font-size:11.5px;gap:2px 14px;margin-top:2px}
+.artifact-card-meta code{background:none;font-size:11.5px;padding:0}
+.artifact-card-path{font-size:12px;min-width:0;overflow-wrap:anywhere}
+.artifact-card-path .artifact-actions-inline{margin-top:6px}
+.artifact-card-evidence{grid-column:1/-1;margin-top:6px;min-width:0}
+
+/* ---------- raw events ---------- */
+.raw-events-shell{border:1px solid var(--line);margin:12px 0}
+.raw-events-shell>summary{background:var(--band);font-size:12.5px;padding:10px 14px}
+.raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto;padding:12px 14px}
 .raw-events-panel .event-table-wrap{max-height:none}
-.raw-event-pages{display:grid;gap:8px}
-.raw-event-page{border:1px solid #dbeafe;overflow:hidden;scroll-margin-top:60px}
-.raw-event-page>summary{background:#e8f2fa;color:#075985;font-size:12px;font-weight:800;padding:8px 11px}
-.raw-page-nav{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}
-.raw-page-nav a{background:#f4f9fd;border:1px solid #cfe0ec;color:#075985;font-size:11.5px;font-weight:700;padding:4px 8px;text-decoration:none}
-.health-pill{background:#f4f9fd;border:1px solid #cfe0ec;color:#075985;display:inline-block;font-size:11.5px;font-weight:700;padding:4px 8px}
-.raw-source-hints{background:var(--band);margin-top:10px;padding:10px 12px}
-.raw-source-hints ul{list-style:none;margin:6px 0 0;padding:0}
-.raw-source-hints li{border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px}
+.raw-event-pages{display:grid;gap:10px}
+.raw-event-page{border:1px solid var(--line);overflow:hidden;scroll-margin-top:60px}
+.raw-event-page>summary{background:var(--band-2);color:var(--primary-ink);font-size:12px;font-weight:600;padding:9px 12px}
+.raw-page-nav{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.raw-page-nav a{background:#fff;border:1px solid var(--line);color:var(--primary-ink);font-size:11.5px;font-weight:600;padding:3px 8px;text-decoration:none}
+.raw-page-nav a:hover{background:var(--band)}
+.health-pill{background:var(--band);border:1px solid var(--line-soft);color:var(--primary-ink);display:inline-block;font-size:11.5px;font-weight:600;padding:3px 8px}
+.raw-source-hints{background:var(--band);margin-top:12px;padding:12px 14px}
+.raw-source-hints ul{list-style:none;margin:8px 0 0;padding:0}
+.raw-source-hints li{border-top:1px solid var(--line-soft);margin-top:8px;padding-top:8px}
 .raw-source-hints li:first-child{border-top:0;margin-top:0;padding-top:0}
-.raw-source-hints .hint-label{font-weight:800}
-.coverage-stats{display:flex;flex-wrap:wrap;gap:5px;margin:5px 0}
-.coverage-stats span{background:#fff;border:1px solid #e3d3b6;font-size:11.5px;padding:2px 7px;white-space:nowrap}
+.raw-source-hints .hint-label{font-weight:600}
+.coverage-stats{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.coverage-stats span{background:#fff;border:1px solid var(--line-soft);color:var(--ink-2);font-size:11.5px;padding:1px 7px;white-space:nowrap}
 .coverage-source{display:block;margin-top:4px}
-.source-artifact-link{display:inline-flex;margin:5px 5px 0 0}
-.failure-note{background:#fffaeb;border-left:4px solid #d97706;color:#7c2d12;display:block;font-size:12.5px;line-height:1.45;margin:10px 0;padding:9px 12px}
-.failure-note.execution-failure-banner{background:#fef3c7;border-left-color:#b54708;margin:12px 0;padding:10px 14px}
+.source-artifact-link{display:inline-flex;margin:6px 6px 0 0}
+
+/* ---------- notices ---------- */
+.failure-note{background:#fdf6e8;border-left:2px solid #d97706;color:#6f3410;display:block;font-size:12.5px;line-height:1.65;margin:12px 0;padding:10px 14px}
+.failure-note.execution-failure-banner{background:#fdf1e7;border-left-color:#b54708;margin:14px 0;padding:11px 15px}
 .failure-note.execution-failure-banner strong{display:block;margin-bottom:2px}
-.section-subtitle{color:var(--muted);display:block;font-size:11.5px;margin:-8px 0 10px}
-.anchor-offset{display:block;height:0;overflow:hidden;position:relative;top:-56px;visibility:hidden}
-.sr-only{clip:rect(0,0,0,0);height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;white-space:nowrap;width:1px}
-.edge-cards{display:grid;gap:8px;margin:10px 0}
-.edge-card{background:var(--band);border-left:3px solid var(--primary);display:grid;gap:6px 14px;grid-template-columns:minmax(180px,220px) minmax(0,1fr);padding:9px 12px}
-.edge-identity{display:grid;gap:5px;align-content:start;min-width:0}
-.edge-identity .kv-line{align-items:baseline}
+
+/* ---------- graph edges ---------- */
+.edge-cards{display:grid;gap:8px;margin:12px 0}
+.edge-card{border:1px solid var(--line);display:grid;gap:8px;padding:12px 15px}
+.edge-flow{align-items:center;display:flex;flex-wrap:wrap;gap:6px 10px;min-width:0}
+.edge-node{background:var(--band);color:var(--ink);font-family:var(--mono);font-size:12px;max-width:100%;overflow-wrap:anywhere;padding:2px 8px}
+.edge-relation{background:var(--primary-soft);color:var(--primary-ink);font-size:11px;font-weight:600;letter-spacing:.03em;padding:2px 8px;text-transform:uppercase}
+.edge-arrow{color:var(--muted);font-family:var(--mono);font-size:12px}
+.edge-key{color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.06em;min-width:52px;text-transform:uppercase}
+.edge-identity{display:grid;align-content:start;gap:5px;min-width:0}
 .edge-identity code{overflow-wrap:anywhere}
-.edge-evidence{display:grid;gap:4px;align-content:start;min-width:0}
-.edge-evidence .inline-actions{justify-self:end;margin:-2px -2px 0 0}
-.edge-key{color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.03em;min-width:56px;text-transform:uppercase}
-.kv-flow{display:flex;flex-wrap:wrap;gap:4px 12px;align-content:start;min-width:0}
-.kv-line{display:inline-flex;align-items:baseline;gap:5px;max-width:100%;min-width:0}
-.kv-key{color:var(--muted);font-size:11px;font-weight:700}
+.edge-evidence{display:grid;align-content:start;gap:4px;min-width:0}
+.edge-evidence .inline-actions{justify-self:end;margin:0}
+.kv-flow{display:flex;flex-wrap:wrap;gap:3px 14px;align-content:start;min-width:0}
+.kv-line{align-items:baseline;display:inline-flex;gap:5px;max-width:100%;min-width:0}
+.kv-key{color:var(--muted);flex:0 0 auto;font-size:11.5px;white-space:nowrap}
 .kv-key:after{content:":"}
 .kv-line code{overflow-wrap:anywhere;white-space:normal}
-.kv-flow .copyable code{background:#fff;border:1px solid #dbe7f0;border-radius:3px;font-size:11.5px;padding:1px 5px}
+.kv-flow .copyable code{background:var(--band);border:0;font-size:11.5px;padding:0 5px}
 .evidence-expansion-card .kv-flow{margin:0}
 .section-note .kv-flow{margin:4px 0 0}
-.secondary-group-empty{color:var(--muted);font-size:12px;margin:6px 0}
-@media(max-width:720px){.edge-card{grid-template-columns:1fr}}
-@media(max-width:1000px){.report-layout{display:block}.report-sidebar{max-height:none;position:static}.report-content{margin-top:14px}.columns{grid-template-columns:1fr}}
-@media(max-width:720px){header#cover{padding:22px 18px}.report-layout{padding:0 14px}.card{padding:14px 16px}section.card>h2{margin:-14px -16px 12px;padding:10px 16px}.grid{grid-template-columns:1fr 1fr}.event-explorer-table{min-width:640px}.event-table{min-width:760px}.event-table-wrap,.event-explorer-wrap{overflow-x:auto}}
-@media print{html{scroll-behavior:auto}body{background:#fff;color:#000;font-size:11px}.report-layout{display:block;margin:0;max-width:none;padding:0}.report-sidebar{display:none}.copy-btn,.copy-icon,.toolbar,.inline-actions,.event-explorer-toolbar{display:none!important}section.card>h2{position:static}.card,.event-table-wrap,.raw-events-panel,.process-tree,.relation-card,.evidence-story-lane,.evidence-summary-card,.raw-event-page{break-inside:avoid;max-height:none!important;overflow:visible!important}.process-tree-path{white-space:normal}.raw-events-shell>summary:after,.raw-event-page>summary:after,.event-evidence-fields>summary:after,.technical-field>summary:after,.raw-technical-fields>summary:after{color:#64748b;content:' (folded in screen view; expand in browser for full evidence)';font-weight:400}}
+
+/* ---------- responsive ---------- */
+@media(max-width:1200px){.report-layout{gap:18px;grid-template-columns:minmax(220px,248px) minmax(0,1fr)}}
+@media(max-width:1000px){.report-layout{display:block}.report-sidebar{max-height:none;position:static}.report-content{margin-top:16px}.columns{grid-template-columns:1fr}}
+@media(max-width:720px){
+  header#cover{padding:24px 18px}
+  header#cover .cover-fact{grid-template-columns:84px minmax(0,1fr)}
+  .report-layout{padding:0 14px}
+  .card{padding:16px 16px 18px}
+  section.card>h2{margin:-16px -16px 14px;padding:11px 16px}
+  .risk-tiles,.grid,.focus-grid{grid-template-columns:1fr 1fr}
+  .event-explorer-table{min-width:640px}
+  .event-card{grid-template-columns:1fr}
+  .event-card-meta{grid-auto-flow:column;justify-content:start;gap:10px}
+  .event-table{min-width:760px}
+  .event-table-wrap,.event-explorer-wrap{overflow-x:auto}
+  .artifact-card{grid-template-columns:1fr}
+  .evt-line{grid-template-columns:1fr}
+}
+
+/* ---------- print ---------- */
+@media print{
+  html{scroll-behavior:auto}
+  body{background:#fff;color:#000;font-size:11px}
+  .report-layout{display:block;margin:0;max-width:none;padding:0}
+  .report-sidebar{display:none}
+  .copy-btn,.copy-icon,.toolbar,.inline-actions,.event-explorer-toolbar{display:none!important}
+  section.card>h2{position:static}
+  .card,.event-table-wrap,.raw-events-panel,.process-tree,.relation-card,.evidence-story-lane,.evidence-summary-card,.raw-event-page,.finding-card,.artifact-card{break-inside:avoid;max-height:none!important;overflow:visible!important}
+  .process-tree-path{white-space:normal}
+  .raw-events-shell>summary:after,.raw-event-page>summary:after,.event-evidence-fields>summary:after,.technical-field>summary:after,.raw-technical-fields>summary:after{color:#64748b;content:' (folded in screen view; expand in browser for full evidence)';font-weight:400}
+}
 """);
         html.AppendLine("</style></head>");
     }
@@ -685,9 +1071,10 @@ details[open]>summary:before{content:'▾'}
         var verdict = DetermineVerdict(report);
         var triageVerdict = ToTriageVerdict(verdict.Label);
         html.AppendLine("<header id=\"cover\">");
+        html.AppendLine("<div class=\"cover-main\">");
         html.AppendLine("<h1>KSword Sandbox Report</h1>");
         html.AppendLine($"<p class=\"muted\">Job {E(report.JobId.ToString())} generated at {E(report.GeneratedAt.ToString("u"))}</p>");
-        html.AppendLine($"<p><span class=\"badge badge-{E(verdict.Css)} triage-verdict\">{E(triageVerdict)}</span> <span class=\"badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</span></p>");
+        html.AppendLine($"<p class=\"cover-verdict\"><span class=\"badge badge-{E(verdict.Css)} triage-verdict\">{E(triageVerdict)}</span> <span class=\"badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</span></p>");
         if (HasExecutionBlockedVerdict(report))
         {
             // Keep the execution outcome visible in the cover. A failed or
@@ -695,20 +1082,24 @@ details[open]>summary:before{content:'▾'}
             // after the operator has scrolled past the verdict badge.
             html.AppendLine("<div class=\"failure-note execution-failure-banner\" role=\"alert\"><strong>Sample execution failed / runtime indeterminate</strong><span>Sample execution failed or ended before complete runtime behavior. This is an execution outcome, not a maliciousness verdict.</span></div>");
         }
-        html.AppendLine("<table><tbody>");
-        Row(html, "Sample", report.Sample.FileName);
-        Row(html, "SHA-256", report.Sample.Sha256);
-        Row(html, "Size", FormatBytes(report.Sample.SizeBytes));
-        Row(html, "Status", report.Status.ToString(), localizeStatusValue: true);
-        Row(html, "Virtualization provider", report.Provider?.ToString() ?? "Unknown");
+
+        // The identity block is a definition grid rather than a bordered
+        // table: labels keep a fixed column so sample name, hash, size, and
+        // environment values line up across the cover without table rules.
+        html.AppendLine("<dl class=\"cover-facts\">");
+        CoverFact(html, "Sample", report.Sample.FileName);
+        CoverFact(html, "SHA-256", report.Sample.Sha256, mono: true);
+        CoverFact(html, "Size", FormatBytes(report.Sample.SizeBytes));
+        CoverFact(html, "Status", report.Status.ToString(), localizeStatusValue: true);
+        CoverFact(html, "Virtualization provider", report.Provider?.ToString() ?? "Unknown");
         if (!string.IsNullOrWhiteSpace(report.TargetVmName))
         {
-            Row(html, "Target VM", report.TargetVmName);
+            CoverFact(html, "Target VM", report.TargetVmName);
         }
 
         if (!string.IsNullOrWhiteSpace(report.BaselineName))
         {
-            Row(html, "Clean baseline", report.BaselineName);
+            CoverFact(html, "Clean baseline", report.BaselineName);
         }
 
         if (!string.IsNullOrWhiteSpace(report.MachineDefinitionPath))
@@ -719,17 +1110,49 @@ details[open]>summary:before{content:'▾'}
                 VirtualizationProvider.Qemu => "QEMU base disk",
                 _ => "Provider machine definition"
             };
-            AppendTechnicalPathRow(html, resourceLabel, report.MachineDefinitionPath);
+            CoverPathFact(html, resourceLabel, report.MachineDefinitionPath);
         }
 
         if (report.Provider is VirtualizationProvider.Qemu &&
             !string.IsNullOrWhiteSpace(report.QemuDiskFormat))
         {
-            Row(html, "QEMU disk format", report.QemuDiskFormat);
+            CoverFact(html, "QEMU disk format", report.QemuDiskFormat);
         }
 
-        html.AppendLine("</tbody></table>");
+        html.AppendLine("</dl>");
+        html.AppendLine("</div>");
         html.AppendLine("</header>");
+    }
+
+    /// <summary>
+    /// Appends one cover identity row. Inputs are a label, a value, and whether
+    /// the value should render as monospace machine text; processing keeps the
+    /// value copyable and aligned inside the cover definition grid.
+    /// </summary>
+    private static void CoverFact(
+        StringBuilder html,
+        string label,
+        string value,
+        bool mono = false,
+        bool localizeStatusValue = false)
+    {
+        var renderedValue = localizeStatusValue
+            ? $"<span class=\"ui-status-value\">{E(value)}</span>"
+            : mono
+                ? $"<code class=\"copyable\" data-copy=\"{A(value)}\" title=\"{A(value)}\">{E(ShortenMiddle(value, 30))}</code>"
+                : E(value);
+        html.AppendLine($"<div class=\"cover-fact\"><dt>{E(label)}</dt><dd class=\"copyable\" data-copy=\"{A(value)}\">{renderedValue}</dd></div>");
+    }
+
+    /// <summary>
+    /// Appends one cover path row as folded technical metadata so host paths do
+    /// not dominate the identity block while staying copyable.
+    /// </summary>
+    private static void CoverPathFact(StringBuilder html, string label, string value)
+    {
+        var hint = SafePathLeaf(value);
+        var summary = string.IsNullOrWhiteSpace(hint) ? "Path" : hint;
+        html.AppendLine($"<div class=\"cover-fact\"><dt>{E(label)}</dt><dd>{RenderTechnicalDisclosure(summary, value)}</dd></div>");
     }
 
     private static string ToTriageVerdict(string detailedLabel)
@@ -884,28 +1307,34 @@ details[open]>summary:before{content:'▾'}
         var supportingFindings = SupportingBehaviorFindings(report).ToList();
         var staticFindings = StaticTriageFindings(report).ToList();
         html.AppendLine("<section id=\"risk\" class=\"card\"><h2>Risk summary</h2>");
-        html.AppendLine("<div class=\"grid\">");
-        Metric(html, "High risk", (CountSeverity(primaryFindings, "critical") + CountSeverity(primaryFindings, "high")).ToString(), "risk-high");
-        Metric(html, "Suspicious", CountSeverity(primaryFindings, "medium").ToString(), "risk-medium");
-        Metric(html, "General / info", (CountSeverity(primaryFindings, "low") + CountSeverity(primaryFindings, "info")).ToString(), "risk-info");
+        // Two reading levels: four conclusion tiles an operator can scan in one
+        // glance, then an aligned definition list with the evidence volumes that
+        // explain those numbers. The list replaces the previous 22-tile grid.
+        html.AppendLine("<div class=\"risk-tiles\">");
+        RiskTile(html, "High risk", (CountSeverity(primaryFindings, "critical") + CountSeverity(primaryFindings, "high")).ToString(), "risk-high", "tone-high");
+        RiskTile(html, "Suspicious", CountSeverity(primaryFindings, "medium").ToString(), "risk-medium", "tone-medium");
+        RiskTile(html, "General / info", (CountSeverity(primaryFindings, "low") + CountSeverity(primaryFindings, "info")).ToString(), "risk-info", "tone-info");
+        RiskTile(html, "MITRE techniques", primaryFindings.Where(f => !string.IsNullOrWhiteSpace(f.MitreTechniqueId)).Select(f => f.MitreTechniqueId).Distinct().Count().ToString(), "risk-info", "tone-info");
+        html.AppendLine("</div>");
+        html.AppendLine("<h3>Evidence volume</h3>");
+        html.AppendLine("<dl class=\"metric-table\">");
         // Static findings are capability clues only. Keep this metric informational
         // even when a rule's internal severity is medium so the landing page does
         // not imply that an import, URL, YARA match, or PE trait was observed at run
         // time.
-        Metric(html, "Static triage", staticFindings.Count.ToString(), "risk-info");
+        MetricRow(html, "Static triage", staticFindings.Count.ToString());
         // Generic R0/process-tree rows are useful corroborating telemetry, but
         // they are not independent behavior conclusions. Keep their count
         // visible without allowing it to inflate the primary risk buckets.
-        Metric(html, "Supporting telemetry", supportingFindings.Count.ToString(), "risk-info");
-        Metric(html, "MITRE techniques", primaryFindings.Where(f => !string.IsNullOrWhiteSpace(f.MitreTechniqueId)).Select(f => f.MitreTechniqueId).Distinct().Count().ToString(), "risk-low");
-        Metric(html, "Events", report.Events.Count.ToString(), "risk-info");
-        Metric(html, "Rule hits", report.Findings.Count.ToString(), "risk-info");
-        Metric(html, "Static tags", (report.StaticAnalysis?.Tags.Count ?? 0).ToString(), "risk-info");
-        Metric(html, "Static URL refs", (report.StaticAnalysis?.Urls.Count ?? 0).ToString(), "risk-info");
-        Metric(html, "File events", report.Events.Count(IsSampleBehaviorFileEvent).ToString(), "risk-medium");
-        Metric(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString(), "risk-medium");
-        Metric(html, "Registry events", report.Events.Count(IsSampleBehaviorRegistryEvent).ToString(), "risk-medium");
-        Metric(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString(), "risk-info");
+        MetricRow(html, "Supporting telemetry", supportingFindings.Count.ToString());
+        MetricRow(html, "Events", report.Events.Count.ToString());
+        MetricRow(html, "Rule hits", report.Findings.Count.ToString());
+        MetricRow(html, "Static tags", (report.StaticAnalysis?.Tags.Count ?? 0).ToString());
+        MetricRow(html, "Static URL refs", (report.StaticAnalysis?.Urls.Count ?? 0).ToString());
+        MetricRow(html, "File events", report.Events.Count(IsSampleBehaviorFileEvent).ToString());
+        MetricRow(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString());
+        MetricRow(html, "Registry events", report.Events.Count(IsSampleBehaviorRegistryEvent).ToString());
+        MetricRow(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString());
         var processRaw = ReportMetric(report, "events.process.raw");
         var processReport = ReportMetric(report, "events.process.report");
         var threadRaw = ReportMetric(report, "events.thread.raw");
@@ -914,19 +1343,19 @@ details[open]>summary:before{content:'▾'}
         var moduleReport = ReportMetric(report, "events.module.report");
         var securityRaw = ReportMetric(report, "events.security.raw");
         var securityReport = ReportMetric(report, "events.security.report");
-        Metric(html, "Process events (raw/report)", $"{processRaw}/{processReport}", processRaw > processReport ? "risk-medium" : "risk-info");
-        Metric(html, "Thread events (raw/report)", $"{threadRaw}/{threadReport}", threadRaw > threadReport ? "risk-medium" : "risk-info");
-        Metric(html, "Module events (raw/report)", $"{moduleRaw}/{moduleReport}", moduleRaw > moduleReport ? "risk-medium" : "risk-info");
-        Metric(html, "Security events (raw/report)", $"{securityRaw}/{securityReport}", securityRaw > securityReport ? "risk-medium" : "risk-info");
+        MetricRow(html, "Process events (raw/report)", $"{processRaw}/{processReport}");
+        MetricRow(html, "Thread events (raw/report)", $"{threadRaw}/{threadReport}");
+        MetricRow(html, "Module events (raw/report)", $"{moduleRaw}/{moduleReport}");
+        MetricRow(html, "Security events (raw/report)", $"{securityRaw}/{securityReport}");
         var r0DriverRaw = ReportMetric(report, "events.r0.driver.raw");
         var r0DriverReport = ReportMetric(report, "events.r0.driver.report");
         var r0DriverOmitted = ReportMetric(report, "events.r0.driver.omitted");
-        Metric(html, "R0 driver rows (raw)", r0DriverRaw.ToString(CultureInfo.InvariantCulture), "risk-info");
-        Metric(html, "R0 driver rows (report)", r0DriverReport.ToString(CultureInfo.InvariantCulture), "risk-info");
-        Metric(html, "R0 driver rows omitted", r0DriverOmitted.ToString(CultureInfo.InvariantCulture), r0DriverOmitted > 0 ? "risk-medium" : "risk-info");
+        MetricRow(html, "R0 driver rows (raw)", r0DriverRaw.ToString(CultureInfo.InvariantCulture));
+        MetricRow(html, "R0 driver rows (report)", r0DriverReport.ToString(CultureInfo.InvariantCulture));
+        MetricRow(html, "R0 driver rows omitted", r0DriverOmitted.ToString(CultureInfo.InvariantCulture));
         var r0QualityWarnings = ReportMetric(report, "events.r0.driver.qualityWarningRows");
-        Metric(html, "R0 collection warnings", r0QualityWarnings.ToString(CultureInfo.InvariantCulture), r0QualityWarnings > 0 ? "risk-medium" : "risk-info");
-        html.AppendLine("</div>");
+        MetricRow(html, "R0 collection warnings", r0QualityWarnings.ToString(CultureInfo.InvariantCulture));
+        html.AppendLine("</dl>");
         if (r0DriverRaw > 0)
         {
             var driverClassSummary = string.Join(
@@ -1073,7 +1502,7 @@ details[open]>summary:before{content:'▾'}
         html.AppendLine("<span id=\"events\" class=\"anchor-offset\"></span><section id=\"event-explorer\" class=\"card\"><h2>Key event explorer</h2>");
         AppendCollectionCoverageBanner(html, report, explorerEvents);
         html.AppendLine("<div class=\"event-explorer-toolbar\">");
-        html.AppendLine("<label>Search <input type=\"search\" data-event-search placeholder=\"type, path, process, target\"></label>");
+        html.AppendLine("<label class=\"event-search\">Search <input type=\"search\" data-event-search placeholder=\"type, path, process, target\"></label>");
         AppendEventExplorerSelect(html, "Event type", "data-event-type", types);
         AppendEventExplorerSelect(html, "Source", "data-event-source", sources);
         AppendEventExplorerSelect(html, "Behavior family", "data-event-family", families);
@@ -1090,7 +1519,11 @@ details[open]>summary:before{content:'▾'}
         }
         else
         {
-            html.AppendLine("<div class=\"event-table-wrap event-explorer-wrap\"><table class=\"event-explorer-table\"><thead><tr><th>Time</th><th>Event type</th><th>Severity</th><th>Evidence</th></tr></thead><tbody>");
+            // Rows render as cards: time and event type stack in a narrow left
+            // column, severity is carried by the row color only, and the
+            // evidence gets the full remaining width instead of a fourth
+            // table column squeezed next to a mostly empty timestamp cell.
+            html.AppendLine("<div class=\"event-table-wrap event-explorer-wrap\"><div class=\"event-list\">");
             for (var rowIndex = 0; rowIndex < renderRows.Count; rowIndex++)
             {
                 var row = renderRows[rowIndex];
@@ -1105,28 +1538,55 @@ details[open]>summary:before{content:'▾'}
                 var plain = overflow
                     ? string.Empty
                     : EventToBoundedPlainText(evt, maxDataPairs: 24, maxValueLength: 220);
-                html.AppendLine($"<tr class=\"event-explorer-row\" data-event-row data-event-overflow=\"{(overflow ? "true" : "false")}\" data-type=\"{A(evt.EventType)}\" data-source=\"{A(evt.Source)}\" data-family=\"{A(row.Family)}\" data-stage=\"{A(row.Stage)}\" data-severity=\"{A(row.Severity)}\" data-sample=\"{(row.SampleBehavior ? "true" : "false")}\" data-event-disposition=\"{A(row.Disposition)}\" data-search=\"{A(search)}\">");
-                html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
-                html.AppendLine($"<td><code data-token-kind=\"type\" data-event-token=\"{A(evt.EventType)}\">{E(evt.EventType)}</code></td><td><span class=\"chip chip-{E(NormalizeSeverity(row.Severity))}\">{E(row.Severity)}</span>{(string.IsNullOrWhiteSpace(exitCode) ? string.Empty : $" <code class=\"exit-code\">{E(exitCode)}</code>")}</td>");
+                html.AppendLine($"<div class=\"event-card event-explorer-row\" data-event-row data-event-overflow=\"{(overflow ? "true" : "false")}\" data-type=\"{A(evt.EventType)}\" data-source=\"{A(evt.Source)}\" data-family=\"{A(row.Family)}\" data-stage=\"{A(row.Stage)}\" data-severity=\"{A(row.Severity)}\" data-sample=\"{(row.SampleBehavior ? "true" : "false")}\" data-event-disposition=\"{A(row.Disposition)}\" data-search=\"{A(search)}\">");
+                html.AppendLine("<div class=\"event-card-meta\">");
+                html.AppendLine($"<span class=\"event-time copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</span>");
+                html.AppendLine($"<code class=\"event-type\" data-token-kind=\"type\" data-event-token=\"{A(evt.EventType)}\">{E(evt.EventType)}</code>");
+                if (!string.IsNullOrWhiteSpace(exitCode))
+                {
+                    html.AppendLine($"<code class=\"exit-code\">{E(exitCode)}</code>");
+                }
+
+                html.AppendLine($"<span class=\"sr-only\">Severity {E(row.Severity)}</span>");
+                html.AppendLine("</div>");
                 var detail = overflow
                     ? $"<div class=\"event-evidence-cell\">{RenderProcessExitOutcome(evt)}<span class=\"inline-actions\">{CopyIconButton(plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span></div>"
                     : $"<div class=\"event-evidence-cell\">{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyIconButton(plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span></div>";
-                // The event explorer is already a bounded, filterable table.
+                // The event explorer is already a bounded, filterable list.
                 // Render selected evidence inline so every row is readable
                 // without a second disclosure control. Raw event pages remain
                 // the place for large, paged payloads.
                 var evidenceTitle = evt.ProcessName ?? DisplayEventTarget(evt, target) ?? "Evidence";
-                html.AppendLine($"<td><div class=\"event-explorer-detail\"><strong class=\"event-evidence-title\">{E(evidenceTitle)}</strong>{detail}</div></td>");
-                html.AppendLine("</tr>");
+                var titleHtml = string.IsNullOrWhiteSpace(evidenceTitle) || evidenceTitle == "-"
+                    ? string.Empty
+                    : $"<strong class=\"event-evidence-title\">{E(evidenceTitle)}</strong>";
+                html.AppendLine($"<div class=\"event-card-body\"><div class=\"event-explorer-detail\">{titleHtml}{detail}</div></div>");
+                html.AppendLine("</div>");
             }
 
-            html.AppendLine("</tbody></table></div>");
+            html.AppendLine("</div></div>");
         }
 
         html.AppendLine("<div class=\"empty event-filter-empty\" data-event-empty hidden>No matching evidence rows. Clear a filter or open Raw normalized events.</div>");
 
         html.AppendLine("</section>");
     }
+
+    /// <summary>
+    /// Maps a normalized severity token to its operator-facing Chinese label.
+    /// Inputs are the raw severity value used for CSS classes and filtering;
+    /// processing keeps unknown tokens untouched; the method returns the
+    /// display text only, never the machine value.
+    /// </summary>
+    private static string ChineseSeverityText(string value) => value.ToLowerInvariant() switch
+    {
+        "critical" => "严重",
+        "high" => "高",
+        "medium" => "中",
+        "low" => "低",
+        "info" => "信息",
+        _ => value
+    };
 
     private static string DisplayExplorerLabel(string value)
     {
@@ -1156,6 +1616,8 @@ details[open]>summary:before{content:'▾'}
             "medium" => "中",
             "high" => "高",
             "critical" => "严重",
+            "observed" => "已观察",
+            "not observed" => "未观察",
             _ => value
         };
     }
@@ -1202,16 +1664,32 @@ details[open]>summary:before{content:'▾'}
             ["dns.query"] = "DNS 查询", ["http.request"] = "HTTP 请求", ["tls.connection"] = "TLS 连接",
             ["etw_live.captured"] = "ETW 实时采集", ["etw_live.decode_failed"] = "ETW 解码失败",
             ["pcap.summary"] = "PCAP 摘要", ["artifact.dropped_file.copied"] = "落地文件已复制",
-            ["artifact.dropped_file.skipped"] = "落地文件未采集", ["collection-health.summary"] = "采集健康摘要"
+            ["artifact.dropped_file.skipped"] = "落地文件未采集", ["collection-health.summary"] = "采集健康摘要",
+            ["etw_security.surface.readiness"] = "ETW 安全面就绪",
+            ["startup_item.wmi.capture_failed"] = "启动项·WMI 采集失败",
+            ["scheduled_task.created"] = "计划任务·已创建",
+            ["scheduled_task.modified"] = "计划任务·已修改",
+            ["scheduled_task.deleted"] = "计划任务·已删除",
+            ["startup_item.created"] = "启动项·已创建",
+            ["startup_item.modified"] = "启动项·已修改",
+            ["startup_item.deleted"] = "启动项·已删除",
+            ["startup_item.snapshot"] = "启动项·快照"
         };
         if (labels.TryGetValue(value, out var label)) return label;
         var prefix = value;
-        foreach (var pair in new[] { ("driver.", "驱动·"), ("process.", "进程·"), ("file.", "文件·"), ("registry.", "注册表·"), ("network.", "网络·"), ("etw_security.", "ETW 安全·"), ("security_eventlog.", "安全日志·"), ("eventlog.", "事件日志·"), ("r0collector.", "R0·"), ("service.", "服务·"), ("startup.", "启动项·"), ("thread.", "线程·"), ("artifact.", "证据·") })
+        foreach (var pair in new[] { ("driver.", "驱动·"), ("process.", "进程·"), ("file.", "文件·"), ("registry.", "注册表·"), ("network.", "网络·"), ("etw_security.", "ETW 安全·"), ("security_eventlog.", "安全日志·"), ("eventlog.", "事件日志·"), ("r0collector.", "R0·"), ("service.", "服务·"), ("startup_item.", "启动项·"), ("startup.", "启动项·"), ("thread.", "线程·"), ("artifact.", "证据·") })
         {
             if (prefix.StartsWith(pair.Item1, StringComparison.OrdinalIgnoreCase))
-                return pair.Item2 + LocalizeMachineToken(prefix[pair.Item1.Length..], "·");
+            {
+                var tail = LocalizeMachineTokenStrict(prefix[pair.Item1.Length..], "·");
+                return tail is null ? value : pair.Item2 + tail;
+            }
         }
-        return LocalizeMachineToken(value, "·");
+
+        // Sample-specific event families (for example "story.raw.00") have no
+        // faithful translation. Showing the raw machine type beats emitting a
+        // half-translated token chain such as "story·原始·00".
+        return LocalizeMachineTokenStrict(value, "·") ?? value;
     }
 
     private static string DisplayEventSourceLabel(string value)
@@ -1236,20 +1714,21 @@ details[open]>summary:before{content:'▾'}
         {
             "file" => "文件", "process" => "进程", "network" => "网络", "registry" => "注册表",
             "image" => "映像", "service" => "服务", "startup" => "启动项", "artifact" => "证据",
-            "security" => "安全", "diagnostic" => "诊断", _ => LocalizeMachineToken(value, "·")
+            "security" => "安全", "diagnostic" => "诊断", "failure" => "失败",
+            // Composite families keep both halves readable instead of falling
+            // back to the raw slash token.
+            "security/privilege" => "安全 / 特权",
+            _ => LocalizeMachineToken(value, "·")
         };
     }
 
     private static string DisplayDispositionLabel(string value) => DisplayExplorerLabel(value);
 
-    private static string LocalizeMachineToken(string value, string separator)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "未知";
-        }
-
-        var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    // Shared token table for machine identifiers such as "process.start" or
+    // "scheduled_task.created". Keys are lower case so lookups stay
+    // case-insensitive without allocating a comparer per call.
+    private static readonly IReadOnlyDictionary<string, string> MachineTokenLabels =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["dynamic"] = "动态", ["late"] = "延迟", ["captured"] = "已采集", ["capture"] = "采集",
             ["failed"] = "失败", ["error"] = "错误", ["started"] = "已启动", ["stopped"] = "已停止",
@@ -1262,19 +1741,97 @@ details[open]>summary:before{content:'▾'}
             ["removed"] = "已关闭", ["powershell"] = "PowerShell", ["script"] = "脚本", ["block"] = "块",
             ["netstat"] = "连接快照", ["deviceopened"] = "设备打开", ["driverhealth"] = "驱动健康",
             ["driverreadevents"] = "读取事件", ["driverstatus"] = "驱动状态", ["r0"] = "R0",
-            ["raw"] = "原始", ["item"] = "项", ["wmi"] = "WMI", ["contract"] = "契约", ["index"] = "索引",
+            ["raw"] = "原始", ["wmi"] = "WMI", ["contract"] = "契约", ["index"] = "索引",
             ["memory"] = "内存", ["dump"] = "转储", ["packet"] = "数据包", ["pe"] = "PE", ["resource"] = "资源",
             ["static"] = "静态", ["analysis"] = "分析", ["timeout"] = "超时", ["enrichment"] = "增强",
             ["virustotal"] = "VirusTotal", ["lookup"] = "查询",
             ["driver"] = "驱动", ["network"] = "网络", ["registry"] = "注册表", ["process"] = "进程",
             ["file"] = "文件", ["device"] = "设备", ["read"] = "读取", ["events"] = "事件",
-            ["event"] = "事件"
+            ["event"] = "事件",
+            // Behavior-family and stage tokens used by the event explorer
+            // filters; without these the Chinese report shows raw English
+            // option text such as "failure" or "collection".
+            ["failure"] = "失败", ["collection"] = "采集", ["execution"] = "执行",
+            ["persistence"] = "持久化", ["discovery"] = "发现", ["evasion"] = "规避",
+            ["credential"] = "凭据", ["privilege"] = "特权", ["injection"] = "注入",
+            ["download"] = "下载", ["exfiltration"] = "外传", ["command"] = "命令",
+            ["control"] = "控制", ["impact"] = "影响", ["reconnaissance"] = "侦察",
+            ["lateral"] = "横向", ["startup"] = "启动项", ["service"] = "服务",
+            ["artifact"] = "证据", ["image"] = "映像", ["storage"] = "存储",
+            // Event-family nouns and verbs that appear after the family prefix.
+            ["tcp"] = "TCP", ["udp"] = "UDP", ["icmp"] = "ICMP", ["tls"] = "TLS", ["http"] = "HTTP",
+            ["dns"] = "DNS", ["etw"] = "ETW", ["vt"] = "VT", ["api"] = "API", ["url"] = "URL",
+            ["pid"] = "PID", ["sid"] = "SID", ["token"] = "令牌", ["surface"] = "面",
+            ["readiness"] = "就绪", ["scheduled"] = "计划任务", ["task"] = "任务",
+            ["start"] = "启动", ["exit"] = "退出", ["new"] = "新建", ["dropped"] = "落地",
+            ["decode"] = "解码", ["embedded"] = "内嵌", ["load"] = "加载", ["connection"] = "连接",
+            ["rule"] = "规则", ["matched"] = "已匹配", ["hit"] = "命中", ["scan"] = "扫描",
+            ["update"] = "更新", ["write"] = "写入", ["drop"] = "落地", ["inject"] = "注入",
+            ["thread"] = "线程", ["flow"] = "流量", ["session"] = "会话",
+            ["pcap"] = "PCAP", ["run"] = "Run", ["collector"] = "采集器",
+            ["start_failed"] = "启动失败", ["decode_failed"] = "解码失败",
+            ["tree_unavailable"] = "进程树不可用", ["dropped_file"] = "落地文件",
+            ["script_block"] = "脚本块"
         };
+
+    private static string[] SplitMachineToken(string value)
+    {
         var camelSeparated = Regex.Replace(value, "(?<=[a-z0-9])(?=[A-Z])", "_", RegexOptions.CultureInvariant);
-        var parts = camelSeparated.Split(['.', '_', '-'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(part => labels.TryGetValue(part, out var translated) ? translated : part)
-            .ToArray();
+        return camelSeparated.Split(
+            ['.', '_', '-'],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    private static string LocalizeMachineToken(string value, string separator)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "未知";
+        }
+
+        var parts = SplitMachineToken(value)
+            .Select(part => MachineTokenLabels.TryGetValue(part, out var translated) ? translated : part);
         return string.Join(separator, parts);
+    }
+
+    /// <summary>
+    /// Localizes a machine token only when every part has a known label.
+    /// Inputs are the raw token and the display separator; processing returns
+    /// null for tokens with unknown parts so callers can fall back to the raw
+    /// machine value instead of emitting a half-translated chain.
+    /// </summary>
+    private static string? LocalizeMachineTokenStrict(string value, string separator)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var parts = SplitMachineToken(value);
+        if (parts.Length == 0)
+        {
+            return null;
+        }
+
+        var localized = new List<string>(parts.Length);
+        foreach (var part in parts)
+        {
+            if (MachineTokenLabels.TryGetValue(part, out var translated))
+            {
+                localized.Add(translated);
+                continue;
+            }
+
+            if (part.All(char.IsDigit))
+            {
+                localized.Add(part);
+                continue;
+            }
+
+            return null;
+        }
+
+        return string.Join(separator, localized);
     }
 
     private static void AppendEventExplorerSelect(StringBuilder html, string label, string attribute, IEnumerable<string> values)
@@ -1546,13 +2103,49 @@ details[open]>summary:before{content:'▾'}
         }
         else
         {
-            html.AppendLine("<table class=\"behavior-findings-table\"><thead><tr><th>Severity</th><th>Behavior</th><th>Evidence</th></tr></thead><tbody>");
+            // Findings read as cards, not table rows: the title is the primary
+            // line, rule/MITRE/evidence metadata sits under it, and the top
+            // evidence events are rendered as aligned time/type/subject lines.
+            html.AppendLine("<div class=\"finding-list\">");
             foreach (var finding in findings)
             {
-                html.AppendLine($"<tr><td class=\"risk-{E(NormalizeSeverity(finding.Severity))}\">{E(finding.Severity)}</td><td><strong>{E(finding.Title)}</strong></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
+                var severity = NormalizeSeverity(finding.Severity);
+                html.AppendLine($"<article class=\"finding-card sev-{E(severity)}\">");
+                html.AppendLine("<div class=\"finding-head\">");
+                html.AppendLine($"<h3 class=\"finding-title\">{E(finding.Title)}</h3>");
+                html.AppendLine($"<span class=\"badge badge-{E(severity)}\">{E(finding.Severity)}</span>");
+                html.AppendLine("</div>");
+                html.AppendLine("<div class=\"finding-meta\">");
+                if (!string.IsNullOrWhiteSpace(finding.RuleId))
+                {
+                    html.AppendLine($"<span>rule {E(finding.RuleId)}</span>");
+                }
+
+                if (!string.IsNullOrWhiteSpace(finding.MitreTechniqueId))
+                {
+                    var technique = string.IsNullOrWhiteSpace(finding.MitreTechniqueName)
+                        ? finding.MitreTechniqueId
+                        : $"{finding.MitreTechniqueId} {finding.MitreTechniqueName}";
+                    html.AppendLine($"<span>{E(technique)}</span>");
+                }
+
+                html.AppendLine($"<span>{E(finding.Evidence.Count.ToString(CultureInfo.InvariantCulture))} <span class=\"finding-count-unit\">evidence rows</span></span>");
+                html.AppendLine("</div>");
+                if (!string.IsNullOrWhiteSpace(finding.Summary))
+                {
+                    // Rule summaries may name an internal field
+                    // ("evidenceFields"); operators should read the finding, not
+                    // renderer plumbing, so the key never reaches the page.
+                    var summaryText = finding.Summary
+                        .Replace("evidenceFields", "evidence fields", StringComparison.OrdinalIgnoreCase);
+                    html.AppendLine($"<p class=\"finding-body\">{E(summaryText)}</p>");
+                }
+
+                html.AppendLine(RenderFindingEvidenceRows(finding.Evidence));
+                html.AppendLine("</article>");
             }
 
-            html.AppendLine("</tbody></table>");
+            html.AppendLine("</div>");
         }
 
         AppendSecondaryFindingGroup(
@@ -1608,22 +2201,40 @@ details[open]>summary:before{content:'▾'}
 
             html.AppendLine($"<article class=\"evidence-story-lane copyable\" data-copy=\"{A(copy)}\">");
             html.AppendLine($"<h3>{E(card.Title)}</h3>");
-            html.AppendLine($"<span class=\"overview-value {E(card.Css)}\">{E(card.Value)}</span>");
+            AppendLaneValue(html, card.Value, card.Css);
             if (card.EvidenceLines.Count == 0)
             {
                 Empty(html, "No sample-attributed evidence for this lane.");
             }
             else
             {
+                // Lanes stay scannable: the first rows define the pattern, and
+                // the tail folds behind a native disclosure so one busy lane
+                // cannot stretch the whole board to several screens.
+                var inlineLines = card.EvidenceLines.Take(BehaviorFactInlineLines).ToList();
+                var foldedLines = card.EvidenceLines.Skip(BehaviorFactInlineLines).ToList();
                 html.AppendLine("<ol class=\"story-evidence-list\">");
-                foreach (var line in card.EvidenceLines.Take(EvidenceStoryInlineLimit))
+                foreach (var line in inlineLines)
                 {
-                    html.AppendLine("<li><div class=\"kv-flow\">");
-                    AppendEvidenceFlow(html, line);
-                    html.AppendLine("</div></li>");
+                    html.AppendLine("<li>");
+                    AppendEvidenceLine(html, line);
+                    html.AppendLine("</li>");
                 }
 
                 html.AppendLine("</ol>");
+                if (foldedLines.Count > 0)
+                {
+                    html.AppendLine($"<details class=\"story-more\"><summary>More evidence: {E(foldedLines.Count.ToString())}/{E(card.EvidenceLines.Count.ToString())}</summary>");
+                    html.AppendLine("<ol class=\"story-evidence-list\">");
+                    foreach (var line in foldedLines)
+                    {
+                        html.AppendLine("<li>");
+                        AppendEvidenceLine(html, line);
+                        html.AppendLine("</li>");
+                    }
+
+                    html.AppendLine("</ol></details>");
+                }
             }
 
             html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy behavior fact", copy)}</div>");
@@ -1795,22 +2406,21 @@ details[open]>summary:before{content:'▾'}
             html.AppendLine($"<p class=\"muted\">{E(note)}</p>");
         }
 
-        html.AppendLine(isStaticTriage
-            ? "<table class=\"behavior-findings-table\"><thead><tr><th>Evidence class</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>"
-            : "<table class=\"behavior-findings-table\"><thead><tr><th>Severity</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>");
+        html.AppendLine("<div class=\"finding-list\">");
         foreach (var finding in findings)
         {
-            if (isStaticTriage)
-            {
-                html.AppendLine($"<tr><td><span class=\"badge static-only-badge\">Static-only / unverified</span></td><td><strong>{E(StaticFindingTitle(finding))}</strong></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
-            }
-            else
-            {
-                html.AppendLine($"<tr><td class=\"risk-{E(NormalizeSeverity(finding.Severity))}\">{E(finding.Severity)}</td><td><strong>{E(finding.Title)}</strong></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
-            }
+            var severity = isStaticTriage ? "info" : NormalizeSeverity(finding.Severity);
+            html.AppendLine($"<article class=\"finding-card sev-{E(severity)}\">");
+            html.AppendLine("<div class=\"finding-head\">");
+            html.AppendLine(isStaticTriage
+                ? $"<h3 class=\"finding-title\">{E(StaticFindingTitle(finding))}</h3><span class=\"badge static-only-badge\">Static-only / unverified</span>"
+                : $"<h3 class=\"finding-title\">{E(finding.Title)}</h3><span class=\"badge badge-{E(severity)}\">{E(finding.Severity)}</span>");
+            html.AppendLine("</div>");
+            html.AppendLine(RenderFindingEvidenceRows(finding.Evidence, inlineLimit: 3));
+            html.AppendLine("</article>");
         }
 
-        html.AppendLine("</tbody></table></details>");
+        html.AppendLine("</div></details>");
     }
 
     /// <summary>
@@ -1822,6 +2432,106 @@ details[open]>summary:before{content:'▾'}
     private static string StaticFindingTitle(BehaviorFinding finding)
     {
         return $"Static capability clue (unverified): {finding.Title}";
+    }
+
+    /// <summary>
+    /// Renders finding evidence as aligned event lines. Inputs are the events
+    /// attached by the rule engine; processing keeps the first rows visible as
+    /// time/type/subject/target columns, folds the full payload behind a native
+    /// details block, and returns encoded HTML.
+    /// </summary>
+    private static string RenderFindingEvidenceRows(IReadOnlyCollection<SandboxEvent> evidence, int inlineLimit = 4)
+    {
+        if (evidence.Count == 0)
+        {
+            return "<span class=\"muted\">—</span>";
+        }
+
+        var topEvidence = evidence.OrderBy(evt => evt.Timestamp).Take(inlineLimit).ToList();
+        var hidden = Math.Max(0, evidence.Count - topEvidence.Count);
+        var full = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            evidence.Select(evt => EventToBoundedPlainText(evt, FindingEvidenceDataPairLimit, FindingEvidenceValueLimit)));
+        var visibleFull = VisibleEvidenceText(full);
+
+        var html = new StringBuilder();
+        html.Append("<div class=\"finding-evidence\"><ol class=\"story-evidence-list\">");
+        foreach (var evt in topEvidence)
+        {
+            html.Append("<li>");
+            html.Append(RenderEvidenceLine(evt));
+            html.Append("</li>");
+        }
+
+        html.Append("</ol>");
+        if (hidden > 0)
+        {
+            html.Append($"<p class=\"finding-more\">{E(hidden.ToString(CultureInfo.InvariantCulture))} more evidence rows are folded into the full payload.</p>");
+        }
+
+        html.Append("<div class=\"finding-full-row\"><details class=\"finding-full\"><summary>Full evidence</summary>");
+        html.Append($"<pre class=\"copyable\" data-copy=\"{A(visibleFull)}\">{E(visibleFull)}</pre></details>");
+        html.Append($"<span class=\"inline-actions\">{CopyIconButton(visibleFull)}</span></div></div>");
+        return html.ToString();
+    }
+
+    /// <summary>
+    /// Renders one event as a three-column evidence line: time, event type, and
+    /// subject with its target underneath. Inputs are a normalized event and the
+    /// method returns encoded HTML.
+    /// </summary>
+    private static string RenderEvidenceLine(SandboxEvent evt)
+    {
+        var target = DisplayEventTarget(evt, ExtractReadableEventTarget(evt));
+        var subject = ProcessDisplayName(evt);
+        var subjectHtml = string.IsNullOrWhiteSpace(subject) || subject == "-"
+            ? "<strong>-</strong>"
+            : $"<strong>{E(subject)}</strong>";
+        var targetHtml = string.IsNullOrWhiteSpace(target) || target == "-"
+            ? string.Empty
+            : $"<span class=\"evt-target\">{E(target)}</span>";
+        return $"<div class=\"evt-line\"><span class=\"evt-time\">{E(evt.Timestamp.ToString("u"))}</span><span class=\"evt-type\">{E(evt.EventType)}</span><span class=\"evt-body\">{subjectHtml}{targetHtml}</span></div>";
+    }
+
+    /// <summary>
+    /// Renders a lane summary count with its unit split into its own span so
+    /// localized reports can translate the unit without touching numbers.
+    /// </summary>
+    private static void AppendLaneValue(StringBuilder html, string value, string css)
+    {
+        var space = value.IndexOf(' ');
+        if (space > 0 && int.TryParse(value[..space], NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+        {
+            html.AppendLine($"<div class=\"lane-value\"><b class=\"overview-value {E(css)}\">{E(value[..space])}</b><span class=\"lane-unit\">{E(value[(space + 1)..])}</span></div>");
+            return;
+        }
+
+        html.AppendLine($"<div class=\"lane-value\"><b class=\"overview-value {E(css)}\">{E(value)}</b></div>");
+    }
+
+    /// <summary>
+    /// Appends one evidence line. Inputs are the compact "time | type | process |
+    /// target" lines produced for fact lanes; processing aligns them into the
+    /// shared three-column evidence grid and falls back to key/value chips for
+    /// lines that are not event summaries.
+    /// </summary>
+    private static void AppendEvidenceLine(StringBuilder html, string line)
+    {
+        var parts = line.Split(" | ", 4, StringSplitOptions.TrimEntries);
+        if (parts.Length == 4 &&
+            parts[0].Length >= 19 &&
+            parts[0][4] == '-' &&
+            parts[0][7] == '-')
+        {
+            var target = string.IsNullOrWhiteSpace(parts[3]) || parts[3] == "-" ? string.Empty : $"<span class=\"evt-target\">{E(parts[3])}</span>";
+            var subject = string.IsNullOrWhiteSpace(parts[2]) || parts[2] == "-" ? "-" : parts[2];
+            html.AppendLine($"<div class=\"evt-line\"><span class=\"evt-time\">{E(parts[0])}</span><span class=\"evt-type\">{E(parts[1])}</span><span class=\"evt-body\"><strong>{E(subject)}</strong>{target}</span></div>");
+            return;
+        }
+
+        html.AppendLine("<div class=\"kv-flow\">");
+        AppendEvidenceFlow(html, line);
+        html.AppendLine("</div>");
     }
 
     /// <summary>
@@ -1873,13 +2583,15 @@ details[open]>summary:before{content:'▾'}
         }
         else
         {
-            html.AppendLine("<table><thead><tr><th>Technique</th><th>Name</th><th>Rules</th><th>Evidence</th></tr></thead><tbody>");
+            html.AppendLine("<div class=\"ref-list\">");
             foreach (var group in groups)
             {
-                html.AppendLine($"<tr><td>{E(group.Key.MitreTechniqueId ?? "-")}</td><td>{E(group.Key.MitreTechniqueName ?? "-")}</td><td>{E(string.Join(", ", group.Select(f => f.RuleId)))}</td><td>{group.Sum(f => f.Evidence.Count)}</td></tr>");
+                var evidenceCount = group.Sum(f => f.Evidence.Count);
+                var ruleList = string.Join(", ", group.Select(f => f.RuleId));
+                html.AppendLine($"<div class=\"ref-row\"><code class=\"ref-key\">{E(group.Key.MitreTechniqueId ?? "-")}</code><span class=\"ref-lead\">{E(group.Key.MitreTechniqueName ?? "-")}</span><span class=\"ref-meta\">Rules: {E(ruleList)}</span><span class=\"ref-tail\">{E(evidenceCount.ToString())} evidence rows</span></div>");
             }
 
-            html.AppendLine("</tbody></table>");
+            html.AppendLine("</div>");
         }
 
         html.AppendLine("</section>");
@@ -1899,7 +2611,7 @@ details[open]>summary:before{content:'▾'}
         }
         else
         {
-            html.AppendLine("<table><thead><tr><th>Engine</th><th>Rule ID</th><th>Title</th><th>Severity</th></tr></thead><tbody>");
+            html.AppendLine("<div class=\"ref-list\">");
             foreach (var finding in report.Findings.OrderBy(f => f.RuleId))
             {
                 var title = IsStaticTriageFinding(finding)
@@ -1908,10 +2620,18 @@ details[open]>summary:before{content:'▾'}
                 var severity = IsStaticTriageFinding(finding)
                     ? "static-only / unverified"
                     : finding.Severity;
-                html.AppendLine($"<tr><td>KSword behavior rules</td><td><code>{E(finding.RuleId)}</code></td><td>{E(title)}</td><td>{E(severity)}</td></tr>");
+                var severityClass = finding.Severity.ToLowerInvariant() switch
+                {
+                    "critical" => "badge-critical",
+                    "high" => "badge-high",
+                    "medium" => "badge-medium",
+                    "low" => "badge-low",
+                    _ => "badge-info"
+                };
+                html.AppendLine($"<div class=\"ref-row\"><code class=\"ref-key\">{E(finding.RuleId)}</code><span class=\"ref-lead\">{E(title)}</span><span class=\"ref-meta\">KSword behavior rules</span><span class=\"badge {severityClass}\">{E(severity)}</span></div>");
             }
 
-            html.AppendLine("</tbody></table>");
+            html.AppendLine("</div>");
         }
 
         html.AppendLine("</section>");
@@ -1926,7 +2646,7 @@ details[open]>summary:before{content:'▾'}
     {
         var staticAnalysis = report.StaticAnalysis;
         html.AppendLine("<section id=\"static\" class=\"card\"><h2>Static analysis</h2>");
-        html.AppendLine("<table><tbody>");
+        html.AppendLine("<div class=\"kv-grid\">");
         Row(html, "File name", report.Sample.FileName);
         AppendTechnicalPathRow(html, "Full path", report.Sample.FullPath);
         Row(html, "File size", FormatBytes(report.Sample.SizeBytes));
@@ -1940,7 +2660,7 @@ details[open]>summary:before{content:'▾'}
         Row(html, "Subsystem", staticAnalysis?.Subsystem ?? "-");
         Row(html, "Entry point RVA", staticAnalysis?.EntryPointRva ?? "-");
         Row(html, "Tags", staticAnalysis is null || staticAnalysis.Tags.Count == 0 ? "-" : string.Join(", ", staticAnalysis.Tags));
-        html.AppendLine("</tbody></table>");
+        html.AppendLine("</div>");
 
         if (staticAnalysis is null)
         {
@@ -2035,16 +2755,17 @@ details[open]>summary:before{content:'▾'}
 
         if (resources.Count > 0)
         {
-            html.AppendLine("<table><thead><tr><th>Type</th><th>Role</th><th>RVA / file offset</th><th>Size</th><th>Entropy</th><th>Flags</th></tr></thead><tbody>");
+            html.AppendLine("<div class=\"ref-list\">");
             foreach (var resource in resources)
             {
                 var role = DescribeReportResourceRole(resource);
                 var flags = StaticResourceFlags(resource);
                 var copy = StaticResourceToPlainText(resource, role, flags);
-                html.AppendLine($"<tr class=\"copyable\" data-copy=\"{A(copy)}\"><td><code>{E(resource.ResourceType)}</code></td><td><span class=\"chip chip-info\">{E(role)}</span></td><td><code>{E(resource.DataRva)}</code><br><span class=\"muted\">{E(resource.DataFileOffset ?? "-")}</span></td><td>{E(FormatBytes(resource.Size))}</td><td>{E(resource.Entropy?.ToString("F3", CultureInfo.InvariantCulture) ?? "-")}<br><span class=\"muted\">{E(resource.EntropyLabel)}</span></td><td>{E(flags)}</td></tr>");
+                var entropy = resource.Entropy?.ToString("F3", CultureInfo.InvariantCulture) ?? "-";
+                html.AppendLine($"<div class=\"ref-row copyable\" data-copy=\"{A(copy)}\"><code class=\"ref-key\">{E(resource.ResourceType)}</code><span class=\"ref-lead\"><span class=\"chip chip-info\">{E(role)}</span></span><span class=\"ref-meta\">RVA {E(resource.DataRva)} · offset {E(resource.DataFileOffset ?? "-")} · {E(FormatBytes(resource.Size))} · entropy {E(entropy)}{(string.IsNullOrWhiteSpace(resource.EntropyLabel) ? string.Empty : " (" + E(resource.EntropyLabel) + ")")}</span><span class=\"ref-meta\">{E(flags)}</span></div>");
             }
 
-            html.AppendLine("</tbody></table>");
+            html.AppendLine("</div>");
         }
 
         if (resourceEvents.Count > 0)
@@ -2511,7 +3232,9 @@ details[open]>summary:before{content:'▾'}
             html.AppendLine("<h3>Process graph nodes</h3><div class=\"graph-map\">");
             foreach (var node in processNodes)
             {
-                html.AppendLine($"<div class=\"graph-node copyable\" data-copy=\"{A(node.CopyText)}\"><strong>{E(node.Label)}</strong><small>{E(node.Detail)}</small></div>");
+                html.AppendLine($"<div class=\"graph-node copyable\" data-copy=\"{A(node.CopyText)}\"><strong>{E(node.Label)}</strong><div class=\"kv-flow node-flow\">");
+                AppendEvidenceFlow(html, node.Detail);
+                html.AppendLine("</div></div>");
             }
 
             html.AppendLine("</div>");
@@ -2524,30 +3247,29 @@ details[open]>summary:before{content:'▾'}
         else
         {
             html.AppendLine("<h3>Evidence graph edges</h3>");
+            var inlineEdges = edges.Take(GraphEdgeInlineLimit).ToList();
+            var foldedEdges = edges.Skip(GraphEdgeInlineLimit).ToList();
             html.AppendLine("<div class=\"edge-cards\">");
-            foreach (var edge in edges)
+            foreach (var edge in inlineEdges)
             {
-                var copy = string.Join(
-                    Environment.NewLine,
-                    [
-                        $"from={edge.From}",
-                        $"relation={edge.Relation}",
-                        $"to={edge.To}",
-                        edge.Evidence
-                    ]);
-                html.AppendLine($"<article class=\"edge-card copyable\" data-copy=\"{A(copy)}\">");
-                html.AppendLine("<div class=\"edge-identity\">");
-                html.AppendLine($"<span class=\"kv-line\"><span class=\"edge-key\">From</span><code>{E(edge.From)}</code></span>");
-                html.AppendLine($"<span class=\"kv-line\"><span class=\"edge-key\">Relation</span><span class=\"badge badge-info\">{E(edge.Relation)}</span></span>");
-                html.AppendLine($"<span class=\"kv-line\"><span class=\"edge-key\">To</span><code>{E(edge.To)}</code></span>");
-                html.AppendLine("</div>");
-                html.AppendLine($"<div class=\"edge-evidence\"><span class=\"inline-actions\">{CopyButton("Copy graph edge", copy)}</span><div class=\"kv-flow\">");
-                AppendEvidenceFlow(html, edge.Evidence);
-                html.AppendLine("</div></div>");
-                html.AppendLine("</article>");
+                AppendGraphEdgeCard(html, edge);
             }
 
             html.AppendLine("</div>");
+            if (foldedEdges.Count > 0)
+            {
+                // Nineteen full-width edge cards were a wall of near-identical
+                // rows. The head of the list stays visible; the rest keeps the
+                // same card markup behind one disclosure.
+                html.AppendLine($"<details class=\"fold-block\"><summary>Remaining graph edges ({E(foldedEdges.Count.ToString(CultureInfo.InvariantCulture))} of {E(edges.Count.ToString(CultureInfo.InvariantCulture))})</summary>");
+                html.AppendLine("<div class=\"edge-cards\">");
+                foreach (var edge in foldedEdges)
+                {
+                    AppendGraphEdgeCard(html, edge);
+                }
+
+                html.AppendLine("</div></details>");
+            }
         }
 
         html.AppendLine("<h3>IOC summary</h3><div class=\"ioc-grid\">");
@@ -2557,6 +3279,37 @@ details[open]>summary:before{content:'▾'}
         AppendIocCard(html, "Artifact IOCs", artifactIocs, "No linked artifacts were indexed for this report.");
         html.AppendLine("</div>");
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends one graph edge as a horizontal source/relation/target chain with
+    /// its evidence fields underneath. Inputs are the report and one edge;
+    /// processing keeps the chain on a single reading line; return is none.
+    /// </summary>
+    private static void AppendGraphEdgeCard(StringBuilder html, BehaviorGraphEdge edge)
+    {
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                $"from={edge.From}",
+                $"relation={edge.Relation}",
+                $"to={edge.To}",
+                edge.Evidence
+            ]);
+        html.AppendLine($"<article class=\"edge-card copyable\" data-copy=\"{A(copy)}\">");
+        // One horizontal chain per edge reads left to right: source,
+        // relation, target. The previous stacked From/Relation/To
+        // column forced long process keys into a narrow strip.
+        html.AppendLine("<div class=\"edge-flow\">");
+        html.AppendLine($"<code class=\"edge-node\">{E(edge.From)}</code>");
+        html.AppendLine($"<span class=\"edge-arrow\" aria-hidden=\"true\">&rarr;</span><span class=\"edge-relation\">{E(edge.Relation)}</span><span class=\"edge-arrow\" aria-hidden=\"true\">&rarr;</span>");
+        html.AppendLine($"<code class=\"edge-node\">{E(edge.To)}</code>");
+        html.AppendLine($"<span class=\"inline-actions\">{CopyButton("Copy graph edge", copy)}</span>");
+        html.AppendLine("</div>");
+        html.AppendLine("<div class=\"edge-evidence\"><div class=\"kv-flow\">");
+        AppendEvidenceFlow(html, edge.Evidence);
+        html.AppendLine("</div></div>");
+        html.AppendLine("</article>");
     }
 
     /// <summary>
@@ -2893,7 +3646,7 @@ details[open]>summary:before{content:'▾'}
         }
 
         html.AppendLine("</div>");
-        html.AppendLine($"<details open class=\"relationship-details\"><summary>Stable relationship lane copy map</summary><div class=\"toolbar\">{CopyButton("Copy stable relationship lanes", copy)}</div><div class=\"copyable\" data-copy=\"{A(copy)}\"><div class=\"kv-flow\">");
+        html.AppendLine($"<details class=\"relationship-details\"><summary>Stable relationship lane overview</summary><div class=\"toolbar\">{CopyButton("Copy stable relationship lanes", copy)}</div><div class=\"copyable\" data-copy=\"{A(copy)}\"><div class=\"kv-flow\">");
         AppendEvidenceFlow(html, copy);
         html.AppendLine("</div></div></details>");
     }
@@ -2939,18 +3692,47 @@ details[open]>summary:before{content:'▾'}
         var copy = string.Join(Environment.NewLine, chain.Select(edge => $"{edge.From} --{edge.Relation}--> {edge.To}"));
         html.AppendLine("<h3>Top behavior chain</h3>");
         html.AppendLine("<div class=\"section-note\"><strong>Top behavior chain.</strong> Lineage-first chain ranked for analyst reading; full bounded evidence is on the edge cards below.</div>");
+        var inlineChain = chain.Take(BehaviorChainInlineLimit).ToList();
+        var foldedChain = chain.Skip(BehaviorChainInlineLimit).ToList();
         html.AppendLine($"<ol class=\"timeline-list behavior-chain copyable\" data-copy=\"{A(copy)}\">");
-        foreach (var edge in chain)
+        foreach (var edge in inlineChain)
         {
-            html.AppendLine("<li>");
-            html.AppendLine($"<code>{E(edge.From)}</code> <span class=\"badge badge-info\">{E(edge.Relation)}</span> <code>{E(edge.To)}</code>");
-            html.AppendLine($"<div class=\"evidence-expansion-card copyable\" data-copy=\"{A(edge.Evidence)}\"><div class=\"kv-flow\">");
-            AppendEvidenceFlow(html, edge.Evidence);
-            html.AppendLine("</div></div>");
-            html.AppendLine("</li>");
+            AppendBehaviorChainItem(html, edge);
         }
 
         html.AppendLine("</ol>");
+        if (foldedChain.Count > 0)
+        {
+            html.AppendLine($"<details class=\"fold-block\"><summary>Rest of the chain ({E(foldedChain.Count.ToString(CultureInfo.InvariantCulture))} of {E(chain.Count.ToString(CultureInfo.InvariantCulture))})</summary>");
+            html.AppendLine("<ol class=\"timeline-list behavior-chain copyable\">");
+            foreach (var edge in foldedChain)
+            {
+                AppendBehaviorChainItem(html, edge);
+            }
+
+            html.AppendLine("</ol></details>");
+        }
+    }
+
+    /// <summary>
+    /// Appends one behavior-chain line: source, relation badge, target, with the
+    /// field payload folded behind a native disclosure. Inputs are the report
+    /// and one edge; return is none.
+    /// </summary>
+    private static void AppendBehaviorChainItem(StringBuilder html, BehaviorGraphEdge edge)
+    {
+        // Each edge is one scannable line; its field payload folds behind a
+        // native disclosure. Eighteen expanded edge payloads previously
+        // formed an unreadable wall of key/value text.
+        var pairCount = edge.Evidence
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Length;
+        html.AppendLine("<li class=\"chain-item\">");
+        html.AppendLine($"<div class=\"chain-head\"><code>{E(edge.From)}</code> <span class=\"badge badge-info\">{E(edge.Relation)}</span> <code>{E(edge.To)}</code></div>");
+        html.AppendLine($"<details class=\"chain-evidence copyable\" data-copy=\"{A(edge.Evidence)}\"><summary>{E(pairCount.ToString())} fields</summary><div class=\"kv-flow\">");
+        AppendEvidenceFlow(html, edge.Evidence);
+        html.AppendLine("</div></details>");
+        html.AppendLine("</li>");
     }
 
     private static int BehaviorChainRelationRank(string relation)
@@ -2986,16 +3768,18 @@ details[open]>summary:before{content:'▾'}
         html.AppendLine("<div class=\"evidence-summary-grid\">");
         foreach (var card in cards)
         {
+            var detailLineCount = card.CopyText.Split('\n').Length;
             html.AppendLine($"<article class=\"evidence-summary-card copyable\" data-copy=\"{A(card.CopyText)}\">");
             html.AppendLine("<div class=\"relationship-title\">");
-            html.AppendLine($"<h3>{E(card.Title)}</h3><span class=\"badge badge-{E(card.Css)}\">{E(card.Value)}</span>");
+            html.AppendLine($"<h3>{E(card.Title)}</h3><span class=\"lane-actions\"><span class=\"badge badge-{E(card.Css)}\">{E(card.Value)}</span>{CopyIconButton(card.CopyText)}</span>");
             html.AppendLine("</div>");
-            html.AppendLine($"<span class=\"summary-value\">{E(card.Value)}</span>");
             html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
-            html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy evidence summary", card.CopyText)}</div>");
-            html.AppendLine($"<div class=\"evidence-expansion-card copyable\" data-copy=\"{A(card.CopyText)}\"><div class=\"kv-flow\">");
+            // The badge already carries the count, so the payload folds instead
+            // of repeating the headline and then dumping every row inline. The
+            // copy action rides in the header instead of a one-button row.
+            html.AppendLine($"<details class=\"relation-evidence copyable\" data-copy=\"{A(card.CopyText)}\"><summary>Detail ({E(detailLineCount.ToString(CultureInfo.InvariantCulture))} rows)</summary><div class=\"kv-flow\">");
             AppendEvidenceFlow(html, card.CopyText);
-            html.AppendLine("</div></div>");
+            html.AppendLine("</div></details>");
             html.AppendLine("</article>");
         }
 
@@ -3080,31 +3864,45 @@ details[open]>summary:before{content:'▾'}
                 : $"Evidence examples shown: {shownEvidenceCount}/{observedEvidenceCount}; expand stays bounded and complete raw source remains in indexed JSON/JSONL artifacts.";
             html.AppendLine($"<article class=\"evidence-story-lane copyable\" data-copy=\"{A(card.CopyText)}\">");
             html.AppendLine("<div class=\"relationship-title\">");
-            html.AppendLine($"<h3>{E(card.Title)}</h3><span class=\"badge badge-{E(card.Css)}\">{E(card.Status)}</span>");
+            html.AppendLine($"<h3>{E(card.Title)}</h3><span class=\"lane-actions\"><span class=\"badge badge-{E(card.Css)}\">{E(card.Status)}</span>{CopyIconButton(card.CopyText)}</span>");
             html.AppendLine("</div>");
             html.AppendLine($"<p class=\"story-lead\">{E(card.Lead)}</p>");
-            html.AppendLine($"<p class=\"copy-hint\">{E(evidenceScope)}</p>");
             html.AppendLine("<div class=\"story-metrics\">");
+            // The shown/total counter used to be a full sentence repeated in
+            // every lane. A chip carries the same number without the prose.
+            html.AppendLine($"<span class=\"copyable\" data-copy=\"{A(evidenceScope)}\">examples {E(shownEvidenceCount.ToString(CultureInfo.InvariantCulture))}/{E(observedEvidenceCount.ToString(CultureInfo.InvariantCulture))}</span>");
             foreach (var metric in card.Metrics.Take(8))
             {
                 html.AppendLine($"<span class=\"copyable\" data-copy=\"{A(metric)}\">{E(metric)}</span>");
             }
 
             html.AppendLine("</div>");
-            html.AppendLine("<div class=\"toolbar\">");
-            html.AppendLine(CopyButton("Copy story lane", card.CopyText));
-            html.AppendLine("</div>");
             html.AppendLine("<div class=\"evidence-expansion-card\">");
             AppendEvidenceExpansionSummary(html, "Story evidence", shownEvidenceCount, observedEvidenceCount, "Sampled report view and indexed source JSON/JSONL artifacts", card.EvidenceLines);
+            var inlineStoryLines = card.EvidenceLines.Take(BehaviorFactInlineLines).ToList();
+            var foldedStoryLines = card.EvidenceLines.Skip(BehaviorFactInlineLines).Take(12).ToList();
             html.AppendLine("<ol class=\"story-evidence-list\">");
-            foreach (var line in card.EvidenceLines.Take(12))
+            foreach (var line in inlineStoryLines)
             {
                 html.AppendLine("<li><div class=\"kv-flow\">");
-                AppendEvidenceFlow(html, line);
+                AppendEvidenceFlow(html, line, StoryEvidenceSegmentBudget);
                 html.AppendLine("</div></li>");
             }
 
             html.AppendLine("</ol>");
+            if (foldedStoryLines.Count > 0)
+            {
+                html.AppendLine($"<details class=\"story-more\"><summary>More evidence: {E(foldedStoryLines.Count.ToString())}</summary><ol class=\"story-evidence-list\">");
+                foreach (var line in foldedStoryLines)
+                {
+                    html.AppendLine("<li><div class=\"kv-flow\">");
+                    AppendEvidenceFlow(html, line, StoryEvidenceSegmentBudget);
+                    html.AppendLine("</div></li>");
+                }
+
+                html.AppendLine("</ol></details>");
+            }
+
             html.AppendLine("</div>");
             html.AppendLine("</article>");
         }
@@ -3397,7 +4195,9 @@ details[open]>summary:before{content:'▾'}
             return string.Empty;
         }
 
-        return "Artifact evidence matrix overview: " + string.Join("; ", rows.Select(row => $"{row.CollectionName}={row.Count}:{row.State}:{row.Bytes}"));
+        // One lane per chip. Joining with "; " produced a single comma-soup
+        // value that wrapped into an unreadable block inside a narrow card.
+        return "Artifact evidence matrix overview: " + string.Join(" | ", rows.Select(row => $"{row.CollectionName}={row.Count}:{row.State}:{FormatBytes(row.Bytes)}"));
     }
 
     private static IReadOnlyList<ArtifactEvidenceMatrixRow> BuildArtifactEvidenceMatrixRows(
@@ -4207,22 +5007,35 @@ details[open]>summary:before{content:'▾'}
             return;
         }
 
-        html.AppendLine("<table><thead><tr><th>Category</th><th>Artifact</th><th>Path / safe link</th><th>Size</th><th>SHA-256</th><th>MIME</th><th>Evidence</th></tr></thead><tbody>");
+        // Artifact rows read as cards: identity and size/hash on the left, the
+        // safe Open/Download selector on the right, and the folded index
+        // evidence underneath. A seven-column table forced hashes and MIME
+        // types to wrap into unreadable slivers.
+        html.AppendLine("<div class=\"artifact-cards\">");
         foreach (var artifact in artifacts)
         {
             var plain = ArtifactToPlainText(artifact);
-            html.AppendLine("<tr>");
-            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(artifact.Category)}\">{E(artifact.Category)}</td>");
-            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(artifact.Name)}\"><strong>{E(artifact.Name)}</strong><br><span class=\"muted\">{E(artifact.Kind.ToString())}</span></td>");
-            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(plain)}\">{RenderArtifactLocation(artifact)}</td>");
-            html.AppendLine($"<td>{E(FormatArtifactSize(artifact.SizeBytes))}</td>");
-            html.AppendLine($"<td><code>{E(ArtifactSha256(artifact))}</code></td>");
-            html.AppendLine($"<td>{E(string.IsNullOrWhiteSpace(artifact.MimeType) ? "-" : artifact.MimeType)}</td>");
-            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}{RenderArtifactPreview(artifact)}</td>");
-            html.AppendLine("</tr>");
+            var sha256 = ArtifactSha256(artifact);
+            var mime = string.IsNullOrWhiteSpace(artifact.MimeType) ? "-" : artifact.MimeType;
+            html.AppendLine($"<article class=\"artifact-card copyable\" data-copy=\"{A(plain)}\">");
+            html.AppendLine("<div class=\"artifact-card-main\">");
+            html.AppendLine("<div class=\"artifact-card-head\">");
+            html.AppendLine($"<span class=\"artifact-card-name\">{E(artifact.Name)}</span>");
+            html.AppendLine($"<span class=\"artifact-card-kind\">{E(artifact.Kind.ToString())}</span>");
+            html.AppendLine($"<span class=\"chip chip-info\">{E(artifact.Category)}</span>");
+            html.AppendLine("</div>");
+            html.AppendLine("<div class=\"artifact-card-meta\">");
+            html.AppendLine($"<span>{E(FormatArtifactSize(artifact.SizeBytes))}</span>");
+            html.AppendLine($"<span><code class=\"copyable\" data-copy=\"{A(sha256)}\" title=\"{A(sha256)}\">{E(ShortenMiddle(sha256, 26))}</code></span>");
+            html.AppendLine($"<span>{E(mime)}</span>");
+            html.AppendLine("</div>");
+            html.AppendLine("</div>");
+            html.AppendLine($"<div class=\"artifact-card-path\">{RenderArtifactLocation(artifact)}</div>");
+            html.AppendLine($"<div class=\"artifact-card-evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}{RenderArtifactPreview(artifact)}</div>");
+            html.AppendLine("</article>");
         }
 
-        html.AppendLine("</tbody></table>");
+        html.AppendLine("</div>");
         html.AppendLine("</section>");
     }
 
@@ -4283,9 +5096,46 @@ details[open]>summary:before{content:'▾'}
             rows.Any(row => !string.IsNullOrWhiteSpace(row.Selectors)) ? "risk-info" : "risk-low");
         html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy artifact matrix narrative", copy)}</div>");
         html.AppendLine("</div>");
-        html.AppendLine("<div class=\"evidence-expansion-card\">");
-        AppendEvidenceExpansionSummary(html, "Artifact matrix", rows.Count, rows.Count, "Artifact links and indexed source JSON/JSONL", matrixLines);
-        html.AppendLine("<ol class=\"compact-list\">");
+        // Lanes render as short records instead of four identical
+        // "collection=… | kind=… | selectors=…" sentences. Selectors and source
+        // are the same for every lane in a run, so they are stated once above
+        // the rows rather than repeated inside each row.
+        var distinctSelectors = rows
+            .Select(row => row.Selectors)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var sharedSelectors = distinctSelectors.Count == 1 ? distinctSelectors[0] : null;
+        if (sharedSelectors is not null)
+        {
+            html.AppendLine($"<p class=\"matrix-legend muted\"><strong>Selectors</strong> <code class=\"copyable\" data-copy=\"{A(sharedSelectors)}\">{E(sharedSelectors)}</code> <span>shared by every lane below</span></p>");
+        }
+
+        html.AppendLine("<div class=\"ref-list matrix-rows\">");
+        foreach (var row in rows)
+        {
+            html.AppendLine("<div class=\"ref-row\">");
+            html.AppendLine($"<span class=\"ref-key\">{E(row.CollectionName)}</span>");
+            html.AppendLine($"<span class=\"ref-lead\">{E(row.Kind.ToString())}</span>");
+            html.AppendLine($"<span class=\"ref-tail\">{E(row.Count.ToString(CultureInfo.InvariantCulture))}{(row.Count == 1 ? " file" : " files")}</span>");
+            html.AppendLine($"<span class=\"ref-tail\">{E(row.State)}</span>");
+            html.AppendLine($"<span class=\"ref-tail\">{E(FormatBytes(row.Bytes))}</span>");
+            html.AppendLine($"<span class=\"ref-meta\">{E(row.Source)}</span>");
+            html.AppendLine("</div>");
+        }
+
+        html.AppendLine("</div>");
+        if (sharedSelectors is null && distinctSelectors.Count > 0)
+        {
+            html.AppendLine("<details class=\"relation-evidence\"><summary>Selectors per lane</summary><div class=\"kv-flow\">");
+            foreach (var row in rows.Where(row => !string.IsNullOrWhiteSpace(row.Selectors)))
+            {
+                html.AppendLine($"<span class=\"kv-line copyable\" data-copy=\"{A(row.Selectors)}\"><span class=\"kv-key\">{E(row.CollectionName)}</span><code>{E(row.Selectors)}</code></span>");
+            }
+
+            html.AppendLine("</div></details>");
+        }
+        html.AppendLine("<details class=\"relation-evidence\"><summary>Matrix evidence lines</summary><ol class=\"compact-list\">");
         foreach (var line in matrixLines.Take(EvidenceStoryInlineLimit))
         {
             html.AppendLine("<li><div class=\"kv-flow\">");
@@ -4293,7 +5143,7 @@ details[open]>summary:before{content:'▾'}
             html.AppendLine("</div></li>");
         }
 
-        html.AppendLine("</ol></div>");
+        html.AppendLine("</ol></details>");
     }
 
     private static bool IsReadyArtifactMatrixState(string state)
@@ -4376,7 +5226,7 @@ details[open]>summary:before{content:'▾'}
             manifestMismatches.Count == 0 ? "risk-low" : "risk-medium");
         html.AppendLine("</div>");
         html.AppendLine($"<div class=\"evidence-expansion-card artifact-index-detail\" data-copy=\"{A(copy)}\">");
-        html.AppendLine("<table class=\"artifact-index-table\"><thead><tr><th>Artifact</th><th>Type</th><th>Selector</th><th>groupCount</th><th>Status</th></tr></thead><tbody>");
+        html.AppendLine("<div class=\"ref-list\">");
         foreach (var artifact in artifacts.Take(12))
         {
             var selector = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadSelector"), artifact.RelativePath, ArtifactHref(artifact), "-");
@@ -4386,9 +5236,9 @@ details[open]>summary:before{content:'▾'}
                 IsDuplicateArtifactDescriptor(artifact) ? "duplicate" : string.Empty,
                 HasArtifactRejectionDiagnostics(artifact) ? "rejected" : string.Empty
             }.Where(value => !string.IsNullOrWhiteSpace(value)));
-            html.AppendLine($"<tr><td><strong>{E(ArtifactDisplayName(artifact))}</strong></td><td>{E(artifact.Kind.ToString())}</td><td><code>{E(VisibleEvidenceText(selector))}</code></td><td>{E(groupCount)}</td><td>{E(string.IsNullOrWhiteSpace(status) ? "-" : status)}</td></tr>");
+            html.AppendLine($"<div class=\"ref-row\"><strong class=\"ref-key\">{E(ArtifactDisplayName(artifact))}</strong><span class=\"ref-meta\">{E(artifact.Kind.ToString())}</span><code class=\"ref-path\">{E(VisibleEvidenceText(selector))}</code><span class=\"ref-meta\">Duplicate groups {E(groupCount)}</span><span class=\"ref-tail\">{E(string.IsNullOrWhiteSpace(status) ? "-" : status)}</span></div>");
         }
-        html.AppendLine("</tbody></table></div>");
+        html.AppendLine("</div></div>");
     }
 
     private static IReadOnlyList<ArtifactManifestJobIdMismatch> FindArtifactManifestJobIdMismatches(
@@ -4499,17 +5349,19 @@ details[open]>summary:before{content:'▾'}
             html.AppendLine("<div class=\"relationship-title\">");
             html.AppendLine($"<h3>{E(card.Name)}</h3><span class=\"badge badge-{E(card.Css)}\">{E(card.Status)}</span>");
             html.AppendLine("</div>");
-            html.AppendLine("<div class=\"relationship-meta\">");
-            html.AppendLine($"<span>Artifacts: {E(card.ArtifactCount.ToString())}</span><span>Events: {E(card.EventCount.ToString())}</span>");
+            // One line of context, then aligned counters. The lane description
+            // used to repeat verbatim inside a bordered "compact summary" box
+            // directly below it, which doubled the card height without adding
+            // a single new fact.
+            html.AppendLine($"<p class=\"muted\">{E(card.Description)}</p>");
+            html.AppendLine("<div class=\"lane-health\">");
+            html.AppendLine("<span class=\"lane-health-key\">Artifact lane health</span>");
+            html.AppendLine($"<span>artifacts<b>{E(card.ArtifactCount.ToString(CultureInfo.InvariantCulture))}</b></span>");
+            html.AppendLine($"<span>events<b>{E(card.EventCount.ToString(CultureInfo.InvariantCulture))}</b></span>");
             html.AppendLine("</div>");
-            html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
-            AppendCompactEvidenceSummary(
-                html,
-                $"Artifact lane health: collection={card.Name}; status={card.Status}; artifacts={card.ArtifactCount}; events={card.EventCount}; detail={card.Detail}",
-                "Copy compact summary");
-            html.AppendLine($"<div class=\"evidence-expansion-card copyable\" data-copy=\"{A(card.CopyText)}\"><div class=\"kv-flow\">");
+            html.AppendLine($"<details class=\"relation-evidence copyable\" data-copy=\"{A(card.CopyText)}\"><summary>Collection detail</summary><div class=\"kv-flow\">");
             AppendEvidenceFlow(html, card.CopyText);
-            html.AppendLine("</div></div>");
+            html.AppendLine("</div></details>");
             html.AppendLine("</article>");
         }
 
@@ -4650,7 +5502,7 @@ details[open]>summary:before{content:'▾'}
                 .. collectionArtifacts.Take(8).Select(ArtifactToPlainText),
                 .. collectionEvents.Take(8).Select(EventOneLine)
             ]);
-        return new ArtifactCollectionStatusCard(name, status, css, collectionArtifacts.Count, collectionEvents.Count, detail, copy);
+        return new ArtifactCollectionStatusCard(name, status, css, collectionArtifacts.Count, collectionEvents.Count, defaultDetail, detail, copy);
     }
 
     private static string InferArtifactCollectionStatus(
@@ -6206,23 +7058,32 @@ details[open]>summary:before{content:'▾'}
             html.AppendLine($"<div class=\"section-note\"><strong>Event table capped for readability.</strong> Inline rows: {E(inlineEvents.Count.ToString())}/{E(orderedEvents.Count.ToString())}. Hidden rows: {E(hiddenCount.ToString())}. Open the sampled report view for all retained rows; use indexed source JSON/JSONL artifacts for complete raw evidence.</div>");
         }
 
-        html.AppendLine("<div class=\"event-table-wrap\">");
-        html.AppendLine("<table class=\"event-table\"><thead><tr><th>Time</th><th>Type</th><th>Process</th><th>Path / Target</th><th>Data</th></tr></thead><tbody>");
+        // Rows render as cards, matching the event explorer: a narrow meta
+        // column carries time plus event type, the body carries process,
+        // target, and evidence fields. A five-column table starved the data
+        // column (one character per line at 1024px) while the timestamp column
+        // stayed mostly empty, so the table was replaced rather than retuned.
+        html.AppendLine("<div class=\"event-table-wrap event-card-list\">");
         foreach (var evt in inlineEvents)
         {
             var plain = EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300);
             var visiblePlain = VisibleEvidenceText(plain);
             var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
-            html.AppendLine("<tr>");
-            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
-            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.EventType)}\">{E(evt.EventType)}</td>");
-            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A((evt.ProcessName ?? "-") + " (" + (evt.ProcessId?.ToString() ?? "-") + ")")}\">{E(evt.ProcessName ?? "-")} ({E(evt.ProcessId?.ToString() ?? "-")})</td>");
-            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(VisibleEvidenceText(ExtractReadableEventTarget(evt)))}\">{RenderEventPathAndCommand(evt, relatedArtifacts)}</td>");
-            html.AppendLine($"<td class=\"evidence\"><div class=\"event-evidence-cell\">{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyButton("Copy event", visiblePlain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>{RenderRelatedArtifacts(relatedArtifacts)}</div></td>");
-            html.AppendLine("</tr>");
+            var processText = (evt.ProcessName ?? "-") + " (" + (evt.ProcessId?.ToString() ?? "-") + ")";
+            var targetText = VisibleEvidenceText(ExtractReadableEventTarget(evt));
+            html.AppendLine($"<article class=\"event-card event-table-card\" data-event-row data-type=\"{A(evt.EventType)}\">");
+            html.AppendLine("<div class=\"event-card-meta\">");
+            html.AppendLine($"<span class=\"event-time copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</span>");
+            html.AppendLine($"<code class=\"event-type\" data-event-token=\"{A(evt.EventType)}\">{E(evt.EventType)}</code>");
+            html.AppendLine("</div>");
+            html.AppendLine("<div class=\"event-card-body\">");
+            html.AppendLine($"<strong class=\"event-evidence-title copyable\" data-copy=\"{A(processText)}\">{E(processText)}</strong>");
+            html.AppendLine($"<div class=\"event-card-target copyable\" data-copy=\"{A(targetText)}\">{RenderEventPathAndCommand(evt, relatedArtifacts)}</div>");
+            html.AppendLine($"<div class=\"event-evidence-cell\">{RenderEventEvidenceDetails(evt, commandLineRenderedInline: true)}<span class=\"inline-actions\">{CopyButton("Copy event", visiblePlain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>{RenderRelatedArtifacts(relatedArtifacts)}</div>");
+            html.AppendLine("</div>");
+            html.AppendLine("</article>");
         }
 
-        html.AppendLine("</tbody></table>");
         html.AppendLine("</div>");
     }
 
@@ -6691,11 +7552,13 @@ details[open]>summary:before{content:'▾'}
             html.AppendLine("</div>");
             AppendProcessRelationFlow(html, card);
             html.AppendLine(RenderInlineArtifactBadges(card.RelatedArtifacts, "Process artifacts / 进程证据"));
-            AppendCompactEvidenceSummary(html, card.CompactSummary, "Copy compact summary");
+            // The counters above already state children/files/registry/network,
+            // linked artifacts, and the observed window. The old "compact
+            // summary" box restated all of them in one dense sentence.
             AppendRelationshipArtifactLinks(html, card.RelatedArtifacts, "Linked artifacts for this process", "Copy linked process artifacts");
             if (!string.IsNullOrWhiteSpace(card.Path) || !string.IsNullOrWhiteSpace(card.CommandLine))
             {
-                html.AppendLine("<div class=\"section-note\">");
+                html.AppendLine("<details class=\"relationship-details\"><summary>Path / command line</summary><div class=\"section-note\">");
                 if (!string.IsNullOrWhiteSpace(card.Path))
                 {
                     var displayPath = DisplayStandaloneTarget(card.Path);
@@ -6707,12 +7570,12 @@ details[open]>summary:before{content:'▾'}
                     html.AppendLine($"<strong>Command line</strong>{RenderTechnicalField("Command line", card.CommandLine)}");
                 }
 
-                html.AppendLine("</div>");
+                html.AppendLine("</div></details>");
             }
 
             if (card.ChildLabels.Count > 0)
             {
-                html.AppendLine("<details open class=\"relationship-details\"><summary>Child processes</summary><ul class=\"mono-list\">");
+                html.AppendLine($"<details class=\"relationship-details\"><summary>Child processes ({E(card.ChildLabels.Count.ToString())})</summary><ul class=\"mono-list\">");
                 foreach (var child in card.ChildLabels.Take(12))
                 {
                     html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(child)}\">{E(child)}</code></li>");
@@ -6724,7 +7587,7 @@ details[open]>summary:before{content:'▾'}
             if (card.RelationshipLines.Count > 0)
             {
                 var relationships = string.Join(Environment.NewLine, card.RelationshipLines);
-                html.AppendLine($"<details open class=\"relationship-details\"><summary>Stable relationship map</summary><div class=\"copyable\" data-copy=\"{A(relationships)}\"><div class=\"kv-flow\">");
+                html.AppendLine($"<details class=\"relationship-details\"><summary>Stable relationship map ({E(card.RelationshipLines.Count.ToString())})</summary><div class=\"copyable\" data-copy=\"{A(relationships)}\"><div class=\"kv-flow\">");
                 AppendEvidenceFlow(html, relationships);
                 html.AppendLine("</div></div></details>");
             }
@@ -6732,9 +7595,12 @@ details[open]>summary:before{content:'▾'}
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy process card", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine("<div class=\"evidence-expansion-card copyable\" data-copy=\"" + A(string.Join(Environment.NewLine, card.EvidenceLines)) + "\"><div class=\"kv-flow\">");
-            AppendEvidenceFlow(html, string.Join(Environment.NewLine, card.EvidenceLines));
-            html.AppendLine("</div></div>");
+            // Evidence stays folded: a nine-event process would otherwise render
+            // every field pair inline and turn one card into three screens.
+            var cardEvidence = string.Join(Environment.NewLine, card.EvidenceLines);
+            html.AppendLine($"<details class=\"relation-evidence copyable\" data-copy=\"{A(cardEvidence)}\"><summary>Evidence detail ({E(card.EvidenceLines.Count.ToString())})</summary><div class=\"kv-flow\">");
+            AppendEvidenceFlow(html, cardEvidence);
+            html.AppendLine("</div></details>");
             html.AppendLine("</article>");
         }
 
@@ -6923,7 +7789,6 @@ details[open]>summary:before{content:'▾'}
             html.AppendLine($"<span>Flow/other: {E(card.FlowCount.ToString())}</span><span>Event types: {E(card.EventTypes.Count.ToString())}</span>");
             html.AppendLine($"<span>Artifacts: {E(card.RelatedArtifacts.Count.ToString())}</span><span>Evidence lines: {E(card.EvidenceLines.Count.ToString())}</span>");
             html.AppendLine("</div>");
-            AppendCompactEvidenceSummary(html, card.CompactSummary, "Copy compact summary");
             AppendNetworkRelationFlow(html, card);
             html.AppendLine(RenderInlineArtifactBadges(card.RelatedArtifacts, "Network artifacts / 网络证据"));
             html.AppendLine("<div class=\"relationship-tags\">");
@@ -6949,9 +7814,10 @@ details[open]>summary:before{content:'▾'}
             html.AppendLine("</div>");
             html.AppendLine("<div class=\"evidence-expansion-card\">");
             AppendEvidenceExpansionSummary(html, "Network evidence", card.EvidenceLines.Count, card.EventCount, "Sampled report view, indexed source JSON/JSONL, and packet artifacts", card.EvidenceLines);
-            html.AppendLine($"<div class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\"><div class=\"kv-flow\">");
-            AppendEvidenceFlow(html, string.Join(Environment.NewLine, card.EvidenceLines));
-            html.AppendLine("</div></div></div>");
+            var networkEvidence = string.Join(Environment.NewLine, card.EvidenceLines);
+            html.AppendLine($"<details class=\"relation-evidence copyable\" data-copy=\"{A(networkEvidence)}\"><summary>Evidence detail ({E(card.EvidenceLines.Count.ToString())})</summary><div class=\"kv-flow\">");
+            AppendEvidenceFlow(html, networkEvidence);
+            html.AppendLine("</div></details></div>");
             html.AppendLine("</article>");
         }
 
@@ -7416,7 +8282,7 @@ details[open]>summary:before{content:'▾'}
         var shown = artifacts.Take(RelationshipArtifactInlineLimit).ToList();
         var hidden = Math.Max(0, artifacts.Count - shown.Count);
         var copy = string.Join(Environment.NewLine, shown.Select(ArtifactCompactLine));
-        html.AppendLine($"<details open class=\"relationship-details related-artifacts-flat\"><summary>{E(title)} ({E(shown.Count.ToString(CultureInfo.InvariantCulture))}/{E(artifacts.Count.ToString(CultureInfo.InvariantCulture))})</summary>");
+        html.AppendLine($"<details class=\"relationship-details related-artifacts-flat\"><summary>{E(title)} ({E(shown.Count.ToString(CultureInfo.InvariantCulture))}/{E(artifacts.Count.ToString(CultureInfo.InvariantCulture))})</summary>");
         html.AppendLine("<ul class=\"artifact-list\">");
         foreach (var artifact in shown)
         {
@@ -7659,6 +8525,26 @@ details[open]>summary:before{content:'▾'}
     }
 
     /// <summary>
+    /// Appends one large risk conclusion tile. Inputs are a label, value, text
+    /// tone, and border tone; processing writes a single square panel so the
+    /// first four numbers of the report read as one row.
+    /// </summary>
+    private static void RiskTile(StringBuilder html, string label, string value, string css, string tone)
+    {
+        html.AppendLine($"<div class=\"risk-tile {E(tone)}\"><span class=\"risk-tile-label\">{E(label)}</span><b class=\"risk-tile-value {E(css)}\">{E(value)}</b></div>");
+    }
+
+    /// <summary>
+    /// Appends one label/value pair to the risk summary definition list so the
+    /// secondary evidence volumes align in columns instead of forming another
+    /// wall of cards.
+    /// </summary>
+    private static void MetricRow(StringBuilder html, string label, string value)
+    {
+        html.AppendLine($"<div class=\"metric-row\"><dt>{E(label)}</dt><dd>{E(value)}</dd></div>");
+    }
+
+    /// <summary>
     /// Appends one flat overview panel.
     /// Inputs are title, value, detail, and CSS class; processing writes a
     /// copyable square panel that matches the report's blue theme.
@@ -7684,7 +8570,7 @@ details[open]>summary:before{content:'▾'}
         var renderedValue = localizeStatusValue
             ? $"<span class=\"ui-status-value\">{E(value)}</span>"
             : E(value);
-        html.AppendLine($"<tr><th>{E(label)}</th><td class=\"copyable\" data-copy=\"{A(value)}\">{renderedValue}</td></tr>");
+        html.AppendLine($"<div class=\"kv-row\"><span class=\"kv-label\">{E(label)}</span><span class=\"kv-value copyable\" data-copy=\"{A(value)}\">{renderedValue}</span></div>");
     }
 
     /// <summary>
@@ -7697,7 +8583,7 @@ details[open]>summary:before{content:'▾'}
         var hint = SafePathLeaf(value);
         var summary = string.IsNullOrWhiteSpace(hint) ? "Path" : hint;
         var disclosure = RenderTechnicalDisclosure(summary, value);
-        html.AppendLine($"<tr><th>{E(label)}</th><td>{disclosure}</td></tr>");
+        html.AppendLine($"<div class=\"kv-row\"><span class=\"kv-label\">{E(label)}</span><span class=\"kv-value\">{disclosure}</span></div>");
     }
 
     /// <summary>
@@ -7839,7 +8725,9 @@ details[open]>summary:before{content:'▾'}
                     childCount = pidChildren;
                 }
 
-                var detail = $"pid={first.ProcessId?.ToString() ?? "-"} ppid={first.ParentProcessId?.ToString() ?? "-"} events={group.Count()} children={childCount} firstSeen={first.Timestamp:u}";
+                // Pipe-separated pairs render as individual chips instead of one
+                // run-on "pid=… ppid=… events=…" sentence.
+                var detail = $"pid={first.ProcessId?.ToString() ?? "-"} | ppid={first.ParentProcessId?.ToString() ?? "-"} | events={group.Count()} | children={childCount} | firstSeen={first.Timestamp:u}";
                 return new ProcessGraphNode(
                     label,
                     detail,
@@ -10663,10 +11551,11 @@ details[open]>summary:before{content:'▾'}
 
     /// <summary>
     /// Renders event data directly inside the selected event row. Inputs are
-    /// one event; processing keeps compact and command evidence visible while
-    /// bounding long values with CSS; returns HTML.
+    /// one event plus whether the row already shows the command line inline;
+    /// processing keeps compact and command evidence visible while bounding
+    /// long values with CSS; returns HTML.
     /// </summary>
-    private static string RenderEventEvidenceDetails(SandboxEvent evt)
+    private static string RenderEventEvidenceDetails(SandboxEvent evt, bool commandLineRenderedInline = false)
     {
         var compactFields = evt.Data
             .Where(pair => !ShouldOmitEventField(evt, pair.Key) && !IsInternalEvidenceField(evt, pair.Key) && !IsLongTechnicalEventField(pair.Key, pair.Value) && IsUserFacingEventFieldForEvent(evt, pair.Key))
@@ -10679,6 +11568,7 @@ details[open]>summary:before{content:'▾'}
             .ToList();
 
         if (!string.IsNullOrWhiteSpace(evt.CommandLine) &&
+            !commandLineRenderedInline &&
             !technicalFields.Any(field => string.Equals(field.Label, "commandLine", StringComparison.OrdinalIgnoreCase)))
         {
             technicalFields.Insert(0, ("commandLine", evt.CommandLine!));
@@ -10714,7 +11604,12 @@ details[open]>summary:before{content:'▾'}
         }
         if (compactFields.Count == 0 && technicalFields.Count == 0)
         {
-            html.Append("<pre>-</pre>");
+            // A card that already shows target and command inline has no
+            // remaining fields; a bare "-" placeholder there is noise.
+            if (!commandLineRenderedInline)
+            {
+                html.Append("<pre>-</pre>");
+            }
         }
         else
         {
@@ -10732,7 +11627,7 @@ details[open]>summary:before{content:'▾'}
                     // Keep the label outside the protected evidence <code> block so
                     // the Chinese renderer can localize chrome while the original
                     // value remains byte-for-byte visible/copyable.
-                    html.Append($"<li class=\"{localizedClass.Trim()}\"><span class=\"ui-field-label\">{E(EventFieldLabel(pair.Key))}</span>=<code class=\"copyable\" data-copy=\"{A(copy)}\">{E(displayValue)}</code></li>");
+                    html.Append($"<li class=\"{localizedClass.Trim()}\"><span class=\"ui-field-label\">{E(EventFieldLabel(pair.Key))}</span><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(displayValue)}</code></li>");
                 }
 
                 html.Append("</ul>");
@@ -10748,8 +11643,8 @@ details[open]>summary:before{content:'▾'}
                     var label = ResolveTechnicalLabel(field.Label, TechnicalFieldLabel(field.Label));
                     var copy = $"{field.Label}={VisibleEvidenceText(boundedValue)}";
                     var prefix = string.Equals(label, "Command line", StringComparison.OrdinalIgnoreCase)
-                        ? "Execute: "
-                        : $"{label}: ";
+                        ? "Execute"
+                        : label;
                     html.Append($"<div class=\"raw-technical-field{localizedClass}\"><span class=\"ui-field-label\">{E(prefix)}</span><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(VisibleEvidenceText(boundedValue))}</code></div>");
                 }
 
@@ -11083,6 +11978,12 @@ details[open]>summary:before{content:'▾'}
         // data attributes, and JavaScript selectors.
         html = html.Replace("<html lang=\"en\">", "<html lang=\"zh-CN\">", StringComparison.Ordinal);
         var protectedFragments = new List<string>();
+        // Field labels ("Process Name", "relativePath", ...) are operator chrome
+        // wrapped in dedicated label spans. Translate them from an exact map
+        // before tag protection runs, otherwise short generic dictionary entries
+        // such as "source" or "size" would mangle longer English labels into
+        // mixed strings like "Raw 来源".
+        html = LocalizeChineseFieldLabels(html, protectedFragments);
         html = ProtectChineseRawEvidenceFragments(html, protectedFragments);
 
         // The rule translation table contains the complete rule catalog, but
@@ -11102,16 +12003,23 @@ details[open]>summary:before{content:'▾'}
         html = ReplaceChineseTranslations(html, translations);
 
         html = ChineseVisibleEventCountRegex.Replace(html, " 个事件");
+        html = ChineseVisibleExampleCountRegex.Replace(html, ">示例 ${count}<");
         // A few compact cards combine translated labels with interpolated
         // values, so the general dictionary cannot match the whole sentence.
         // Run this while raw evidence is still protected; machine-readable
         // payloads and attributes are restored unchanged below.
         html = NormalizeChineseVisibleFragments(html);
         html = RestoreChineseRawEvidenceFragments(html, protectedFragments);
+        // Tag-bearing translations (">high<", "<th>Name</th>", "<strong>Path</strong>")
+        // could not match while every tag was a protected token. They run here
+        // in a payload-only pass, so the second half of the chrome dictionary
+        // is no longer dead weight.
+        html = LocalizeChineseTaggedPhrases(html);
         // Closing tags are protected above, so run the visible count pass
         // once more after raw fragments are restored. This keeps machine
         // evidence text intact while localizing badges such as "21 events".
         html = ChineseVisibleEventCountRegex.Replace(html, " 个事件");
+        html = ChineseVisibleExampleCountRegex.Replace(html, ">示例 ${count}<");
         foreach (var (english, chinese) in ChineseCssTranslations)
         {
             html = html.Replace(english, chinese, StringComparison.Ordinal);
@@ -11121,6 +12029,17 @@ details[open]>summary:before{content:'▾'}
         html = LocalizeChineseFilterOptions(html);
         html = LocalizeChineseVisibleEventTokens(html);
         html = LocalizeChineseVisibleEvidenceValues(html);
+        html = LocalizeChineseEventTypeChips(html);
+        html = LocalizeChineseStatusValues(html);
+        // Rule summaries in the rule set carry a boilerplate review hint that
+        // names an internal field ("evidenceFields"). Operators should see the
+        // finding itself, not renderer plumbing.
+        html = Regex.Replace(
+            html,
+            "行为规则命中“([^”]*)”；请结合 evidenceFields、进程树和样本上下文复核。",
+            "行为规则命中：$1。",
+            RegexOptions.CultureInvariant);
+        html = html.Replace("evidenceFields", "证据字段", StringComparison.Ordinal);
 
         return html;
     }
@@ -11454,7 +12373,7 @@ details[open]>summary:before{content:'▾'}
         {
             html = Regex.Replace(
                 html,
-                $"(?<![A-Za-z0-9_-]){Regex.Escape(raw)}(?![A-Za-z0-9_-])",
+                $"(?<![A-Za-z0-9_/-]){Regex.Escape(raw)}(?![A-Za-z0-9_/.-])",
                 display,
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
@@ -11547,9 +12466,137 @@ details[open]>summary:before{content:'▾'}
         return html;
     }
 
-    private static string NormalizeChineseRestoredChrome(string html)
+    /// <summary>
+    /// Localizes the visible event-type text on event cards and behavior chips.
+    /// Inputs are the rendered Chinese HTML; processing rewrites only the
+    /// dedicated type/chip spans and falls back to the behavior-family label,
+    /// then to the untouched machine value, so raw tables and copy payloads
+    /// keep the exact event type.
+    /// </summary>
+    private static string LocalizeChineseEventTypeChips(string html)
     {
-        // Input attributes are protected while the main translation pass
+        return ChineseEventTypeChipRegex.Replace(
+            html,
+            match =>
+            {
+                var raw = match.Groups[2].Value.Trim();
+                if (raw.Length == 0 || raw.Any(c => c > 0x7F))
+                {
+                    return match.Value;
+                }
+
+                var countText = ChineseBadgeCountText(raw);
+                if (countText is not null)
+                {
+                    return match.Groups[1].Value + countText + match.Groups[3].Value;
+                }
+
+                if (!ChineseMachineTokenRegex.IsMatch(raw))
+                {
+                    return match.Value;
+                }
+
+                var display = DisplayEventTypeLabel(raw);
+                return string.Equals(display, raw, StringComparison.Ordinal)
+                    ? match.Value
+                    : match.Groups[1].Value + display + match.Groups[3].Value;
+            });
+    }
+
+    /// <summary>
+    /// Localizes a compact count badge such as "3 nodes". Inputs are the badge
+    /// text; processing returns null when the text is not a count phrase so the
+    /// caller can fall through to other label maps.
+    /// </summary>
+    private static string? ChineseBadgeCountText(string raw)
+    {
+        var match = ChineseBadgeCountRegex.Match(raw);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var unit = match.Groups[2].Value switch
+        {
+            "events" => "个事件",
+            "nodes" => "个节点",
+            "artifacts" => "个证据文件",
+            "captures" => "个截图",
+            "dumps" => "个转储",
+            "items" => "项",
+            "rows" => "行",
+            "files" => "个文件",
+            _ => null
+        };
+        return unit is null ? null : $"{match.Groups[1].Value} {unit}";
+    }
+
+    /// <summary>
+    /// Localizes state-like evidence values such as "phase=before-start" or
+    /// "collectorState=running". Inputs are the rendered Chinese HTML;
+    /// processing rewrites only copy cells whose visible text repeats the
+    /// payload and whose field is a known state field, so paths, hashes, and
+    /// command lines keep their exact machine text.
+    /// </summary>
+    private static string LocalizeChineseStatusValues(string html)
+    {
+        html = ChineseStatusValueRegex.Replace(
+            html,
+            match =>
+            {
+                var key = match.Groups[2].Value;
+                var value = match.Groups[3].Value;
+                if (!string.Equals(value, match.Groups[4].Value, StringComparison.Ordinal))
+                {
+                    return match.Value;
+                }
+
+                if (!ChineseStatusFieldKeys.Contains(key) || !ChineseStatusValues.TryGetValue(value, out var chinese))
+                {
+                    return match.Value;
+                }
+
+                return match.Groups[1].Value + chinese + match.Groups[5].Value;
+            });
+
+        return ChineseBareStatusValueRegex.Replace(
+            html,
+            match =>
+            {
+                var value = match.Groups[2].Value;
+                if (!string.Equals(value, match.Groups[3].Value, StringComparison.Ordinal) ||
+                    !ChineseStatusValues.TryGetValue(value, out var chinese))
+                {
+                    return match.Value;
+                }
+
+                return match.Groups[1].Value + chinese + match.Groups[4].Value;
+            });
+    }
+
+    private static readonly HashSet<string> ChineseStatusFieldKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "phase", "collectorState", "status", "captureState", "state", "result",
+        "health", "readiness", "outcome", "disposition", "collectionState"
+    };
+
+    private static readonly IReadOnlyDictionary<string, string> ChineseStatusValues =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["running"] = "运行中", ["completed"] = "已完成", ["failed"] = "失败",
+            ["pending"] = "等待中", ["stopped"] = "已停止", ["started"] = "已启动",
+            ["before-start"] = "运行前", ["before-run"] = "运行前", ["during-run"] = "运行中",
+            ["after-run"] = "运行后", ["after-start"] = "运行后", ["not-run"] = "未运行",
+            ["skipped"] = "已跳过", ["disabled"] = "已禁用", ["captured"] = "已采集",
+            ["partial"] = "部分采集", ["unknown"] = "未知", ["ready"] = "就绪",
+            ["degraded"] = "降级", ["healthy"] = "正常", ["ok"] = "正常",
+            ["enabled"] = "已启用", ["missing"] = "缺失", ["empty"] = "空",
+            ["observed"] = "已观察", ["not-observed"] = "未观察", ["blocked"] = "已阻断",
+            ["available"] = "可用", ["unavailable"] = "不可用"
+        };
+
+    private static string NormalizeChineseRestoredChrome(string html)
+    {        // Input attributes are protected while the main translation pass
         // runs so raw evidence tags remain byte stable. Translate this
         // operator-facing search hint after those fragments are restored.
         html = html.Replace("placeholder=\"type, path, process, target\"", "placeholder=\"事件类型、路径、进程或目标\"", StringComparison.Ordinal);
@@ -11560,6 +12607,92 @@ details[open]>summary:before{content:'▾'}
         // The cover status value is wrapped explicitly so this replacement
         // localizes the UI label without touching same-named evidence values.
         html = html.Replace("ui-status-value\">Failed", "ui-status-value\">失败", StringComparison.Ordinal);
+        html = html.Replace("分页证据样例。 此页", "分页证据样例。此页", StringComparison.Ordinal);
+        // Screen-reader severity spans keep the localized prefix but the value
+        // stays a raw enum token ("严重性 medium"). Localize the value here,
+        // where the restored markup makes the prefix visible to the regex.
+        html = ChineseSeverityValueRegex.Replace(html, match => ChineseSeverityText(match.Value));
+        // Process lane keys are "<image> pid" composites. Keep the executable
+        // name and render the identifier as the professional "PID" token.
+        html = Regex.Replace(
+            html,
+            "(<span class=\"kv-key\">[^<]*\\S) pid(</span>)",
+            "$1 PID$2",
+            RegexOptions.CultureInvariant);
+        // Leaf names are wrapped by a full-width opening bracket, so the
+        // closing bracket must match it instead of leaving an ASCII ")".
+        html = Regex.Replace(
+            html,
+            "主机路径已隐藏（([^()<>]*)\\)",
+            "主机路径已隐藏（$1）",
+            RegexOptions.CultureInvariant);
+        // Story copy hints combine a translated prefix with an English tail.
+        // Rewrite the whole sentence so the hint reads as one language.
+        html = Regex.Replace(
+            html,
+            @"已显示证据示例：\s*(\d+)/(\d+); expand stays bounded and complete raw source remains in indexed JSON/JSONL artifacts\.",
+            "已显示证据示例：$1/$2；展开内容保持有界，完整来源保留在已索引的 JSON/JSONL 证据文件中。",
+            RegexOptions.CultureInvariant);
+        // Folded disclosure labels carry a live count, so they cannot be
+        // dictionary entries; rewrite the whole summary text per pattern.
+        html = Regex.Replace(html, "<summary>More evidence: (\\d+)/(\\d+)</summary>", "<summary>还有 $1 条证据（共 $2 条）</summary>", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "<summary>More evidence: (\\d+)</summary>", "<summary>还有 $1 条证据</summary>", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "<summary>(\\d+) fields</summary>", "<summary>$1 个字段</summary>", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "<summary>(?:Evidence|证据) detail \\((\\d+)\\)</summary>", "<summary>证据明细（$1 条）</summary>", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "<summary>Detail \\((\\d+) rows\\)</summary>", "<summary>明细（$1 行）</summary>", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "<summary>Collection detail</summary>", "<summary>采集明细</summary>", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "<span class=\"ref-meta\">Rules: ([^<]*)</span>", "<span class=\"ref-meta\">规则：$1</span>", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "<span class=\"ref-tail\">(\\d+) evidence rows</span>", "<span class=\"ref-tail\">$1 条证据</span>", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "<span class=\"ref-meta\">Duplicate groups ([^<]*)</span>", "<span class=\"ref-meta\">重复组：$1</span>", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "· offset ([^<·]*) ·", "· 偏移 $1 ·", RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "· entropy ([^<]*)</span>", "· 熵 $1</span>", RegexOptions.CultureInvariant);
+        // Finding metadata renders the rule identifier as "rule <id>"; keep
+        // the identifier and localize only the label word.
+        html = Regex.Replace(
+            html,
+            "<span>rule (?=[A-Za-z0-9-]+</span>)",
+            "<span>规则 ",
+            RegexOptions.CultureInvariant);
+        // Process relation cards summarize per-process object counts on one
+        // line; translate the three labels while keeping the numbers.
+        html = Regex.Replace(
+            html,
+            "Files (\\d+) / Registry (\\d+) / Network (\\d+)",
+            "文件 $1 / 注册表 $2 / 网络 $3",
+            RegexOptions.CultureInvariant);
+        // Artifact matrix and lane-health summaries keep machine tokens
+        // ("dropped-files=1:ready:512", "状态=captured") next to translated
+        // labels. Normalize the punctuation and the state word, leaving the
+        // token itself untouched so it still matches the raw evidence.
+        html = Regex.Replace(
+            html,
+            "证据文件矩阵: ([a-z][a-z-]*=\\d+:[a-z]+:\\d+)\\.",
+            "证据文件矩阵：$1。",
+            RegexOptions.CultureInvariant);
+        html = html.Replace("证据文件矩阵: ", "证据文件矩阵：", StringComparison.Ordinal);
+        // Matrix tokens read "<name>=<count>:<state>:<bytes> bytes"; localize
+        // the state slot and the byte unit while keeping the counts numeric.
+        html = Regex.Replace(
+            html,
+            "(\\d+):(ready|partial|missing|disabled|unknown):(\\d+)",
+            match => $"{match.Groups[1].Value}:{ChineseStatusValues[match.Groups[2].Value]}:{match.Groups[3].Value}",
+            RegexOptions.CultureInvariant);
+        html = Regex.Replace(html, "(?<=\\d) bytes(?=</span>)", " 字节", RegexOptions.CultureInvariant);
+        html = html.Replace("; 状态=", "；状态=", StringComparison.Ordinal);
+        foreach (var (raw, chinese) in new (string Raw, string Chinese)[]
+        {
+            ("状态=captured", "状态=已采集"),
+            ("状态=partial", "状态=部分采集"),
+            ("状态=disabled", "状态=已禁用"),
+            ("状态=skipped", "状态=已跳过"),
+            ("状态=not-run", "状态=未运行"),
+            ("状态=running", "状态=运行中"),
+            ("状态=failed", "状态=失败"),
+            ("状态=ready", "状态=就绪")
+        })
+        {
+            html = html.Replace(raw, chinese, StringComparison.Ordinal);
+        }
         // Severity values are renderer-owned chrome.  They appear inside
         // styled badges/cells whose tags are protected during the first pass,
         // so localize only the exact UI wrappers and leave raw evidence values
@@ -11742,8 +12875,7 @@ details[open]>summary:before{content:'▾'}
             ("Deleted startup inventory 行 can indicate cleanup or rollback behavior.", "已删除的启动项清单行可能表示清理或回滚行为。"),
             ("Startup values pointing at Temp/AppData/Public/Downloads/ProgramData or script/executable payloads.", "指向 Temp/AppData/Public/Downloads/ProgramData 或脚本/可执行载荷的启动项值。"),
             ("Default report.html uses Simplified Chinese; report.en.html keeps English operator chrome.", "默认 report.html 使用简体中文；report.en.html 保留英文操作界面。"),
-            ("No JavaScript required for report navigation: native details, table scrolling, safe", "报告导航不依赖 JavaScript：原生 details、表格滚动、安全"),
-            ("artifact links and the print stylesheet remain usable.", "证据文件链接和打印样式仍可使用。"),
+            ("No JavaScript required for report navigation: native details, table scrolling, safe Open/Download artifact links, and the print stylesheet remain usable.", "报告导航不依赖 JavaScript：原生 details、表格滚动、打开/下载证据文件链接与打印样式均可使用。"),
             ("Copy buttons require JavaScript; without it, select visible evidence text or use report.json/raw source hints.", "复制按钮需要 JavaScript；无 JS 时请选中可见证据文本，或使用 report.json/原始来源提示。"),
             ("Startup / 持久化 diff", "启动项 / 持久化差异"),
             ("Graph self-noise boundary / 图谱自噪声边界", "图谱自噪声边界"),
@@ -11848,6 +12980,355 @@ details[open]>summary:before{content:'▾'}
         return html;
     }
 
+    /// <summary>
+    /// Applies the markup-bearing half of the Chinese chrome dictionary.
+    /// Inputs are the rendered HTML with tags restored; processing protects
+    /// machine payloads only (code/pre blocks, dotted event keys, machine
+    /// option values, link payloads) and then replaces phrases that include
+    /// their own markup, which the first pass could never match; the method
+    /// returns the localized document with payloads byte-identical.
+    /// </summary>
+    private static string LocalizeChineseTaggedPhrases(string html)
+    {
+        var payloadFragments = new List<string>();
+        html = ChineseRawPayloadFragmentRegex.Replace(
+            html,
+            match =>
+            {
+                var token = $"__KSWORD_TAG_PHRASE_FRAGMENT_{payloadFragments.Count}__";
+                payloadFragments.Add(match.Value);
+                return token;
+            });
+
+        foreach (var (english, chinese) in ChineseHtmlTranslations)
+        {
+            if (english.IndexOf('<') < 0)
+            {
+                continue;
+            }
+
+            if (html.Contains(english, StringComparison.Ordinal))
+            {
+                html = html.Replace(english, chinese, StringComparison.Ordinal);
+            }
+        }
+
+        for (var index = 0; index < payloadFragments.Count; index++)
+        {
+            html = html.Replace(
+                $"__KSWORD_TAG_PHRASE_FRAGMENT_{index}__",
+                payloadFragments[index],
+                StringComparison.Ordinal);
+        }
+
+        return html;
+    }
+
+    private static readonly Regex ChineseFieldLabelSpanRegex = new(
+        "<span class=\"(ui-field-label|kv-key|edge-key|lane-unit|finding-count-unit)\">([^<]*)</span>",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    /// <summary>
+    /// Localizes operator-facing field labels and count units. Inputs are the
+    /// rendered HTML and the protected-fragment list; processing rewrites only
+    /// dedicated label spans through exact maps and protects the result so the
+    /// generic dictionary cannot split a longer English label into mixed text.
+    /// </summary>
+    private static string LocalizeChineseFieldLabels(string html, List<string> protectedFragments)
+    {
+        return ChineseFieldLabelSpanRegex.Replace(
+            html,
+            match =>
+            {
+                var kind = match.Groups[1].Value;
+                var raw = match.Groups[2].Value;
+                var key = raw.Trim().TrimEnd(':', '=').Trim();
+                if (key.Length == 0)
+                {
+                    return match.Value;
+                }
+
+                string? chinese = null;
+                if (kind is "lane-unit" or "finding-count-unit")
+                {
+                    ChineseCountUnitMap.TryGetValue(key, out chinese);
+                }
+                else if (!ChineseFieldLabelMap.TryGetValue(key, out chinese))
+                {
+                    // Technical labels are humanized from raw keys
+                    // ("statusCode" -> "Status Code"), so fall back to a
+                    // space-insensitive lookup.
+                    ChineseFieldLabelNormalized.TryGetValue(NormalizeFieldLabelKey(key), out chinese);
+                }
+
+                if (string.IsNullOrEmpty(chinese))
+                {
+                    // Unknown machine keys must never reach the generic
+                    // dictionary: short entries such as "artifact" or "count"
+                    // would split them into mixed text like
+                    // "Screenshot证据文件Count". Keep the raw key intact.
+                    if (LooksLikeMachineFieldKey(key))
+                    {
+                        var protectedKey = $"__KSWORD_RAW_FRAGMENT_{protectedFragments.Count}__";
+                        protectedFragments.Add(match.Value);
+                        return protectedKey;
+                    }
+
+                    return match.Value;
+                }
+
+                var localized = match.Value.Replace(">" + raw + "<", ">" + chinese + "<", StringComparison.Ordinal);
+                var token = $"__KSWORD_RAW_FRAGMENT_{protectedFragments.Count}__";
+                protectedFragments.Add(localized);
+                return token;
+            });
+    }
+
+    /// <summary>
+    /// Detects labels that are raw field keys rather than humanized chrome.
+    /// Inputs are the label text; processing flags single-token identifiers
+    /// such as "collectionName", "hash.sha256", or "cdn.example-c2.top".
+    /// </summary>
+    private static bool LooksLikeMachineFieldKey(string value)
+    {
+        if (value.Length == 0 || value.Contains(' '))
+        {
+            return false;
+        }
+
+        if (value.Contains('.') || value.Contains('_'))
+        {
+            return true;
+        }
+
+        for (var index = 1; index < value.Length; index++)
+        {
+            if (char.IsLower(value[index - 1]) && char.IsUpper(value[index]))
+            {
+                return true;
+            }
+        }
+
+        return value.All(character => !char.IsLetter(character) || char.IsLower(character));
+    }
+
+    /// <summary>
+    /// Count units rendered next to a lane or finding number.
+    /// </summary>
+    private static readonly Dictionary<string, string> ChineseCountUnitMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["actors"] = "个主体",
+        ["rows"] = "行",
+        ["IOCs"] = "个 IOC",
+        ["items"] = "项",
+        ["indexed"] = "个已索引",
+        ["evidence rows"] = "条证据"
+    };
+
+    private static Dictionary<string, string>? normalizedFieldLabels;
+
+    private static Dictionary<string, string> ChineseFieldLabelNormalized => normalizedFieldLabels ??= BuildNormalizedFieldLabels();
+
+    private static Dictionary<string, string> BuildNormalizedFieldLabels()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in ChineseFieldLabelMap)
+        {
+            map[NormalizeFieldLabelKey(key)] = value;
+        }
+
+        return map;
+    }
+
+    private static string NormalizeFieldLabelKey(string value)
+    {
+        return new string(value.Where(character => !char.IsWhiteSpace(character) && character is not ':' and not '=').ToArray());
+    }
+
+
+    /// <summary>
+    /// Exact label map for event/evidence field names. Values (hashes, paths,
+    /// commands, event types) are never translated; only the label in front of
+    /// them is.
+    /// </summary>
+    private static readonly Dictionary<string, string> ChineseFieldLabelMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Humanized technical labels
+        ["Process Name"] = "进程名",
+        ["Collector State"] = "采集器状态",
+        ["Dropped Count"] = "落地文件数",
+        ["Queue Depth"] = "队列深度",
+        ["Integrity Level"] = "完整性级别",
+        ["User Sid"] = "用户 SID",
+        ["Task Trigger"] = "任务触发器",
+        ["Service Path"] = "服务路径",
+        ["Service Start Type"] = "服务启动类型",
+        ["Privilege Name"] = "权限名",
+        ["Privilege State"] = "权限状态",
+        ["Query Type"] = "查询类型",
+        ["Resolved Addresses"] = "解析地址",
+        ["Http Method"] = "HTTP 方法",
+        ["User Agent"] = "User-Agent",
+        ["Server Name"] = "服务器名称",
+        ["Bytes Received"] = "接收字节",
+        ["Bytes Sent"] = "发送字节",
+        ["Protocol"] = "协议",
+        ["Pcapng Packet Count"] = "PCAPNG 包数",
+        ["Pcapng Relative Path"] = "PCAPNG 相对路径",
+        ["Dropped File Bytes"] = "落地文件字节",
+        ["Memory Dump Bytes"] = "内存转储字节",
+        ["Packet Capture Bytes"] = "数据包捕获字节",
+        ["Screenshot Bytes"] = "截图字节",
+        ["Screenshot Relative Path"] = "截图相对路径",
+        ["Memory Dump Relative Path"] = "内存转储相对路径",
+        ["Child Process Dump Enabled"] = "子进程转储启用",
+        ["Additional value"] = "附加值",
+        ["Capture State"] = "捕获状态",
+        ["Capture Status"] = "捕获状态",
+        ["Collector Name"] = "采集器名称",
+        ["Latest Reason"] = "最近原因",
+        ["Related Artifact"] = "关联证据文件",
+        ["Related Artifacts"] = "关联证据文件",
+        ["Artifact Evidence Collections Ready"] = "证据文件集合就绪状态",
+        ["File Size"] = "文件大小",
+        ["Status Code"] = "状态码",
+        ["Community Score Source"] = "社区评分来源",
+        ["collectionName"] = "集合名称",
+        ["relatedArtifacts"] = "关联证据文件",
+        ["fileSize"] = "文件大小",
+        ["latestReason"] = "最近原因",
+        ["reputation"] = "信誉",
+        ["collection"] = "集合",
+        ["network"] = "网络",
+        ["Dropped File Artifact Count"] = "落地文件证据数",
+        ["Memory Dump Artifact Count"] = "内存转储证据数",
+        ["Packet Capture Artifact Count"] = "数据包捕获证据数",
+        ["Screenshot Artifact Count"] = "截图证据数",
+        ["Etw Live Capture Enabled"] = "ETW 实时捕获启用",
+        ["Etw Live Capture State"] = "ETW 实时捕获状态",
+        ["Is Embedded Pe"] = "内嵌 PE",
+        ["Last Analysis Date Utc"] = "最近分析时间（UTC）",
+        ["Permalink"] = "永久链接",
+        ["Primary Artifact Selectors"] = "主要证据文件选择器",
+        ["R0 Enabled"] = "R0 启用",
+        ["Raw Source"] = "原始来源",
+        ["Resource Role"] = "资源角色",
+        ["Resource Type"] = "资源类型",
+        ["Surface Key"] = "持久化面键",
+        ["Surface Subscribed"] = "持久化面已订阅",
+        ["Vt Community Harmless Votes"] = "VT 社区无害票",
+        ["Vt Community Malicious Votes"] = "VT 社区恶意票",
+        ["Vt Community Score"] = "VT 社区评分",
+        ["Vt Community Vote Count"] = "VT 社区投票数",
+        ["Vt Harmless"] = "VT 无害",
+        ["Vt Malicious"] = "VT 恶意",
+        ["Vt Reputation"] = "VT 信誉",
+        ["Vt Undetected"] = "VT 未检出",
+        ["Vt Verdict"] = "VT 判定",
+        ["Vt Suspicious"] = "VT 可疑",
+        ["Vt Engine Count"] = "VT 引擎数",
+        ["Vt Status"] = "VT 状态",
+        ["Execute"] = "执行",
+        ["Index"] = "索引",
+        ["Additional detail"] = "附加证据",
+        // Raw evidence keys (label only; values stay original)
+        ["kind"] = "类型",
+        ["source"] = "来源",
+        ["path"] = "路径",
+        ["process"] = "进程",
+        ["pid"] = "PID",
+        ["ppid"] = "父 PID",
+        ["count"] = "数量",
+        ["state"] = "状态",
+        ["bytes"] = "字节",
+        ["selectors"] = "选择器",
+        ["commandLine"] = "命令行",
+        ["time"] = "时间",
+        ["type"] = "类型",
+        ["category"] = "类别",
+        ["artifact"] = "证据文件",
+        ["selector"] = "选择器",
+        ["size"] = "大小",
+        ["name"] = "名称",
+        ["relativePath"] = "相对路径",
+        ["safeLink"] = "安全链接",
+        ["mimeType"] = "MIME 类型",
+        ["sizeBytes"] = "字节大小",
+        ["hash.sha256"] = "SHA-256",
+        ["captureState"] = "捕获状态",
+        ["processKey"] = "进程键",
+        ["parentProcess"] = "父进程",
+        ["parentProcessKey"] = "父进程键",
+        ["status"] = "状态",
+        ["artifactCount"] = "证据文件数",
+        ["eventCount"] = "事件数",
+        ["phases"] = "阶段",
+        ["role"] = "角色",
+        ["duplicate"] = "重复",
+        ["rejection"] = "拒绝",
+        ["relation"] = "关系",
+        ["href"] = "链接",
+        ["artifactIocCount"] = "证据文件 IOC 数",
+        ["bytesReceived"] = "接收字节",
+        ["bytesSent"] = "发送字节",
+        ["child"] = "子进程",
+        ["communityScore"] = "社区评分",
+        ["duplicateGroupCount"] = "重复组数",
+        ["duplicateGroupKey"] = "重复组键",
+        ["fileIocCount"] = "文件 IOC 数",
+        ["files"] = "文件",
+        ["highestFinding"] = "最高风险发现",
+        ["httpMethod"] = "HTTP 方法",
+        ["iocCount"] = "IOC 数",
+        ["ja3"] = "JA3",
+        ["nodes"] = "节点",
+        ["privilegeName"] = "权限名",
+        ["privilegeState"] = "权限状态",
+        ["queryType"] = "查询类型",
+        ["registry"] = "注册表",
+        ["registryIocCount"] = "注册表 IOC 数",
+        ["remoteAddress"] = "远程地址",
+        ["remotePort"] = "远程端口",
+        ["representativePaths"] = "代表路径",
+        ["resolvedAddresses"] = "解析地址",
+        ["serverName"] = "服务器名称",
+        ["sha256"] = "SHA-256",
+        ["spawnEdges"] = "派生边",
+        ["statusCode"] = "状态码",
+        ["userAgent"] = "User-Agent",
+        ["valueData"] = "值数据",
+        ["valueName"] = "值名称",
+        ["verdict"] = "判定",
+        ["vtCommunityHarmlessVotes"] = "VT 社区无害票",
+        ["vtCommunityMaliciousVotes"] = "VT 社区恶意票",
+        ["vtCommunityScore"] = "VT 社区评分",
+        ["vtCommunityVoteCount"] = "VT 社区投票数",
+        ["vtHarmless"] = "VT 无害",
+        ["vtMalicious"] = "VT 恶意",
+        ["vtReputation"] = "VT 信誉",
+        ["vtUndetected"] = "VT 未检出",
+        ["vtVerdict"] = "VT 判定",
+        ["exitCode"] = "退出码",
+        ["phase"] = "阶段",
+        ["target"] = "目标",
+        ["message"] = "消息",
+        ["reason"] = "原因",
+        ["failureHint"] = "失败提示",
+        ["collectionHealth"] = "采集健康",
+        ["operation"] = "操作",
+        ["direction"] = "方向",
+        ["method"] = "方法",
+        ["host"] = "主机",
+        ["hostname"] = "主机名",
+        ["port"] = "端口",
+        ["username"] = "用户",
+        ["object"] = "对象",
+        ["ruleId"] = "规则",
+        ["severity"] = "严重性"
+    };
+
+
     private static readonly IReadOnlyList<(string English, string Chinese)> ChineseCssTranslations =
     [
         ("content:'Step ' counter(report-section)", "content:'步骤 ' counter(report-section)"),
@@ -11922,7 +13403,7 @@ details[open]>summary:before{content:'▾'}
         ("Default report.html uses Simplified Chinese; report.en.html keeps English operator chrome. Evidence values stay original in both reports. The WebUI also serves these through /api/jobs/{jobId}/report/html?lang=zh and ?lang=en.", "默认 report.html 使用简体中文；report.en.html 保留英文操作界面。两份报告中的证据值保持原文。WebUI 也通过 /api/jobs/{jobId}/report/html?lang=zh 和 ?lang=en 提供这些报告。"),
         ("The WebUI also serves these through /api/jobs/{jobId}/report/html?lang=zh and ?lang=en.", "WebUI 也通过 /api/jobs/{jobId}/report/html?lang=zh 和 ?lang=en 提供这些报告。"),
         ("Print/no-JS fallback", "打印 / 无 JS 兜底"),
-        ("No JavaScript required for report navigation: native details, table scrolling, safe Open/Download artifact links, and the print stylesheet remain usable. Copy buttons require JavaScript; without it, select visible evidence text or use report.json/raw source hints.", "报告导航不依赖 JavaScript：原生 details、表格滚动、安全打开/下载证据链接和打印样式仍可使用。复制按钮需要 JavaScript；无 JS 时请选中可见证据文本，或使用 report.json/原始来源提示。"),
+        ("No JavaScript required for report navigation: native details, table scrolling, safe Open/Download artifact links, and the print stylesheet remain usable. Copy buttons require JavaScript; without it, select visible evidence text or use report.json/raw source hints.", "报告导航不依赖 JavaScript：原生 details、表格滚动、打开/下载证据文件链接与打印样式均可使用。复制按钮需要 JavaScript；无 JS 时请选中可见证据文本，或使用 report.json/原始来源提示。"),
         (" (folded in screen view; expand in browser for full evidence)", "（屏幕视图中折叠；在浏览器中展开查看完整证据）"),
         ("Quick navigation", "快速导航"),
         ("Report navigation", "报告导航"),
@@ -12014,6 +13495,7 @@ details[open]>summary:before{content:'▾'}
         ("malformed driver rows=", "驱动格式错误行="),
         ("lost rows=", "丢失行数="),
         ("ETW gaps=", "ETW 缺口="),
+        ("; ETW gaps=", "；ETW 缺口="),
         ("PCAP gaps=", "PCAP 缺口="),
         ("guest collection failures=", "来宾采集失败="),
         ("driver drain did not prove an empty queue", "驱动排空未证明队列为空"),
@@ -12042,9 +13524,10 @@ details[open]>summary:before{content:'▾'}
         (">artifact.dropped_file.skipped<", ">落地文件未采集<"),
         (">etwLive<", ">ETW 实时<"),
         (">guest<", ">来宾<"),
+        (">host<", ">主机<"),
+        (">virustotal<", ">VirusTotal<"),
         (">driver<", ">内核驱动<"),
         (">r0collector<", ">R0 采集器<"),
-        (">windows行为EventLog<", ">Windows 行为日志<"),
         (">file<", ">文件<"),
         (">process<", ">进程<"),
         (">network<", ">网络<"),
@@ -12491,6 +13974,8 @@ details[open]>summary:before{content:'▾'}
         ("available", "可用"),
         ("Stable relationship lanes", "稳定关系通道"),
         ("Stable relationship lanes.", "稳定关系通道。"),
+        ("Stable relationship lane overview", "稳定关系通道一览"),
+        ("Path / command line", "路径 / 命令行"),
         ("Lane counts and representative paths for process lineage, file, registry, network, and artifact proof; complete edges are card-listed below.", "进程谱系、文件路径、注册表路径、网络路径与证据文件证明的通道计数及代表路径；完整边以卡片形式列在下方。"),
         ("Process lineage lane", "进程链路通道"),
         ("File path lane", "文件路径通道"),
@@ -12513,7 +13998,7 @@ details[open]>summary:before{content:'▾'}
         ("Copy behavior routing", "复制行为路由"),
         ("Behavior routing evidence examples", "行为路由证据示例"),
         ("Evidence lane health", "证据通道健康状态"),
-        ("Artifact lane health:", "证据文件通道健康："),
+        ("Artifact lane health", "证据文件通道健康"),
         ("Process relation path", "进程关系路径"),
         ("Process relation path:", "进程关系路径："),
         ("Artifact links", "证据文件链接"),
@@ -12546,6 +14031,12 @@ details[open]>summary:before{content:'▾'}
         ("Host artifact index.", "主机证据文件索引。"),
         ("Download buttons use safe report-relative selectors only; duplicate grouping and rejection diagnostics explain why guest manifest references were accepted, deduplicated, or rejected.", "下载按钮只使用安全的报告相对选择器；重复分组和拒绝诊断说明 guest manifest 引用为何被接受、去重或拒绝。"),
         ("Safe download selectors", "安全下载选择器"),
+        (">Selectors<", ">选择器<"),
+        ("shared by every lane below", "以下各通道共用"),
+        ("Selectors per lane", "各通道选择器"),
+        ("Matrix evidence lines", "矩阵证据行"),
+        ("Remaining graph edges", "其余图边"),
+        ("Rest of the chain", "链条其余部分"),
         ("Duplicate artifact groups", "重复证据文件组"),
         ("Rejected artifact references", "已拒绝证据文件引用"),
         ("Artifacts with explicit selector evidence:", "带显式选择器证据的证据文件："),
@@ -12728,7 +14219,8 @@ details[open]>summary:before{content:'▾'}
         ("Show inline raw events", "显示内联原始事件"),
         ("Copy raw page", "复制原始事件页"),
         ("Page evidence sample.", "分页证据样例。"),
-        ("This page is a bounded native-details chunk; long command/output/script fields remain folded. Use the copy button or right-click to copy this inline page; open report.json/events.json for complete row payloads.", "此页是有界的原生 details 分块；长 command/output/script 字段保持折叠。使用复制按钮或右键可复制此内联页；打开 report.json/events.json 查看完整行载荷。"),
+        ("This page is a bounded native-details chunk; long command/output/script fields remain folded. Use the copy button or right-click to copy this inline page; report.json contains all retained rows, while events.json/driver JSONL contain complete raw payloads when indexed.", "此页是有界的原生 details 分块；长命令/输出/脚本字段保持折叠。可用复制按钮或右键复制此内联页；report.json 含全部保留行，已索引的 events.json / 驱动 JSONL 含完整原始载荷。"),
+        ("This page is a bounded native-details chunk; long command/output/script fields remain folded. Use the copy button or right-click to copy this inline page; open report.json/events.json for complete row payloads.", "此页是有界的原生 details 分块；长命令/输出/脚本字段保持折叠。可用复制按钮或右键复制此内联页；打开 report.json/events.json 查看完整行载荷。"),
         ("; families ", "；事件族 "),
         ("; top types ", "；主要类型 "),
         ("Raw event distribution", "原始事件分布"),
@@ -12998,6 +14490,9 @@ details[open]>summary:before{content:'▾'}
         (">dropped-file<", ">落地文件<"),
         (">static-analysis<", ">静态分析<"),
         (">screenshot<", ">截图<"),
+        ("Screenshot: ", "截图："),
+        ("MemoryDump: ", "内存转储："),
+        ("PacketCapture: ", "网络抓包："),
         ("memory-dump", "内存转储"),
         (">packet-capture<", ">网络抓包<"),
         (">telemetry<", ">遥测<"),
@@ -13005,6 +14500,20 @@ details[open]>summary:before{content:'▾'}
         (">log<", ">日志<"),
         (">bundle<", ">打包<"),
         (">artifact<", ">证据文件<"),
+        // Behavior-graph relation and artifact-kind words are rendered as
+        // badge/relation chips. Localize the chip text only; the machine
+        // relation stays in the data-copy payload.
+        (">spawn<", ">派生<"),
+        (">Screenshot<", ">截图<"),
+        (">DroppedFile<", ">落地文件<"),
+        (">MemoryDump<", ">内存转储<"),
+        (">PacketCapture<", ">网络抓包<"),
+        (">duplicate / rejected<", ">重复 / 拒绝<"),
+        (">duplicate<", ">重复<"),
+        (">rejected<", ">拒绝<"),
+        (">accepted<", ">接受<"),
+        (">none<", ">无<"),
+        (">None<", ">无<"),
         ("Process execution", "进程执行"),
         ("File creation or modification", "文件创建或修改"),
         ("Network connection", "网络连接"),
@@ -13227,6 +14736,9 @@ details[open]>summary:before{content:'▾'}
         ,("Raw size", "原始大小")
         ,("RVA / file offset", "RVA / 文件偏移")
         ,("static.pe.resource normalized evidence", "静态 PE 资源规范化证据")
+        ,("Evidence volume", "证据规模")
+        ,("Full evidence", "完整证据")
+        ,("more evidence rows are folded into the full payload.", "条证据已折叠在完整证据中。")
     ];
 
     private static readonly IReadOnlyList<(string English, string Chinese)> ChineseRuleHtmlTranslations =
@@ -14232,7 +15744,240 @@ details[open]>summary:before{content:'▾'}
         ("WMIC remote process creation", "WMIC 远程创建进程"),
         ("WMIC shadow copy deletion command", "WMIC 删除卷影副本命令"),
         ("Writable executable, very high entropy, or low-entropy section", "可写可执行、高熵或低熵 PE 节"),
-        ("WScript or CScript executes remote script URL", "WScript/CScript 执行远程脚本 URL")
+        ("WScript or CScript executes remote script URL", "WScript/CScript 执行远程脚本 URL"),
+        ("The guest agent observed a sample-correlated non-baseline process after launch. Only confirmed or probable sample correlation can promote this generic finding; uncorrelated and environmental rows remain raw evidence.", "Guest Agent 在样本启动后观察到与样本关联的非基线进程。只有确认或高度可能的样本关联才会提升该通用发现；未关联与环境行仍作为原始证据保留。"),
+        ("R0 image-load metadata is reported only when the row is sample-correlated and not a truncated/system-mode image path; ordinary system DLL load metadata stays diagnostic.", "R0 映像加载元数据仅在行与样本关联且不是截断/系统模式映像路径时才报告；普通系统 DLL 加载元数据保持为诊断信息。"),
+        ("Sleep-evasion timeout signal", "休眠规避导致的超时信号"),
+        ("A timeout row is reported only when explicit sleep-evasion telemetry marks the timeout as a behavior candidate; a process merely still running after a short analysis window is metadata.", "只有当显式休眠规避遥测把超时标记为行为候选时才会报告该行；进程仅在较短分析窗口后仍在运行属于元数据。"),
+        ("Static URL strings are reported only when the structured indicator contains a meaningful host; malformed tiny URL-like fragments and reference metadata stay triage context.", "只有当结构化指标包含有意义主机时才报告静态 URL 字符串；畸形的超短 URL 片段与引用元数据保留为分诊上下文。"),
+        ("Static analysis parsed at least one PE import descriptor; imported module/API evidence may appear in interesting strings. Pure PE metadata is suppressed from findings unless a future producer explicitly sets promoteStaticMetadataFinding=true.", "静态分析解析到至少一个 PE 导入描述符；导入模块/API 证据可能出现在可疑字符串中。纯 PE 元数据默认不进入发现，除非未来的生产者显式设置 promoteStaticMetadataFinding=true。"),
+        ("TLS callback present", "存在 PE TLS 回调"),
+        ("Static analysis found a decoded PE TLS callback, which can execute code before the main entry point and is useful to triage for packing or evasion. A directory with an empty callback table remains low-risk metadata.", "静态分析发现已解码的 PE TLS 回调，可在主入口点之前执行代码，适合用于加壳或规避的初步判断；回调表为空的目录仍属于低风险元数据。"),
+        ("Static analysis parsed a PE resource directory; resource type and payload hints may appear in static evidence. Pure PE metadata is suppressed from findings unless a future producer explicitly sets promoteStaticMetadataFinding=true.", "静态分析解析到 PE 资源目录；资源类型与载荷线索可能出现在静态证据中。纯 PE 元数据默认不进入发现，除非未来的生产者显式设置 promoteStaticMetadataFinding=true。"),
+        ("Static analysis observed PE security-directory, certificate-table, or Authenticode metadata. This is provenance context only and should not increase risk by itself. Pure PE metadata is suppressed from findings unless a future producer explicitly sets promoteStaticMetadataFinding=true.", "静态分析观察到 PE 安全目录、证书表或 Authenticode 元数据。这仅属来源上下文，本身不应提高风险。纯 PE 元数据默认不进入发现，除非未来的生产者显式设置 promoteStaticMetadataFinding=true。"),
+        ("WMIC system discovery or anti-analysis string", "WMIC 系统侦察或反分析字符串"),
+        ("Static analysis extracted WMIC hardware, OS, ACPI, board, memory, or device inventory command strings. This is static triage for system discovery or sandbox fingerprinting and requires runtime corroboration.", "静态分析提取到 WMIC 硬件、操作系统、ACPI、主板、内存或设备清单命令字符串。这是面向系统侦察或沙箱指纹识别的静态分诊，需要运行期证据佐证。"),
+        ("Driver registry mutation rows are promoted only when sample correlation confirms sample behavior; empty-process CTL/certificate maintenance rows stay telemetry diagnostics.", "驱动注册表变更行仅在样本关联确认样本行为时提升；空进程的 CTL/证书维护行保留为遥测诊断。"),
+        ("The process-tree probe emitted a non-baseline node with parent, root, depth, child-count, or lineage metadata, enabling full descendant review beyond single process-start rows.", "进程树探测输出了非基线节点及其父进程、根节点、深度、子进程数或血缘元数据，可在单条进程启动行之外审查完整后代。"),
+        ("Process-tree child-count metadata is reported only for fan-out of two or more child processes; 0/1 child counts stay metadata.", "仅当子进程扇出为两个或以上时才报告进程树子进程数元数据；0/1 子进程数保留为元数据。"),
+        ("Living-off-the-land binary in process tree", "进程树中出现系统自带代理执行程序"),
+        ("A process-tree node path referenced a common Windows LOLBin used for proxy execution, scripting, installation, or download staging.", "进程树节点路径引用了常见的 Windows 系统二进制（LOLBin），常用于代理执行、脚本宿主、安装或下载暂存。"),
+        ("Process tree execution from user-writable path", "进程树从用户可写路径执行"),
+        ("A sample-correlated process-tree or process observation referenced execution from Temp, AppData, Downloads, ProgramData, or Public staging paths. A process.new row also requires sample-root lineage; uncorrelated and environmental rows remain raw evidence.", "样本关联的进程树或进程观察引用了 Temp、AppData、Downloads、ProgramData 或 Public 等暂存路径。process.new 行还需要样本根进程血缘；未关联与环境行仍作为原始证据保留。"),
+        ("Service inventory item created or modified", "系统变更探测到服务新建或修改"),
+        ("The system-change probe observed a Windows service created or modified after sample launch.", "系统变更探测在样本启动后观察到 Windows 服务被创建或修改。"),
+        ("Service diff with suspicious command metadata", "服务变更加载可疑命令元数据"),
+        ("A created or modified service diff referenced command shells, script interpreters, or user-writable staging paths in its raw metadata.", "新建或修改的服务差异在原始元数据中引用了命令解释器、脚本宿主或用户可写暂存路径。"),
+        ("Scheduled task inventory item created or modified", "系统变更探测到计划任务新建或修改"),
+        ("The system-change probe observed a scheduled task created or modified after sample launch.", "系统变更探测在样本启动后观察到计划任务被创建或修改。"),
+        ("Scheduled task diff with suspicious target", "计划任务指向可疑目标"),
+        ("A created or modified scheduled task launches script interpreters, command shells, or payloads from user-writable staging paths.", "新建或修改的计划任务启动脚本宿主、命令解释器，或从用户可写暂存路径加载载荷。"),
+        ("Startup item inventory entry created or modified", "系统变更探测到启动项新建或修改"),
+        ("The system-change probe observed a startup registry value or startup-folder item created or modified after sample launch.", "系统变更探测在样本启动后观察到启动注册表值或启动文件夹项被创建或修改。"),
+        ("Startup item executable or script value", "启动项指向可执行内容"),
+        ("A created or modified startup item references an executable, script, library, or user-writable path as its autostart payload.", "新建或修改的启动项以可执行文件、脚本、库或用户可写路径作为自启动载荷。"),
+        ("Persistence inventory item deleted", "持久化项被删除"),
+        ("The system-change probe observed a service, scheduled task, or startup item deleted during execution; this can represent cleanup, tampering, or installer rollback.", "系统变更探测在执行期间观察到服务、计划任务或启动项被删除；这可能代表清理、篡改或安装程序回滚。"),
+        ("System diff event volume truncated", "系统差异事件数量被截断"),
+        ("The process-tree/system-change probe reached a per-kind diff cap and emitted a truncation marker so analysts know additional service, task, or startup changes existed.", "进程树/系统变更探测达到单类差异上限并写入截断标记，提示仍存在更多服务、任务或启动项变更。"),
+        ("Unified startup diff created or modified", "启动项差异：自启动面新建或修改"),
+        ("The before/after startup inventory observed a service, driver, task, Run key, WMI subscription, Winlogon/IFEO/LSA/AppInit/Winsock/shell-extension, or related autostart surface created or modified.", "前后对比的启动清单观察到服务、驱动、任务、Run 键、WMI 订阅、Winlogon/IFEO/LSA/AppInit/Winsock/Shell 扩展或相关自启动面被创建或修改。"),
+        ("Startup diff WMI permanent event subscription", "启动项差异：WMI 永久事件订阅"),
+        ("A startup diff row referenced WMI EventFilter, CommandLineEventConsumer, ActiveScriptEventConsumer, or FilterToConsumerBinding persistence.", "启动项差异行引用了 WMI EventFilter、CommandLineEventConsumer、ActiveScriptEventConsumer 或 FilterToConsumerBinding 持久化。"),
+        ("Startup diff IFEO or SilentProcessExit persistence", "启动项差异：IFEO 或静默进程退出"),
+        ("A startup diff row touched Image File Execution Options or SilentProcessExit autostart/debugger surfaces.", "启动项差异行涉及映像文件执行选项（IFEO）或 SilentProcessExit 自启动/调试器面。"),
+        ("Startup diff advanced registry persistence surface", "启动项差异：高级注册表持久化面"),
+        ("A startup diff row referenced LSA, AppInit/AppCert, Winsock, shell extensions, print monitors, time providers, Netsh helpers, Active Setup, BootExecute, or Winlogon autostart surfaces.", "启动项差异行引用了 LSA、AppInit/AppCert、Winsock、Shell 扩展、打印监视器、时间提供程序、Netsh 助手、Active Setup、BootExecute 或 Winlogon 自启动面。"),
+        ("Startup diff driver service", "启动项差异：驱动服务"),
+        ("A startup diff row projected a created or modified kernel/file-system driver service or .sys ImagePath.", "启动项差异行投影出新建或修改的内核/文件系统驱动服务或 .sys ImagePath。"),
+        ("Startup diff points to user-writable or script target", "启动项指向用户可写路径或脚本"),
+        ("A startup diff row points at Temp, AppData, Public, Downloads, ProgramData, or script/executable payload tokens.", "启动项差异行指向 Temp、AppData、Public、Downloads、ProgramData，或包含脚本/可执行载荷特征。"),
+        ("DNS cache entry added", "新增 DNS 缓存条目"),
+        ("The network probe observed a new DNS cache entry after sample execution, preserving name, record type, TTL, or raw resolver evidence.", "网络探测在样本执行后观察到新的 DNS 缓存条目，并保留名称、记录类型、TTL 或原始解析器证据。"),
+        ("DNS cache entry with tunnel-capable record", "DNS 缓存条目具备隧道特征"),
+        ("A new DNS cache entry referenced TXT, NULL, CNAME, tunnel, DGA, or DNS-log tokens commonly used in DNS C2 and tunneling triage.", "新增 DNS 缓存条目引用了 TXT、NULL、CNAME、tunnel、DGA 或 DNS 日志特征，常用于 DNS C2 与隧道分诊。"),
+        ("DNS cache dynamic or disposable domain", "DNS 缓存条目为动态或一次性域名"),
+        ("A new DNS cache entry contained dynamic DNS, disposable, or commonly abused domain/TLD fragments.", "新增 DNS 缓存条目包含动态 DNS、一次性或常被滥用的域名/TLD 片段。"),
+        ("Netstat collection metadata row observed", "观察到 netstat 连接行"),
+        ("The network probe emitted a netstat row with local/remote endpoints, protocol, state, and optional owning PID. Generic observed rows are collection metadata; use netstat-added-connection for post-launch deltas.", "网络探测输出包含本地/远端端点、协议、状态和可选所属 PID 的 netstat 行。通用观察行属于采集元数据；启动后增量请参考 netstat-added-connection。"),
+        ("Netstat connection added after launch", "样本启动后新增 netstat 连接"),
+        ("A netstat row appeared only after sample execution, providing endpoint, state, protocol, and PID metadata beyond the TCP diff API.", "netstat 行仅在样本执行后出现，提供 TCP 差异 API 之外的端点、状态、协议与 PID 元数据。"),
+        ("Network listener opened", "新开网络监听端口"),
+        ("A TCP or UDP listener appeared after launch, which can indicate bind shells, local proxying, peer-to-peer behavior, or test harness services.", "启动后出现 TCP 或 UDP 监听，可能代表绑定 shell、本地代理、点对点通信或测试服务。"),
+        ("Network listener on non-standard suspicious port", "监听端口非常规"),
+        ("A newly-opened TCP or UDP listener used a port often associated with reverse shells, proxying, Tor, testing backdoors, or non-standard command channels.", "新开的 TCP 或 UDP 监听使用了常见于反弹 shell、代理、Tor、测试后门或非常规命令通道的端口。"),
+        ("TCP connection closed after launch", "连接在分析后关闭"),
+        ("A TCP connection present in baseline was gone after execution; this is useful context for short-lived network behavior and cleanup windows.", "基线中存在的 TCP 连接在执行后消失，可用于理解短时网络行为与清理窗口。"),
+        ("HTTP executable or script download", "HTTP 下载可执行内容"),
+        ("HTTP or PCAP HTTP metadata referenced executable/script extensions, PE magic, archive payloads, or binary content types associated with staged tools.", "HTTP 或 PCAP HTTP 元数据引用了可执行/脚本扩展名、PE 魔数、压缩包载荷或与工具暂存相关的二进制内容类型。"),
+        ("HTTP POST or check-in beacon pattern", "HTTP POST 或心跳上线特征"),
+        ("HTTP request metadata referenced common beacon/check-in paths or explicit beacon/C2 labels. Generic POST/PUT methods alone are intentionally excluded to avoid treating normal web traffic as C2.", "HTTP 请求元数据引用了常见的 beacon/上线路径或显式 beacon/C2 标记。单纯的 POST/PUT 方法被有意排除，避免把正常 Web 流量当作 C2。"),
+        ("DNS-over-HTTPS request indicator", "DNS-over-HTTPS 请求"),
+        ("HTTP metadata referenced DNS-over-HTTPS endpoints or application/dns-message content that can hide DNS lookups inside web traffic.", "HTTP 元数据引用了 DNS-over-HTTPS 端点或 application/dns-message 内容，可将 DNS 查询隐藏在 Web 流量中。"),
+        ("HTTP proxy or tunnel method observed", "HTTP 代理或隧道方法"),
+        ("HTTP telemetry referenced CONNECT, Upgrade, WebSocket, or proxy-like fields often used for tunneling through web infrastructure.", "HTTP 遥测引用了 CONNECT、Upgrade、WebSocket 或类代理字段，常用于通过 Web 基础设施建立隧道。"),
+        ("TLS invalid or self-signed certificate indicator", "TLS 证书无效或自签名"),
+        ("TLS metadata referenced invalid, expired, untrusted, self-signed, or mismatched certificate validation evidence.", "TLS 元数据引用了无效、过期、不受信任、自签名或名称不匹配的证书校验证据。"),
+        ("TLS ECH or ESNI metadata observed", "TLS 加密 ClientHello 或 ESNI"),
+        ("TLS metadata referenced encrypted SNI or Encrypted ClientHello fields for encrypted-channel triage.", "TLS 元数据引用了加密 SNI 或 Encrypted ClientHello 字段，用于加密信道分诊。"),
+        ("PCAP executable payload indicator", "PCAP 中出现可执行载荷"),
+        ("Packet-derived metadata referenced PE magic, executable filenames, archive payloads, or binary content types suggesting payload transfer.", "数据包派生元数据引用了 PE 魔数、可执行文件名、压缩包载荷或提示载荷传输的二进制内容类型。"),
+        ("PCAP DNS NXDOMAIN or DGA indicator", "PCAP DNS 出现 NXDOMAIN 或 DGA"),
+        ("Packet-derived DNS telemetry referenced NXDOMAIN responses, DGA classification, or suspicious generated-domain labels.", "数据包派生 DNS 遥测引用了 NXDOMAIN 响应、DGA 分类或可疑的生成式域名特征。"),
+        ("PCAP upload or exfiltration indicator", "PCAP 上传或外传指标"),
+        ("Flow or HTTP metadata combined upload direction with explicit upload or exfiltration semantics; direction alone is not sufficient.", "流量或 HTTP 元数据将上传方向与显式上传/外传语义结合；仅有方向不足以判定。"),
+        ("PCAP flow-count metadata observed", "PCAP 流计数元数据"),
+        ("Packet summary or flow metadata included count, unique-destination, packet, or duration fields for future fan-out and beacon thresholding.", "数据包摘要或流元数据包含计数、唯一目标数、包数或持续时长字段，可用于后续扇出与心跳阈值判断。"),
+        ("RDP network port observed", "观察到 RDP 端口"),
+        ("Network, driver, netstat, or PCAP telemetry referenced the Remote Desktop Protocol port 3389 or protocol labels.", "网络、驱动、netstat 或 PCAP 遥测引用了远程桌面协议 3389 端口或相关协议标记。"),
+        ("SSH network port observed", "观察到 SSH 端口"),
+        ("Network, driver, netstat, or PCAP telemetry referenced SSH port 22 or SSH protocol labels, useful for lateral movement and tunneling triage.", "网络、驱动、netstat 或 PCAP 遥测引用了 SSH 22 端口或 SSH 协议标记，可用于横向移动与隧道分诊。"),
+        ("LDAP or Kerberos network port observed", "观察到 LDAP 或 Kerberos 端口"),
+        ("Network telemetry referenced LDAP, LDAPS, Kerberos, or Global Catalog ports that can support domain discovery, authentication, and lateral movement triage.", "网络遥测引用了 LDAP、LDAPS、Kerberos 或全局编录端口，可支撑域侦察、认证与横向移动分诊。"),
+        ("Tor or proxy port observed", "观察到 Tor 或代理端口"),
+        ("Network telemetry referenced common local or remote proxy/Tor/SOCKS ports or protocol labels used to relay command channels.", "网络遥测引用了常见的本地或远端代理/Tor/SOCKS 端口或协议标记，常用于中继命令通道。"),
+        ("Admin share file path observed", "观察到管理共享文件路径"),
+        ("A file event referenced administrative shares such as ADMIN$, C$, IPC$, or UNC staging paths commonly used for lateral tool transfer.", "文件事件引用了 ADMIN$、C$、IPC$ 等管理共享或 UNC 暂存路径，常用于横向工具传输。"),
+        ("Remote Desktop command observed", "观察到远程桌面命令"),
+        ("A command line referenced mstsc, cmdkey, or RDP connection file usage that can indicate interactive remote desktop activity.", "命令行引用了 mstsc、cmdkey 或 RDP 连接文件用法，可能表示交互式远程桌面操作。"),
+        ("Network share discovery command", "网络共享侦察命令"),
+        ("A command line enumerated network shares, domains, sessions, or remote computers using built-in Windows discovery tools.", "命令行使用 Windows 内置侦察工具枚举网络共享、域、会话或远程主机。"),
+        ("System information discovery command", "系统信息侦察命令"),
+        ("A command line collected local OS, host, user, domain, or computer-system details that often precede staging or evasion decisions.", "命令行收集了本机操作系统、主机、用户、域或计算机系统信息，常出现在暂存或规避决策之前。"),
+        ("Process discovery command", "进程侦察命令"),
+        ("A command line enumerated running processes or services using tasklist, PowerShell, WMI, or service-control utilities.", "命令行使用 tasklist、PowerShell、WMI 或服务控制工具枚举运行中的进程或服务。"),
+        ("Network configuration discovery command", "网络配置侦察命令"),
+        ("A command line collected local network configuration, routes, ARP cache, firewall, or active connection details.", "命令行收集了本机网络配置、路由、ARP 缓存、防火墙或活动连接信息。"),
+        ("Screen capture API observed", "观察到屏幕捕获 API"),
+        ("An API event referenced GDI/User32 screen-capture primitives such as BitBlt, GetDC, PrintWindow, or GetForegroundWindow.", "API 事件引用了 GDI/User32 屏幕捕获原语，例如 BitBlt、GetDC、PrintWindow 或 GetForegroundWindow。"),
+        ("Double-extension masquerading file", "双扩展名伪装文件"),
+        ("A file event referenced document/image/archive-looking names that end in executable or script extensions, a common user deception pattern.", "文件事件引用了以文档/图片/压缩包外观命名、实际以可执行或脚本扩展名结尾的文件，是常见的用户欺骗手法。"),
+        ("Hidden or system file attribute command", "隐藏文件属性命令"),
+        ("A command line used attrib to set hidden, system, or read-only file attributes, often used to conceal staged files or persistence artifacts.", "命令行使用 attrib 设置隐藏、系统或只读属性，常用于隐藏暂存文件或持久化产物。"),
+        ("Legacy RunServices persistence path", "旧版 RunServices 持久化"),
+        ("A registry event touched legacy RunServices or RunServicesOnce autostart paths still useful for malware triage on older Windows profiles.", "注册表事件涉及旧版 RunServices 或 RunServicesOnce 自启动路径，在较旧 Windows 配置上仍具分析价值。"),
+        ("AppCert DLLs persistence path", "AppCert DLLs 持久化"),
+        ("A registry event touched Session Manager AppCertDlls, which can load DLLs into processes that call selected Win32 APIs.", "注册表事件涉及会话管理器 AppCertDlls，可向调用特定 Win32 API 的进程加载 DLL。"),
+        ("Application shim persistence artifact", "应用程序兼容性垫片持久化"),
+        ("A registry or file event touched AppCompat shim database registration paths used to redirect application behavior or load attacker-controlled shims.", "注册表或文件事件涉及 AppCompat 垫片数据库注册路径，可用于重定向应用行为或加载攻击者控制的垫片。"),
+        ("Active Setup persistence path", "Active Setup 持久化"),
+        ("A registry event touched Active Setup Installed Components or StubPath values that can execute commands during user logon initialization.", "注册表事件涉及 Active Setup Installed Components 或 StubPath 值，可在用户登录初始化时执行命令。"),
+        ("Logon script persistence registry path", "登录脚本策略持久化"),
+        ("A registry event touched Windows logon/startup script policy paths that can execute attacker-controlled scripts during user or machine logon.", "注册表事件涉及 Windows 登录/启动脚本策略路径，可在用户或计算机登录时执行攻击者脚本。"),
+        ("BITS job persistence or download command", "BITS 任务持久化或下载命令"),
+        ("A command line configured BITS jobs, notification commands, or transfers that can persist or stage payloads without an interactive browser.", "命令行配置了 BITS 任务、通知命令或传输，可在无交互浏览器的情况下持久化或暂存载荷。"),
+        ("Screensaver persistence registry path", "屏幕保护程序持久化"),
+        ("A registry event modified desktop screensaver configuration values that can launch a malicious SCR payload at idle or unlock time.", "注册表事件修改了桌面屏幕保护配置值，可在空闲或解锁时启动恶意 SCR 载荷。"),
+        ("PowerShell profile persistence file", "PowerShell 配置文件持久化"),
+        ("A file event wrote a PowerShell profile script that can run code every time a PowerShell host starts for the affected user or host.", "文件事件写入 PowerShell 配置文件脚本，可在受影响用户或主机的每次 PowerShell 启动时执行代码。"),
+        ("Thread context hijacking injection primitive", "线程上下文劫持注入"),
+        ("An API or thread event referenced suspending a thread and changing its context, a common execution redirection primitive.", "API 或线程事件涉及挂起线程并修改其上下文，是常见的执行重定向原语。"),
+        ("Portable executable manual-map injection signal", "PE 手动映射注入"),
+        ("An event referenced manual PE mapping, RunPE, section-image mapping, or process doppelganging style injection evidence.", "事件涉及手动 PE 映射、RunPE、节区映像映射或进程替身（doppelganging）式注入证据。"),
+        ("Reflective loader or module stomping signal", "反射加载或模块替换信号"),
+        ("An API, memory, or image-load event referenced reflective DLL loading, in-memory module loading, or module stomping evidence.", "API、内存或映像加载事件涉及反射 DLL 加载、内存模块加载或模块替换证据。"),
+        ("DCOM remote execution command", "DCOM 远程执行命令"),
+        ("A command line referenced DCOM automation classes or helper labels commonly used to execute commands on a remote Windows host.", "命令行引用了常用于在远程 Windows 主机执行命令的 DCOM 自动化类或辅助标记。"),
+        ("RPC or DCOM endpoint mapper port observed", "观察到 RPC 或 DCOM 端口"),
+        ("A network, driver, or PCAP flow event referenced RPC/DCOM endpoint mapper ports or protocol labels often used during remote Windows management.", "网络、驱动或 PCAP 流量事件引用了 RPC/DCOM 端点映射端口或协议标记，常见于远程 Windows 管理。"),
+        ("PowerShell SSH remoting command", "PowerShell SSH 远程命令"),
+        ("A PowerShell command line used SSH transport remoting switches that can run commands on a remote system over SSH.", "PowerShell 命令行使用了 SSH 传输远程会话开关，可通过 SSH 在远程系统执行命令。"),
+        ("Remote registry command observed", "远程注册表命令"),
+        ("A process command line used reg.exe against a remote registry path, which can support remote persistence, configuration change, or discovery.", "进程命令行使用 reg.exe 操作远程注册表路径，可支撑远程持久化、配置修改或侦察。"),
+        ("Locale, language, or timezone anti-analysis command", "区域与时间反分析命令"),
+        ("A command line queried locale, language, or timezone information often used to gate execution by region or identify sandbox defaults.", "命令行查询了区域、语言或时区信息，常用于按地域限制执行或识别沙箱默认配置。"),
+        ("User input or idle-state anti-analysis API observed", "用户输入或空闲状态反分析 API"),
+        ("An API event referenced user input, cursor, foreground window, or idle-time checks used to detect unattended sandbox sessions.", "API 事件引用了用户输入、光标、前台窗口或空闲时间检查，用于识别无人值守的沙箱会话。"),
+        ("Accelerated or skipped sleep telemetry observed", "休眠加速或跳过遥测"),
+        ("Sleep or timeout telemetry carried requested/actual duration fields that can expose long-sleep evasion or sandbox time acceleration.", "休眠或超时遥测携带请求时长与实际时长字段，可暴露长休眠规避或沙箱时间加速。"),
+        ("Certutil download or decode command", "Certutil 下载或解码命令"),
+        ("A command line used certutil URL-cache, verifyctl, decode, or decodehex options to stage or transform payload data.", "命令行使用 certutil 的 URL 缓存、verifyctl、decode 或 decodehex 选项暂存或转换载荷数据。"),
+        ("A command line used msiexec to install or execute a remote HTTP/HTTPS/UNC package, a common proxy execution and download-execute pattern.", "命令行使用 msiexec 安装或执行远程 HTTP/HTTPS/UNC 安装包，是常见的代理执行与下载执行模式。"),
+        ("Rundll32 remote URL or script execution", "Rundll32 远程 URL 或脚本执行"),
+        ("A command line used rundll32 with URL handlers, JavaScript, or remote DLL/script references associated with proxy execution.", "命令行使用 rundll32 配合 URL 处理器、JavaScript 或远程 DLL/脚本引用，属于代理执行。"),
+        ("Archive extracted then executed chain observed", "解压后执行链"),
+        ("A normalized correlation event indicates an archive or ISO was extracted or mounted and a child payload executed from the extracted path. The rule requires an executed path plus archive/extraction context.", "规范化关联事件显示压缩包或 ISO 被解压/挂载，并从解压路径执行了子载荷。该规则要求执行路径加解压上下文同时成立。"),
+        ("DNS long-label or base64-like query", "DNS 长标签或 base64 查询"),
+        ("DNS telemetry carried long-label, high-entropy, base64-marker, or encoded-query metadata together with a tunnel/DGA/encoded classification, reducing false positives from ordinary query-length fields.", "DNS 遥测同时携带长标签、高熵、base64 特征或编码查询元数据以及隧道/DGA/编码分类，可降低普通查询长度字段带来的误报。"),
+        ("DNS exfiltration volume metadata observed", "DNS 外传体量元数据"),
+        ("DNS or PCAP summary telemetry included query-count or byte-total fields for tunnel and exfiltration triage.", "DNS 或 PCAP 摘要遥测包含查询计数或字节总量字段，可用于隧道与外传分诊。"),
+        ("HTTP authorization, cookie, or token exfiltration field", "HTTP 认证信息或令牌外传"),
+        ("HTTP metadata included authorization headers, cookies, bearer tokens, passwords, or session fields that can indicate credential or token exfiltration.", "HTTP 元数据包含 Authorization 头、Cookie、Bearer 令牌、口令或会话字段，可能表示凭据或令牌外传。"),
+        ("TLS missing SNI or rare JA3 indicator", "TLS 缺少 SNI 或罕见 JA3"),
+        ("TLS telemetry indicated missing/encrypted SNI or a rare JA3/JA3S classification for encrypted-channel C2 triage.", "TLS 遥测显示 SNI 缺失/加密或罕见的 JA3/JA3S 分类，用于加密信道 C2 分诊。"),
+        ("QUIC or HTTP/3 network activity", "QUIC 或 HTTP/3 网络活动"),
+        ("UDP, flow, or TLS metadata referenced QUIC/HTTP3/ALPN h3 traffic that can carry encrypted command-and-control over web ports.", "UDP、流量或 TLS 元数据引用了 QUIC/HTTP3/ALPN h3 流量，可在 Web 端口上承载加密命令控制。"),
+        ("Packet capture artifact indexed", "已索引的数据包捕获证据"),
+        ("A manifest, host artifact, or PCAP import event recorded a packet-capture artifact path, hash, MIME type, or byte size for report linkage.", "清单、主机证据或 PCAP 导入事件记录了数据包捕获证据的路径、哈希、MIME 类型或字节大小，用于报告关联。"),
+        ("Office add-in persistence registry path", "Office 加载项持久化注册表"),
+        ("A registry event targeted Microsoft Office add-in, VSTO, or application option values that can load attacker-controlled code when Office starts.", "注册表事件指向 Microsoft Office 加载项、VSTO 或应用选项值，可在 Office 启动时加载攻击者代码。"),
+        ("Office startup folder persistence file", "Office 启动文件夹持久化"),
+        ("A file write targeted Office Startup, Word STARTUP, or Excel XLSTART locations that load templates/add-ins when Office applications start.", "文件写入指向 Office Startup、Word STARTUP 或 Excel XLSTART 位置，可在 Office 应用启动时加载模板/加载项。"),
+        ("Accessibility feature IFEO debugger persistence", "辅助功能 IFEO 持久化"),
+        ("A registry event configured Image File Execution Options debugger values for Windows accessibility utilities commonly hijacked for persistence or privilege escalation.", "注册表事件为 Windows 辅助功能工具配置了映像文件执行选项调试器值，常被劫持用于持久化或提权。"),
+        ("Logon script persistence file path", "登录脚本文件持久化"),
+        ("A file write targeted Group Policy or user logon/logoff script paths that can execute scripts during interactive logon or startup.", "文件写入指向组策略或用户登录/注销脚本路径，可在交互式登录或启动时执行脚本。"),
+        ("Mavinject process injection command", "Mavinject 进程注入命令"),
+        ("A command line used mavinject.exe injection switches to load a DLL into another process.", "命令行使用 mavinject.exe 注入开关，将 DLL 加载到其他进程。"),
+        ("InstallUtil proxy execution command", "InstallUtil 代理执行命令"),
+        ("A command line invoked InstallUtil, which is commonly abused for .NET signed utility proxy execution in malware sandboxes.", "命令行调用 InstallUtil，常被滥用于通过签名的 .NET 工具进行代理执行。"),
+        ("MSBuild inline-task proxy execution", "MSBuild 内联任务代理执行"),
+        ("A command line referenced MSBuild inline tasks or CodeTaskFactory-style project execution used for trusted developer utility proxy execution.", "命令行引用了 MSBuild 内联任务或 CodeTaskFactory 式项目执行，用于可信开发工具的代理执行。"),
+        ("Regasm or Regsvcs proxy execution command", "Regasm 或 Regsvcs 代理执行命令"),
+        ("A command line invoked Regasm or Regsvcs for signed utility proxy execution against a .NET assembly.", "命令行调用 Regasm 或 Regsvcs，针对 .NET 程序集进行签名工具代理执行。"),
+        ("Clipboard collection API observed", "观察到剪贴板采集 API"),
+        ("An API-call event referenced Windows clipboard access APIs that can collect copied credentials, tokens, wallet addresses, or operator input.", "API 调用事件引用了 Windows 剪贴板访问 API，可采集复制的凭据、令牌、钱包地址或操作输入。"),
+        ("Screenshot-like image file created by sample", "样本创建疑似截屏文件"),
+        ("A file write used screenshot, screen, desktop, or capture-oriented filenames, which can corroborate screen-capture API evidence.", "文件写入使用了 screenshot、screen、desktop 或 capture 类文件名，可佐证屏幕捕获 API 证据。"),
+        ("Uptime or boot-time anti-analysis check", "系统运行时长反分析命令"),
+        ("A command line queried system uptime, boot time, or elapsed run time, often used to identify freshly started sandbox guests.", "命令行查询了系统运行时长、启动时间或已运行时间，常用于识别刚启动的沙箱客户机。"),
+        ("Parent-process anti-analysis check API", "父进程检查反分析 API"),
+        ("An API-call or process-query event referenced parent-process or PEB inspection primitives used to detect non-interactive sandbox launchers.", "API 调用或进程查询事件引用了父进程或 PEB 检查原语，用于识别非交互式沙箱启动器。"),
+        ("Windows credential staging command", "Windows 凭据暂存命令"),
+        ("A command line staged credentials with cmdkey for remote Windows access, commonly adjacent to SMB, RDP, or WinRM lateral movement.", "命令行使用 cmdkey 暂存凭据以便远程 Windows 访问，常与 SMB、RDP 或 WinRM 横向移动相邻出现。"),
+        ("Domain trust discovery command", "域信任关系侦察命令"),
+        ("A command line queried domain trusts, domain controllers, or domain groups before potential lateral movement.", "命令行在可能的横向移动前查询了域信任、域控制器或域组。"),
+        ("Tor hidden-service domain observed", "Tor 隐藏服务域名"),
+        ("DNS, HTTP, or PCAP metadata referenced a .onion hidden-service domain, which can indicate anonymized C2 or proxy infrastructure.", "DNS、HTTP 或 PCAP 元数据引用了 .onion 隐藏服务域名，可能表示匿名 C2 或代理基础设施。"),
+        ("HTTP long or encoded URI C2 indicator", "HTTP 长编码 URI C2 特征"),
+        ("HTTP metadata was labeled as a long, encoded, base64, or high-entropy URI, which is useful C2 beacon and tasking triage evidence.", "HTTP 元数据被标记为长、编码、base64 或高熵 URI，是有效的 C2 心跳与任务下发分诊证据。"),
+        ("HTTP/TLS domain-fronting indicator", "HTTP 域名前置特征"),
+        ("HTTP, TLS, or PCAP metadata indicated host/SNI mismatch or explicit domain-fronting classification used to hide C2 destinations behind shared infrastructure.", "HTTP、TLS 或 PCAP 元数据显示 Host/SNI 不匹配或显式域名前置分类，用于在共享基础设施后隐藏 C2 目标。"),
+        ("TLS C2 indicator fields", "TLS C2 指标字段"),
+        ("TLS metadata was labeled as beacon, C2, suspicious JA3/JA3S, or suspicious SNI by a guest, PCAP, or enrichment sidecar.", "TLS 元数据被 guest、PCAP 或增强侧车标记为 beacon、C2、可疑 JA3/JA3S 或可疑 SNI。"),
+        ("Office process spawned script or shell child", "Office 进程派生脚本子进程"),
+        ("Process-tree telemetry showed an Office application spawning a shell, scripting interpreter, or LOLBin child, a strong malicious-document execution pattern.", "进程树遥测显示 Office 应用派生了命令解释器、脚本宿主或系统二进制子进程，是典型的恶意文档执行模式。"),
+        ("Browser process spawned script, shell, or LOLBin child", "浏览器派生脚本或系统二进制子进程"),
+        ("Process-tree telemetry showed a browser spawning a shell, scripting interpreter, installer, or proxy-execution utility after download or exploit-driven execution.", "进程树遥测显示浏览器在下载或漏洞利用执行后派生了命令解释器、脚本宿主、安装程序或代理执行工具。"),
+        ("A registry write weakened UAC prompts or secure desktop behavior by setting known risky Policies\\System values.", "注册表写入通过设置已知高风险的 Policies\\System 值削弱 UAC 提示或安全桌面行为。"),
+        ("A file event path matched Chromium-family Network\\Cookies databases while common browser process names were excluded.", "文件事件路径匹配 Chromium 系 Network\\Cookies 数据库，同时排除了常见浏览器进程名。"),
+        ("A file write targeted a user PowerShell profile script under Documents\\WindowsPowerShell or Documents\\PowerShell, an autostart surface for interactive shells.", "文件写入指向 Documents\\WindowsPowerShell 或 Documents\\PowerShell 下的用户 PowerShell 配置文件，是交互式 Shell 的自启动面。"),
+        ("Parsed R0 file telemetry reports dropped-file candidates only for create/write/rename/delete/security mutation rows with full paths in user-writable locations.", "解析后的 R0 文件遥测仅在创建/写入/重命名/删除/安全属性变更行且完整路径位于用户可写位置时报告落地文件候选。"),
+        ("A service Parameters\\ServiceDll registry value points at a user-writable path, a pattern used by service DLL persistence.", "服务 Parameters\\ServiceDll 注册表值指向用户可写路径，是服务 DLL 持久化的典型模式。"),
+        ("Static analysis summary emitted tags", "静态分析输出摘要标签"),
+        ("The host static analyzer emitted one or more summary tags. This is static triage context only and should be correlated with granular static rows or runtime evidence.", "主机静态分析器输出了一个或多个摘要标签。这仅是静态分诊上下文，应与细粒度静态行或运行期证据关联。"),
+        ("Built-in static YARA-like engine matched", "内置静态 YARA 引擎命中"),
+        ("A static.yara.match row came from the built-in lightweight YARA-like engine. Treat it as static signature triage until corroborated by runtime behavior.", "static.yara.match 行来自内置轻量 YARA 引擎。在获得运行期行为佐证前，应作为静态特征分诊处理。"),
+        ("Sample-correlated explicit credential use", "样本关联的显式凭据使用"),
+        ("A Windows Security 4648 explicit-credential logon row was strongly correlated to the sample process. Review target account, server, and process context before treating it as credential abuse.", "Windows 安全日志 4648 显式凭据登录行与样本进程强关联。在判定凭据滥用前，请复核目标账户、服务器与进程上下文。"),
+        ("Sample-correlated ETW remote thread telemetry", "样本关联的 ETW 远程线程遥测"),
+        ("ETW-style thread telemetry reported a remote-thread or threat-intelligence thread event with explicit sample correlation. Readiness-only ETW rows remain excluded by nonbehavior guards.", "ETW 式线程遥测报告了带显式样本关联的远程线程或威胁情报线程事件。仅表示就绪状态的 ETW 行仍会被非行为守卫排除。"),
+        ("Static multi-signal keylogging capability", "静态多信号：键盘记录能力"),
+        ("Multiple independent static signals suggest keylogging capability. Runtime input-hook or keyboard telemetry is required before treating this as observed behavior.", "多个独立静态信号提示存在键盘记录能力。需运行期输入钩子或键盘遥测才能视为已观察行为。"),
+        ("Static multi-signal browser credential capability", "静态多信号：浏览器凭据访问能力"),
+        ("Multiple browser-store paths or credential APIs were found statically. Runtime file or credential-store access is required before treating this as observed theft.", "静态发现多个浏览器存储路径或凭据 API。需运行期文件或凭据库访问才能视为已观察窃取。"),
+        ("Static multi-signal clipboard collection capability", "静态多信号：剪贴板采集能力"),
+        ("Multiple clipboard APIs and/or related strings were found statically. Runtime clipboard reads are required before treating this as observed collection.", "静态发现多个剪贴板 API 和/或相关字符串。需运行期剪贴板读取才能视为已观察采集。"),
+        ("Static multi-signal screenshot capability", "静态多信号：屏幕捕获能力"),
+        ("Multiple desktop-capture APIs and/or related strings were found statically. A captured image or runtime screen-read event is required before treating this as observed collection.", "静态发现多个桌面捕获 API 和/或相关字符串。需捕获的图像或运行期屏幕读取事件才能视为已观察采集。"),
+        ("Static multi-signal collection and exfiltration capability", "静态多信号：数据外传能力"),
+        ("Outbound transport is statically paired with a collection signal. Runtime flow tied to the sample is required before treating this as exfiltration.", "出站传输与采集信号在静态层面成对出现。需与样本关联的运行期流量才能视为外传。"),
+        ("Static multi-signal persistence capability", "静态多信号：持久化能力"),
+        ("Multiple registry/service/task APIs or paths suggest persistence capability. Runtime writes or task/service creation are required before treating this as observed persistence.", "多个注册表/服务/任务 API 或路径提示存在持久化能力。需运行期写入或任务/服务创建才能视为已观察持久化。"),
+        ("Static multi-signal download and execute capability", "静态多信号：下载执行能力"),
+        ("Download and execution signals form a static chain hypothesis. Runtime transfer, file creation, and child-process evidence are required before treating this as observed execution.", "下载与执行信号在静态层面构成链路假设。需运行期传输、文件创建与子进程证据才能视为已观察执行。"),
+        ("Static multi-signal process injection capability", "静态多信号：进程注入能力"),
+        ("At least two injection primitives were statically imported. Runtime remote-process memory or thread telemetry is required before treating this as observed injection.", "静态导入中至少包含两个注入原语。需运行期远程进程内存或线程遥测才能视为已观察注入。"),
     ];
 
     /// <summary>
@@ -14412,12 +16157,24 @@ details[open]>summary:before{content:'▾'}
     /// </summary>
     private static void AppendEvidenceFlow(StringBuilder html, string evidence)
     {
+        AppendEvidenceFlow(html, evidence, int.MaxValue);
+    }
+
+    /// <summary>
+    /// Appends an evidence payload as key/value chips, optionally capped.
+    /// Inputs are a raw payload and a segment budget; processing keeps the
+    /// leading label chips and stops after the budget, reporting the remainder
+    /// so a long matrix row cannot turn a card into a wall of fields.
+    /// </summary>
+    private static void AppendEvidenceFlow(StringBuilder html, string evidence, int maxSegments)
+    {
         if (string.IsNullOrWhiteSpace(evidence))
         {
             html.AppendLine("<span class=\"kv-line\"><code>-</code></span>");
             return;
         }
 
+        var items = new List<(string? Label, string Segment)>();
         foreach (var rawLine in evidence.Split('\n'))
         {
             var line = rawLine.Trim();
@@ -14429,6 +16186,7 @@ details[open]>summary:before{content:'▾'}
             // A leading "Label:" prefix (colon before any '=', short, and not a
             // timestamp, URL scheme, or path) becomes its own label chip; the
             // remainder is split into key/value segments below.
+            string? label = null;
             var colon = line.IndexOf(':');
             var equals = line.IndexOf('=');
             if (colon > 0 &&
@@ -14440,18 +16198,51 @@ details[open]>summary:before{content:'▾'}
                 !line[..colon].Contains('\\') &&
                 !line[..colon].Contains('/'))
             {
-                AppendEvidenceFlowLabel(html, line[..colon].Trim());
+                label = line[..colon].Trim();
                 line = line[(colon + 1)..].Trim();
                 if (line.Length == 0)
                 {
+                    if (label is not null)
+                    {
+                        items.Add((label, string.Empty));
+                    }
+
                     continue;
                 }
             }
 
             foreach (var segment in line.Split(" | ", StringSplitOptions.TrimEntries))
             {
-                AppendEvidenceFlowSegment(html, segment);
+                items.Add((label, segment));
+                label = null;
             }
+        }
+
+        var emitted = 0;
+        foreach (var item in items)
+        {
+            if (emitted >= maxSegments)
+            {
+                break;
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.Label))
+            {
+                AppendEvidenceFlowLabel(html, item.Label);
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.Segment))
+            {
+                AppendEvidenceFlowSegment(html, item.Segment);
+            }
+
+            emitted++;
+        }
+
+        var remaining = items.Count - emitted;
+        if (remaining > 0)
+        {
+            html.AppendLine($"<span class=\"kv-line kv-more\"><span class=\"kv-key\">还有</span><code>{E(remaining.ToString(CultureInfo.InvariantCulture))} 项</code></span>");
         }
     }
 

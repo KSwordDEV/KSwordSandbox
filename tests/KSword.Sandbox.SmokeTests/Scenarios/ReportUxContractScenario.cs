@@ -175,8 +175,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "report-layout", "Report renderer should expose a documentation-style sidebar/content shell.");
         RequireContains(rendererSource, "report-sidebar", "Report renderer should place navigation in a dedicated left sidebar.");
         RequireContains(rendererSource, "event-evidence-title", "Primary event evidence should be visible inline with a compact process/target label.");
-        RequireContains(rendererSource, ".modern-sandbox-report{font-size:13px;line-height:1.35}", "Modern report rows should use a compact base line height.");
-        RequireContains(rendererSource, ".modern-sandbox-report .event-explorer-table td{line-height:1.2;padding:4px 7px}", "Event explorer rows should use compact cell padding.");
+        RequireContains(rendererSource, ".modern-sandbox-report{font-size:14px;line-height:1.6", "Modern report body should use a readable base type scale.");
+        RequireContains(rendererSource, ".event-card{border-bottom:1px solid var(--line-soft)", "Event explorer rows should render as severity-tinted cards, not dense table rows.");
+        RequireContains(rendererSource, "data-event-row", "Event explorer cards should keep the filter row marker used by the client-side filter.");
         RequireContains(rendererSource, "CopyIconButton(copyText, label)", "Copy actions should use short icon buttons with accessible labels.");
         RequireContainsNormalized(rendererSource, "grid-template-columns:minmax(248px,280px) minmax(0,1fr)", "Desktop report layout should reserve a stable left navigation column.");
         RequireContainsNormalized(rendererSource, "max-height:calc(100vh - 32px)", "Desktop report sidebar should stay viewport-bounded.");
@@ -218,7 +219,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "resourceRole", "Report renderer should render static resource roles.");
         RequireContains(rendererSource, "Artifact index evidence", "Report renderer should explain artifact selector/duplicate/rejection diagnostics.");
         RequireContains(rendererSource, "Artifact lane health", "Report renderer should expose artifact lane health in compact summaries.");
-        RequireContains(rendererSource, "artifact-index-table", "Report renderer should expose structured artifact index evidence.");
+        RequireContains(rendererSource, "ref-list", "Report renderer should expose structured artifact index evidence as reference rows.");
         RequireContains(rendererSource, "VirusTotal official evidence", "Report renderer should summarize VT official file-object fields.");
         RequireContains(rendererSource, "VT reputation/community", "Report renderer should expose VT reputation/community score.");
         RequireContains(rendererSource, "id=\\\"cover\\\"", "Report renderer should expose a cover anchor.");
@@ -464,13 +465,14 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "data-event-disposition=\"diagnostic\"", "Event explorer should expose collection diagnostics in row data.");
         RequireContains(englishHtml, "data-event-disposition=\"unattributed\"", "Event explorer should retain unattributed rows for explicit filter reveal.");
         RequireContains(englishHtml, "process.exit", "Rendered event explorer should retain process exit evidence.");
-        RequireContains(englishHtml, "<table class=\"event-explorer-table\"><thead><tr><th>Time</th><th>Event type</th><th>Severity</th><th>Evidence</th>", "Event explorer should keep only compact identity/severity columns and the wide evidence column.");
-        RequireNotContains(englishHtml, "<table class=\"event-explorer-table\"><thead><tr><th>Time</th><th>Event type</th><th>Source</th>", "Event explorer should not render the source column.");
+        RequireContains(englishHtml, "<div class=\"event-card event-explorer-row\" data-event-row", "Event explorer should render each event as a filterable card row.");
+        RequireContains(englishHtml, "<div class=\"event-card-meta\">", "Event explorer cards should stack time, type, and severity metadata beside the wide evidence column.");
+        RequireNotContains(englishHtml, "<table class=\"event-explorer-table\">", "Event explorer should not fall back to a dense table.");
         RequireNotContains(englishHtml, "<th>Stage</th>", "Event tables should not render the stage column.");
         RequireNotContains(englishHtml, "<th>Disposition</th>", "Event tables should not render the attribution column.");
         RequireNotContains(englishHtml, "Payload detail", "Technical payload fields should not render the narrow Payload detail label.");
         RequireContains(englishHtml, "class=\"finding-evidence\"", "Finding evidence should keep copy controls beside the evidence text.");
-        RequireContains(englishHtml, "<th>groupCount</th>", "Artifact index evidence should expose groupCount as a dedicated column.");
+        RequireContains(englishHtml, "Duplicate groups", "Artifact index evidence should label the duplicate group count per artifact.");
         RequireNotContains(englishHtml, "groupCount=-", "Artifact index tables should not expose raw groupCount key/value text.");
         RequireNotContains(chineseVisibleText, "静态证据仅供分诊", "Chinese reports should not show the long static-evidence disclaimer.");
         RequireNotContains(chineseVisibleText, "大型报告渲染边界", "Chinese reports should not show the large-report implementation note.");
@@ -495,7 +497,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "采集健康：", "Chinese failure reasons should expose collection-health counters.");
         RequireNotContains(chineseVisibleText, "报告中还有更多证据行。", "Chinese event explorer status should avoid the verbose additional-row hint.");
         RequireContains(chineseHtml, "样本归因：", "Chinese network coverage should localize sample attribution labels.");
-        RequireContains(chineseHtml, "data-copy=\"Failed\"><span class=\"ui-status-value\">失败</span></td>", "Chinese report should localize the cover analysis status while preserving the original machine-readable value.");
+        RequireContains(chineseHtml, "data-copy=\"Failed\"><span class=\"ui-status-value\">失败</span></dd>", "Chinese report should localize the cover analysis status while preserving the original machine-readable value.");
         RequireNotContains(chineseVisibleText, "可按事件类型、来源、阶段、严重性和样本行为状态搜索或筛选。", "Chinese event explorer should not show the long filter instruction.");
         RequireNotContains(chineseVisibleText, "证据归因状态会区分已确认/可能关联的样本行为、未归因观察和采集诊断。", "Chinese event explorer should not show internal disposition guidance.");
         RequireNotContains(chineseVisibleText, "未归因观察会保留在原始证据中，选择该归因状态后即可显示。", "Chinese event explorer should not show the long unattributed-row instruction.");
@@ -528,8 +530,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(chineseVisibleText, "行为规则命中“命令和脚本解释器”", "Chinese behavior cards must not repeat verbose rule-hit guidance.");
         RequireNotContains(chineseVisibleText, "请结合 evidenceFields、进程树和样本上下文复核", "Chinese behavior cards must not leak internal evidenceFields review instructions.");
         RequireNotContains(chineseVisibleText, "evidenceFields", "Chinese report chrome must not leak the internal evidenceFields key.");
-        RequireContains(chineseHtml, "class=\"chip chip-high\">高</span>", "Chinese report should localize high-severity UI badges.");
-        RequireContains(chineseHtml, "class=\"chip chip-medium\">中</span>", "Chinese report should localize medium-severity UI badges.");
+        RequireContains(chineseHtml, "class=\"badge badge-medium\">中</span>", "Chinese report should localize severity badges on finding cards.");
+        RequireContains(chineseHtml, "严重性 中", "Chinese event cards should localize the screen-reader severity value.");
         RequireNotContains(chineseHtml, "additional behavior rows in report.json", "Chinese report must not leak the event explorer report-only-row phrase.");
         RequireNotContains(chineseVisibleText, "sample-attributed:", "Chinese report must not leak the English sample-attributed counter label.");
         RequireNotContains(chineseVisibleText, "Read the verdict and high-signal evidence first.", "Chinese report must not leak the analyst-focus English lead.");
@@ -644,7 +646,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Static PE resource story", "Rendered HTML should include structured static resource story.");
         RequireContains(englishHtml, "embedded-pe", "Rendered HTML should include static resourceRole evidence.");
         RequireContains(englishHtml, "Artifact index evidence", "Rendered HTML should include artifact selector/duplicate/rejection cards.");
-        RequireContains(englishHtml, "<th>groupCount</th>", "Rendered artifact rows should expose groupCount as a dedicated column.");
+        RequireContains(englishHtml, "Duplicate groups", "Rendered artifact rows should label the duplicate group count per artifact.");
         RequireContains(englishHtml, "Rejected artifact references", "Rendered artifact index story should summarize rejection diagnostics.");
         RequireContains(englishHtml, "VirusTotal official evidence", "Rendered HTML should include VT official evidence cards.");
         RequireContains(englishHtml, "VT reputation/community", "Rendered HTML should include VT reputation/community fields.");
@@ -1316,7 +1318,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                     Severity = "medium",
                     MitreTechniqueId = "T1059",
                     MitreTechniqueName = "Command and Scripting Interpreter",
-                    Summary = "行为规则命中“命令和脚本解释器”；请结合 evidenceFields、进程树和样本上下文复核。",
+                    Summary = "Behavior rule hit \"command and scripting interpreter\"; review with evidenceFields, the process tree, and sample context.",
+                    SummaryZh = "行为规则命中“命令和脚本解释器”；请结合 evidenceFields、进程树和样本上下文复核。",
                     Evidence = [processEvent]
                 }
             ],

@@ -179,9 +179,9 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
 
         AssertExecutionBoundaryVerdictContracts(renderer, report, events);
 
-        RequireMetric(englishHtml, "High risk", "0", "risk-high");
-        RequireMetric(englishHtml, "Suspicious", "0", "risk-medium");
-        RequireMetric(englishHtml, "General / info", "0", "risk-info");
+        RequireRiskTile(englishHtml, "High risk", "0", "risk-high");
+        RequireRiskTile(englishHtml, "Suspicious", "0", "risk-medium");
+        RequireRiskTile(englishHtml, "General / info", "0", "risk-info");
         RequireContains(englishHtml, "No high-risk behavior", "Report verdict should not become malicious for health/status-only evidence.");
 
         var behaviorSection = ExtractSection(englishHtml, "behavior");
@@ -401,6 +401,15 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
     private static void RequireMetric(string html, string label, string value, string css)
     {
         RequireContains(html, $"<span class=\"muted\">{label}</span><b class=\"{css}\">{value}</b>", $"Rendered metric '{label}' should equal {value}.");
+    }
+
+    /// <summary>
+    /// Requires one rendered risk tile label/value pair. Risk conclusions use
+    /// the tile markup rather than the compact metric row.
+    /// </summary>
+    private static void RequireRiskTile(string html, string label, string value, string css)
+    {
+        RequireContains(html, $"<span class=\"risk-tile-label\">{label}</span><b class=\"risk-tile-value {css}\">{value}</b>", $"Rendered risk tile '{label}' should equal {value}.");
     }
 
     /// <summary>

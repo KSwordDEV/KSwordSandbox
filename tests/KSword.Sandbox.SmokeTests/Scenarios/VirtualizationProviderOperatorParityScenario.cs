@@ -537,10 +537,10 @@ internal sealed class VirtualizationProviderOperatorParityScenario : ISmokeTestS
         Require(jobService, "Submission = persistedSubmission", "Offline report imports should not replace the logical submission with an effective provider target.");
 
         var reportRenderer = Read(context, Path.Combine("src", "KSword.Sandbox.Core", "Reporting", "HtmlReportRenderer.cs"));
-        Require(reportRenderer, "Row(html, \"Target VM\", report.TargetVmName)", "HTML reports should identify the effective provider VM target.");
+        Require(reportRenderer, "CoverFact(html, \"Target VM\", report.TargetVmName)", "HTML reports should identify the effective provider VM target.");
         Require(reportRenderer, "VirtualizationProvider.VMware => \"VMX path\"", "VMware reports should label their effective VMX resource.");
         Require(reportRenderer, "VirtualizationProvider.Qemu => \"QEMU base disk\"", "QEMU reports should label their effective base disk.");
-        Require(reportRenderer, "Row(html, \"QEMU disk format\", report.QemuDiskFormat)", "QEMU reports should show the format paired with the base disk.");
+        Require(reportRenderer, "CoverFact(html, \"QEMU disk format\", report.QemuDiskFormat)", "QEMU reports should show the format paired with the base disk.");
 
         Require(jobPersistence, "metadataJob?.Runbook?.Provider ??", "Metadata recovery should prefer persisted runbook provider identity.");
         Require(jobPersistence, "VirtualizationProvider.HyperV;", "Provider-less legacy jobs should recover as the historical Hyper-V format instead of following the current profile.");

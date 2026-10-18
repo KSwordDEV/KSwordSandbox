@@ -27,9 +27,9 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(html, "resourceRole", "Static resource evidence should be copyable with resourceRole.");
         RequireContains(html, "embedded-pe", "Static resource story should highlight embedded PE resources.");
         RequireContains(html, "Artifact index evidence", "Report should include artifact index selector diagnostics.");
-        RequireContains(html, "<table class=\"artifact-index-table\"", "Artifact evidence should use a compact structured index table.");
-        RequireContains(html, "<th>Selector</th>", "Artifact rows should expose selector diagnostics in a dedicated column.");
-        RequireContains(html, "<th>groupCount</th>", "Artifact rows should expose groupCount in a dedicated column.");
+        RequireContains(html, "<div class=\"ref-list\">", "Artifact evidence should use compact reference rows instead of a wide table.");
+        RequireContains(html, "<code class=\"ref-path\">", "Artifact rows should expose selector diagnostics in a dedicated column.");
+        RequireContains(html, "Duplicate groups ", "Artifact rows should expose groupCount in a dedicated column.");
         RequireContains(html, "duplicateGroupCount=2", "Artifact evidence should include duplicate group metadata.");
         RequireContains(html, "unsafeGuestArtifactPath", "Artifact evidence should include rejection diagnostics.");
         RequireNotContains(html, "Driver network status / WFP-ALE", "R0 readiness diagnostics should stay out of the main report UI.");

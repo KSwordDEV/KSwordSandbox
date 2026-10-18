@@ -134,9 +134,9 @@ internal sealed class ReportR0CollectorSelfNoiseContractScenario : ISmokeTestSce
         RequireContains(quickNav, "<a class=\"quick-link\" href=\"#network\"><strong>Network behavior</strong><small>0</small></a>", "Quick network count should exclude collector self-noise.");
 
         var riskSection = ExtractSection(englishHtml, "risk");
-        RequireMetric(riskSection, "File events", "1", "risk-medium");
-        RequireMetric(riskSection, "Network events", "0", "risk-medium");
-        RequireMetric(riskSection, "Registry events", "0", "risk-medium");
+        RequireMetricRow(riskSection, "File events", "1");
+        RequireMetricRow(riskSection, "Network events", "0");
+        RequireMetricRow(riskSection, "Registry events", "0");
 
         var dynamicSection = ExtractSection(englishHtml, "dynamic");
         RequireMetric(dynamicSection, "File events", "1", "risk-medium");
@@ -196,6 +196,15 @@ internal sealed class ReportR0CollectorSelfNoiseContractScenario : ISmokeTestSce
     private static void RequireMetric(string html, string label, string value, string css)
     {
         RequireContains(html, $"<span class=\"muted\">{label}</span><b class=\"{css}\">{value}</b>", $"Rendered metric '{label}' should equal {value}.");
+    }
+
+    /// <summary>
+    /// Requires one rendered definition-list metric row. The risk summary folds
+    /// its evidence volumes into an aligned metric table.
+    /// </summary>
+    private static void RequireMetricRow(string html, string label, string value)
+    {
+        RequireContains(html, $"<dt>{label}</dt><dd>{value}</dd>", $"Rendered metric row '{label}' should equal {value}.");
     }
 
     /// <summary>
