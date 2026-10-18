@@ -119,6 +119,12 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         RequireContains(postProcess, "NetworkArtifactEventImporter", "PostProcess must use the same guest network-artifact importer as the live job import path.");
         RequireContains(postProcess, "ImportGuestArtifacts(guestRoot, includeCanonicalDriverJsonl: false)", "PostProcess must retain normalized PCAP/sidecar rows when rebuilding a report.");
         RequireContains(postProcess, "network.import.failed", "PostProcess must preserve network-artifact parser failures as host diagnostics instead of silently dropping the network lane.");
+        var environmentalR0Helper = ExtractMethod(postProcess, "private static bool IsKnownEnvironmentalR0Row", "private static bool EventDataEqualsAny");
+        RequireContains(environmentalR0Helper, "sampleCorrelation", "PostProcess R0 environment accounting must accept explicit sample-correlation disposition.");
+        RequireContains(environmentalR0Helper, "collectorSelfNoise", "PostProcess R0 environment accounting must accept explicit collector self-noise markers.");
+        RequireContains(environmentalR0Helper, "selfProcess", "PostProcess R0 environment accounting must accept explicit self-process markers.");
+        RequireNotContains(environmentalR0Helper, "nonbehavior", "Generic nonbehavior must remain unresolved attribution in PostProcess R0 metrics.");
+        RequireNotContains(environmentalR0Helper, "notSampleBehavior", "Generic notSampleBehavior must remain unresolved attribution in PostProcess R0 metrics.");
 
         RequireContains(agentProgram, "--driver-events", "Guest Agent must accept the driver JSONL path.");
         RequireContains(agentProgram, "DriverJsonLinesReader", "Guest Agent must keep a dedicated driver JSONL read path.");
@@ -585,6 +591,20 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
     private static void RequireContains(string content, string expected, string message)
     {
         SmokeAssert.True(content.Contains(expected, StringComparison.Ordinal), message);
+    }
+
+    private static void RequireNotContains(string content, string forbidden, string message)
+    {
+        SmokeAssert.True(!content.Contains(forbidden, StringComparison.Ordinal), message);
+    }
+
+    private static string ExtractMethod(string content, string startMarker, string endMarker)
+    {
+        var start = content.IndexOf(startMarker, StringComparison.Ordinal);
+        SmokeAssert.True(start >= 0, $"Expected source marker '{startMarker}'.");
+        var end = content.IndexOf(endMarker, start, StringComparison.Ordinal);
+        SmokeAssert.True(end > start, $"Expected source marker '{endMarker}' after '{startMarker}'.");
+        return content[start..end];
     }
 
     /// <summary>

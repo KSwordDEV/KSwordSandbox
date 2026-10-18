@@ -1191,9 +1191,7 @@ internal static class PostProcessProgram
             "collectorNoise",
             "collectionNoise",
             "selfNoise",
-            "selfProcess",
-            "nonbehavior",
-            "notSampleBehavior");
+            "selfProcess");
     }
 
     private static bool EventDataEqualsAny(SandboxEvent evt, string key, params string[] values) =>
