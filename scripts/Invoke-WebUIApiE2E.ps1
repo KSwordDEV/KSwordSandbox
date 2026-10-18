@@ -603,8 +603,22 @@ function Stop-E2EStartedWebUI {
     }
 
     if ($script:StartedWebUIProcess -and -not $script:StartedWebUIProcess.HasExited) {
-        Write-E2EStep "Stopping WebUI PID $($script:StartedWebUIProcess.Id)"
-        Stop-Process -Id $script:StartedWebUIProcess.Id -Force -ErrorAction SilentlyContinue
+        $rootPid = $script:StartedWebUIProcess.Id
+        Write-E2EStep "Stopping WebUI process tree rooted at PID $rootPid"
+        $processIds = [System.Collections.Generic.List[int]]::new()
+        [void]$processIds.Add($rootPid)
+        do {
+            $childIds = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+                Where-Object { $processIds.Contains([int]$_.ParentProcessId) -and -not $processIds.Contains([int]$_.ProcessId) } |
+                Select-Object -ExpandProperty ProcessId)
+            foreach ($childId in $childIds) {
+                [void]$processIds.Add([int]$childId)
+            }
+        } while ($childIds.Count -gt 0)
+
+        foreach ($processId in ($processIds | Sort-Object -Descending)) {
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
