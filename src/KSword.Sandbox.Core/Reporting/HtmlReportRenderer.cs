@@ -366,8 +366,9 @@ public sealed class HtmlReportRenderer
         html.AppendLine("<aside class=\"report-sidebar\" aria-label=\"Report navigation\">");
         html.AppendLine("<div class=\"sidebar-heading\"><div><strong>KSword Sandbox Report</strong><span>Report navigation</span></div><button type=\"button\" class=\"sidebar-toggle\" aria-controls=\"sidebar-navigation\" aria-expanded=\"false\"><span aria-hidden=\"true\">&#9776;</span><span>Sections</span></button></div>");
         html.AppendLine("<div id=\"sidebar-navigation\" class=\"sidebar-navigation\">");
-        AppendQuickNavigation(html, report, artifactLinks);
-        AppendTableOfContents(html);
+        var largeReport = report.Events.Count > 500;
+        AppendQuickNavigation(html, report, artifactLinks, largeReport);
+        AppendTableOfContents(html, largeReport);
         html.AppendLine("</div></aside>");
         html.AppendLine("<main class=\"report-content\">");
         AppendRiskSummary(html, report);
@@ -380,7 +381,6 @@ public sealed class HtmlReportRenderer
         AppendStaticAnalysis(html, report);
         AppendDynamicAnalysis(html, report);
         AppendVirusTotalSummary(html, report, artifactLookup, artifactLinks);
-        var largeReport = report.Events.Count > 500;
         if (!largeReport)
         {
             AppendBehaviorGraph(html, report, artifactLookup, artifactLinks, collectionList);
@@ -695,7 +695,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     /// Inputs are a StringBuilder, processing writes anchor links matching the
     /// target report structure, and the method returns no value.
     /// </summary>
-    private static void AppendTableOfContents(StringBuilder html)
+    private static void AppendTableOfContents(StringBuilder html, bool largeReport)
     {
         html.AppendLine("<nav id=\"toc\" class=\"sidebar-section toc\" aria-labelledby=\"toc-title\"><h2 id=\"toc-title\">Table of contents</h2><div class=\"toc-links\">");
         foreach (var (href, title) in new[]
@@ -725,6 +725,11 @@ html[lang="en"] .localized-evidence-field{display:none}
             ("events", "Raw normalized events")
         })
         {
+            if (largeReport && (href == "graph" || href == "timeline" || href == "process"))
+            {
+                continue;
+            }
+
             html.AppendLine($"<a class=\"toc-link\" href=\"#{href}\">{E(title)}</a>");
         }
 
@@ -737,7 +742,7 @@ html[lang="en"] .localized-evidence-field{display:none}
     /// Process / Files / Network / R0 / VT / Artifacts quick navigation links;
     /// the method returns no value.
     /// </summary>
-    private static void AppendQuickNavigation(StringBuilder html, AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    private static void AppendQuickNavigation(StringBuilder html, AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts, bool largeReport)
     {
         html.AppendLine("<nav id=\"quick-nav\" class=\"sidebar-section quick-nav\" aria-labelledby=\"quick-nav-title\">");
         html.AppendLine("<h2 id=\"quick-nav-title\">Quick navigation</h2>");
@@ -746,7 +751,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         QuickLink(html, "focus", "Analyst focus", report.Events.Count(IsSampleBehaviorEvent).ToString());
         QuickLink(html, "event-explorer", "Key event explorer", EventExplorerQuickLinkCount(report));
         QuickLink(html, "facts", "Behavior facts", BuildBehaviorFactCards(report, artifacts).Count(IsPrimaryBehaviorFactCard).ToString());
-        QuickLink(html, "process", "Process details", report.Events.Count(IsSampleBehaviorProcessEvent).ToString());
+        if (!largeReport)
+        {
+            QuickLink(html, "process", "Process details", report.Events.Count(IsSampleBehaviorProcessEvent).ToString());
+        }
         QuickLink(html, "security", "Security / privilege", report.Events.Count(IsSampleBehaviorSecurityPrivilegeEvent).ToString());
         QuickLink(html, "files", "File system activity", report.Events.Count(IsSampleBehaviorFileEvent).ToString());
         QuickLink(html, "startup", "Startup diff", report.Events.Count(IsSampleBehaviorStartupEvent).ToString());

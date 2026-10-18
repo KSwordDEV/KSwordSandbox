@@ -383,6 +383,33 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
     }
 
     /// <summary>
+    /// Requires every in-page link to resolve to an emitted element id. Inputs
+    /// are rendered HTML and a report label; processing checks all hash hrefs
+    /// against the document ids and returns no value on success.
+    /// </summary>
+    private static void RequireNavigationAnchorsResolve(string html, string reportLabel)
+    {
+        var ids = Regex.Matches(
+                html,
+                "\\bid=\"(?<id>[^\"]+)\"",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["id"].Value)
+            .ToHashSet(StringComparer.Ordinal);
+        var anchors = Regex.Matches(
+                html,
+                "<a\\b[^>]*\\bhref=\"#(?<id>[^\"]+)\"",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["id"].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var anchor in anchors)
+        {
+            SmokeAssert.True(ids.Contains(anchor), $"{reportLabel} navigation anchor #{anchor} must resolve to an emitted id.");
+        }
+    }
+
+    /// <summary>
     /// Renders synthetic English and Chinese reports to verify the UX contract
     /// against emitted HTML rather than source strings only. Inputs are none;
     /// processing builds a deterministic report model and checks required
@@ -403,6 +430,23 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
             string.Empty,
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
         var documents = renderer.RenderBilingualReports(report, artifacts);
+        RequireNavigationAnchorsResolve(englishHtml, "English report");
+        RequireNavigationAnchorsResolve(chineseHtml, "Chinese report");
+        var largeReport = report with
+        {
+            Events = report.Events
+                .Concat(Enumerable.Repeat(report.Events[0], Math.Max(0, 501 - report.Events.Count)))
+                .ToList()
+        };
+        var largeEnglishHtml = renderer.RenderEnglish(largeReport, artifacts);
+        var largeChineseHtml = renderer.RenderChinese(largeReport, artifacts);
+        RequireNavigationAnchorsResolve(largeEnglishHtml, "large English report");
+        RequireNavigationAnchorsResolve(largeChineseHtml, "large Chinese report");
+        foreach (var omittedAnchor in new[] { "graph", "timeline", "process" })
+        {
+            RequireNotContains(largeEnglishHtml, $"href=\"#{omittedAnchor}\"", $"Large English report navigation must omit the unavailable #{omittedAnchor} anchor.");
+            RequireNotContains(largeChineseHtml, $"href=\"#{omittedAnchor}\"", $"Large Chinese report navigation must omit the unavailable #{omittedAnchor} anchor.");
+        }
         var totalRawEvents = report.Events.Count;
         var hiddenRawEvents = Math.Max(0, totalRawEvents - 30);
 
