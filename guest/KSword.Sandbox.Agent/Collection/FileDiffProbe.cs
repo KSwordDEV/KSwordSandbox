@@ -263,6 +263,24 @@ internal sealed class FileDiffProbe : IGuestProbe
         AddRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
         AddRoot(roots, Environment.GetEnvironmentVariable("PROGRAMDATA"));
 
+        // Ransomware and wipers hit the user document surfaces first, and
+        // those are exactly the paths public analyses list as its landing
+        // artifacts (desktop ransom notes, %MyDocuments%\recovery_key.txt).
+        // Watching only AppData/ProgramData made a real TeslaCrypt run report
+        // an empty file lane while *.ecc ciphertext was being written.
+        AddRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
+        AddRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
+        AddRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.MyPictures));
+        AddRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.MyMusic));
+        AddRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.MyVideos));
+        AddRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.Favorites));
+        AddRoot(
+            roots,
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Downloads"));
+        AddRoot(roots, Environment.GetEnvironmentVariable("PUBLIC"));
+
         var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         AddRoot(roots, Path.Combine(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "Startup"));
         var common = Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu);

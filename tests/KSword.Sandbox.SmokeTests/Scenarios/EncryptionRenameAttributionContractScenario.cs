@@ -28,6 +28,8 @@ internal sealed class EncryptionRenameAttributionContractScenario : ISmokeTestSc
         const string DocumentCiphertext = DocumentPath + ".qwerty";
         const string SettingsPath = @"C:\Users\Public\settings.json";
         const string SettingsTemp = SettingsPath + ".tmp";
+        const string LedgerPath = @"C:\Users\Public\ledger.xlsx";
+        const string LedgerCiphertext = LedgerPath + ".plmn";
 
         var events = new List<SandboxEvent>
         {
@@ -37,6 +39,10 @@ internal sealed class EncryptionRenameAttributionContractScenario : ISmokeTestSc
             WatcherRename(start.AddSeconds(6), DocumentPath, DocumentCiphertext),
             WatcherRename(start.AddSeconds(7), SettingsPath, SettingsTemp),
             WatcherCreate(start.AddSeconds(8), @"C:\Users\Public\budget.xlsx.locked"),
+            // Outside the derived lifecycle window but stamped by the guest
+            // probe as during-run: this is the shape the full job pipeline
+            // produces once host planning rows reshape root PID resolution.
+            WatcherRename(start.AddSeconds(700), LedgerPath, LedgerCiphertext, "during-run"),
             // Outside the sample lifecycle: the process already exited at
             // +20s, so this rename belongs to the guest's own activity.
             WatcherRename(start.AddSeconds(600), TelemetryPath, TelemetryCiphertext + ".late")
@@ -75,11 +81,19 @@ internal sealed class EncryptionRenameAttributionContractScenario : ISmokeTestSc
             late.Data["sampleCorrelation"] == "environment",
             "An encryption rename outside the sample lifecycle must stay collector noise.");
 
+        var phaseStamped = Require(correlated, "file.renamed", LedgerCiphertext);
+        SmokeAssert.True(
+            phaseStamped.Data["sampleCorrelation"] == "probable",
+            "A guest-stamped during-run encryption rename must stay attributable even when the derived lifecycle window does not cover it. actual=" +
+            (phaseStamped.Data.TryGetValue("sampleCorrelation", out var phaseActual) ? phaseActual : "none") +
+            " reason=" +
+            (phaseStamped.Data.TryGetValue("sampleCorrelationReason", out var phaseReason) ? phaseReason : "none"));
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = "Encryption renames inside the sample lifecycle are attributable by shape; late and benign-suffix renames stay noise."
+            Message = "Encryption renames inside the sample lifecycle or stamped during-run are attributable by shape; late and benign-suffix renames stay noise."
         });
     }
 
@@ -111,13 +125,13 @@ internal sealed class EncryptionRenameAttributionContractScenario : ISmokeTestSc
         }
     };
 
-    private static SandboxEvent WatcherRename(DateTimeOffset timestamp, string sourcePath, string destinationPath) => new()
+    private static SandboxEvent WatcherRename(
+        DateTimeOffset timestamp,
+        string sourcePath,
+        string destinationPath,
+        string? capturePhase = null)
     {
-        EventType = "file.renamed",
-        Source = "guest",
-        Timestamp = timestamp,
-        Path = destinationPath,
-        Data = new(StringComparer.OrdinalIgnoreCase)
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["actorPidStatus"] = "unavailable-filesystem-watcher",
             ["operation"] = "file.renamed",
@@ -125,8 +139,22 @@ internal sealed class EncryptionRenameAttributionContractScenario : ISmokeTestSc
             ["previousPath"] = sourcePath,
             ["destinationPath"] = destinationPath,
             ["behaviorCounted"] = "true"
+        };
+        if (!string.IsNullOrWhiteSpace(capturePhase))
+        {
+            data["capturePhase"] = capturePhase;
+            data["phase"] = capturePhase;
         }
-    };
+
+        return new SandboxEvent
+        {
+            EventType = "file.renamed",
+            Source = "guest",
+            Timestamp = timestamp,
+            Path = destinationPath,
+            Data = data
+        };
+    }
 
     private static SandboxEvent WatcherCreate(DateTimeOffset timestamp, string path) => new()
     {

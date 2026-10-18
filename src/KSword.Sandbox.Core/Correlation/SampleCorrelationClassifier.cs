@@ -423,7 +423,47 @@ public static class SampleCorrelationClassifier
             return ClassifyProcessEvidence(evt, data, context);
         }
 
-        return CorrelationDisposition.Unchanged();
+        return UnclassifiedFallback(evt, data, "event-type-has-no-correlation-rule", "eventType");
+    }
+
+    /// <summary>
+    /// Closes the taxonomy for rows no rule claims.  Returning Unchanged left
+    /// the producer's placeholder in place, so a live WannaCry import shipped
+    /// 1281 rows labelled "unattributed" that were neither attributed nor
+    /// explicitly excluded (measured).  A producer that already published a
+    /// real verdict keeps it; only placeholders are replaced.
+    /// </summary>
+    private static CorrelationDisposition UnclassifiedFallback(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        string reason,
+        string field)
+    {
+        var existing = FirstNonEmpty(
+            Value(data, "sampleCorrelation"),
+            Value(data, "sampleCorrelationStatus"));
+        if (!string.IsNullOrWhiteSpace(existing) &&
+            !TextEqualsAny(existing, "unattributed", "uncorrelated", "unknown", "pending", "not-evaluated", "not-run"))
+        {
+            return CorrelationDisposition.Unchanged();
+        }
+
+        // Host-side operational rows (planning, runbook, artifact index,
+        // packet-capture summaries) describe the run, not the sample.  Their
+        // producer labels and merge keys are part of the report contract, so
+        // they keep them instead of being folded into the runtime taxonomy.
+        if (string.Equals(evt.Source, "host", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("artifact.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("report.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("network.import.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("guest.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("collection", StringComparison.OrdinalIgnoreCase))
+        {
+            return CorrelationDisposition.Unchanged();
+        }
+
+        return CorrelationDisposition.Unknown(reason, field);
     }
 
     private static CorrelationDisposition ClassifyDriverEvidence(
@@ -849,6 +889,21 @@ public static class SampleCorrelationClassifier
 
         if (LooksUserWritableOrPersistenceTarget(persistenceSurface, context))
         {
+            // A Run/RunOnce/service value that points at an image the sample's
+            // own process tree started is persistence evidence even without a
+            // second runtime source repeating the registry key.  Measured case:
+            // TeslaCrypt set HKCU\...\Run\crypto13 to %APPDATA%\sxrtqak.exe
+            // after dropping and starting that copy, and the row stayed unknown
+            // because process.start rows never enter the cross-source mutation
+            // index.
+            if (TargetsImageStartedBySampleTree(target, context))
+            {
+                return CorrelationDisposition.Probable(
+                    "persistence-target-is-image-started-by-sample-process-tree",
+                    "value/imagePath/taskToRun",
+                    "probable-persistence-target-boundary");
+            }
+
             if (HasIndependentSampleEvidence(evt, target, context, "mutation"))
             {
                 return CorrelationDisposition.Probable("service-or-task-target-points-to-user-writable-location-with-cross-source-sample-evidence", "imagePath/taskToRun", "probable-cross-source-mutation-boundary");
@@ -903,7 +958,7 @@ public static class SampleCorrelationClassifier
         if (IsUnattributedFileWatcherEvent(evt, data) &&
             IsHighSignalMutation(evt, data) &&
             TryDescribeEncryptionRename(evt, data, out var encryptionSignature) &&
-            IsWithinSampleLifecycle(evt, context))
+            IsObservedDuringSampleRun(evt, data, context))
         {
             return CorrelationDisposition.Probable(
                 $"filesystem-watcher-encryption-rename-inside-sample-lifecycle:{encryptionSignature}",
@@ -991,7 +1046,7 @@ public static class SampleCorrelationClassifier
             return CorrelationDisposition.Unknown("process-row-has-root-process-id-only-without-parent-lineage-or-path-match", "rootProcessId");
         }
 
-        return CorrelationDisposition.Unchanged();
+        return UnclassifiedFallback(evt, data, "process-row-has-no-sample-path-parentage-or-pid-match", "processId");
     }
 
     private static bool IsLikelyWmiSecondaryPayload(
@@ -2121,6 +2176,126 @@ public static class SampleCorrelationClassifier
         return context.SampleLifecycles.Count > 0 &&
             context.SampleLifecycles.Any(window =>
                 evt.Timestamp >= window.StartUtc && evt.Timestamp <= window.EndUtc);
+    }
+
+    /// <summary>
+    /// Reports whether a persistence target names an executable the sample's
+    /// own process tree launched.  A Run value pointing at a dropped copy the
+    /// sample itself started is stronger evidence than a same-key cross-source
+    /// join, and it is the only signal available when the registry write is
+    /// captured by a post-run snapshot diff with no owning PID.
+    /// </summary>
+    private static bool TargetsImageStartedBySampleTree(string? target, CorrelationContext context)
+    {
+        var candidate = NormalizePersistenceTargetImage(target);
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        foreach (var pid in context.SampleProcessIds)
+        {
+            if (!context.Processes.TryGetValue(pid, out var facts) ||
+                string.IsNullOrWhiteSpace(facts.ImagePath))
+            {
+                continue;
+            }
+
+            if (string.Equals(NormalizePath(facts.ImagePath), candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizePersistenceTargetImage(string? target)
+    {
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = target.Trim();
+        // Persistence values are frequently a full command line; the image is
+        // the leading quoted or unquoted token.  Quote handling has to run
+        // before any blanket Trim('"'), otherwise the leading quote is removed
+        // and the token split leaves a trailing quote inside the path.
+        if (trimmed.StartsWith('"'))
+        {
+            var closingQuote = trimmed.IndexOf('"', 1);
+            if (closingQuote > 1)
+            {
+                trimmed = trimmed[1..closingQuote];
+            }
+        }
+        else
+        {
+            var space = trimmed.IndexOf(' ');
+            if (space > 0)
+            {
+                var head = trimmed[..space];
+                if (head.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+                    head.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                {
+                    trimmed = head;
+                }
+            }
+        }
+
+        trimmed = trimmed.Trim().Trim('"');
+        if (!trimmed.Contains('\\') && !trimmed.Contains('/'))
+        {
+            return string.Empty;
+        }
+
+        return NormalizePath(trimmed);
+    }
+
+    /// <summary>
+    /// Reports whether an event was observed while the sample was executing.
+    /// The guest probes stamp their own capture phase, which is more precise
+    /// than re-deriving lifecycle windows from the process tree: the pipeline
+    /// merges host planning and artifact rows before classification, and root
+    /// PID resolution can then land on a different process than the one the
+    /// file-diff probe was watching.  Measured on a live TeslaCrypt capture,
+    /// the window test alone dropped the encryption rule from 52 rows to zero
+    /// once the full job pipeline (not just the guest event file) ran.
+    /// </summary>
+    private static bool IsObservedDuringSampleRun(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context)
+    {
+        var phase = FirstNonEmpty(
+            Value(data, "capturePhase"),
+            Value(data, "phase"),
+            Value(data, "probePhase"));
+        if (!string.IsNullOrWhiteSpace(phase))
+        {
+            if (TextEqualsAny(phase, "during-run", "during-run-window", "runtime", "running"))
+            {
+                return true;
+            }
+
+            // The after-run sweep is the diff snapshot taken immediately after
+            // the sample window.  It records in-run artifacts the watcher
+            // queued too late, which is exactly when a completed encryption
+            // pass shows up, so it stays eligible; the suffix signature still
+            // has to match, which stock Windows file churn never does.
+            if (TextEqualsAny(phase, "after-run", "post-run", "after-run-sweep"))
+            {
+                return true;
+            }
+
+            if (TextEqualsAny(phase, "before-run", "before-start", "baseline", "pre-run"))
+            {
+                return false;
+            }
+        }
+
+        return IsWithinSampleLifecycle(evt, context);
     }
 
     private static bool TryDescribeEncryptionRename(

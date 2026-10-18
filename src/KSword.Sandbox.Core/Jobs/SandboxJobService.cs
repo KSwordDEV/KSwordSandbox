@@ -976,14 +976,21 @@ public sealed partial class SandboxJobService
                     var root = document.RootElement;
                     path ??= ReadJsonString(root, "sample", "samplePath");
                     sha256 ??= ReadJsonString(root, "sampleSha256", "sha256");
+                    // A self-deleting sample (measured: Locky removes its own
+                    // executable before the agent writes the summary) produces
+                    // "sampleSizeBytes": null. JsonElement.TryGetInt64 throws
+                    // InvalidOperationException instead of returning false for
+                    // a null token, which aborted the whole import and lost a
+                    // 2316-event capture, so the kind is checked first.
                     if (!sizeBytes.HasValue &&
                         root.TryGetProperty("sampleSizeBytes", out var sizeElement) &&
+                        sizeElement.ValueKind == JsonValueKind.Number &&
                         sizeElement.TryGetInt64(out var summarySize) && summarySize >= 0)
                     {
                         sizeBytes = summarySize;
                     }
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
                 {
                     // Legacy imports may not contain a summary. Collection
                     // health retains that fact; report rebuild remains usable.
