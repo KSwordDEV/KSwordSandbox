@@ -107,6 +107,7 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
         }
 
         var engine = new RuleEngine(rules);
+        AssertPcapUploadRequiresSemanticEvidence(engine);
         var findings = engine.Classify(CreateSyntheticEvents());
         var findingIds = findings.Select(finding => finding.RuleId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var ruleId in RequiredRuleIds)
@@ -128,7 +129,7 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
         {
             var coveredKeys = rules.Rules
                 .Where(rule => rule.EventTypes.Any(candidate => string.Equals(candidate, eventType, StringComparison.OrdinalIgnoreCase)))
-                .SelectMany(rule => rule.DataKeys.Concat(rule.DataContains.Keys))
+                .SelectMany(rule => rule.DataKeys.Concat(rule.DataContains.Keys).Concat(rule.AllDataContains.Keys))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             foreach (var expectedKey in expectedKeys)
@@ -138,6 +139,40 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
                     $"PCAP importer field '{eventType}.{expectedKey}' should be covered by a behavior rule data predicate.");
             }
         }
+    }
+
+    private static void AssertPcapUploadRequiresSemanticEvidence(RuleEngine engine)
+    {
+        var directionOnly = engine.Classify(
+        [
+            new SandboxEvent
+            {
+                EventType = "pcap.flow",
+                Source = "host",
+                Data = { ["direction"] = "outbound" }
+            }
+        ]);
+        SmokeAssert.True(
+            !directionOnly.Any(finding => string.Equals(finding.RuleId, "pcap-upload-or-exfil-indicator", StringComparison.OrdinalIgnoreCase)),
+            "A single outbound direction must not be reported as upload or exfiltration.");
+
+        var semanticEvidence = engine.Classify(
+        [
+            new SandboxEvent
+            {
+                EventType = "pcap.flow",
+                Source = "host",
+                Data =
+                {
+                    ["direction"] = "outbound",
+                    ["classification"] = "upload",
+                    ["behavior"] = "data theft"
+                }
+            }
+        ]);
+        SmokeAssert.True(
+            semanticEvidence.Any(finding => string.Equals(finding.RuleId, "pcap-upload-or-exfil-indicator", StringComparison.OrdinalIgnoreCase)),
+            "Upload/exfiltration classification must still match when direction and semantic labels are present.");
     }
 
     /// <summary>
@@ -463,7 +498,9 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
                     ["payloadMagic"] = "MZ",
                     ["filename"] = "payload.exe",
                     ["contentType"] = "application/x-msdownload",
-                    ["direction"] = "upload"
+                    ["direction"] = "upload",
+                    ["classification"] = "upload",
+                    ["behavior"] = "data theft"
                 }
             },
             new SandboxEvent

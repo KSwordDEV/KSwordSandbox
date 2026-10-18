@@ -7730,8 +7730,8 @@
       "titleZh": "PCAP 上传或外传指标",
       "severity": "medium",
       "confidence": "medium",
-      "summary": "Flow or HTTP metadata referenced upload direction or exfiltration labels that can support C2-channel exfiltration triage.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“PCAP 上传或外传指标”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summary": "Flow or HTTP metadata combined upload direction with explicit upload or exfiltration semantics; direction alone is not sufficient.",
+      "summaryZh": "流量或 HTTP 遥测同时包含上传方向和明确的上传/外传语义；仅有出站方向不会命中。",
       "mitreTechniqueId": "T1041",
       "mitreTechniqueName": "Exfiltration Over C2 Channel",
       "eventTypes": [
@@ -7740,7 +7740,7 @@
         "pcap.http",
         "http.request"
       ],
-      "dataContains": {
+      "allDataContains": {
         "direction": [
           "upload",
           "egress",
