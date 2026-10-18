@@ -10938,13 +10938,21 @@ html[lang="en"] .localized-evidence-field{display:none}
         var protectedFragments = new List<string>();
         html = ProtectChineseRawEvidenceFragments(html, protectedFragments);
 
-        foreach (var (english, chinese) in ChineseHtmlTranslations
+        // The rule translation table contains the complete rule catalog, but
+        // a report only renders translations for findings that actually
+        // matched. Filtering by the report model avoids repeatedly scanning a
+        // multi-megabyte document for hundreds of absent rule summaries.
+        var renderedFindingText = report.Findings
+            .SelectMany(finding => new[] { finding.Title, finding.Summary })
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToHashSet(StringComparer.Ordinal);
+        var activeRuleTranslations = ChineseRuleHtmlTranslations
+            .Where(pair => renderedFindingText.Contains(pair.English));
+        var translations = ChineseHtmlTranslations
             .Concat(GetReportFindingHtmlTranslations(report))
-            .Concat(ChineseRuleHtmlTranslations)
-            .OrderByDescending(pair => pair.English.Length))
-        {
-            html = html.Replace(english, chinese, StringComparison.Ordinal);
-        }
+            .Concat(activeRuleTranslations)
+            .ToList();
+        html = ReplaceChineseTranslations(html, translations);
 
         html = ChineseVisibleEventCountRegex.Replace(html, " 个事件");
         // A few compact cards combine translated labels with interpolated
@@ -10968,6 +10976,143 @@ html[lang="en"] .localized-evidence-field{display:none}
         html = LocalizeChineseVisibleEvidenceValues(html);
 
         return html;
+    }
+
+    private static string ReplaceChineseTranslations(
+        string html,
+        IReadOnlyCollection<(string English, string Chinese)> translations)
+    {
+        if (translations.Count == 0 || string.IsNullOrEmpty(html))
+        {
+            return html;
+        }
+
+        var lookup = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (english, chinese) in translations)
+        {
+            if (!string.IsNullOrEmpty(english) && !lookup.ContainsKey(english))
+            {
+                lookup[english] = chinese;
+            }
+        }
+
+        if (lookup.Count == 0)
+        {
+            return html;
+        }
+
+        // Scan the document once with a compact Aho-Corasick trie.  A large
+        // alternation still makes the regex engine backtrack through every
+        // branch at many positions; the trie keeps work proportional to the
+        // document plus the number of actual matches.  Longest output wins,
+        // matching the old longest-first replacement precedence.
+        var nodes = new List<TranslationTrieNode> { new() };
+        foreach (var pair in lookup)
+        {
+            var nodeIndex = 0;
+            foreach (var character in pair.Key)
+            {
+                if (!nodes[nodeIndex].Next.TryGetValue(character, out var nextIndex))
+                {
+                    nextIndex = nodes.Count;
+                    nodes[nodeIndex].Next[character] = nextIndex;
+                    nodes.Add(new TranslationTrieNode());
+                }
+
+                nodeIndex = nextIndex;
+            }
+
+            if (pair.Key.Length > nodes[nodeIndex].MatchLength)
+            {
+                nodes[nodeIndex].Replacement = pair.Value;
+                nodes[nodeIndex].MatchLength = pair.Key.Length;
+            }
+        }
+
+        var queue = new Queue<int>();
+        foreach (var child in nodes[0].Next.Values)
+        {
+            queue.Enqueue(child);
+        }
+
+        while (queue.Count > 0)
+        {
+            var nodeIndex = queue.Dequeue();
+            foreach (var edge in nodes[nodeIndex].Next)
+            {
+                var fallback = nodes[nodeIndex].Failure;
+                while (fallback != 0 && !nodes[fallback].Next.ContainsKey(edge.Key))
+                {
+                    fallback = nodes[fallback].Failure;
+                }
+
+                if (nodes[fallback].Next.TryGetValue(edge.Key, out var fallbackIndex) && fallbackIndex != edge.Value)
+                {
+                    fallback = fallbackIndex;
+                }
+
+                nodes[edge.Value].Failure = fallback;
+                if (nodes[edge.Value].MatchLength < nodes[fallback].MatchLength)
+                {
+                    nodes[edge.Value].Replacement = nodes[fallback].Replacement;
+                    nodes[edge.Value].MatchLength = nodes[fallback].MatchLength;
+                }
+
+                queue.Enqueue(edge.Value);
+            }
+        }
+
+        var builder = new StringBuilder(html.Length);
+        var state = 0;
+        var copiedThrough = 0;
+        for (var index = 0; index < html.Length; index++)
+        {
+            var character = html[index];
+            while (state != 0 && !nodes[state].Next.ContainsKey(character))
+            {
+                state = nodes[state].Failure;
+            }
+
+            if (nodes[state].Next.TryGetValue(character, out var nextState))
+            {
+                state = nextState;
+            }
+            else
+            {
+                state = 0;
+            }
+
+            var node = nodes[state];
+            if (node.Replacement is null || node.MatchLength <= 0)
+            {
+                continue;
+            }
+
+            var matchStart = index - node.MatchLength + 1;
+            if (matchStart < copiedThrough)
+            {
+                continue;
+            }
+
+            builder.Append(html, copiedThrough, matchStart - copiedThrough);
+            builder.Append(node.Replacement);
+            copiedThrough = index + 1;
+            state = 0;
+        }
+
+        builder.Append(html, copiedThrough, html.Length - copiedThrough);
+        return builder.ToString();
+    }
+
+    private sealed class TranslationTrieNode
+    {
+        public Dictionary<char, int> Next { get; } = [];
+
+        public int Failure { get; set; }
+
+        public string? Replacement { get; set; }
+
+        public int MatchLength { get; set; }
     }
 
     /// <summary>
