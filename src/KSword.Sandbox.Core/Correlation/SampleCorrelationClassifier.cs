@@ -151,6 +151,87 @@ public static class SampleCorrelationClassifier
         "%public%"
     ];
 
+    // Ransomware publishes its ciphertext under either a fixed family marker
+    // (.ecc, .locked, .wncry) or an opaque token appended to the plaintext
+    // name (report.docx -> report.docx.qwerty).  Both shapes matter here
+    // because a filesystem watcher can only observe the post-rename name,
+    // which by construction never matches the plaintext path an R0/ETW row
+    // recorded.
+    private static readonly IReadOnlyDictionary<string, string> RansomwareExtensionFamilies =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ecc"] = "teslacrypt",
+            ["ezz"] = "teslacrypt",
+            ["exx"] = "teslacrypt",
+            ["zzz"] = "teslacrypt",
+            ["xyz"] = "teslacrypt",
+            ["aaa"] = "teslacrypt",
+            ["abc"] = "teslacrypt",
+            ["ccc"] = "teslacrypt",
+            ["vvv"] = "teslacrypt",
+            ["micro"] = "teslacrypt",
+            ["ttt"] = "teslacrypt",
+            ["locked"] = "locky",
+            ["locky"] = "locky",
+            ["zepto"] = "locky",
+            ["odin"] = "locky",
+            ["aesir"] = "locky",
+            ["thor"] = "locky",
+            ["osiris"] = "locky",
+            ["zzzzz"] = "locky",
+            ["cerber"] = "cerber",
+            ["cerber2"] = "cerber",
+            ["cerber3"] = "cerber",
+            ["wncry"] = "wannacry",
+            ["wcry"] = "wannacry",
+            ["wnry"] = "wannacry",
+            ["wncryt"] = "wannacry",
+            ["crypt"] = "generic-cryptor",
+            ["crypted"] = "generic-cryptor",
+            ["crypto"] = "generic-cryptor",
+            ["encrypted"] = "generic-cryptor",
+            ["enc"] = "generic-cryptor",
+            ["encry"] = "generic-cryptor",
+            ["cbf"] = "generic-cryptor",
+            ["cef"] = "generic-cryptor",
+            ["djvu"] = "stop-djvu",
+            ["conti"] = "conti",
+            ["lockbit"] = "lockbit",
+            ["revil"] = "revil-sodinokibi",
+            ["sodinokibi"] = "revil-sodinokibi",
+            ["phobos"] = "phobos",
+            ["dharma"] = "dharma",
+            ["makop"] = "phobos",
+            ["mallox"] = "mallox",
+            ["krab"] = "krab",
+            ["wallet"] = "generic-ransom",
+            ["sage"] = "sage",
+            ["arena"] = "arena"
+        };
+
+    private static readonly IReadOnlySet<string> RansomwarePlaintextExtensions =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "doc", "docx", "docm", "xls", "xlsx", "xlsm", "ppt", "pptx", "pdf", "txt", "rtf",
+            "odt", "ods", "odp", "csv", "mdb", "accdb", "sql", "db", "sqlite", "pst", "msg", "eml",
+            "jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff", "psd", "raw", "svg", "heic",
+            "mp3", "mp4", "avi", "mkv", "mov", "wav", "flac", "wmv", "m4a",
+            "zip", "rar", "7z", "tar", "gz", "iso", "vhd", "vmdk", "vdi",
+            "json", "xml", "log", "ini", "cfg", "dat", "bak", "cs", "cpp", "h", "py", "js",
+            "java", "php", "dwg", "ai", "cdr", "wallet", "kdbx"
+        };
+
+    // Suffixes that ordinary Windows software appends to a live file.  These
+    // are excluded from the opaque-token shape so that a rename such as
+    // settings.json -> settings.json.tmp cannot be read as encryption.
+    private static readonly IReadOnlySet<string> BenignAppendedSuffixes =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "tmp", "temp", "log", "bak", "old", "orig", "sav", "part", "crdownload", "download",
+            "etl", "dmp", "mdmp", "hdmp", "lnk", "ini", "cfg", "json", "xml", "txt", "cache",
+            "lock", "pf", "regtrans-ms", "blf", "dat", "db", "db-wal", "db-shm"
+        };
+
     private static readonly string[] SystemPathHints =
     [
         @"\windows\system32\",
@@ -808,6 +889,26 @@ public static class SampleCorrelationClassifier
         if (targetMatchesSample)
         {
             return CorrelationDisposition.Confirmed("file-target-points-to-submitted-sample", "path");
+        }
+
+        // Ransomware encryption renames can never join a same-target
+        // cross-source row: the kernel/ETW row names the plaintext path the
+        // sample opened, while the watcher only sees the ciphertext name it
+        // renamed the file to.  Without this shape-aware rule every encrypted
+        // file collapses into collector noise (Telemetry/*.json.ecc is the
+        // measured case), so the join requirement is replaced by an explicit
+        // encryption suffix plus placement inside the sample execution window.
+        // The row stays probable rather than confirmed because the watcher
+        // still cannot name the actor.
+        if (IsUnattributedFileWatcherEvent(evt, data) &&
+            IsHighSignalMutation(evt, data) &&
+            TryDescribeEncryptionRename(evt, data, out var encryptionSignature) &&
+            IsWithinSampleLifecycle(evt, context))
+        {
+            return CorrelationDisposition.Probable(
+                $"filesystem-watcher-encryption-rename-inside-sample-lifecycle:{encryptionSignature}",
+                "path/destinationPath/sourcePath",
+                "probable-filesystem-watcher-encryption-edge");
         }
 
         if (IsUnattributedFileWatcherEvent(evt, data) && IsKnownCollectorFilesystemNoise(target))
@@ -2013,6 +2114,77 @@ public static class SampleCorrelationClassifier
             normalized.Contains("\\AppRepository\\", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains("RPTA", StringComparison.OrdinalIgnoreCase) &&
             normalized.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsWithinSampleLifecycle(SandboxEvent evt, CorrelationContext context)
+    {
+        return context.SampleLifecycles.Count > 0 &&
+            context.SampleLifecycles.Any(window =>
+                evt.Timestamp >= window.StartUtc && evt.Timestamp <= window.EndUtc);
+    }
+
+    private static bool TryDescribeEncryptionRename(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        out string signature)
+    {
+        signature = string.Empty;
+        var destination = FirstNonEmpty(
+            Value(data, "destinationPath"),
+            Value(data, "newPath"),
+            Value(data, "destination"),
+            Value(data, "filePath"),
+            evt.Path,
+            Value(data, "path"));
+        if (string.IsNullOrWhiteSpace(destination))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(destination.Trim().Trim('"', '\'')).TrimStart('.');
+        if (extension.Length == 0)
+        {
+            return false;
+        }
+
+        if (RansomwareExtensionFamilies.TryGetValue(extension, out var family))
+        {
+            signature = $"{family}-marker(.{extension.ToLowerInvariant()})";
+            return true;
+        }
+
+        var source = FirstNonEmpty(
+            Value(data, "sourcePath"),
+            Value(data, "previousPath"),
+            Value(data, "oldPath"),
+            Value(data, "originalPath"));
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return false;
+        }
+
+        // Unknown families append an opaque token to the plaintext name, so
+        // the ciphertext basename keeps the plaintext basename as its stem.
+        var stem = Path.GetFileNameWithoutExtension(destination.Trim());
+        var plaintextName = Path.GetFileName(source.Trim());
+        if (string.IsNullOrWhiteSpace(stem) ||
+            !string.Equals(stem, plaintextName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var plaintextExtension = Path.GetExtension(stem).TrimStart('.');
+        var opaqueToken = extension.Length is >= 3 and <= 8;
+        if (!RansomwarePlaintextExtensions.Contains(plaintextExtension) ||
+            !opaqueToken ||
+            !extension.All(char.IsAsciiLetterOrDigit) ||
+            BenignAppendedSuffixes.Contains(extension))
+        {
+            return false;
+        }
+
+        signature = $"appended-token(.{plaintextExtension.ToLowerInvariant()}->.{extension.ToLowerInvariant()})";
+        return true;
     }
 
     private static bool IsBenignWindowsDiscoveryUtility(
