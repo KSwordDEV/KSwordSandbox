@@ -147,14 +147,14 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(html, "process-tree-sparkline", "Process tree should expose weak-interaction activity sparklines.");
         RequireContains(html, "Network relation path", "Network cards should expose readable process-to-endpoint relation paths.");
         RequireContains(html, "raw-page-nav", "Raw event expansion should expose native page shortcuts.");
-        RequireContains(html, "Story evidence expansion summary", "Evidence expansions should show a visible summary before dense rows.");
+        RequireContains(html, "data-evidence-count=", "Bounded evidence blocks should retain machine-readable counts without a verbose visible summary.");
         RequireContains(html, "Artifact evidence matrix overview", "Process story lane should surface evidence-matrix overview evidence.");
         RequireContains(html, "Dropped-file evidence matrix", "Dropped-file story lane should surface evidence-matrix state.");
         RequireContains(html, "Screenshot evidence matrix", "Screenshot story lane should surface evidence-matrix state.");
         RequireContains(html, "Memory dump evidence matrix", "Memory dump story lane should surface evidence-matrix state.");
         RequireContains(html, "PCAP evidence matrix", "PCAP story lane should surface evidence-matrix state.");
         RequireContains(html, "Artifact evidence matrix lane", "Behavior graph artifact lane should include matrix-backed evidence.");
-        RequireContains(html, "Network evidence expansion summary", "Network relationship expansions should summarize shown/hidden evidence.");
+        RequireContains(html, "Network evidence", "Network relationship evidence should retain an accessible copy target.");
         RequireContains(html, "Raw event slimming story", "Raw event section should explain visible/folded/report-only evidence before row expansion.");
         RequireContains(html, "Artifact / network / R0 anchors", "Raw event slimming cards should preserve artifact/network/R0 evidence anchors.");
         RequireContains(html, "data-copy-button=\"true\"", "Raw event slimming story should be explicitly copyable.");

@@ -139,7 +139,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "<details open class=\\\"technical-metadata\\\">", "Technical path metadata should be visible without an extra disclosure click.");
         RequireContains(rendererSource, "event-explorer-table{min-width:0;width:100%", "Event explorer should use the available width instead of a fixed narrow evidence column.");
         RequireContains(rendererSource, "return \"Evidence\";", "Unknown technical fields should use a neutral inline label.");
-        RequireContains(rendererSource, "<details open class=\\\"flat-details", "Flat evidence details should be visible by default.");
+        RequireContains(rendererSource, "<div class=\\\"flat-details", "Bounded finding evidence should be visible without a disclosure click.");
         RequireContains(rendererSource, "Closed by default", "Raw event shell should label the default folded state.");
         RequireContains(rendererSource, "folded technical fields", "Raw event page summaries should expose folded technical field counts.");
         RequireContains(rendererSource, "RawEventFoldedTechnicalFieldCount", "Raw event pagination should compute folded technical field counts per page.");
@@ -172,7 +172,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContainsNormalized(rendererSource, "position:static", "Unbounded tables should keep non-sticky headers so they cannot leak across chapters.");
         RequireContains(rendererSource, "report-layout", "Report renderer should expose a documentation-style sidebar/content shell.");
         RequireContains(rendererSource, "report-sidebar", "Report renderer should place navigation in a dedicated left sidebar.");
-        RequireContains(rendererSource, "details open class=\\\"event-explorer-details\\\"", "Primary event evidence should be visible without a disclosure click.");
+        RequireContains(rendererSource, "event-evidence-title", "Primary event evidence should be visible inline with a compact process/target label.");
         RequireContains(rendererSource, ".modern-sandbox-report{font-size:13px;line-height:1.35}", "Modern report rows should use a compact base line height.");
         RequireContains(rendererSource, ".modern-sandbox-report .event-explorer-table td{line-height:1.2;padding:4px 7px}", "Event explorer rows should use compact cell padding.");
         RequireContains(rendererSource, "CopyIconButton(copyText, label)", "Copy actions should use short icon buttons with accessible labels.");
@@ -556,8 +556,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(englishHtml, "prompt-internal-contract", "Prompt-like collector fields must never reach the report HTML.");
         RequireNotContains(chineseHtml, "prompt-internal-contract", "Prompt-like collector fields must never reach the Chinese report HTML.");
         RequireContains(englishHtml, "class=\"copy-btn copy-icon\"", "English event evidence should expose an icon copy button.");
-        RequireContains(englishHtml, "<details open class=\"event-explorer-details\">", "English event evidence should be visible by default.");
-        RequireContains(englishHtml, "<details open class=\"evidence-expansion-card\">", "Evidence cards should be visible by default without a disclosure click.");
+        RequireContains(englishHtml, "class=\"event-evidence-title\"", "English event evidence should be visible inline with a compact process/target label.");
+        RequireContains(englishHtml, "<div class=\"evidence-expansion-card\">", "Bounded evidence cards should be visible without a disclosure click.");
 
         RequireNotContains(englishHtml, "Technical evidence:", "Generic technical evidence prefixes should not repeat on every event row.");
         RequireNotContains(englishHtml, "Additional detail:", "Generic additional-detail prompts should not repeat on every event row.");

@@ -517,6 +517,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .event-explorer-details{display:block;min-width:0;width:100%}
 .modern-sandbox-report .event-explorer-details summary{background:#eaf5fb;border:0;border-radius:0;color:#1f5e7b;min-height:0;overflow-wrap:anywhere;padding:4px 7px;white-space:normal}
 .modern-sandbox-report .event-explorer-detail{background:#f7fbfe;border:0;border-radius:0;margin-top:2px;max-height:34vh;min-height:0;min-width:0;overflow:auto;padding:6px 8px;width:100%}
+.modern-sandbox-report .event-evidence-title{color:#1f5e7b;display:block;font-size:12px;font-weight:900;margin-bottom:3px;overflow-wrap:anywhere}
 .modern-sandbox-report .event-explorer-detail pre,.modern-sandbox-report .event-explorer-detail code{font-size:12px;line-height:1.4}
 .modern-sandbox-report .ui-field-label{font-weight:800;color:#24516b;white-space:nowrap}
 .modern-sandbox-report .event-explorer-detail .event-evidence-fields{max-height:none;overflow:visible}
@@ -1010,9 +1011,12 @@ html[lang="en"] .localized-evidence-field{display:none}
                 var detail = overflow
                     ? RenderProcessExitOutcome(evt)
                     : $"{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyIconButton(plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>";
-                // Keep primary evidence open so operators can read and copy it
-                // without an extra disclosure click.
-                html.AppendLine($"<td><details open class=\"event-explorer-details\"><summary>{E(evt.ProcessName ?? target ?? "Open evidence")}</summary><div class=\"event-explorer-detail\">{detail}</div></details></td>");
+                // The event explorer is already a bounded, filterable table.
+                // Render selected evidence inline so every row is readable
+                // without a second disclosure control. Raw event pages remain
+                // the place for large, paged payloads.
+                var evidenceTitle = evt.ProcessName ?? DisplayEventTarget(evt, target) ?? "Evidence";
+                html.AppendLine($"<td><div class=\"event-explorer-detail\"><strong class=\"event-evidence-title\">{E(evidenceTitle)}</strong>{detail}</div></td>");
                 html.AppendLine("</tr>");
             }
 
@@ -1515,7 +1519,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 html.AppendLine("<ol class=\"story-evidence-list\">");
                 foreach (var line in card.EvidenceLines.Take(EvidenceStoryInlineLimit))
                 {
-                    html.AppendLine($"<li><code>{E(line)}</code></li>");
+                    html.AppendLine($"<li><code>{E(VisibleEvidenceText(line))}</code></li>");
                 }
 
                 html.AppendLine("</ol>");
@@ -1753,7 +1757,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         return
             $"<span class=\"inline-actions\">{CopyIconButton(full)}</span>" +
-            $"<details open class=\"flat-details\"><summary>Evidence</summary><pre class=\"copyable\" data-copy=\"{A(full)}\">{E(compact)}</pre></details>";
+            $"<div class=\"flat-details\"><pre class=\"copyable\" data-copy=\"{A(full)}\">{E(compact)}</pre></div>";
     }
 
     /// <summary>
@@ -1954,7 +1958,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         if (resourceEvents.Count > 0)
         {
             var evidenceText = string.Join(Environment.NewLine, resourceEvents.Take(12).Select(EventOneLine));
-            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence ({E(Math.Min(resourceEvents.Count, 12).ToString(CultureInfo.InvariantCulture))}/{E(resourceEvents.Count.ToString(CultureInfo.InvariantCulture))})</summary><pre class=\"copyable\" data-copy=\"{A(evidenceText)}\">{E(evidenceText)}</pre></details>");
+            html.AppendLine($"<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(evidenceText)}\">{E(VisibleEvidenceText(evidenceText))}</pre></div>");
         }
     }
 
@@ -2316,7 +2320,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             "Copy-only external VirusTotal GUI/API link; use it for analyst pivoting outside the local report.",
             string.Equals(permalink, "-", StringComparison.Ordinal) ? "risk-low" : "risk-info");
         html.AppendLine("</div>");
-        html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        html.AppendLine($"<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(VisibleEvidenceText(copy))}</pre></div>");
     }
 
     private static string FormatVirusTotalEngineStats(SandboxEvent evt)
@@ -2443,7 +2447,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(edge.From)}\"><code>{E(edge.From)}</code></td>");
                 html.AppendLine($"<td><span class=\"badge badge-info\">{E(edge.Relation)}</span></td>");
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(edge.To)}\"><code>{E(edge.To)}</code></td>");
-                html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy graph edge", copy)}</span><details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details></td>");
+                html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy graph edge", copy)}</span><div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(VisibleEvidenceText(copy))}</pre></div></td>");
                 html.AppendLine("</tr>");
             }
 
@@ -2840,7 +2844,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         {
             html.AppendLine("<li>");
             html.AppendLine($"<code>{E(edge.From)}</code> <span class=\"badge badge-info\">{E(edge.Relation)}</span> <code>{E(edge.To)}</code>");
-            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(edge.Evidence)}\">{E(edge.Evidence)}</pre></details>");
+            html.AppendLine($"<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(edge.Evidence)}\">{E(VisibleEvidenceText(edge.Evidence))}</pre></div>");
             html.AppendLine("</li>");
         }
 
@@ -2887,7 +2891,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine($"<span class=\"summary-value\">{E(card.Value)}</span>");
             html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
             html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy evidence summary", card.CopyText)}</div>");
-            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
+            html.AppendLine($"<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></div>");
             html.AppendLine("</article>");
         }
 
@@ -2987,17 +2991,17 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy story lane", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence ({E(shownEvidenceCount.ToString(CultureInfo.InvariantCulture))}/{E(observedEvidenceCount.ToString(CultureInfo.InvariantCulture))} observed rows)</summary>");
-            AppendEvidenceExpansionSummary(html, "Story evidence expansion summary", shownEvidenceCount, observedEvidenceCount, "Sampled report view and indexed source JSON/JSONL artifacts", card.EvidenceLines);
+            html.AppendLine("<div class=\"evidence-expansion-card\">");
+            AppendEvidenceExpansionSummary(html, "Story evidence", shownEvidenceCount, observedEvidenceCount, "Sampled report view and indexed source JSON/JSONL artifacts", card.EvidenceLines);
             html.AppendLine("<ol class=\"story-evidence-list\">");
             foreach (var line in card.EvidenceLines.Take(12))
             {
-                html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(line)}</code></li>");
+                html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(VisibleEvidenceText(line))}</code></li>");
             }
 
             html.AppendLine("</ol>");
-            html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(evidenceText)}\">{E(evidenceText)}</pre>");
-            html.AppendLine("</details>");
+            html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(evidenceText)}\">{E(VisibleEvidenceText(evidenceText))}</pre>");
+            html.AppendLine("</div>");
             html.AppendLine("</article>");
         }
 
@@ -3213,44 +3217,21 @@ html[lang="en"] .localized-evidence-field{display:none}
         string completeSource,
         IReadOnlyCollection<string> evidenceLines)
     {
-        var hiddenCount = Math.Max(0, sourceCount - renderedCount);
         var firstEvidence = evidenceLines.FirstOrDefault(line => !string.IsNullOrWhiteSpace(line)) ?? "-";
-        var previewLines = evidenceLines
-            .Where(line => !string.IsNullOrWhiteSpace(line))
-            .Take(3)
-            .ToList();
         var copy = string.Join(
             Environment.NewLine,
             [
                 title,
                 $"renderedEvidence={renderedCount}",
                 $"sourceEvidence={sourceCount}",
-                $"hiddenEvidence={hiddenCount}",
                 $"completeSource={completeSource}",
-                $"firstEvidence={firstEvidence}",
-                "previewEvidence:",
-                .. previewLines
+                $"firstEvidence={firstEvidence}"
             ]);
-        html.AppendLine($"<div class=\"evidence-expansion-summary copyable\" data-copy=\"{A(copy)}\">");
-        html.AppendLine($"<strong>{E(title)}</strong>");
-        html.AppendLine("<div class=\"relationship-tags\">");
-        html.AppendLine($"<span class=\"chip chip-info\">shown {E(renderedCount.ToString(CultureInfo.InvariantCulture))}/{E(sourceCount.ToString(CultureInfo.InvariantCulture))}</span>");
-        html.AppendLine($"<span class=\"chip chip-medium\">hidden {E(hiddenCount.ToString(CultureInfo.InvariantCulture))}</span>");
-        html.AppendLine($"<span class=\"chip chip-low\">complete source: {E(completeSource)}</span>");
-        html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"copy-hint\">First evidence: <code>{E(firstEvidence)}</code></div>");
-        if (previewLines.Count > 0)
-        {
-            html.AppendLine("<ol class=\"compact-list evidence-preview-list\">");
-            foreach (var line in previewLines)
-            {
-                html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(line)}</code></li>");
-            }
-
-            html.AppendLine("</ol>");
-        }
-
-        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy evidence expansion summary", copy)}</div>");
+        // Bounded evidence is already shown immediately below this marker.
+        // Keep only an accessible icon action in the visual flow; the full
+        // summary remains in data-copy for audit and operator handoff.
+        html.AppendLine($"<div class=\"evidence-expansion-summary\" data-copy=\"{A(copy)}\" data-evidence-count=\"{E(renderedCount.ToString(CultureInfo.InvariantCulture))}\" data-source-count=\"{E(sourceCount.ToString(CultureInfo.InvariantCulture))}\">");
+        html.AppendLine($"<span class=\"sr-only\">{E(title)}: {E(renderedCount.ToString(CultureInfo.InvariantCulture))}/{E(sourceCount.ToString(CultureInfo.InvariantCulture))}</span>{CopyIconButton(copy)}");
         html.AppendLine("</div>");
     }
 
@@ -3832,7 +3813,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine($"<h3>{E(gap.Name)}</h3><span class=\"badge badge-{E(css)}\">coverage gap · {E(CollectionGapStateLabel(gap.State))}</span>");
             html.AppendLine("</div>");
             html.AppendLine($"<p class=\"muted\">{E(gap.Detail)}</p>");
-            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(evidence)}\">{E(evidence)}</pre></details>");
+            html.AppendLine($"<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(evidence)}\">{E(VisibleEvidenceText(evidence))}</pre></div>");
             html.AppendLine("</article>");
         }
 
@@ -4067,7 +4048,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine($"<td>{E(FormatArtifactSize(artifact.SizeBytes))}</td>");
             html.AppendLine($"<td><code>{E(ArtifactSha256(artifact))}</code></td>");
             html.AppendLine($"<td>{E(string.IsNullOrWhiteSpace(artifact.MimeType) ? "-" : artifact.MimeType)}</td>");
-            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(plain)}\">{E(plain)}</pre></details>{RenderArtifactPreview(artifact)}</td>");
+            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(plain)}\">{E(VisibleEvidenceText(plain))}</pre></div>{RenderArtifactPreview(artifact)}</td>");
             html.AppendLine("</tr>");
         }
 
@@ -4134,15 +4115,15 @@ html[lang="en"] .localized-evidence-field{display:none}
             rows.Any(row => !string.IsNullOrWhiteSpace(row.Selectors)) ? "risk-info" : "risk-low");
         html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy artifact matrix narrative", copy)}</div>");
         html.AppendLine("</div>");
-        html.AppendLine("<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary>");
-        AppendEvidenceExpansionSummary(html, "Artifact matrix expansion summary", rows.Count, rows.Count, "Artifact links and indexed source JSON/JSONL", matrixLines);
+        html.AppendLine("<div class=\"evidence-expansion-card\">");
+        AppendEvidenceExpansionSummary(html, "Artifact matrix", rows.Count, rows.Count, "Artifact links and indexed source JSON/JSONL", matrixLines);
         html.AppendLine("<ol class=\"compact-list\">");
         foreach (var line in matrixLines.Take(EvidenceStoryInlineLimit))
         {
-            html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(line)}</code></li>");
+            html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(VisibleEvidenceText(line))}</code></li>");
         }
 
-        html.AppendLine("</ol></details>");
+        html.AppendLine("</ol></div>");
     }
 
     private static bool IsReadyArtifactMatrixState(string state)
@@ -4225,7 +4206,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 : $"Top-level guest artifact manifest jobId is all-zero while report/runbook JobId is {report.JobId:D}; original evidence is preserved.",
             manifestMismatches.Count == 0 ? "risk-low" : "risk-medium");
         html.AppendLine("</div>");
-        html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        html.AppendLine($"<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(VisibleEvidenceText(copy))}</pre></div>");
     }
 
     private static IReadOnlyList<ArtifactManifestJobIdMismatch> FindArtifactManifestJobIdMismatches(
@@ -4344,7 +4325,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                 html,
                 $"Artifact lane health: collection={card.Name}; status={card.Status}; artifacts={card.ArtifactCount}; events={card.EventCount}; detail={card.Detail}",
                 "Copy compact summary");
-            html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
+            html.AppendLine($"<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></div>");
             html.AppendLine("</article>");
         }
 
@@ -5163,7 +5144,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         html.AppendLine("<details open class=\"relationship-details\"><summary>Collector self-noise examples (" + E(selfNoiseEvents.Count.ToString()) + ")</summary><ul class=\"mono-list\">");
         foreach (var line in sample)
         {
-            html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(line)}</code></li>");
+            html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(VisibleEvidenceText(line))}</code></li>");
         }
 
         html.AppendLine("</ul>");
@@ -5273,7 +5254,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             counters,
             HasR0NetworkFailureCounters(latest) ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
-        html.AppendLine($"<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence ({E(statusEvents.Count.ToString(CultureInfo.InvariantCulture))})</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        html.AppendLine($"<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(VisibleEvidenceText(copy))}</pre></div>");
     }
 
     private static string R0ReadinessLabel(string value)
@@ -6620,9 +6601,9 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy process card", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine("<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary>");
-            AppendEvidenceExpansionSummary(html, "Process evidence expansion summary", card.EvidenceLines.Count, card.EventCount, "Sampled report view and indexed source JSON/JSONL", card.EvidenceLines);
-            html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
+            html.AppendLine("<div class=\"evidence-expansion-card\">");
+            AppendEvidenceExpansionSummary(html, "Process evidence", card.EvidenceLines.Count, card.EventCount, "Sampled report view and indexed source JSON/JSONL", card.EvidenceLines);
+            html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(VisibleEvidenceText(string.Join(Environment.NewLine, card.EvidenceLines)))}</pre></div>");
             html.AppendLine("</article>");
         }
 
@@ -6836,9 +6817,9 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy network card", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine("<details open class=\"evidence-expansion-card\"><summary class=\"sr-only\">Evidence</summary>");
-            AppendEvidenceExpansionSummary(html, "Network evidence expansion summary", card.EvidenceLines.Count, card.EventCount, "Sampled report view, indexed source JSON/JSONL, and packet artifacts", card.EvidenceLines);
-            html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
+            html.AppendLine("<div class=\"evidence-expansion-card\">");
+            AppendEvidenceExpansionSummary(html, "Network evidence", card.EvidenceLines.Count, card.EventCount, "Sampled report view, indexed source JSON/JSONL, and packet artifacts", card.EvidenceLines);
+            html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(VisibleEvidenceText(string.Join(Environment.NewLine, card.EvidenceLines)))}</pre></div>");
             html.AppendLine("</article>");
         }
 
@@ -7280,7 +7261,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             return;
         }
 
-        html.AppendLine($"<div class=\"compact-evidence-summary copyable\" data-copy=\"{A(compactSummary)}\"><strong>Compact evidence summary</strong><br>{E(compactSummary)}<div class=\"toolbar\">{CopyButton(copyLabel, compactSummary)}</div></div>");
+        html.AppendLine($"<div class=\"compact-evidence-summary copyable\" data-copy=\"{A(compactSummary)}\"><strong>Compact evidence summary</strong><br>{E(VisibleEvidenceText(compactSummary))}<div class=\"toolbar\">{CopyButton(copyLabel, compactSummary)}</div></div>");
     }
 
     /// <summary>
@@ -10528,7 +10509,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             : string.Equals(displayLabel, "Evidence", StringComparison.OrdinalIgnoreCase)
                 ? string.Empty
                 : $"{displayLabel}: ";
-        return $"<div class=\"technical-field\"><span class=\"ui-field-label\">{E(prefix)}</span><pre class=\"copyable\" data-copy=\"{A(value)}\">{E(VisibleEvidenceFieldValue(label, value, 1_200))}</pre></div>";
+        return $"<div class=\"technical-field\"><span class=\"ui-field-label\">{E(prefix)}</span><pre class=\"copyable\" data-copy=\"{A(value)}\">{E(VisibleEvidenceText(VisibleEvidenceFieldValue(label, value, 1_200)))}</pre></div>";
     }
 
     /// <summary>
@@ -10601,7 +10582,7 @@ html[lang="en"] .localized-evidence-field{display:none}
                         : string.Equals(label, "Evidence", StringComparison.OrdinalIgnoreCase)
                             ? string.Empty
                             : $"{label}: ";
-                    html.Append($"<div class=\"raw-technical-field{localizedClass}\"><span class=\"ui-field-label\">{E(prefix)}</span><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(boundedValue)}</code></div>");
+                    html.Append($"<div class=\"raw-technical-field{localizedClass}\"><span class=\"ui-field-label\">{E(prefix)}</span><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(VisibleEvidenceText(boundedValue))}</code></div>");
                 }
 
                 html.Append("</div>");
@@ -12130,6 +12111,10 @@ html[lang="en"] .localized-evidence-field{display:none}
         ("R0 health/noise boundary", "R0 健康/噪声边界"),
         ("R0 availability, queue loss, and collector self-noise are called out as evidence-quality context, not sample behavior.", "R0 可用性、队列丢失和采集器自噪声会作为证据质量上下文呈现，而不是样本行为。"),
         ("Copy story lane", "复制故事通道"),
+        ("Story evidence", "故事证据"),
+        ("Artifact matrix", "证据文件矩阵"),
+        ("Process evidence", "进程证据"),
+        ("Network evidence", "网络证据"),
         ("Expand story evidence", "展开故事证据"),
         ("Expand bounded story evidence", "展开有界故事证据"),
         ("Story evidence expansion summary", "故事证据展开摘要"),
@@ -14055,6 +14040,31 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         return bounded;
+    }
+
+    /// <summary>
+    /// Removes absolute host/guest path prefixes from visible bounded evidence.
+    /// Inputs are copyable evidence text; processing keeps the original text in
+    /// data-copy while replacing path tokens in the visible preview with their
+    /// file names; return is safe analyst-facing text.
+    /// </summary>
+    private static string VisibleEvidenceText(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        return Regex.Replace(
+            value,
+            @"(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|\\\\)[^\s<>""'|;,)\]]+",
+            match =>
+            {
+                var token = match.Value.TrimEnd('.', ',', ';', ')', ']');
+                var leaf = SafePathLeaf(token);
+                return string.IsNullOrWhiteSpace(leaf) ? "path" : leaf;
+            },
+            RegexOptions.CultureInvariant);
     }
 
     private static string AbbreviateEvidenceValue(string value, int maxLength)
