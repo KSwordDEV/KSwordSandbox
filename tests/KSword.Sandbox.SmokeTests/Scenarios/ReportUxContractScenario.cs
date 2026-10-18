@@ -218,7 +218,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "resourceRole", "Report renderer should render static resource roles.");
         RequireContains(rendererSource, "Artifact index evidence", "Report renderer should explain artifact selector/duplicate/rejection diagnostics.");
         RequireContains(rendererSource, "Artifact lane health", "Report renderer should expose artifact lane health in compact summaries.");
-        RequireContains(rendererSource, "Download selector / duplicate / rejection diagnostics", "Report renderer should expose artifact index row evidence.");
+        RequireContains(rendererSource, "artifact-index-table", "Report renderer should expose structured artifact index evidence.");
         RequireContains(rendererSource, "VirusTotal official evidence", "Report renderer should summarize VT official file-object fields.");
         RequireContains(rendererSource, "VT reputation/community", "Report renderer should expose VT reputation/community score.");
         RequireContains(rendererSource, "id=\\\"cover\\\"", "Report renderer should expose a cover anchor.");
@@ -420,6 +420,17 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "data-event-disposition=\"diagnostic\"", "Event explorer should expose collection diagnostics in row data.");
         RequireContains(englishHtml, "data-event-disposition=\"unattributed\"", "Event explorer should retain unattributed rows for explicit filter reveal.");
         RequireContains(englishHtml, "process.exit", "Rendered event explorer should retain process exit evidence.");
+        RequireContains(englishHtml, "<table class=\"event-explorer-table\"><thead><tr><th>Time</th><th>Event type</th><th>Severity</th><th>Evidence</th>", "Event explorer should keep only compact identity/severity columns and the wide evidence column.");
+        RequireNotContains(englishHtml, "<table class=\"event-explorer-table\"><thead><tr><th>Time</th><th>Event type</th><th>Source</th>", "Event explorer should not render the source column.");
+        RequireNotContains(englishHtml, "<th>Stage</th>", "Event tables should not render the stage column.");
+        RequireNotContains(englishHtml, "<th>Disposition</th>", "Event tables should not render the attribution column.");
+        RequireNotContains(englishHtml, "Payload detail", "Technical payload fields should not render the narrow Payload detail label.");
+        RequireContains(englishHtml, "class=\"finding-evidence\"", "Finding evidence should keep copy controls beside the evidence text.");
+        RequireContains(englishHtml, "<th>groupCount</th>", "Artifact index evidence should expose groupCount as a dedicated column.");
+        RequireNotContains(englishHtml, "groupCount=-", "Artifact index tables should not expose raw groupCount key/value text.");
+        RequireNotContains(chineseVisibleText, "静态证据仅供分诊", "Chinese reports should not show the long static-evidence disclaimer.");
+        RequireNotContains(chineseVisibleText, "大型报告渲染边界", "Chinese reports should not show the large-report implementation note.");
+        RequireNotContains(chineseVisibleText, "证据文件证据卡", "Chinese reports should not show the artifact-card implementation note.");
         RequireContains(englishHtml, "exitCode=", "Rendered event explorer should show process exit code evidence.");
         RequireContains(englishHtml, "Evidence coverage warning", "Rendered event explorer should visibly explain incomplete evidence coverage.");
         RequireContains(englishHtml, "hasFilter = !!query", "Event explorer should reveal retained overflow rows when a filter is active.");
@@ -589,7 +600,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Static PE resource story", "Rendered HTML should include structured static resource story.");
         RequireContains(englishHtml, "embedded-pe", "Rendered HTML should include static resourceRole evidence.");
         RequireContains(englishHtml, "Artifact index evidence", "Rendered HTML should include artifact selector/duplicate/rejection cards.");
-        RequireContains(englishHtml, "Download selector / duplicate / rejection diagnostics", "Rendered artifact rows should expose index diagnostics.");
+        RequireContains(englishHtml, "<th>groupCount</th>", "Rendered artifact rows should expose groupCount as a dedicated column.");
         RequireContains(englishHtml, "Rejected artifact references", "Rendered artifact index story should summarize rejection diagnostics.");
         RequireContains(englishHtml, "VirusTotal official evidence", "Rendered HTML should include VT official evidence cards.");
         RequireContains(englishHtml, "VT reputation/community", "Rendered HTML should include VT reputation/community fields.");

@@ -381,11 +381,7 @@ public sealed class HtmlReportRenderer
         AppendDynamicAnalysis(html, report);
         AppendVirusTotalSummary(html, report, artifactLookup, artifactLinks);
         var largeReport = report.Events.Count > 500;
-        if (largeReport)
-        {
-            AppendLargeReportRenderingNotice(html, report);
-        }
-        else
+        if (!largeReport)
         {
             AppendBehaviorGraph(html, report, artifactLookup, artifactLinks, collectionList);
         }
@@ -554,6 +550,38 @@ html[lang="en"] .localized-evidence-field{display:none}
 .modern-sandbox-report .language-entry .hint{display:none}
 @media(max-width:1000px){.modern-sandbox-report .report-layout{grid-template-columns:1fr}.modern-sandbox-report .report-sidebar{position:static}.modern-sandbox-report .event-explorer-details{min-width:0}}
 @media(max-width:640px){.modern-sandbox-report .card,.modern-sandbox-report section.card{border-radius:0;padding:18px}.modern-sandbox-report .event-explorer-table{min-width:0;width:100%}.modern-sandbox-report .event-explorer-table th:nth-child(-n+6),.modern-sandbox-report .event-explorer-table td:nth-child(-n+6){display:none}.modern-sandbox-report .event-explorer-table th:nth-child(7),.modern-sandbox-report .event-explorer-table td:nth-child(7){display:table-cell;min-width:100%;width:100%}.modern-sandbox-report .event-explorer-details{min-width:0;width:100%}}
+/* Compact evidence tables: reserve only the small identity columns and let
+   evidence consume the remaining width. */
+.modern-sandbox-report .event-explorer-table,
+.modern-sandbox-report .event-table{table-layout:fixed;min-width:0;width:100%}
+.modern-sandbox-report .event-explorer-table th:nth-child(1),.modern-sandbox-report .event-explorer-table td:nth-child(1){width:8.5rem;white-space:nowrap}
+.modern-sandbox-report .event-explorer-table th:nth-child(2),.modern-sandbox-report .event-explorer-table td:nth-child(2){width:9rem;min-width:0;overflow-wrap:anywhere}
+.modern-sandbox-report .event-explorer-table th:nth-child(3),.modern-sandbox-report .event-explorer-table td:nth-child(3){width:4.5rem;min-width:4.5rem;white-space:nowrap;word-break:keep-all}
+.modern-sandbox-report .event-explorer-table th:nth-child(4),.modern-sandbox-report .event-explorer-table td:nth-child(4){width:auto;min-width:0}
+.modern-sandbox-report .event-table th:nth-child(1),.modern-sandbox-report .event-table td:nth-child(1){width:8.5rem;white-space:nowrap}
+.modern-sandbox-report .event-table th:nth-child(2),.modern-sandbox-report .event-table td:nth-child(2){width:8rem;min-width:0;overflow-wrap:anywhere}
+.modern-sandbox-report .event-table th:nth-child(3),.modern-sandbox-report .event-table td:nth-child(3){width:11rem;min-width:0;overflow-wrap:anywhere}
+.modern-sandbox-report .event-table th:nth-child(4),.modern-sandbox-report .event-table td:nth-child(4){width:16rem;min-width:0;overflow-wrap:anywhere}
+.modern-sandbox-report .event-table th:nth-child(5),.modern-sandbox-report .event-table td:nth-child(5){width:auto;min-width:0}
+.modern-sandbox-report .event-explorer-detail,.modern-sandbox-report .event-evidence-cell{min-width:0;width:100%}
+.modern-sandbox-report .event-evidence-cell{align-items:flex-start;display:flex;gap:8px}
+.modern-sandbox-report .event-evidence-cell>.event-evidence-fields,.modern-sandbox-report .event-evidence-cell>.event-explorer-detail,.modern-sandbox-report .event-evidence-cell>.flat-details{flex:1 1 auto;min-width:0}
+.modern-sandbox-report .event-evidence-cell>.inline-actions{flex:0 0 auto;margin:0 0 0 auto;order:2;white-space:nowrap}
+.modern-sandbox-report .event-evidence-cell .raw-field-list{min-width:0;padding-left:14px}
+.modern-sandbox-report .event-evidence-cell pre,.modern-sandbox-report .event-evidence-cell code{max-width:100%;overflow-wrap:anywhere;white-space:pre-wrap;word-break:break-word}
+.modern-sandbox-report .event-related-artifacts{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.modern-sandbox-report .finding-evidence{align-items:flex-start;display:flex;gap:8px;min-width:0;width:100%}
+.modern-sandbox-report .finding-evidence>.flat-details{flex:1 1 auto;min-width:0;margin:0;padding:0;border-left:0}
+.modern-sandbox-report .finding-evidence>.inline-actions{flex:0 0 auto;margin:0 0 0 auto;order:2;white-space:nowrap}
+.modern-sandbox-report .behavior-findings-table{table-layout:fixed}
+.modern-sandbox-report .behavior-findings-table th:first-child{width:90px}
+.modern-sandbox-report .behavior-findings-table th:nth-child(2){width:30%;min-width:220px}
+.modern-sandbox-report .behavior-findings-table th:nth-child(3){width:auto;min-width:0}
+.modern-sandbox-report .artifact-index-detail{min-width:0;overflow:auto}
+.modern-sandbox-report .artifact-index-table{table-layout:fixed;margin-top:0;min-width:720px}
+.modern-sandbox-report .artifact-index-table th:nth-child(1){width:18%}.modern-sandbox-report .artifact-index-table th:nth-child(2){width:18%}.modern-sandbox-report .artifact-index-table th:nth-child(3){width:34%}.modern-sandbox-report .artifact-index-table th:nth-child(4){width:12%}.modern-sandbox-report .artifact-index-table th:nth-child(5){width:18%}
+.modern-sandbox-report .artifact-index-table td{overflow-wrap:anywhere;vertical-align:top}
+@media(max-width:640px){.modern-sandbox-report .event-explorer-table th:nth-child(-n+3),.modern-sandbox-report .event-explorer-table td:nth-child(-n+3){display:none}.modern-sandbox-report .event-explorer-table th:nth-child(4),.modern-sandbox-report .event-explorer-table td:nth-child(4){display:table-cell;min-width:100%;width:100%}.modern-sandbox-report .event-table{min-width:720px}}
 """);
         html.AppendLine("</style></head>");
     }
@@ -740,13 +768,6 @@ html[lang="en"] .localized-evidence-field{display:none}
         var total = report.Events.Count(IsEventExplorerEvent);
         var inline = Math.Min(total, EventExplorerInlineLimit);
         return $"{inline}/{total}";
-    }
-
-    private static void AppendLargeReportRenderingNotice(StringBuilder html, AnalysisReport report)
-    {
-        html.AppendLine("<section id=\"large-report-rendering\" class=\"report-section\"><h2>Large report view</h2>");
-        html.AppendLine($"<div class=\"section-note\"><strong>Large report rendering boundary.</strong> This report contains {E(report.Events.Count.ToString(CultureInfo.InvariantCulture))} normalized events. High-cost graph, timeline, process-detail, and raw-event expansions are kept in the JSON/JSONL evidence artifacts; the event explorer, coverage cards, R0, network, failure, and artifact sections remain available here so rendering stays responsive and complete evidence is not discarded.</div>");
-        html.AppendLine("</section>");
     }
 
     private static bool IsPrimaryBehaviorFactCard(BehaviorFactCard card)
@@ -972,7 +993,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
         else
         {
-            html.AppendLine("<div class=\"event-table-wrap event-explorer-wrap\"><table class=\"event-explorer-table\"><thead><tr><th>Time</th><th>Event type</th><th>Source</th><th>Stage</th><th>Severity</th><th>Disposition</th><th>Evidence</th></tr></thead><tbody>");
+            html.AppendLine("<div class=\"event-table-wrap event-explorer-wrap\"><table class=\"event-explorer-table\"><thead><tr><th>Time</th><th>Event type</th><th>Severity</th><th>Evidence</th></tr></thead><tbody>");
             for (var rowIndex = 0; rowIndex < renderRows.Count; rowIndex++)
             {
                 var row = renderRows[rowIndex];
@@ -989,11 +1010,10 @@ html[lang="en"] .localized-evidence-field{display:none}
                     : EventToBoundedPlainText(evt, maxDataPairs: 24, maxValueLength: 220);
                 html.AppendLine($"<tr class=\"event-explorer-row\" data-event-row data-event-overflow=\"{(overflow ? "true" : "false")}\" data-type=\"{A(evt.EventType)}\" data-source=\"{A(evt.Source)}\" data-family=\"{A(row.Family)}\" data-stage=\"{A(row.Stage)}\" data-severity=\"{A(row.Severity)}\" data-sample=\"{(row.SampleBehavior ? "true" : "false")}\" data-event-disposition=\"{A(row.Disposition)}\" data-search=\"{A(search)}\">");
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
-                var sourceValue = string.IsNullOrWhiteSpace(evt.Source) ? "unknown" : evt.Source;
-                html.AppendLine($"<td><code data-token-kind=\"type\" data-event-token=\"{A(evt.EventType)}\">{E(evt.EventType)}</code></td><td><span data-token-kind=\"source\" data-event-token=\"{A(sourceValue)}\">{E(sourceValue)}</span></td><td><span class=\"chip chip-info\" data-token-kind=\"stage\" data-event-token=\"{A(row.Stage)}\">{E(row.Stage)}</span></td><td><span class=\"chip chip-{E(NormalizeSeverity(row.Severity))}\">{E(row.Severity)}</span></td><td><span class=\"chip chip-{E(EventDispositionCss(row.Disposition))}\" data-token-kind=\"disposition\" data-event-token=\"{A(row.Disposition)}\">{E(row.Disposition)}</span>{(string.IsNullOrWhiteSpace(exitCode) ? string.Empty : $" <code class=\"exit-code\">{E(exitCode)}</code>")}</td>");
+                html.AppendLine($"<td><code data-token-kind=\"type\" data-event-token=\"{A(evt.EventType)}\">{E(evt.EventType)}</code></td><td><span class=\"chip chip-{E(NormalizeSeverity(row.Severity))}\">{E(row.Severity)}</span>{(string.IsNullOrWhiteSpace(exitCode) ? string.Empty : $" <code class=\"exit-code\">{E(exitCode)}</code>")}</td>");
                 var detail = overflow
-                    ? RenderProcessExitOutcome(evt)
-                    : $"{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyIconButton(plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>";
+                    ? $"<div class=\"event-evidence-cell\">{RenderProcessExitOutcome(evt)}<span class=\"inline-actions\">{CopyIconButton(plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span></div>"
+                    : $"<div class=\"event-evidence-cell\">{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyIconButton(plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span></div>";
                 // The event explorer is already a bounded, filterable table.
                 // Render selected evidence inline so every row is readable
                 // without a second disclosure control. Raw event pages remain
@@ -1664,7 +1684,12 @@ html[lang="en"] .localized-evidence-field{display:none}
         IReadOnlyCollection<BehaviorFinding> findings)
     {
         html.AppendLine($"<details open class=\"relationship-details\"><summary>{E(title)} ({E(findings.Count.ToString())})</summary>");
-        html.AppendLine($"<p class=\"muted\">{E(note)}</p>");
+        var isStaticTriage = string.Equals(title, "Static triage indicators", StringComparison.Ordinal);
+        if (!isStaticTriage)
+        {
+            html.AppendLine($"<p class=\"muted\">{E(note)}</p>");
+        }
+
         if (findings.Count == 0)
         {
             Empty(html, "None.");
@@ -1672,7 +1697,6 @@ html[lang="en"] .localized-evidence-field{display:none}
             return;
         }
 
-        var isStaticTriage = string.Equals(title, "Static triage indicators", StringComparison.Ordinal);
         html.AppendLine(isStaticTriage
             ? "<table class=\"behavior-findings-table\"><thead><tr><th>Evidence class</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>"
             : "<table class=\"behavior-findings-table\"><thead><tr><th>Severity</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>");
@@ -1680,7 +1704,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         {
             if (isStaticTriage)
             {
-                html.AppendLine($"<tr><td><span class=\"badge static-only-badge\">Static-only / unverified</span></td><td><strong>{E(StaticFindingTitle(finding))}</strong><br><span class=\"muted static-boundary\">{E(StaticFindingSummary(finding))}</span></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
+                html.AppendLine($"<tr><td><span class=\"badge static-only-badge\">Static-only / unverified</span></td><td><strong>{E(StaticFindingTitle(finding))}</strong></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
             }
             else
             {
@@ -1700,17 +1724,6 @@ html[lang="en"] .localized-evidence-field{display:none}
     private static string StaticFindingTitle(BehaviorFinding finding)
     {
         return $"Static capability clue (unverified): {finding.Title}";
-    }
-
-    /// <summary>
-    /// Adds one stable boundary sentence to static finding summaries. Inputs
-    /// are static finding metadata; processing preserves the rule explanation;
-    /// the method returns a summary that requires runtime corroboration.
-    /// </summary>
-    private static string StaticFindingSummary(BehaviorFinding finding)
-    {
-        const string boundary = " Static evidence only: imports, API-like strings, URLs, YARA matches, entropy, and PE metadata do not prove execution, credential access, anti-analysis, download, persistence, or exfiltration; require correlated runtime evidence.";
-        return boundary;
     }
 
     /// <summary>
@@ -1739,8 +1752,8 @@ html[lang="en"] .localized-evidence-field{display:none}
 
         var visibleFull = VisibleEvidenceText(full);
         return
-            $"<span class=\"inline-actions\">{CopyIconButton(visibleFull)}</span>" +
-            $"<div class=\"flat-details\"><pre class=\"copyable\" data-copy=\"{A(visibleFull)}\">{E(VisibleEvidenceText(compact))}</pre></div>";
+            $"<div class=\"finding-evidence\"><div class=\"flat-details\"><pre class=\"copyable\" data-copy=\"{A(visibleFull)}\">{E(VisibleEvidenceText(compact))}</pre></div>" +
+            $"<span class=\"inline-actions\">{CopyIconButton(visibleFull)}</span></div>";
     }
 
     /// <summary>
@@ -1815,7 +1828,6 @@ html[lang="en"] .localized-evidence-field{display:none}
     {
         var staticAnalysis = report.StaticAnalysis;
         html.AppendLine("<section id=\"static\" class=\"card\"><h2>Static analysis</h2>");
-        html.AppendLine("<div class=\"section-note\"><strong>Static evidence boundary.</strong> Imports, API-like strings, URLs, YARA matches, entropy, PE metadata, and family labels are capability clues for triage. They are unverified until correlated with sample-attributed runtime events; they do not prove execution, credential access, anti-analysis, download, persistence, or exfiltration.</div>");
         html.AppendLine("<table><tbody>");
         Row(html, "File name", report.Sample.FileName);
         AppendTechnicalPathRow(html, "Full path", report.Sample.FullPath);
@@ -1896,7 +1908,6 @@ html[lang="en"] .localized-evidence-field{display:none}
             .ToList();
 
         html.AppendLine("<h3>Static PE resource story</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Resource payload triage.</strong> Structured <code>static.pe.resource</code> evidence highlights resourceRole, embedded-PE markers, entropy, and size so payload candidates are visible before opening raw static events.</div>");
         html.AppendLine("<div class=\"overview-strip static-resource-overview\">");
         AppendOverviewItem(
             html,
@@ -2044,7 +2055,6 @@ html[lang="en"] .localized-evidence-field{display:none}
     private static void AppendStaticEvidenceGroups(StringBuilder html, StaticAnalysisResult staticAnalysis)
     {
         html.AppendLine("<h3>Static evidence map</h3>");
-        html.AppendLine("<div class=\"section-note\">Imports, exports, resources, TLS, and indicators are grouped from <code>StaticAnalysisResult.Tags</code>, <code>Urls</code>, and prefixed <code>InterestingStrings</code> evidence so report JSON stays backward-compatible.</div>");
 
         html.AppendLine("<div class=\"columns\">");
         html.AppendLine("<div>");
@@ -4009,7 +4019,6 @@ html[lang="en"] .localized-evidence-field{display:none}
     private static void AppendArtifactLinks(StringBuilder html, AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         html.AppendLine("<section id=\"artifacts\" class=\"card\"><h2>Artifact links</h2>");
-        html.AppendLine("<div class=\"section-note\"><strong>Artifact evidence cards.</strong> Collection status, safe download selectors, duplicate grouping, and rejection diagnostics are summarized before the dense artifact table. Safe report-relative links can open or download; absolute host/guest paths remain copy-only evidence.</div>");
         AppendArtifactCollectionStatusCards(html, report, artifacts);
         AppendArtifactEvidenceMatrixNarrative(html, report, artifacts);
         AppendArtifactIndexStory(html, report, artifacts);
@@ -4075,7 +4084,6 @@ html[lang="en"] .localized-evidence-field{display:none}
             ]);
 
         html.AppendLine("<h3>Artifact evidence matrix narrative</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Artifact evidence matrix narrative.</strong> Matrix lanes summarize dropped files, screenshots, memory dumps, and packet captures before the artifact table. Counts come from normalized evidence-matrix rows when present and fall back to the artifact index, so missing lanes stay explicit without expanding raw rows.</div>");
         html.AppendLine($"<div class=\"overview-strip artifact-matrix-narrative copyable\" data-copy=\"{A(copy)}\">");
         AppendOverviewItem(
             html,
@@ -4155,7 +4163,6 @@ html[lang="en"] .localized-evidence-field{display:none}
             ]);
 
         html.AppendLine("<h3>Artifact index evidence</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Host artifact index.</strong> Download buttons use safe report-relative selectors only; duplicate grouping and rejection diagnostics explain why guest manifest references were accepted, deduplicated, or rejected.</div>");
         foreach (var mismatch in manifestMismatches)
         {
             html.AppendLine($"<div class=\"section-note failure-note artifact-manifest-integrity\"><strong>Artifact manifest job-id mismatch:</strong> {E(mismatch.Detail)} Original manifest evidence is preserved and was not rewritten.</div>");
@@ -4188,7 +4195,20 @@ html[lang="en"] .localized-evidence-field{display:none}
                 : $"Top-level guest artifact manifest jobId is all-zero while report/runbook JobId is {report.JobId:D}; original evidence is preserved.",
             manifestMismatches.Count == 0 ? "risk-low" : "risk-medium");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(VisibleEvidenceText(copy))}</pre></div>");
+        html.AppendLine($"<div class=\"evidence-expansion-card artifact-index-detail\" data-copy=\"{A(copy)}\">");
+        html.AppendLine("<table class=\"artifact-index-table\"><thead><tr><th>Artifact</th><th>Type</th><th>Selector</th><th>groupCount</th><th>Status</th></tr></thead><tbody>");
+        foreach (var artifact in artifacts.Take(12))
+        {
+            var selector = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadSelector"), artifact.RelativePath, ArtifactHref(artifact), "-");
+            var groupCount = FirstNonEmpty(MetadataValue(artifact.Metadata, "duplicateGroupCount"), "-");
+            var status = string.Join(" / ", new[]
+            {
+                IsDuplicateArtifactDescriptor(artifact) ? "duplicate" : string.Empty,
+                HasArtifactRejectionDiagnostics(artifact) ? "rejected" : string.Empty
+            }.Where(value => !string.IsNullOrWhiteSpace(value)));
+            html.AppendLine($"<tr><td><strong>{E(ArtifactDisplayName(artifact))}</strong></td><td>{E(artifact.Kind.ToString())}</td><td><code>{E(VisibleEvidenceText(selector))}</code></td><td>{E(groupCount)}</td><td>{E(string.IsNullOrWhiteSpace(status) ? "-" : status)}</td></tr>");
+        }
+        html.AppendLine("</tbody></table></div>");
     }
 
     private static IReadOnlyList<ArtifactManifestJobIdMismatch> FindArtifactManifestJobIdMismatches(
@@ -6060,7 +6080,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         html.AppendLine("<div class=\"event-table-wrap\">");
-        html.AppendLine("<table class=\"event-table\"><thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Process</th><th>Path / Target</th><th>Data</th></tr></thead><tbody>");
+        html.AppendLine("<table class=\"event-table\"><thead><tr><th>Time</th><th>Type</th><th>Process</th><th>Path / Target</th><th>Data</th></tr></thead><tbody>");
         foreach (var evt in inlineEvents)
         {
             var plain = EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300);
@@ -6069,10 +6089,9 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine("<tr>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.EventType)}\">{E(evt.EventType)}</td>");
-            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Source)}\">{E(evt.Source)}</td>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A((evt.ProcessName ?? "-") + " (" + (evt.ProcessId?.ToString() ?? "-") + ")")}\">{E(evt.ProcessName ?? "-")} ({E(evt.ProcessId?.ToString() ?? "-")})</td>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(VisibleEvidenceText(ExtractReadableEventTarget(evt)))}\">{RenderEventPathAndCommand(evt, relatedArtifacts)}</td>");
-            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy event", visiblePlain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>{RenderEventEvidenceDetails(evt)}{RenderRelatedArtifacts(relatedArtifacts)}</td>");
+            html.AppendLine($"<td class=\"evidence\"><div class=\"event-evidence-cell\">{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyButton("Copy event", visiblePlain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>{RenderRelatedArtifacts(relatedArtifacts)}</div></td>");
             html.AppendLine("</tr>");
         }
 
@@ -10611,7 +10630,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         if (normalized.Contains("error", StringComparison.Ordinal) || normalized.Contains("exception", StringComparison.Ordinal)) return "Error detail";
         if (normalized.Contains("stack", StringComparison.Ordinal) || normalized.Contains("trace", StringComparison.Ordinal)) return "Call stack";
         if (normalized.Contains("response", StringComparison.Ordinal) || normalized.Contains("body", StringComparison.Ordinal)) return "Response detail";
-        if (normalized.Contains("payload", StringComparison.Ordinal) || normalized.Contains("content", StringComparison.Ordinal)) return "Payload detail";
+        if (normalized.Contains("payload", StringComparison.Ordinal) || normalized.Contains("content", StringComparison.Ordinal)) return "Evidence";
         if (normalized.Contains("data", StringComparison.Ordinal) || normalized.Contains("value", StringComparison.Ordinal)) return "Additional value";
         // Keep unknown technical fields inline without repeating a generic
         // prompt before every value; the raw key remains in the copy action.
@@ -14398,9 +14417,14 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Where(artifact => !string.IsNullOrWhiteSpace(ArtifactHref(artifact)))
             .Take(4)
             .ToList();
-        foreach (var artifact in links)
+        if (links.Count > 0)
         {
-            html.Append($"<br>{RenderArtifactActionButtons(artifact, inline: true)}");
+            html.Append("<span class=\"event-related-artifacts\">");
+            foreach (var artifact in links)
+            {
+                html.Append(RenderArtifactActionButtons(artifact, inline: true));
+            }
+            html.Append("</span>");
         }
 
         if (!string.IsNullOrWhiteSpace(evt.CommandLine))
