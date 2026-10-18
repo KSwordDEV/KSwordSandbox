@@ -543,6 +543,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .copy-icon{align-items:center;display:inline-flex;height:26px;justify-content:center;padding:3px;width:26px}.modern-sandbox-report .copy-icon svg{fill:none;height:16px;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8;width:16px}.sr-only{height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;width:1px;clip:rect(0,0,0,0);white-space:nowrap}
 .modern-sandbox-report .badge,.modern-sandbox-report .chip{border:0;border-radius:0}
 .modern-sandbox-report .section-note{display:block}
+.modern-sandbox-report .section-note:not(.failure-note){display:none!important}
 .modern-sandbox-report .section-note.failure-note{background:#fff5e5;border-left:0;display:block;margin:10px 0;padding:10px 12px}
 .modern-sandbox-report .focus-coverage-warning{background:#fff5e5;border-left:4px solid #d97706;color:#7c2d12;display:block;margin-top:12px;padding:10px 12px}
 .modern-sandbox-report .focus-coverage-warning strong{display:block;color:#9a3412;margin-bottom:3px}
@@ -864,53 +865,35 @@ html[lang="en"] .localized-evidence-field{display:none}
         var collectionFailureRows = Math.Max(0, report.CollectionHealth.FailureRows);
         var collectionLossRows = Math.Max(0, report.CollectionHealth.LossRows);
         var artifactCount = artifacts.Count;
-        var topFinding = primaryFindings.FirstOrDefault();
         var verdict = DetermineVerdict(report);
-        var focusCopy = string.Join(
-            Environment.NewLine,
-            [
-                "Analyst focus",
-                $"verdict={verdict.Label}",
-                $"primaryFindings={primaryFindings.Count}",
-                $"sampleBehaviorEvents={sampleEvents}",
-                $"failureEvents={failures}",
-                $"sampleExitOutcomes={sampleExitOutcomes}",
-            $"collectionFailureRows={collectionFailureRows}",
-            $"collectionLossRows={collectionLossRows}",
-            $"driverLostCount={report.CollectionHealth.DriverLostCount}",
-            $"etwEventsLost={report.CollectionHealth.EtwEventsLost}",
-                $"artifacts={artifactCount}",
-                $"next={topFinding?.Title ?? "Review static evidence and runtime events"}"
-            ]);
 
         html.AppendLine("<section id=\"focus\" class=\"card focus-panel\">");
         html.AppendLine("<div class=\"focus-heading\"><div><p class=\"eyebrow\">Start here</p><h2>Analyst focus</h2><p class=\"section-lead\">Read the verdict and high-signal evidence first.</p></div>");
         html.AppendLine($"<div class=\"focus-verdict badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</div></div>");
         html.AppendLine("<div class=\"focus-grid\">");
-        FocusMetric(html, "Primary findings", primaryFindings.Count.ToString(CultureInfo.InvariantCulture), primaryFindings.Count > 0 ? "risk-medium" : "risk-low", "Rules that contribute to the sample verdict.");
-        FocusMetric(html, "Sample behavior", sampleEvents.ToString(CultureInfo.InvariantCulture), sampleEvents > 0 ? "risk-medium" : "risk-info", "Events eligible for the behavior story.");
+        FocusMetric(html, "Primary findings", primaryFindings.Count.ToString(CultureInfo.InvariantCulture), primaryFindings.Count > 0 ? "risk-medium" : "risk-low");
+        FocusMetric(html, "Sample behavior", sampleEvents.ToString(CultureInfo.InvariantCulture), sampleEvents > 0 ? "risk-medium" : "risk-info");
         var runtimeFailureCount = failures + sampleExitOutcomes + collectionFailureRows + collectionLossRows;
-        FocusMetric(html, "Runtime / collection failures", runtimeFailureCount.ToString(CultureInfo.InvariantCulture), runtimeFailureCount > 0 || report.Status == AnalysisStatus.Failed ? "risk-high" : "risk-low", "Sample execution, environment, and evidence failures.");
-        FocusMetric(html, "Collection failures", collectionFailureRows.ToString(CultureInfo.InvariantCulture), collectionFailureRows > 0 ? "risk-high" : "risk-low", "Probe and collector failure rows from collection health.");
-        FocusMetric(html, "Collection loss", collectionLossRows.ToString(CultureInfo.InvariantCulture), collectionLossRows > 0 ? "risk-high" : "risk-low", "Rows or counters that show telemetry loss or backpressure.");
-        FocusMetric(html, "Sample exit outcomes", sampleExitOutcomes.ToString(CultureInfo.InvariantCulture), sampleExitOutcomes > 0 ? "risk-info" : "risk-low", "Non-zero sample exits are execution outcomes, not maliciousness verdicts.");
-        FocusMetric(html, "Artifacts", artifactCount.ToString(CultureInfo.InvariantCulture), artifactCount > 0 ? "risk-low" : "risk-info", "Indexed files, screenshots, dumps, and packet captures.");
+        FocusMetric(html, "Runtime / collection failures", runtimeFailureCount.ToString(CultureInfo.InvariantCulture), runtimeFailureCount > 0 || report.Status == AnalysisStatus.Failed ? "risk-high" : "risk-low");
+        FocusMetric(html, "Collection failures", collectionFailureRows.ToString(CultureInfo.InvariantCulture), collectionFailureRows > 0 ? "risk-high" : "risk-low");
+        FocusMetric(html, "Collection loss", collectionLossRows.ToString(CultureInfo.InvariantCulture), collectionLossRows > 0 ? "risk-high" : "risk-low");
+        FocusMetric(html, "Sample exit outcomes", sampleExitOutcomes.ToString(CultureInfo.InvariantCulture), sampleExitOutcomes > 0 ? "risk-info" : "risk-low");
+        FocusMetric(html, "Artifacts", artifactCount.ToString(CultureInfo.InvariantCulture), artifactCount > 0 ? "risk-low" : "risk-info");
         html.AppendLine("</div>");
         if (HasRuntimeCoverageGap(report))
         {
             html.AppendLine("<div class=\"focus-coverage-warning\"><strong>Collection coverage warning</strong><span>Runtime evidence coverage is incomplete; review Collection coverage gaps before treating a quiet result as evidence that the sample had no behavior.</span></div>");
         }
         html.AppendLine("<div class=\"focus-next\">");
-        html.AppendLine($"<div class=\"focus-next-copy copyable\" data-copy=\"{A(focusCopy)}\"><strong>Next review</strong><br><span>{E(topFinding?.Title ?? "Review static evidence and runtime events")}</span></div>");
+        // Next-review prose is intentionally omitted; action links remain below.
         html.AppendLine($"<a class=\"focus-action\" href=\"#event-explorer\">Open filtered event table</a><a class=\"focus-action secondary\" href=\"#failure\">Open failure log</a>");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy analyst focus", focusCopy)}</div>");
         html.AppendLine("</section>");
     }
 
-    private static void FocusMetric(StringBuilder html, string label, string value, string css, string detail)
+    private static void FocusMetric(StringBuilder html, string label, string value, string css)
     {
-        html.AppendLine($"<div class=\"focus-metric\"><span>{E(label)}</span><strong class=\"{E(css)}\">{E(value)}</strong><small>{E(detail)}</small></div>");
+        html.AppendLine($"<div class=\"focus-metric\"><span>{E(label)}</span><strong class=\"{E(css)}\">{E(value)}</strong></div>");
     }
 
     /// <summary>
@@ -1502,8 +1485,6 @@ html[lang="en"] .localized-evidence-field{display:none}
                 [
                     card.Title,
                     $"value={card.Value}",
-                    $"whatHappened={card.WhatHappened}",
-                    $"whyReview={card.WhySuspicious}",
                     "evidence:",
                     evidenceText
                 ]);
@@ -1511,8 +1492,6 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine($"<article class=\"evidence-story-lane copyable\" data-copy=\"{A(copy)}\">");
             html.AppendLine($"<h3>{E(card.Title)}</h3>");
             html.AppendLine($"<span class=\"overview-value {E(card.Css)}\">{E(card.Value)}</span>");
-            html.AppendLine($"<p><strong>What happened:</strong> {E(card.WhatHappened)}</p>");
-            html.AppendLine($"<p><strong>Why review:</strong> {E(card.WhySuspicious)}</p>");
             if (card.EvidenceLines.Count == 0)
             {
                 Empty(html, "No sample-attributed evidence for this lane.");
@@ -4052,12 +4031,11 @@ html[lang="en"] .localized-evidence-field{display:none}
             html.AppendLine($"<td>{E(FormatArtifactSize(artifact.SizeBytes))}</td>");
             html.AppendLine($"<td><code>{E(ArtifactSha256(artifact))}</code></td>");
             html.AppendLine($"<td>{E(string.IsNullOrWhiteSpace(artifact.MimeType) ? "-" : artifact.MimeType)}</td>");
-            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}<div class=\"evidence-expansion-card\"><pre class=\"copyable\" data-copy=\"{A(plain)}\">{E(VisibleEvidenceText(plain))}</pre></div>{RenderArtifactPreview(artifact)}</td>");
+            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}{RenderArtifactPreview(artifact)}</td>");
             html.AppendLine("</tr>");
         }
 
         html.AppendLine("</tbody></table>");
-        html.AppendLine("<div class=\"copy-hint\">Safe links are relative to the report artifact root; unsafe or guest-local paths are shown as copyable text only.</div>");
         html.AppendLine("</section>");
     }
 
@@ -7542,10 +7520,9 @@ html[lang="en"] .localized-evidence-field{display:none}
             Environment.NewLine,
             [
                 title,
-                $"value={value}",
-                $"detail={detail}"
+                $"value={value}"
             ]);
-        html.AppendLine($"<article class=\"overview-item copyable\" data-copy=\"{A(copyText)}\"><h3>{E(title)}</h3><span class=\"overview-value {E(css)}\">{E(value)}</span><p>{E(detail)}</p></article>");
+        html.AppendLine($"<article class=\"overview-item copyable\" data-copy=\"{A(copyText)}\"><h3>{E(title)}</h3><span class=\"overview-value {E(css)}\">{E(value)}</span></article>");
     }
 
     /// <summary>
@@ -14987,12 +14964,23 @@ html[lang="en"] .localized-evidence-field{display:none}
 
     private static string RenderArtifactIndexEvidence(ArtifactDescriptor artifact)
     {
-        var copy = ArtifactIndexEvidenceLine(artifact);
         var html = new StringBuilder();
-        // Selector/import/rejection fields are troubleshooting metadata. Keep
-        // them in one collapsed block so the row defaults to a readable name,
-        // hash, and safe action.
-        html.Append($"<details open class=\"flat-details artifact-index-fields\"><summary>Download selector / duplicate / rejection diagnostics</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        var status = new List<string>();
+        if (IsDuplicateArtifactDescriptor(artifact))
+        {
+            status.Add("duplicate");
+        }
+
+        if (HasArtifactRejectionDiagnostics(artifact))
+        {
+            status.Add("rejected");
+        }
+
+        if (status.Count > 0)
+        {
+            html.Append($"<span class=\"artifact-status\">{E(string.Join(" / ", status))}</span>");
+        }
+
         return html.ToString();
     }
 
