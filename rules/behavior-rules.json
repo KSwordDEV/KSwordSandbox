@@ -3243,6 +3243,7 @@
       ],
       "dataContains": {
         "keyPath": [
+          "CurrentVersion\\Run",
           "CurrentVersion\\Run\\",
           "CurrentVersion\\RunOnce\\",
           "CurrentVersion\\RunOnceEx\\",
@@ -3251,6 +3252,7 @@
           "StartupApproved\\Run32"
         ],
         "path": [
+          "CurrentVersion\\Run",
           "CurrentVersion\\Run\\",
           "CurrentVersion\\RunOnce\\",
           "CurrentVersion\\RunOnceEx\\",
