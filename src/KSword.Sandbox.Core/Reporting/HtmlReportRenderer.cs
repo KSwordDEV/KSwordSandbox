@@ -248,6 +248,12 @@ public sealed class HtmlReportRenderer
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
+    // Artifact lane rows carry a file count ("1 file", "5 files").
+    private static readonly Regex ChineseVisibleFileCountRegex = new(
+        ">(?<count>\\d+) files?<",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
     // Event cards, behavior chips, and count badges carry raw machine text as
     // visible content while data-copy keeps the payload. These spans are the
     // only place where the value is operator chrome rather than raw evidence.
@@ -852,23 +858,29 @@ details[open]>summary:before{content:'–'}
 
 /* ---------- panels ---------- */
 .evidence-summary-grid,.relation-grid,.overview-strip,.ioc-grid,.graph-map{align-items:start;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin:12px 0}
-/* relation cards carry uneven disclosures, so they pack like masonry too */
-.relation-grid{column-gap:10px;columns:3;display:block}
-.relation-grid>.relation-card{break-inside:avoid;display:block;margin:0 0 10px;page-break-inside:avoid}
-@media (max-width:1280px){.relation-grid{columns:2}}
-@media (max-width:820px){.relation-grid{columns:1}}
+.relation-grid{align-items:stretch;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
 .evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane,.ioc-card,.graph-node{background:var(--band);border-left:2px solid var(--primary);max-height:none;min-width:0;overflow:visible;overflow-wrap:anywhere;padding:13px 15px;position:relative}
 .graph-node strong{display:block;font-size:12.5px;line-height:1.5;margin-bottom:4px;overflow-wrap:anywhere}
 .graph-node .node-flow{gap:2px 12px}
 .evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3,.ioc-card h3{font-size:13px;font-weight:600;line-height:1.5;margin:0 0 6px}
 .artifact-status-grid{grid-template-columns:repeat(auto-fit,minmax(420px,1fr))}
-/* Boards pack like masonry instead of a grid. Lanes and status cards have very
-   different heights, and a grid row stretched every short card down to the
-   tallest card beside it, leaving dead bands under each row. */
-.evidence-story-board,.artifact-status-grid{column-gap:10px;columns:3;display:block;margin:12px 0}
-.evidence-story-board>*,.artifact-status-grid>*{break-inside:avoid;display:block;margin:0 0 10px;page-break-inside:avoid}
-@media (max-width:1280px){.evidence-story-board,.artifact-status-grid{columns:2}}
-@media (max-width:820px){.evidence-story-board,.artifact-status-grid{columns:1}}
+/* Boards stay on a grid so every row starts and ends on the same line. A
+   masonry flow packed the section tighter, but the staggered card tops read as
+   ragged. Cards now fill a common row height and their tail (fold link or
+   evidence disclosure) is pinned to the bottom edge, so a row closes flat. */
+.evidence-story-board,.artifact-status-grid{align-items:stretch;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));margin:12px 0}
+.evidence-story-board>.evidence-story-lane,.artifact-status-grid>.evidence-summary-card,.relation-grid>.relation-card{display:flex;flex-direction:column}
+/* A short tail row never leaves a hole: one leftover card takes the full row,
+   two leftovers share it. */
+@media (min-width:1200px){
+  .evidence-story-board>:last-child:nth-child(3n+1),.artifact-status-grid>:last-child:nth-child(3n+1){grid-column:span 3}
+  .evidence-story-board>:last-child:nth-child(3n+2),.artifact-status-grid>:last-child:nth-child(3n+2){grid-column:span 2}
+}
+.evidence-story-board>.evidence-story-lane>.evidence-expansion-card{display:flex;flex:1 1 auto;flex-direction:column;min-height:0}
+.evidence-story-lane>.toolbar,.evidence-story-lane .story-more,.relation-card>.relation-evidence,.artifact-status-grid .relation-evidence{margin-top:auto}
+/* One lead paragraph is enough context; clamping keeps a chatty lane from
+   setting the height for every card in its row. */
+.story-lead{-webkit-box-orient:vertical;-webkit-line-clamp:3;display:-webkit-box;line-clamp:3;overflow:hidden}
 .evidence-story-lane h3{display:block}
 .evidence-story-lane h3:after{display:none}
 .summary-value,.overview-value{color:var(--primary-ink);display:block;font-size:22px;font-variant-numeric:tabular-nums;font-weight:600;letter-spacing:-.01em;line-height:1.2}
@@ -1056,6 +1068,8 @@ details[open]>summary:before{content:'–'}
   .card,.event-table-wrap,.raw-events-panel,.process-tree,.relation-card,.evidence-story-lane,.evidence-summary-card,.raw-event-page,.finding-card,.artifact-card{break-inside:avoid;max-height:none!important;overflow:visible!important}
   .process-tree-path{white-space:normal}
   .raw-events-shell>summary:after,.raw-event-page>summary:after,.event-evidence-fields>summary:after,.technical-field>summary:after,.raw-technical-fields>summary:after{color:#64748b;content:' (folded in screen view; expand in browser for full evidence)';font-weight:400}
+  /* Screen-only clamps must not truncate printed evidence. */
+  .story-lead{-webkit-line-clamp:none;display:block;overflow:visible}
 }
 """);
         html.AppendLine("</style></head>");
@@ -12004,6 +12018,7 @@ details[open]>summary:before{content:'–'}
 
         html = ChineseVisibleEventCountRegex.Replace(html, " 个事件");
         html = ChineseVisibleExampleCountRegex.Replace(html, ">示例 ${count}<");
+        html = ChineseVisibleFileCountRegex.Replace(html, ">${count} 个文件<");
         // A few compact cards combine translated labels with interpolated
         // values, so the general dictionary cannot match the whole sentence.
         // Run this while raw evidence is still protected; machine-readable
@@ -12020,6 +12035,7 @@ details[open]>summary:before{content:'–'}
         // evidence text intact while localizing badges such as "21 events".
         html = ChineseVisibleEventCountRegex.Replace(html, " 个事件");
         html = ChineseVisibleExampleCountRegex.Replace(html, ">示例 ${count}<");
+        html = ChineseVisibleFileCountRegex.Replace(html, ">${count} 个文件<");
         foreach (var (english, chinese) in ChineseCssTranslations)
         {
             html = html.Replace(english, chinese, StringComparison.Ordinal);
@@ -12718,6 +12734,9 @@ details[open]>summary:before{content:'–'}
             ("Collector evidence (path folded)", "采集器路径"),
             ("Host path hidden", "主机路径已隐藏"),
             ("Additional detail", "证据"),
+            // Lane-health counters carry their unit inside a <b> value pair.
+            (">artifacts<b>", ">证据文件<b>"),
+            (">events<b>", ">事件<b>"),
             (">Raw<", ">原始<"),
             (">Report<", ">报告<"),
             (">Omitted<", ">省略<"),
