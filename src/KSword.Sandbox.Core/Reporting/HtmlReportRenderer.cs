@@ -445,7 +445,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .empty{background:#fff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);padding:14px}
 .copy-btn{background:#fff;border:1px solid rgba(67,160,255,.55);border-radius:2px;color:#075985;cursor:pointer;font-size:12px;font-weight:700;margin:2px 6px 2px 0;padding:4px 8px}.copyable{cursor:copy}.copy-hint{color:var(--muted);font-size:12px;margin-top:8px}.no-js-fallback{border-color:#b9ddff}.no-js-fallback:before{background:#38bdf8}.fold-label{background:#f8fbff;border:1px solid #cfe6fb;color:#075985;display:inline-block;font-size:12px;font-weight:800;margin:2px 6px 2px 0;padding:3px 7px}
 .toolbar,.inline-actions{align-items:center;display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;margin:0 0 4px}.event-table-wrap{border:1px solid var(--line);border-radius:2px;margin-top:14px;max-height:var(--subsection-max);overflow:auto}.event-table-wrap table{margin-top:0}.event-table-wrap th,.raw-events-panel th,.raw-event-page th{position:sticky;top:0;z-index:1}.bounded-list{max-height:var(--subsection-max);overflow:auto}
-.focus-panel{background:linear-gradient(180deg,#fff,#f8fbff)}.focus-heading{align-items:flex-start;display:flex;gap:16px;justify-content:space-between}.focus-heading h2{margin-bottom:6px}.eyebrow{color:#075985;font-size:11px;font-weight:900;letter-spacing:.12em;margin:0 0 4px;text-transform:uppercase}.section-lead{color:var(--muted);font-size:14px;line-height:1.5;margin:0;max-width:72ch}.focus-verdict{font-size:13px;white-space:nowrap}.focus-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-top:16px}.focus-metric{background:#fff;border:1px solid var(--line);border-left:3px solid var(--primary);display:grid;gap:5px;padding:12px}.focus-metric>span{color:#475569;font-size:12px;font-weight:800}.focus-metric>strong{font-size:25px;line-height:1}.focus-metric>small{color:var(--muted);font-size:12px;line-height:1.35}.focus-next{align-items:stretch;display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.focus-next-copy{background:#eef7ff;border:1px solid #cfe6fb;border-left:4px solid var(--primary);display:grid;flex:1 1 360px;gap:3px;padding:10px 12px}.focus-next-copy strong{color:#075985;font-size:12px}.focus-next-copy span{font-weight:900}.focus-next-copy small{color:var(--muted);font-size:12px;line-height:1.4}.focus-action{align-items:center;background:var(--primary);border:1px solid var(--primary);border-radius:2px;color:#fff;display:inline-flex;font-size:12px;font-weight:900;justify-content:center;padding:7px 10px;text-decoration:none;white-space:nowrap}.focus-action.secondary{background:#fff;border-color:#bfdbfe;color:#075985}.focus-action:hover{outline:2px solid rgba(67,160,255,.18)}.event-explorer-toolbar{align-items:end;background:#f8fbff;border:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding:10px}.event-explorer-toolbar label{color:#475569;display:grid;font-size:11px;font-weight:800;gap:4px}.event-explorer-toolbar input,.event-explorer-toolbar select{background:#fff;border:1px solid #bfdbfe;border-radius:2px;color:var(--ink);font:inherit;font-size:12px;min-height:32px;min-width:132px;padding:5px 7px}.event-explorer-toolbar input:focus,.event-explorer-toolbar select:focus{border-color:var(--primary);outline:2px solid rgba(67,160,255,.18)}.event-explorer-toolbar label:first-child{flex:1 1 220px}.event-explorer-toolbar label:first-child input{min-width:220px}.event-explorer-status{color:var(--muted);font-size:12px;margin-top:8px}.event-explorer-wrap{max-height:60vh}.event-explorer-table{min-width:760px;table-layout:fixed}.event-explorer-table th{position:sticky;top:0}.event-explorer-table td{font-size:12px}.event-explorer-table td:nth-child(1){white-space:nowrap}.event-explorer-table td:nth-child(2){min-width:0}.event-explorer-table td:nth-child(7){min-width:260px;width:auto}.event-explorer-row[data-hidden=true],.event-explorer-row[data-event-overflow=true]{display:none}.event-explorer-details summary{cursor:pointer;font-weight:800}.event-explorer-detail{background:#f8fbff;border-left:2px solid #cfe6fb;margin-top:6px;padding:7px 8px}.event-explorer-detail .event-evidence-fields{max-height:22vh;overflow:auto}.event-explorer-empty{color:var(--muted);display:none;font-size:13px;padding:12px}.event-explorer-table tbody:empty+.event-explorer-empty{display:block}
+.focus-panel{background:linear-gradient(180deg,#fff,#f8fbff)}.focus-heading{align-items:flex-start;display:flex;gap:16px;justify-content:space-between}.focus-heading h2{margin-bottom:6px}.eyebrow{color:#075985;font-size:11px;font-weight:900;letter-spacing:.12em;margin:0 0 4px;text-transform:uppercase}.section-lead{color:var(--muted);font-size:14px;line-height:1.5;margin:0;max-width:72ch}.focus-verdict{font-size:13px;white-space:nowrap}.focus-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-top:16px}.focus-metric{background:#fff;border:1px solid var(--line);border-left:3px solid var(--primary);display:grid;gap:5px;padding:12px}.focus-metric>span{color:#475569;font-size:12px;font-weight:800}.focus-metric>strong{font-size:25px;line-height:1}.focus-metric>small{color:var(--muted);font-size:12px;line-height:1.35}.focus-next{align-items:stretch;display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.focus-next-copy{background:#eef7ff;border:1px solid #cfe6fb;border-left:4px solid var(--primary);display:grid;flex:1 1 360px;gap:3px;padding:10px 12px}.focus-next-copy strong{color:#075985;font-size:12px}.focus-next-copy span{font-weight:900}.focus-next-copy small{color:var(--muted);font-size:12px;line-height:1.4}.focus-action{align-items:center;background:var(--primary);border:1px solid var(--primary);border-radius:2px;color:#fff;display:inline-flex;font-size:12px;font-weight:900;justify-content:center;padding:7px 10px;text-decoration:none;white-space:nowrap}.focus-action.secondary{background:#fff;border-color:#bfdbfe;color:#075985}.focus-action:hover{outline:2px solid rgba(67,160,255,.18)}.event-explorer-toolbar{align-items:end;background:#f8fbff;border:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding:10px}.event-explorer-toolbar label{color:#475569;display:grid;font-size:11px;font-weight:800;gap:4px}.event-explorer-toolbar input,.event-explorer-toolbar select{background:#fff;border:1px solid #bfdbfe;border-radius:2px;color:var(--ink);font:inherit;font-size:12px;min-height:32px;min-width:132px;padding:5px 7px}.event-explorer-toolbar input:focus,.event-explorer-toolbar select:focus{border-color:var(--primary);outline:2px solid rgba(67,160,255,.18)}.event-explorer-toolbar label:first-child{flex:1 1 220px}.event-explorer-toolbar label:first-child input{min-width:220px}.event-explorer-status{color:var(--muted);font-size:12px;margin-top:8px}.event-explorer-wrap{max-height:60vh}.event-explorer-table{min-width:0;width:100%;table-layout:fixed}.event-explorer-table th{position:sticky;top:0}.event-explorer-table td{font-size:12px}.event-explorer-table td:nth-child(1){white-space:nowrap}.event-explorer-table td:nth-child(2){min-width:0}.event-explorer-table td:nth-child(7){min-width:0;width:42%}.event-explorer-row[data-hidden=true],.event-explorer-row[data-event-overflow=true]{display:none}.event-explorer-details summary{cursor:pointer;font-weight:800}.event-explorer-detail{background:#f8fbff;border-left:2px solid #cfe6fb;margin-top:6px;padding:7px 8px}.event-explorer-detail .event-evidence-fields{max-height:22vh;overflow:auto}.event-explorer-empty{color:var(--muted);display:none;font-size:13px;padding:12px}.event-explorer-table tbody:empty+.event-explorer-empty{display:block}
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline-groups{display:grid;gap:10px;margin-top:14px}.timeline-group{background:#fff;border:1px solid var(--line);border-radius:2px;overflow:hidden}.timeline-group>summary{align-items:flex-start;cursor:pointer;display:flex;gap:10px;justify-content:space-between;list-style:none;padding:12px 14px}.timeline-group>summary::-webkit-details-marker{display:none}.timeline-group>summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.timeline-group[open]>summary:before{content:'▼'}.timeline-group small{color:var(--muted);display:block;line-height:1.4;margin-top:3px}.timeline{border-left:3px solid rgba(67,160,255,.45);margin:0 14px 14px 20px;padding:12px 0 0 18px}.timeline-item{background:#fff;border:1px solid var(--line);border-radius:2px;margin:0 0 10px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:2px solid var(--primary-soft);border-radius:2px;content:'';height:10px;left:-25px;position:absolute;top:13px;width:10px}.timeline-overflow{background:#f1f7ff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);margin:0 0 12px;padding:9px 11px}
 .graph-map{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.behavior-chain{background:#fff;border:1px solid var(--line);border-radius:2px;counter-reset:chain;margin:12px 0;max-height:var(--subsection-max);overflow:auto;padding:8px 10px}.behavior-chain li{align-items:flex-start;background:#fff;border-bottom:1px solid #dbeafe;border-radius:0;counter-increment:chain;display:grid;gap:8px;grid-template-columns:auto 1fr;margin:0;padding:10px}.behavior-chain li:last-child{border-bottom:0}.behavior-chain li:before{align-items:center;background:var(--primary);border-radius:2px;color:white;content:counter(chain);display:inline-flex;font-weight:900;height:24px;justify-content:center;width:24px}.behavior-chain details{grid-column:2}.behavior-chain pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#fff;border:1px solid var(--line);border-radius:2px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
@@ -469,7 +469,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .modern-sandbox-report .event-explorer-table td:nth-child(4){width:92px}
 .modern-sandbox-report .event-explorer-table td:nth-child(5){width:80px}
 .modern-sandbox-report .event-explorer-table td:nth-child(6){width:102px}
-.modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:260px;width:auto}
+.modern-sandbox-report .event-explorer-table td:nth-child(7){min-width:0;width:42%}
 .modern-sandbox-report .event-explorer-details{display:block;min-width:0;width:100%}
 .modern-sandbox-report .event-explorer-details summary{background:#f4f9ff;border-left:3px solid #93c5fd;padding:7px 9px}
 .modern-sandbox-report .event-explorer-detail{background:#fff;border-left:3px solid #43A0FF;margin-top:4px;min-height:0;max-height:42vh;overflow:auto;padding:8px 10px}
@@ -1677,7 +1677,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         string note,
         IReadOnlyCollection<BehaviorFinding> findings)
     {
-        html.AppendLine($"<details class=\"relationship-details\"><summary>{E(title)} ({E(findings.Count.ToString())})</summary>");
+        html.AppendLine($"<details open class=\"relationship-details\"><summary>{E(title)} ({E(findings.Count.ToString())})</summary>");
         html.AppendLine($"<p class=\"muted\">{E(note)}</p>");
         if (findings.Count == 0)
         {
@@ -2560,7 +2560,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             reasonCounts.Count > 0 ? "risk-info" : "risk-low");
         html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy behavior routing", copy)}</div>");
         html.AppendLine("</div>");
-        html.AppendLine($"<details class=\"relationship-details\"><summary>Behavior routing evidence examples</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        html.AppendLine($"<details open class=\"relationship-details\"><summary>Behavior routing evidence examples</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
     }
 
     private static IReadOnlyList<(string Label, int Count)> BuildBehaviorExclusionReasonCounts(IEnumerable<SandboxEvent> events)
@@ -2791,7 +2791,7 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
 
         html.AppendLine("</div>");
-        html.AppendLine($"<details class=\"relationship-details\"><summary>Stable relationship lane copy map</summary><div class=\"toolbar\">{CopyButton("Copy stable relationship lanes", copy)}</div><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        html.AppendLine($"<details open class=\"relationship-details\"><summary>Stable relationship lane copy map</summary><div class=\"toolbar\">{CopyButton("Copy stable relationship lanes", copy)}</div><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
     }
 
     private static bool BehaviorGraphEdgeLooksLikeCollectorSelfNoise(BehaviorGraphEdge edge)
@@ -5160,7 +5160,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Select(evt => $"{evt.EventType} · {evt.ProcessName ?? "-"} ({evt.ProcessId?.ToString() ?? "-"}) · {evt.Path ?? "-"}")
             .ToList();
         html.AppendLine("<div class=\"self-noise-note\"><strong>Collector self-noise hidden from behavior sections.</strong> Driver rows attributed to KSword.Sandbox.R0Collector.exe are collection-side noise, not sample behavior. They remain available in raw events/report.json.</div>");
-        html.AppendLine("<details class=\"relationship-details\"><summary>Collector self-noise examples (" + E(selfNoiseEvents.Count.ToString()) + ")</summary><ul class=\"mono-list\">");
+        html.AppendLine("<details open class=\"relationship-details\"><summary>Collector self-noise examples (" + E(selfNoiseEvents.Count.ToString()) + ")</summary><ul class=\"mono-list\">");
         foreach (var line in sample)
         {
             html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(line)}</code></li>");
@@ -5207,7 +5207,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             .Take(R0HealthEvidenceInlineLimit)
             .ToList();
         var hiddenHealthEvents = Math.Max(0, healthEvents.Count - inlineHealthEvents.Count);
-        html.AppendLine($"<details class=\"relationship-details r0-health-evidence\"><summary>R0 health evidence ({E(inlineHealthEvents.Count.ToString())}/{E(healthEvents.Count.ToString())}; {E(hiddenHealthEvents.ToString())} hidden)</summary>");
+        html.AppendLine($"<details open class=\"relationship-details r0-health-evidence\"><summary>R0 health evidence ({E(inlineHealthEvents.Count.ToString())}/{E(healthEvents.Count.ToString())}; {E(hiddenHealthEvents.ToString())} hidden)</summary>");
         AppendEventRows(html, inlineHealthEvents, artifactLookup, artifacts);
         html.AppendLine("</details>");
     }
@@ -6602,7 +6602,7 @@ html[lang="en"] .localized-evidence-field{display:none}
 
             if (card.ChildLabels.Count > 0)
             {
-                html.AppendLine("<details class=\"relationship-details\"><summary>Child processes</summary><ul class=\"mono-list\">");
+                html.AppendLine("<details open class=\"relationship-details\"><summary>Child processes</summary><ul class=\"mono-list\">");
                 foreach (var child in card.ChildLabels.Take(12))
                 {
                     html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(child)}\">{E(child)}</code></li>");
@@ -6614,7 +6614,7 @@ html[lang="en"] .localized-evidence-field{display:none}
             if (card.RelationshipLines.Count > 0)
             {
                 var relationships = string.Join(Environment.NewLine, card.RelationshipLines);
-                html.AppendLine($"<details class=\"relationship-details\"><summary>Stable relationship map</summary><pre class=\"copyable\" data-copy=\"{A(relationships)}\">{E(relationships)}</pre></details>");
+                html.AppendLine($"<details open class=\"relationship-details\"><summary>Stable relationship map</summary><pre class=\"copyable\" data-copy=\"{A(relationships)}\">{E(relationships)}</pre></details>");
             }
 
             html.AppendLine("<div class=\"toolbar\">");
@@ -10634,9 +10634,9 @@ html[lang="en"] .localized-evidence-field{display:none}
         if (normalized.Contains("response", StringComparison.Ordinal) || normalized.Contains("body", StringComparison.Ordinal)) return "Response detail";
         if (normalized.Contains("payload", StringComparison.Ordinal) || normalized.Contains("content", StringComparison.Ordinal)) return "Payload detail";
         if (normalized.Contains("data", StringComparison.Ordinal) || normalized.Contains("value", StringComparison.Ordinal)) return "Additional value";
-        // Keep unknown technical fields readable without repeating the
-        // meaningless generic heading "Evidence" on every row.
-        return "Additional detail";
+        // Keep unknown technical fields inline without repeating a generic
+        // prompt before every value; the raw key remains in the copy action.
+        return "Evidence";
     }
 
     private static string DisplayEventTarget(SandboxEvent evt, string? target)
@@ -11272,6 +11272,9 @@ html[lang="en"] .localized-evidence-field{display:none}
         }
         var replacements = new (string English, string Chinese)[]
         {
+            ("Collector evidence (path folded)", "采集器路径"),
+            ("Host path hidden", "主机路径已隐藏"),
+            ("Additional detail", "证据"),
             (">Raw<", ">原始<"),
             (">Report<", ">报告<"),
             (">Omitted<", ">省略<"),

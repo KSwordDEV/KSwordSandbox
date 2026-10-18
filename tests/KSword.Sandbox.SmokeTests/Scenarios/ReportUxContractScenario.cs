@@ -137,6 +137,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "coverage-stats", "Report renderer should keep evidence completeness metrics compact.");
         RequireContains(rendererSource, "RenderCoverageSourceLinks", "Report renderer should expose direct raw guest/driver source links.");
         RequireContains(rendererSource, "<details open class=\\\"technical-metadata\\\">", "Technical path metadata should be visible without an extra disclosure click.");
+        RequireContains(rendererSource, "event-explorer-table{min-width:0;width:100%", "Event explorer should use the available width instead of a fixed narrow evidence column.");
+        RequireContains(rendererSource, "return \"Evidence\";", "Unknown technical fields should use a neutral inline label.");
         RequireContains(rendererSource, "<details open class=\\\"flat-details", "Flat evidence details should be visible by default.");
         RequireContains(rendererSource, "Closed by default", "Raw event shell should label the default folded state.");
         RequireContains(rendererSource, "folded technical fields", "Raw event page summaries should expose folded technical field counts.");
@@ -441,12 +443,14 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(chineseVisibleText, "证据归因状态会区分已确认/可能关联的样本行为、未归因观察和采集诊断。", "Chinese event explorer should not show internal disposition guidance.");
         RequireNotContains(chineseVisibleText, "未归因观察会保留在原始证据中，选择该归因状态后即可显示。", "Chinese event explorer should not show the long unattributed-row instruction.");
         RequireContains(chineseVisibleText, "证据覆盖警告", "Chinese report should visibly explain incomplete evidence coverage.");
+        RequireNotContains(chineseVisibleText, "Collector evidence (path folded)", "Chinese report must not leak the collector path placeholder.");
+        RequireNotContains(chineseVisibleText, "Host path hidden", "Chinese report must not leak the host path placeholder.");
         RequireNotContains(chineseVisibleText, "type, path, process, target", "Chinese event explorer must not leak the English search placeholder.");
         RequireContains(chineseHtml, "placeholder=\"事件类型、路径、进程或目标\"", "Chinese event explorer search placeholder should be localized in the control attribute.");
         RequireContains(chineseVisibleText, "此通道没有归属于样本的证据。", "Chinese story-lane empty state should be localized.");
         RequireNotContains(chineseVisibleText, "隐藏技术字段", "Chinese event evidence must use compact field labels instead of the technical-field prompt.");
         RequireNotContains(chineseVisibleText, "Additional detail", "Chinese event evidence must localize the generic technical-field fallback label.");
-        RequireContains(chineseHtml, "附加详情：", "Chinese event evidence should expose a localized generic technical-field label.");
+        RequireContains(chineseHtml, "证据", "Chinese event evidence should expose a compact generic technical-field label.");
         RequireContains(chineseHtml, "data-copy=\"reason=sourceFileMissing\">源文件已不存在</code>", "Chinese event evidence should localize source-missing diagnostics while preserving the copy payload.");
         RequireContains(chineseHtml, "data-copy=\"capturePhase=after-run\">运行后采集</code>", "Chinese event evidence should localize capture phases while preserving the copy payload.");
         RequireContains(chineseHtml, "data-copy=\"status=skipped\">已跳过</code>", "Chinese event evidence should localize raw status values while preserving the copy payload.");
@@ -556,6 +560,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "<details open class=\"evidence-expansion-card\">", "Evidence cards should be visible by default without a disclosure click.");
 
         RequireNotContains(englishHtml, "Technical evidence:", "Generic technical evidence prefixes should not repeat on every event row.");
+        RequireNotContains(englishHtml, "Additional detail:", "Generic additional-detail prompts should not repeat on every event row.");
         RequireContains(englishHtml, "aria-label=\"复制\"", "Icon copy buttons should retain a short accessible label.");
         RequireContains(englishHtml, "<span class=\"sr-only\">复制</span>", "Icon copy button should keep a short accessible label.");
         RequireNotContains(englishHtml, "<br><span class=\"muted\">cmd.exe /c whoami</span>", "Rendered event tables should not inline command lines directly.");
