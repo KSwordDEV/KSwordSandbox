@@ -1876,7 +1876,8 @@ public static class SampleCorrelationClassifier
     {
         return evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("filesystem.", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("dropped_file.", StringComparison.OrdinalIgnoreCase);
+            evt.EventType.StartsWith("dropped_file.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsUnattributedFileWatcherEvent(
@@ -1918,7 +1919,8 @@ public static class SampleCorrelationClassifier
         var isProcessOrDriverEvidence = IsProcessEvidence(evt) ||
             evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("image.", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("load.", StringComparison.OrdinalIgnoreCase);
+            evt.EventType.StartsWith("load.", StringComparison.OrdinalIgnoreCase) ||
+            IsEtwEvidence(evt) && TextEqualsAny(evt.EventType, "thread.start", "thread.exit");
         if (!isProcessOrDriverEvidence)
         {
             return false;
@@ -2259,11 +2261,21 @@ public static class SampleCorrelationClassifier
         // DLL/resource lookup traffic; ordinary create/open probes there are
         // staging noise.  Real writes, renames, deletes, and explicit
         // persistence markers still pass through the signal checks below.
+        var explicitMutationMarker =
+            IsTruthy(Value(data, "deleteIntent")) ||
+            IsTruthy(Value(data, "renameIntent")) ||
+            IsTruthy(Value(data, "writeIntent")) ||
+            IsTruthy(Value(data, "fileWrite")) ||
+            ContainsAny(operation, "write", "setinfo", "rename", "delete");
+        var failedFileOperation =
+            TextEqualsAny(Value(data, "fileIntent"), "failed-access", "failed-open", "open-failed", "access-denied", "failed", "probe") ||
+            IsTruthy(Value(data, "operationFailed")) ||
+            TextEqualsAny(Value(data, "status"), "failed", "failure", "error", "denied") ||
+            TextEqualsAny(Value(data, "captureState"), "failed", "failure", "error", "denied") ||
+            TextEqualsAny(Value(data, "result"), "failed", "failure", "error", "denied");
         if (IsFileEvidence(evt) &&
-            (TextEqualsAny(Value(data, "fileIntent"), "failed-access", "failed", "probe") ||
-             IsTruthy(Value(data, "operationFailed")) ||
-             (IsSandboxIncomingPath(target) &&
-              !ContainsAny(operation, "write", "setinfo", "rename", "delete"))))
+            (failedFileOperation ||
+             (IsSandboxIncomingPath(target) && !explicitMutationMarker)))
         {
             return false;
         }

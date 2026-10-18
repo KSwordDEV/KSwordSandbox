@@ -169,6 +169,95 @@ internal sealed class SystemNativeDiscoveryVerdictRegressionScenario : ISmokeTes
             string.Equals(classifiedStagingRow.Data.GetValueOrDefault("sampleCorrelation"), "environment", StringComparison.OrdinalIgnoreCase),
             "Guest sample staging by MSPCManagerService must not be promoted by the submitted sample path.");
 
+        // Incoming setup probes can carry a broad dropped-file bit or a
+        // failed open/create intent. They remain environment evidence until a
+        // successful, explicit mutation is present.
+        var failedOpenStagingRow = stagingRow with
+        {
+            Timestamp = timestamp.AddMilliseconds(60),
+            Data = new Dictionary<string, string>(stagingRow.Data, StringComparer.OrdinalIgnoreCase)
+            {
+                ["operationName"] = "open",
+                ["fileIntent"] = "failed-open",
+                ["droppedFileCandidate"] = "true",
+                ["processId"] = "7000",
+                ["processImagePath"] = sample.Path
+            },
+            ProcessName = "sample.exe",
+            ProcessId = 7000
+        };
+        var classifiedFailedOpen = SampleCorrelationClassifier.Apply([sample, failedOpenStagingRow], sample.Path)
+            .Single(evt => evt.Timestamp == failedOpenStagingRow.Timestamp);
+        SmokeAssert.True(
+            string.Equals(classifiedFailedOpen.Data.GetValueOrDefault("sampleCorrelation"), "environment", StringComparison.OrdinalIgnoreCase),
+            "Failed-open staging probes with droppedFileCandidate must remain environment evidence.");
+        SmokeAssert.True(
+            string.Equals(classifiedFailedOpen.Data.GetValueOrDefault("behaviorCounted"), "false", StringComparison.OrdinalIgnoreCase),
+            "Failed-open staging probes must not count as sample behavior.");
+
+        var successfulIncomingWrite = failedOpenStagingRow with
+        {
+            Timestamp = timestamp.AddMilliseconds(70),
+            Data = new Dictionary<string, string>(failedOpenStagingRow.Data, StringComparer.OrdinalIgnoreCase)
+            {
+                ["operationName"] = "write",
+                ["fileIntent"] = "write",
+                ["fileWrite"] = "true",
+                ["operationFailed"] = "false"
+            }
+        };
+        var classifiedIncomingWrite = SampleCorrelationClassifier.Apply([sample, successfulIncomingWrite], sample.Path)
+            .Single(evt => evt.Timestamp == successfulIncomingWrite.Timestamp);
+        SmokeAssert.True(
+            string.Equals(classifiedIncomingWrite.Data.GetValueOrDefault("sampleCorrelation"), "confirmed", StringComparison.OrdinalIgnoreCase),
+            "A successful explicit incoming write must remain eligible for sample behavior.");
+
+        foreach (var threadType in new[] { "thread.start", "thread.exit" })
+        {
+            var benignThread = new SandboxEvent
+            {
+                EventType = threadType,
+                Timestamp = timestamp.AddMilliseconds(300),
+                Source = "etwLive",
+                ProcessName = "hostname.exe",
+                ProcessId = 7001,
+                Path = @"C:\Windows\System32\hostname.exe",
+                Data =
+                {
+                    ["captureSource"] = "etwLive",
+                    ["processImagePath"] = @"C:\Windows\System32\hostname.exe",
+                    ["threadId"] = "42"
+                }
+            };
+            var classifiedThread = SampleCorrelationClassifier.Apply([sample, hostname, benignThread], sample.Path)
+                .Single(evt => evt.EventType == threadType && evt.Timestamp == benignThread.Timestamp);
+            SmokeAssert.True(
+                string.Equals(classifiedThread.Data.GetValueOrDefault("sampleCorrelation"), "environment", StringComparison.OrdinalIgnoreCase),
+                $"ETW {threadType} from a signed System32 discovery utility should remain environment evidence.");
+        }
+
+        var remoteThread = new SandboxEvent
+        {
+            EventType = "thread.start",
+            Timestamp = timestamp.AddMilliseconds(310),
+            Source = "etwLive",
+            ProcessName = "hostname.exe",
+            ProcessId = 7001,
+            Path = @"C:\Windows\System32\hostname.exe",
+            Data =
+            {
+                ["captureSource"] = "etwLive",
+                ["processImagePath"] = @"C:\Windows\System32\hostname.exe",
+                ["remoteThread"] = "true",
+                ["creatorProcessId"] = "7000"
+            }
+        };
+        var classifiedRemoteThread = SampleCorrelationClassifier.Apply([sample, hostname, remoteThread], sample.Path)
+            .Single(evt => evt.Timestamp == remoteThread.Timestamp);
+        SmokeAssert.True(
+            string.Equals(classifiedRemoteThread.Data.GetValueOrDefault("sampleCorrelation"), "confirmed", StringComparison.OrdinalIgnoreCase),
+            "Explicit remote-thread evidence must bypass benign discovery suppression.");
+
         var rules = RuleEngine.LoadRuleSet(Path.Combine(context.RulesDirectory, "behavior-rules.json"));
         var findings = new RuleEngine(rules).Classify(classified);
         SmokeAssert.True(
