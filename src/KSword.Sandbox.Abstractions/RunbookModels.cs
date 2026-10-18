@@ -57,5 +57,22 @@ public sealed record SandboxRunbook
 
     public bool UsesTemporaryVm { get; init; }
 
+    /// <summary>
+    /// Launch context planned for the Guest Agent.  Provider runbooks normally
+    /// start from the logged-on interactive desktop and may fall back to an
+    /// S4U scheduled task when that desktop is unavailable.  Keeping this on
+    /// the runbook makes the context survive report/job persistence even when
+    /// the fallback warning is emitted later by a live PowerShell step.
+    /// </summary>
+    public string LaunchContext { get; init; } = "unknown";
+
+    /// <summary>
+    /// Stable operator warning for the optional launch fallback.  This is a
+    /// plan-time explanation; an actual warning is copied to
+    /// <see cref="SandboxRunbookExecutionResult.FallbackWarning"/> only when
+    /// the live run enters the fallback branch.
+    /// </summary>
+    public string? FallbackWarning { get; init; }
+
     public List<SandboxRunbookStep> Steps { get; init; } = [];
 }

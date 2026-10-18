@@ -1,6 +1,7 @@
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Core.Configuration;
 using KSword.Sandbox.Core.Orchestration;
+using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.SmokeTests.Assertions;
 using KSword.Sandbox.SmokeTests.Framework;
 using System.Text;
@@ -28,6 +29,8 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         var hyperV = builder.Build(baseConfig, jobId, sample);
         SmokeAssert.True(hyperV.Provider is VirtualizationProvider.HyperV, "Existing configs should continue to select Hyper-V by default.");
         SmokeAssert.True(hyperV.LiveExecutionLeasePath == expectedLiveExecutionLeasePath, "Hyper-V should use the runtime-root live execution lease.");
+        SmokeAssert.True(hyperV.LaunchContext == "interactive-desktop", "Hyper-V runbooks should persist the interactive desktop launch context.");
+        SmokeAssert.True(hyperV.FallbackWarning?.Contains("S4U", StringComparison.OrdinalIgnoreCase) == true, "Hyper-V runbooks should persist the S4U fallback warning.");
         RequireStepContains(hyperV, "restore-golden", "Restore-VMSnapshot");
         RequireAnyStepContains(hyperV, "New-PSSession -VMName");
         RequireProviderResourceFailure(
@@ -59,6 +62,8 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         SmokeAssert.True(vmware.BaselineName == "Clean", "VMware runbook should expose the effective snapshot baseline.");
         SmokeAssert.True(vmware.MachineDefinitionPath == vmwareConfig.VMware.VmxPath, "VMware runbook should expose the effective VMX path.");
         SmokeAssert.True(vmware.LiveExecutionLeasePath == expectedLiveExecutionLeasePath, "VMware should share the Hyper-V live execution lease.");
+        SmokeAssert.True(vmware.LaunchContext == "interactive-desktop", "VMware runbooks should persist the interactive desktop launch context.");
+        SmokeAssert.True(vmware.FallbackWarning?.Contains("S4U", StringComparison.OrdinalIgnoreCase) == true, "VMware runbooks should persist the S4U fallback warning.");
         RequireStepContains(vmware, "restore-vm-snapshot", "revertToSnapshot");
         RequireStepContains(vmware, "start-vm", "start $vmxPath gui");
         RequireStepContains(vmware, "start-vm", "SetEnvironmentVariable('KSWORDBOX_GUEST_PASSWORD', $null, 'Process')");
@@ -82,6 +87,8 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
             "VMware remoting fallback must detach Guest Agent and return control to sync-live-output instead of waiting synchronously.");
         RequireStepContains(vmware, "run-agent", "live sync will wait for agent.exit");
         RequireStepContains(vmware, "run-agent", "Stop-ScheduledTask -TaskName $taskName");
+        RequireStepContains(vmware, "run-agent", "Interactive desktop is unavailable; starting Guest Agent in the remoting session.");
+        RequireStepContains(vmware, "run-agent", "S4U fallback started");
         RequireStepContains(vmware, "run-agent", "$launchDeadline = (Get-Date).AddSeconds(30);");
         RequireStepContains(vmware, "run-agent", "$fallbackDeadline=(Get-Date).AddSeconds(60)");
         RequireStepContains(vmware, "check-sample-runtime", "mscoree\\.dll");
@@ -445,6 +452,7 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
 
         VerifyAutomaticGuestRemotingMigration(context);
         VerifyAutomaticDriverDiscovery(context);
+        VerifyS4UFallbackHealthPersistence();
 
         return Task.FromResult(new SmokeTestResult
         {
@@ -452,6 +460,29 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
             Passed = true,
             Message = "Hyper-V, VMware, and QEMU produce provider-specific full runbooks."
         });
+    }
+
+    private static void VerifyS4UFallbackHealthPersistence()
+    {
+        var warning = "Interactive desktop unavailable; Guest Agent started by S4U scheduled task fallback.";
+        var fallbackEvent = new SandboxEvent
+        {
+            EventType = "vmware.runbook.executed",
+            Source = "host",
+            Data =
+            {
+                ["collectionHealth"] = "true",
+                ["runbookFallbackWarning"] = "true",
+                ["launchContext"] = "s4u-fallback",
+                ["fallbackWarning"] = warning
+            }
+        };
+
+        var summary = CollectionHealthSummaryBuilder.Build([fallbackEvent]);
+        SmokeAssert.True(summary.RunbookFallbackWarningRows == 1, "S4U fallback should remain a persisted collection-health row.");
+        SmokeAssert.True(summary.RunbookLaunchContext == "s4u-fallback", "Collection health should retain the S4U launch context.");
+        SmokeAssert.True(summary.RunbookFallbackWarning == warning, "Collection health should retain the normalized fallback warning.");
+        SmokeAssert.True(summary.StateReasons.Contains("runbook-s4u-fallback", StringComparer.OrdinalIgnoreCase), "Collection health should explain the S4U fallback boundary.");
     }
 
     private static void VerifyAutomaticGuestRemotingMigration(SmokeTestContext context)

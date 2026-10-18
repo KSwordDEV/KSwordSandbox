@@ -82,6 +82,12 @@ public sealed class HyperVRunbookBuilder
             QemuDiskFormat = provider is VirtualizationProvider.Qemu ? config.Qemu.DiskFormat : null,
             LiveExecutionLeasePath = Path.Combine(config.Paths.RuntimeRoot, "locks", "live-execution.lock"),
             UsesTemporaryVm = usesTemporaryVm,
+            LaunchContext = config.Driver.UseMockCollector
+                ? "remoting-session"
+                : "interactive-desktop",
+            FallbackWarning = config.Driver.UseMockCollector
+                ? null
+                : "Interactive desktop unavailable; Guest Agent will use an S4U scheduled task fallback.",
             Steps = steps
         };
     }

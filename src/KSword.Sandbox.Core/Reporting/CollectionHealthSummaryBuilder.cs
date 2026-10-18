@@ -106,6 +106,13 @@ public static class CollectionHealthSummaryBuilder
             : FirstUnsigned(finalRemainingRow, DriverRemainingUnreadKeys);
         var malformedRows = raw.Count(IsMalformedDriverRow);
         var outputWriteFailureRows = raw.Count(IsOutputWriteFailureRow);
+        var runbookFallbackRows = raw.Where(IsRunbookFallbackWarning).ToList();
+        var runbookFallbackWarning = runbookFallbackRows
+            .Select(evt => Value(evt, "fallbackWarning"))
+            .LastOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        var runbookLaunchContext = runbookFallbackRows
+            .Select(evt => Value(evt, "launchContext"))
+            .LastOrDefault(value => !string.IsNullOrWhiteSpace(value));
         var etwFailureRows = raw.Count(IsEtwFailure);
         var pcapFailureRows = raw.Count(IsPcapFailure);
         var agentFailureRows = raw.Count(evt => IsAgentFailure(evt, rawEvents));
@@ -132,7 +139,8 @@ public static class CollectionHealthSummaryBuilder
             collectorSuppressed,
             driverHealthRows.Count(IsDriverQualityWarning),
             expectedSuppressedRows,
-            unsupportedProducerRows);
+            unsupportedProducerRows,
+            runbookFallbackRows.Count);
 
         return new CollectionHealthSummary
         {
@@ -149,8 +157,12 @@ public static class CollectionHealthSummaryBuilder
                 agentFailureRows,
                 processTreeUnavailableRows,
                 collectorSuppressed,
-                driverHealthRows.Count(IsDriverQualityWarning)),
+                driverHealthRows.Count(IsDriverQualityWarning),
+                runbookFallbackRows.Count),
             StateReasons = stateReasons,
+            RunbookLaunchContext = runbookLaunchContext,
+            RunbookFallbackWarning = runbookFallbackWarning,
+            RunbookFallbackWarningRows = runbookFallbackRows.Count,
             DriverHealthRows = driverHealthRows.Count,
             RawRows = raw.Count,
             ReportRows = report.Count,
@@ -195,6 +207,7 @@ public static class CollectionHealthSummaryBuilder
         CollectionHealthSummary summary)
     {
         metrics["collectionHealth.raw"] = summary.RawRows;
+        metrics["collectionHealth.runbook.fallbackWarningRows"] = summary.RunbookFallbackWarningRows;
         metrics["collectionHealth.stateCode"] = StateCode(summary.State);
         metrics["collectionHealth.complete"] = string.Equals(summary.State, "complete", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
         metrics["collectionHealth.degraded"] = string.Equals(summary.State, "degraded", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
@@ -241,6 +254,7 @@ public static class CollectionHealthSummaryBuilder
         // aliases so report consumers can migrate from the flat health keys
         // without reparsing the raw diagnostic events.
         metrics["events.collectionHealth.raw"] = summary.RawRows;
+        metrics["events.collectionHealth.runbook.fallbackWarningRows"] = summary.RunbookFallbackWarningRows;
         metrics["events.collectionHealth.stateCode"] = StateCode(summary.State);
         metrics["events.collectionHealth.complete"] = string.Equals(summary.State, "complete", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
         metrics["events.collectionHealth.degraded"] = string.Equals(summary.State, "degraded", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
@@ -347,6 +361,15 @@ public static class CollectionHealthSummaryBuilder
         }
 
         if (BoolTrue(evt, "collectionHealth", "collection_health", "collectionDiagnostic", "collectorDiagnostic", "collectorHealthEvidence"))
+        {
+            return true;
+        }
+
+        // A runbook can complete its host steps while still losing the
+        // interactive desktop and launching the Guest Agent through S4U.
+        // Keep that boundary in collection health so it survives report
+        // sampling and is not mistaken for sample behavior.
+        if (IsRunbookFallbackWarning(evt))
         {
             return true;
         }
@@ -543,6 +566,12 @@ public static class CollectionHealthSummaryBuilder
             string.Equals(evt.Source, "r0collector", StringComparison.OrdinalIgnoreCase) ||
             BoolTrue(evt, "collectorHealthEvidence");
     }
+
+    private static bool IsRunbookFallbackWarning(SandboxEvent evt) =>
+        BoolTrue(evt, "runbookFallbackWarning") ||
+        string.Equals(Value(evt, "hostOperationalKind"), "runbook-fallback-warning", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(evt.EventType, "hyperv.runbook.fallback", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(evt.EventType, "vmware.runbook.fallback", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsDriverDeferredSummary(SandboxEvent evt) =>
         string.Equals(evt.EventType, "driver.events.deferred", StringComparison.OrdinalIgnoreCase);
@@ -932,7 +961,8 @@ public static class CollectionHealthSummaryBuilder
         int agentFailureRows,
         int processTreeUnavailableRows,
         ulong suppressedEvents,
-        int qualityWarningRows)
+        int qualityWarningRows,
+        int runbookFallbackWarningRows)
     {
         if (rawRows == 0)
         {
@@ -952,7 +982,7 @@ public static class CollectionHealthSummaryBuilder
         }
 
         var optionalGap = etwFailureRows > 0 || pcapFailureRows > 0 || agentFailureRows > 0 ||
-            suppressedEvents > 0 || qualityWarningRows > 0;
+            suppressedEvents > 0 || qualityWarningRows > 0 || runbookFallbackWarningRows > 0;
         return optionalGap ? "degraded" : "complete";
     }
 
@@ -971,7 +1001,8 @@ public static class CollectionHealthSummaryBuilder
         ulong suppressedEvents,
         int qualityWarningRows,
         int expectedSuppressedRows,
-        int unsupportedProducerRows)
+        int unsupportedProducerRows,
+        int runbookFallbackWarningRows)
     {
         var reasons = new List<string>();
         if (raw.Count == 0)
@@ -1038,6 +1069,11 @@ public static class CollectionHealthSummaryBuilder
         if (qualityWarningRows > 0)
         {
             reasons.Add("driver-quality-warning");
+        }
+
+        if (runbookFallbackWarningRows > 0)
+        {
+            reasons.Add("runbook-s4u-fallback");
         }
 
         if (unsupportedProducerRows > 0)

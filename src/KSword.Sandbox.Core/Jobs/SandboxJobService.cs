@@ -2119,6 +2119,35 @@ public sealed partial class SandboxJobService
             }
 
             var providerPrefix = provider.ToString().ToLowerInvariant();
+            var fallbackWarning = result.FallbackWarning ?? string.Empty;
+            var fallbackUsed = !string.IsNullOrWhiteSpace(fallbackWarning) ||
+                string.Equals(result.LaunchContext, "s4u-fallback", StringComparison.OrdinalIgnoreCase);
+            var runbookData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["provider"] = provider.ToString(),
+                ["mode"] = result.Mode.ToString(),
+                ["success"] = result.Success.ToString(),
+                ["totalSteps"] = result.TotalSteps.ToString(),
+                ["executedSteps"] = result.ExecutedSteps.ToString(),
+                ["failedStepIndex"] = result.FailedStepIndex?.ToString() ?? string.Empty,
+                ["duration"] = result.Duration.ToString(),
+                ["resultPath"] = resultPath,
+                ["message"] = result.Message ?? string.Empty,
+                ["failureHint"] = BuildSafeRunbookFailureHint(result),
+                ["launchContext"] = string.IsNullOrWhiteSpace(result.LaunchContext) ? "unknown" : result.LaunchContext,
+                ["fallbackWarning"] = fallbackWarning,
+                ["fallbackUsed"] = fallbackUsed.ToString()
+            };
+            if (fallbackUsed)
+            {
+                // Persist this as evidence-quality health so report.json and
+                // CollectionHealthSummary retain the desktop-to-S4U boundary
+                // after stdout/stderr are no longer in the live request.
+                runbookData["collectionHealth"] = "true";
+                runbookData["runbookFallbackWarning"] = "true";
+                runbookData["healthSeverity"] = "warning";
+            }
+
             events.Add(new SandboxEvent
             {
                 EventType = $"{providerPrefix}.runbook.executed",
@@ -2128,19 +2157,7 @@ public sealed partial class SandboxJobService
                     $"{providerPrefix}-runbook-executed",
                     "runbook-execution-summary-is-host-control-plane-not-sample-behavior",
                     $"{provider} runbook execution summary describes host orchestration, not sample behavior.",
-                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["provider"] = provider.ToString(),
-                    ["mode"] = result.Mode.ToString(),
-                    ["success"] = result.Success.ToString(),
-                    ["totalSteps"] = result.TotalSteps.ToString(),
-                    ["executedSteps"] = result.ExecutedSteps.ToString(),
-                    ["failedStepIndex"] = result.FailedStepIndex?.ToString() ?? string.Empty,
-                    ["duration"] = result.Duration.ToString(),
-                    ["resultPath"] = resultPath,
-                    ["message"] = result.Message ?? string.Empty,
-                    ["failureHint"] = BuildSafeRunbookFailureHint(result)
-                })
+                    runbookData)
             });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -2566,7 +2583,9 @@ public sealed partial class SandboxJobService
                 {
                     ["provider"] = runbook.Provider.ToString(),
                     ["steps"] = runbook.Steps.Count.ToString(),
-                    ["usesTemporaryVm"] = runbook.UsesTemporaryVm.ToString()
+                    ["usesTemporaryVm"] = runbook.UsesTemporaryVm.ToString(),
+                    ["launchContext"] = runbook.LaunchContext,
+                    ["fallbackWarning"] = runbook.FallbackWarning ?? string.Empty
                 })
             }
         };

@@ -223,6 +223,24 @@ public sealed record CollectionHealthSummary
     public List<string> StateReasons { get; init; } = [];
 
     /// <summary>
+    /// Launch context retained from the host runbook execution marker, for
+    /// example <c>interactive-desktop</c> or <c>s4u-fallback</c>.
+    /// </summary>
+    public string? RunbookLaunchContext { get; init; }
+
+    /// <summary>
+    /// Stable warning copied when the interactive desktop was unavailable and
+    /// the Guest Agent was started through the S4U fallback.
+    /// </summary>
+    public string? RunbookFallbackWarning { get; init; }
+
+    /// <summary>
+    /// Number of runbook execution rows that recorded the S4U fallback.  This
+    /// is evidence-quality context and never sample behavior.
+    /// </summary>
+    public int RunbookFallbackWarningRows { get; init; }
+
+    /// <summary>
     /// Number of R0 collector health/status rows observed in the raw stream.
     /// A final queue value cannot be inferred when this lane is absent.
     /// </summary>

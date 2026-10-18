@@ -1407,6 +1407,10 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         string? message,
         bool requiresElevation)
     {
+        var fallbackWarning = DetectS4UFallbackWarning(stepResults);
+        var launchContext = fallbackWarning is null
+            ? runbook.LaunchContext
+            : "s4u-fallback";
         return new SandboxRunbookExecutionResult
         {
             JobId = runbook.JobId,
@@ -1417,6 +1421,8 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             QemuDiskFormat = runbook.QemuDiskFormat,
             Mode = options.Mode,
             Success = success,
+            LaunchContext = string.IsNullOrWhiteSpace(launchContext) ? "unknown" : launchContext,
+            FallbackWarning = fallbackWarning,
             TotalSteps = runbook.Steps.Count,
             ExecutedSteps = stepResults.Count(step => !step.Skipped && step.StepIndex >= 0),
             FailedStepIndex = failedStepIndex,
@@ -1426,6 +1432,25 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             StepResults = stepResults,
             Message = message
         };
+    }
+
+    /// <summary>
+    /// Extracts the stable desktop-to-S4U boundary from captured run-agent
+    /// output.  The PowerShell warning is intentionally normalized instead of
+    /// persisting the whole stream, which keeps the execution record safe and
+    /// makes the report health field deterministic across localized hosts.
+    /// </summary>
+    private static string? DetectS4UFallbackWarning(
+        IReadOnlyList<SandboxRunbookStepExecutionResult> stepResults)
+    {
+        var runAgentOutput = stepResults
+            .Where(step => string.Equals(step.StepId, "run-agent", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(step => new[] { step.StandardOutput, step.StandardError, step.Message ?? string.Empty });
+        return runAgentOutput.Any(output =>
+                output.Contains("Interactive desktop is unavailable", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("S4U fallback started", StringComparison.OrdinalIgnoreCase))
+            ? "Interactive desktop unavailable; Guest Agent started by S4U scheduled task fallback."
+            : null;
     }
 
     /// <summary>

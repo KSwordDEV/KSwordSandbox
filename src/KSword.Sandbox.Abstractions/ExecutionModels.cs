@@ -339,6 +339,20 @@ public sealed record SandboxRunbookExecutionResult
     public bool Success { get; init; }
 
     /// <summary>
+    /// Launch context observed for this attempt.  It starts with the planned
+    /// runbook context and is changed to <c>s4u-fallback</c> when the
+    /// interactive scheduled-task launch emits the fallback marker.
+    /// </summary>
+    public string LaunchContext { get; init; } = "unknown";
+
+    /// <summary>
+    /// Stable operator warning captured when the Guest Agent had to leave the
+    /// interactive desktop path.  Null means the fallback branch was not
+    /// observed (or the result predates this field).
+    /// </summary>
+    public string? FallbackWarning { get; init; }
+
+    /// <summary>
     /// True when execution stopped because an operator cancellation was
     /// recorded. This is derived from step evidence so older persisted results
     /// remain compatible and successful cleanup cannot overwrite the terminal
