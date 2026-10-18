@@ -10400,7 +10400,18 @@ html[lang="en"] .localized-evidence-field{display:none}
         if (artifact.Metadata.TryGetValue("artifactExists", out var exists) &&
             string.Equals(exists, "false", StringComparison.OrdinalIgnoreCase))
         {
-            return string.Empty;
+            // Metadata can come from an earlier import or a stale manifest.
+            // A current non-empty host file is authoritative for rendering:
+            // do not hide a real evidence link because an old row said it was
+            // missing. Keep the missing state only when the file is still
+            // absent or zero length.
+            var filePresent = !string.IsNullOrWhiteSpace(artifact.FullPath) &&
+                File.Exists(artifact.FullPath) &&
+                artifact.SizeBytes > 0;
+            if (!filePresent)
+            {
+                return string.Empty;
+            }
         }
 
         if (artifact.Kind == ArtifactKind.DriverEventsJsonLines && artifact.SizeBytes <= 0)
@@ -10965,6 +10976,21 @@ html[lang="en"] .localized-evidence-field{display:none}
     /// </summary>
     private static string LocalizeChineseVisibleEvidenceValues(string html)
     {
+        // Artifact selectors are machine values and must remain byte-stable.
+        // Protect URL-bearing attributes before translating visible labels so
+        // a Chinese display name cannot corrupt an evidence download href.
+        var protectedLinks = new List<string>();
+        html = Regex.Replace(
+            html,
+            "\\b(?:href|src)=\"[^\"]*\"",
+            match =>
+            {
+                var token = $"__KSWORD_ZH_LINK_{protectedLinks.Count}__";
+                protectedLinks.Add(match.Value);
+                return token;
+            },
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
         foreach (var (field, rawValue, display) in new (string Field, string RawValue, string Display)[]
         {
             ("reason", "sourceFileMissing", "源文件已不存在"),
@@ -11160,6 +11186,11 @@ html[lang="en"] .localized-evidence-field{display:none}
         for (var index = 0; index < copyAttributes.Count; index++)
         {
             html = html.Replace($"__KSWORD_ZH_COPY_ATTRIBUTE_{index}__", copyAttributes[index], StringComparison.Ordinal);
+        }
+
+        for (var index = 0; index < protectedLinks.Count; index++)
+        {
+            html = html.Replace($"__KSWORD_ZH_LINK_{index}__", protectedLinks[index], StringComparison.Ordinal);
         }
 
         return html;
