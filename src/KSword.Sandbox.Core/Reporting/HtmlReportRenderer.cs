@@ -73,6 +73,10 @@ public sealed class HtmlReportRenderer
     // printing every edge at full width.
     private const int GraphEdgeInlineLimit = 6;
     private const int BehaviorChainInlineLimit = 8;
+
+    // A story-lane payload is already collapsed behind its index row; keep it
+    // bounded so one busy lane cannot open into a several-screen list.
+    private const int StoryEvidenceLineLimit = 12;
     private static readonly string[] BenignWindowsDiscoveryUtilityNames =
     [
         "arp", "getmac", "hostname", "ipconfig", "nbtstat", "netstat",
@@ -104,7 +108,7 @@ public sealed class HtmlReportRenderer
         string WhySuspicious,
         IReadOnlyList<string> EvidenceLines);
 
-    private sealed record EvidenceSummaryCard(string Title, string Value, string Detail, string Css, string CopyText);
+    private sealed record EvidenceSummaryCard(string Title, string Value, string Unit, string Detail, string CopyText);
 
     private sealed record BehaviorRoutingStats(
         int TotalEvents,
@@ -743,9 +747,11 @@ table.kv-table th{width:230px}
 .chain-item:last-child{border-bottom:0}
 .chain-head{align-items:baseline;display:flex;flex-wrap:wrap;gap:2px 8px;min-width:0}
 .chain-head code{overflow-wrap:anywhere}
-.chain-evidence{margin:2px 0 0}
-.chain-evidence>summary{color:var(--muted);cursor:pointer;font-size:11px;padding:1px 0}
+.chain-evidence{margin:0}
+.chain-evidence>summary{align-items:baseline;color:var(--ink);cursor:pointer;display:flex;flex-wrap:wrap;font-size:12.5px;gap:2px 8px;padding:2px 0}
 .chain-evidence>summary:hover{color:var(--primary-ink)}
+.chain-evidence>summary code{overflow-wrap:anywhere}
+.chain-fields{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;margin-left:auto;white-space:nowrap}
 .relation-evidence{margin:6px 0 0}
 .relation-evidence>summary{color:var(--primary-ink);cursor:pointer;font-size:11.5px;padding:2px 0}
 .relation-evidence>summary:hover{text-decoration:underline}
@@ -856,6 +862,28 @@ details[open]>summary:before{content:'–'}
 .fold-block>summary{background:var(--band);border:1px solid var(--line-soft);font-size:12px;padding:7px 12px}
 .fold-block[open]>summary{margin-bottom:8px}
 
+/* ---------- collapsed fact index ---------- */
+/* One line per fact. Nothing beyond the index is visible until a row is
+   opened, so the section reads like a table of contents instead of a board of
+   cards whose nested chips have to be scrolled past before raw evidence. */
+.fact-list{border-top:1px solid var(--line);display:block;margin:12px 0}
+.fact-row{border-bottom:1px solid var(--line-soft)}
+.fact-row>summary{align-items:baseline;display:flex;flex-wrap:wrap;gap:2px 16px;list-style:none;padding:9px 2px}
+.fact-row>summary:before{color:var(--muted);flex:0 0 auto;font-size:11px;margin-right:2px;width:9px}
+.fact-row>summary:hover{background:var(--band-2)}
+.fact-row>summary:hover .fact-name{color:var(--primary-ink)}
+.fact-row[open]>summary{border-bottom:1px solid var(--line-soft);margin-bottom:10px}
+.fact-row[open]>summary:before{content:'-'}
+.fact-name{color:var(--ink);flex:0 0 12.5rem;font-size:13px;font-weight:600;line-height:1.55;overflow-wrap:anywhere}
+.fact-value{align-items:baseline;color:var(--primary-ink);display:inline-flex;flex:0 0 auto;gap:5px;line-height:1.5;white-space:nowrap}
+.fact-value b{font-size:14px;font-variant-numeric:tabular-nums;font-weight:600}
+.fact-value .finding-count-unit{color:var(--muted);font-size:11.5px}
+.fact-status{flex:0 0 auto}
+.fact-lead{color:var(--muted);flex:1 1 20rem;font-size:12px;line-height:1.6;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fact-count{color:var(--muted);flex:0 0 auto;font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.fact-body{border-left:2px solid var(--line-soft);margin:0 0 12px 2px;padding:2px 0 2px 14px}
+.fact-note{color:var(--muted);font-size:12px;line-height:1.6;margin:0}
+
 /* ---------- panels ---------- */
 .evidence-summary-grid,.relation-grid,.overview-strip,.ioc-grid,.graph-map{align-items:start;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin:12px 0}
 .relation-grid{align-items:stretch;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
@@ -864,25 +892,17 @@ details[open]>summary:before{content:'–'}
 .graph-node .node-flow{gap:2px 12px}
 .evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3,.ioc-card h3{font-size:13px;font-weight:600;line-height:1.5;margin:0 0 6px}
 .artifact-status-grid{grid-template-columns:repeat(auto-fit,minmax(420px,1fr))}
-/* Boards stay on a grid so every row starts and ends on the same line. A
-   masonry flow packed the section tighter, but the staggered card tops read as
-   ragged. Cards now fill a common row height and their tail (fold link or
-   evidence disclosure) is pinned to the bottom edge, so a row closes flat. */
-.evidence-story-board,.artifact-status-grid{align-items:stretch;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));margin:12px 0}
-.evidence-story-board>.evidence-story-lane,.artifact-status-grid>.evidence-summary-card,.relation-grid>.relation-card{display:flex;flex-direction:column}
+/* Artifact status stays a card grid: every lane is a short, self-contained
+   status tile. Story lanes moved to the collapsed fact list above. */
+.artifact-status-grid{align-items:stretch;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));margin:12px 0}
+.artifact-status-grid>.evidence-summary-card,.relation-grid>.relation-card{display:flex;flex-direction:column}
 /* A short tail row never leaves a hole: one leftover card takes the full row,
    two leftovers share it. */
 @media (min-width:1200px){
-  .evidence-story-board>:last-child:nth-child(3n+1),.artifact-status-grid>:last-child:nth-child(3n+1){grid-column:span 3}
-  .evidence-story-board>:last-child:nth-child(3n+2),.artifact-status-grid>:last-child:nth-child(3n+2){grid-column:span 2}
+  .artifact-status-grid>:last-child:nth-child(3n+1){grid-column:span 3}
+  .artifact-status-grid>:last-child:nth-child(3n+2){grid-column:span 2}
 }
-.evidence-story-board>.evidence-story-lane>.evidence-expansion-card{display:flex;flex:1 1 auto;flex-direction:column;min-height:0}
-.evidence-story-lane>.toolbar,.evidence-story-lane .story-more,.relation-card>.relation-evidence,.artifact-status-grid .relation-evidence{margin-top:auto}
-/* One lead paragraph is enough context; clamping keeps a chatty lane from
-   setting the height for every card in its row. */
-.story-lead{-webkit-box-orient:vertical;-webkit-line-clamp:3;display:-webkit-box;line-clamp:3;overflow:hidden}
-.evidence-story-lane h3{display:block}
-.evidence-story-lane h3:after{display:none}
+.relation-card>.relation-evidence,.artifact-status-grid .relation-evidence{margin-top:auto}
 .summary-value,.overview-value{color:var(--primary-ink);display:block;font-size:22px;font-variant-numeric:tabular-nums;font-weight:600;letter-spacing:-.01em;line-height:1.2}
 .overview-value.risk-medium{color:var(--warm)}
 .overview-value.risk-high{color:var(--hot)}
@@ -1018,8 +1038,11 @@ details[open]>summary:before{content:'–'}
 .failure-note.execution-failure-banner strong{display:block;margin-bottom:2px}
 
 /* ---------- graph edges ---------- */
+/* Each edge is one line: source, relation, target, field count. The field
+   payload folds, so eighteen edges read as an index instead of a wall. */
 .edge-cards{display:grid;gap:8px;margin:12px 0}
-.edge-card{border:1px solid var(--line);display:grid;gap:8px;padding:12px 15px}
+.edge-card{border:0;display:block;padding:0}
+.edge-card>summary{align-items:baseline;display:flex;flex-wrap:wrap;gap:2px 8px;padding:7px 2px}
 .edge-flow{align-items:center;display:flex;flex-wrap:wrap;gap:6px 10px;min-width:0}
 .edge-node{background:var(--band);color:var(--ink);font-family:var(--mono);font-size:12px;max-width:100%;overflow-wrap:anywhere;padding:2px 8px}
 .edge-relation{background:var(--primary-soft);color:var(--primary-ink);font-size:11px;font-weight:600;letter-spacing:.03em;padding:2px 8px;text-transform:uppercase}
@@ -1068,8 +1091,8 @@ details[open]>summary:before{content:'–'}
   .card,.event-table-wrap,.raw-events-panel,.process-tree,.relation-card,.evidence-story-lane,.evidence-summary-card,.raw-event-page,.finding-card,.artifact-card{break-inside:avoid;max-height:none!important;overflow:visible!important}
   .process-tree-path{white-space:normal}
   .raw-events-shell>summary:after,.raw-event-page>summary:after,.event-evidence-fields>summary:after,.technical-field>summary:after,.raw-technical-fields>summary:after{color:#64748b;content:' (folded in screen view; expand in browser for full evidence)';font-weight:400}
-  /* Screen-only clamps must not truncate printed evidence. */
-  .story-lead{-webkit-line-clamp:none;display:block;overflow:visible}
+  /* A one-line index truncates with an ellipsis on screen; print it in full. */
+  .fact-lead{overflow:visible;white-space:normal}
 }
 """);
         html.AppendLine("</style></head>");
@@ -2198,7 +2221,12 @@ details[open]>summary:before{content:'–'}
             return;
         }
 
-        html.AppendLine("<div class=\"evidence-story-board\">");
+        // Behavior facts read as an index, not a board: every lane is one line
+        // (name, count, first evidence row) and the evidence itself stays
+        // collapsed until the row is opened. Seven cards of nested chips made
+        // an operator scroll past repeating shapes before reaching any raw
+        // event.
+        html.AppendLine("<div class=\"fact-list\">");
         foreach (var card in cards)
         {
             var evidenceText = card.EvidenceLines.Count == 0
@@ -2213,22 +2241,33 @@ details[open]>summary:before{content:'–'}
                     evidenceText
                 ]);
 
-            html.AppendLine($"<article class=\"evidence-story-lane copyable\" data-copy=\"{A(copy)}\">");
-            html.AppendLine($"<h3>{E(card.Title)}</h3>");
-            AppendLaneValue(html, card.Value, card.Css);
+            html.AppendLine("<details class=\"fact-row\">");
+            html.AppendLine("<summary>");
+            html.AppendLine($"<span class=\"fact-name\">{E(card.Title)}</span>");
+            // Split "4 actors" into value + unit so the unit can be localized
+            // by the shared count-unit map like every other counter.
+            var valueSpace = card.Value.IndexOf(' ');
+            if (valueSpace > 0 && int.TryParse(card.Value[..valueSpace], NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+            {
+                html.AppendLine($"<span class=\"fact-value\"><b>{E(card.Value[..valueSpace])}</b><span class=\"finding-count-unit\">{E(card.Value[(valueSpace + 1)..])}</span></span>");
+            }
+            else
+            {
+                html.AppendLine($"<span class=\"fact-value\"><b>{E(card.Value)}</b></span>");
+            }
+
+            html.AppendLine($"<span class=\"fact-lead\">{E(BuildFactPreview(card.EvidenceLines))}</span>");
+            html.AppendLine($"<span class=\"fact-count\">{E(card.EvidenceLines.Count.ToString(CultureInfo.InvariantCulture))} <span class=\"finding-count-unit\">evidence rows</span></span>");
+            html.AppendLine("</summary>");
+            html.AppendLine("<div class=\"fact-body\">");
             if (card.EvidenceLines.Count == 0)
             {
                 Empty(html, "No sample-attributed evidence for this lane.");
             }
             else
             {
-                // Lanes stay scannable: the first rows define the pattern, and
-                // the tail folds behind a native disclosure so one busy lane
-                // cannot stretch the whole board to several screens.
-                var inlineLines = card.EvidenceLines.Take(BehaviorFactInlineLines).ToList();
-                var foldedLines = card.EvidenceLines.Skip(BehaviorFactInlineLines).ToList();
                 html.AppendLine("<ol class=\"story-evidence-list\">");
-                foreach (var line in inlineLines)
+                foreach (var line in card.EvidenceLines)
                 {
                     html.AppendLine("<li>");
                     AppendEvidenceLine(html, line);
@@ -2236,26 +2275,38 @@ details[open]>summary:before{content:'–'}
                 }
 
                 html.AppendLine("</ol>");
-                if (foldedLines.Count > 0)
-                {
-                    html.AppendLine($"<details class=\"story-more\"><summary>More evidence: {E(foldedLines.Count.ToString())}/{E(card.EvidenceLines.Count.ToString())}</summary>");
-                    html.AppendLine("<ol class=\"story-evidence-list\">");
-                    foreach (var line in foldedLines)
-                    {
-                        html.AppendLine("<li>");
-                        AppendEvidenceLine(html, line);
-                        html.AppendLine("</li>");
-                    }
-
-                    html.AppendLine("</ol></details>");
-                }
             }
 
             html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy behavior fact", copy)}</div>");
-            html.AppendLine("</article>");
+            html.AppendLine("</div></details>");
         }
 
         html.AppendLine("</div></section>");
+    }
+
+    /// <summary>
+    /// Builds the one-line preview shown next to a collapsed fact row. Inputs
+    /// are the lane's evidence rows; processing drops the leading timestamp and
+    /// collapses whitespace so every row keeps a single line; return is a
+    /// bounded preview string.
+    /// </summary>
+    private static string BuildFactPreview(IReadOnlyList<string> lines)
+    {
+        var first = lines.FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
+        if (first is null)
+        {
+            return "No sample-attributed evidence";
+        }
+
+        var text = first.Trim();
+        var stamp = Regex.Match(text, "^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z?\\s*", RegexOptions.CultureInvariant);
+        if (stamp.Success)
+        {
+            text = text[stamp.Length..];
+        }
+
+        text = Regex.Replace(text, "\\s+", " ", RegexOptions.CultureInvariant);
+        return text.Length <= 160 ? text : string.Concat(text.AsSpan(0, 160), "…");
     }
 
     private static IReadOnlyList<BehaviorFactCard> BuildBehaviorFactCards(
@@ -3234,8 +3285,7 @@ details[open]>summary:before{content:'–'}
         Metric(html, "Registry IOCs", registryIocs.Count.ToString(), "risk-medium");
         Metric(html, "Artifact IOCs", artifactIocs.Count.ToString(), "risk-info");
         html.AppendLine("</div>");
-        AppendEvidenceNarrativeSpine(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts);
-        AppendEvidenceSummaryCards(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
+        AppendEvidenceSummaryCards(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts);
         AppendEvidenceStoryBoard(html, report, artifacts);
         AppendCollectionCoverageGaps(html, report, artifacts, collections);
         AppendStableRelationshipLanes(html, edges);
@@ -3243,12 +3293,21 @@ details[open]>summary:before{content:'–'}
 
         if (processNodes.Count > 0)
         {
-            html.AppendLine("<h3>Process graph nodes</h3><div class=\"graph-map\">");
+            html.AppendLine("<h3>Process graph nodes</h3><div class=\"fact-list\">");
             foreach (var node in processNodes)
             {
-                html.AppendLine($"<div class=\"graph-node copyable\" data-copy=\"{A(node.CopyText)}\"><strong>{E(node.Label)}</strong><div class=\"kv-flow node-flow\">");
+                // The label already carries process id and name, so the lead
+                // drops the repeated pid field.
+                var nodeLead = string.Join(
+                    " · ",
+                    node.Detail
+                        .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Where(field => !field.StartsWith("pid=", StringComparison.OrdinalIgnoreCase)));
+                AppendFactRowOpen(html, node.Label, lead: nodeLead, codeName: true);
+                html.AppendLine($"<div class=\"kv-flow node-flow copyable\" data-copy=\"{A(node.CopyText)}\">");
                 AppendEvidenceFlow(html, node.Detail);
-                html.AppendLine("</div></div>");
+                html.AppendLine("</div>");
+                AppendFactRowClose(html);
             }
 
             html.AppendLine("</div>");
@@ -3263,7 +3322,7 @@ details[open]>summary:before{content:'–'}
             html.AppendLine("<h3>Evidence graph edges</h3>");
             var inlineEdges = edges.Take(GraphEdgeInlineLimit).ToList();
             var foldedEdges = edges.Skip(GraphEdgeInlineLimit).ToList();
-            html.AppendLine("<div class=\"edge-cards\">");
+            html.AppendLine("<div class=\"fact-list\">");
             foreach (var edge in inlineEdges)
             {
                 AppendGraphEdgeCard(html, edge);
@@ -3274,9 +3333,9 @@ details[open]>summary:before{content:'–'}
             {
                 // Nineteen full-width edge cards were a wall of near-identical
                 // rows. The head of the list stays visible; the rest keeps the
-                // same card markup behind one disclosure.
+                // same row markup behind one disclosure.
                 html.AppendLine($"<details class=\"fold-block\"><summary>Remaining graph edges ({E(foldedEdges.Count.ToString(CultureInfo.InvariantCulture))} of {E(edges.Count.ToString(CultureInfo.InvariantCulture))})</summary>");
-                html.AppendLine("<div class=\"edge-cards\">");
+                html.AppendLine("<div class=\"fact-list\">");
                 foreach (var edge in foldedEdges)
                 {
                     AppendGraphEdgeCard(html, edge);
@@ -3286,7 +3345,7 @@ details[open]>summary:before{content:'–'}
             }
         }
 
-        html.AppendLine("<h3>IOC summary</h3><div class=\"ioc-grid\">");
+        html.AppendLine("<h3>IOC summary</h3><div class=\"fact-list\">");
         AppendIocCard(html, "Network IOCs", networkIocs, "No DNS, HTTP, TLS, PCAP, or TCP/IP indicators were extracted from events.");
         AppendIocCard(html, "File/path IOCs", fileIocs, "No file/path indicators were extracted from dynamic events.");
         AppendIocCard(html, "Registry IOCs", registryIocs, "No registry indicators were extracted from dynamic events.");
@@ -3296,9 +3355,9 @@ details[open]>summary:before{content:'–'}
     }
 
     /// <summary>
-    /// Appends one graph edge as a horizontal source/relation/target chain with
-    /// its evidence fields underneath. Inputs are the report and one edge;
-    /// processing keeps the chain on a single reading line; return is none.
+    /// Appends one graph edge as a single source/relation/target row whose
+    /// field payload is folded. Inputs are the report and one edge; processing
+    /// keeps the chain on one reading line; return is none.
     /// </summary>
     private static void AppendGraphEdgeCard(StringBuilder html, BehaviorGraphEdge edge)
     {
@@ -3310,20 +3369,24 @@ details[open]>summary:before{content:'–'}
                 $"to={edge.To}",
                 edge.Evidence
             ]);
-        html.AppendLine($"<article class=\"edge-card copyable\" data-copy=\"{A(copy)}\">");
+        var fieldCount = edge.Evidence
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Length;
+        html.AppendLine("<details class=\"fact-row edge-card\">");
+        html.AppendLine("<summary>");
         // One horizontal chain per edge reads left to right: source,
         // relation, target. The previous stacked From/Relation/To
         // column forced long process keys into a narrow strip.
-        html.AppendLine("<div class=\"edge-flow\">");
         html.AppendLine($"<code class=\"edge-node\">{E(edge.From)}</code>");
         html.AppendLine($"<span class=\"edge-arrow\" aria-hidden=\"true\">&rarr;</span><span class=\"edge-relation\">{E(edge.Relation)}</span><span class=\"edge-arrow\" aria-hidden=\"true\">&rarr;</span>");
         html.AppendLine($"<code class=\"edge-node\">{E(edge.To)}</code>");
-        html.AppendLine($"<span class=\"inline-actions\">{CopyButton("Copy graph edge", copy)}</span>");
-        html.AppendLine("</div>");
-        html.AppendLine("<div class=\"edge-evidence\"><div class=\"kv-flow\">");
+        html.AppendLine($"<span class=\"fact-count\">{E(fieldCount.ToString(CultureInfo.InvariantCulture))} <span class=\"finding-count-unit\">fields</span></span>");
+        html.AppendLine("</summary>");
+        html.AppendLine($"<div class=\"fact-body copyable\" data-copy=\"{A(copy)}\"><div class=\"kv-flow\">");
         AppendEvidenceFlow(html, edge.Evidence);
-        html.AppendLine("</div></div>");
-        html.AppendLine("</article>");
+        html.AppendLine("</div>");
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy graph edge", copy)}</div>");
+        html.AppendLine("</div></details>");
     }
 
     /// <summary>
@@ -3501,42 +3564,12 @@ details[open]>summary:before{content:'–'}
     };
 
     /// <summary>
-    /// Appends a compact left-to-right narrative before the heavier graph
-    /// widgets. Inputs are already-derived graph, IOC, and artifact summaries;
-    /// processing emits four bounded copyable cards that answer what happened,
-    /// what it touched, what it contacted, and what proof was collected.
+    /// Builds the one-line narrative that introduces the evidence summary.
+    /// Inputs are already-derived graph, IOC, and artifact summaries;
+    /// processing folds what happened, what it touched, what it contacted, and
+    /// what proof was collected into a single copyable sentence so the four
+    /// families below do not repeat it as four separate cards.
     /// </summary>
-    private static void AppendEvidenceNarrativeSpine(
-        StringBuilder html,
-        AnalysisReport report,
-        IReadOnlyCollection<ProcessGraphNode> processNodes,
-        IReadOnlyCollection<BehaviorGraphEdge> edges,
-        IReadOnlyCollection<string> fileIocs,
-        IReadOnlyCollection<string> registryIocs,
-        IReadOnlyCollection<string> networkIocs,
-        IReadOnlyCollection<string> artifactIocs,
-        IReadOnlyCollection<ArtifactDescriptor> artifacts)
-    {
-        var cards = BuildEvidenceNarrativeCards(report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts);
-        var spineCopy = BuildNarrativeSpineCopyText(cards);
-        html.AppendLine("<h3 id=\"narrative-spine\" class=\"anchor-offset\">Narrative spine</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Compact evidence narrative.</strong> Read left to right: process tree root, behavior graph edges, network endpoint scope, and collected artifact proof. Each step stays bounded and copyable.</div>");
-        html.AppendLine($"<div class=\"narrative-spine-lead copyable\" data-copy=\"{A(spineCopy)}\"><strong>Narrative spine summary</strong><span>Execution → storage → network → artifact proof, with copyable bounded evidence and no raw event wall.</span>{CopyButton("Copy narrative spine", spineCopy)}</div>");
-        html.AppendLine("<div class=\"narrative-spine\">");
-        foreach (var card in cards)
-        {
-            html.AppendLine($"<article class=\"narrative-step copyable\" data-copy=\"{A(card.CopyText)}\">");
-            html.AppendLine($"<span class=\"narrative-step-index\">{E(card.Step)}</span>");
-            html.AppendLine($"<h3>{E(card.Title)}</h3>");
-            html.AppendLine($"<span class=\"overview-value {E(card.Css)}\">{E(card.Value)}</span>");
-            html.AppendLine($"<p>{E(card.Detail)}</p>");
-            html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy narrative step", card.CopyText)}</div>");
-            html.AppendLine("</article>");
-        }
-
-        html.AppendLine("</div>");
-    }
-
     private static string BuildNarrativeSpineCopyText(IReadOnlyList<EvidenceNarrativeCard> cards)
     {
         return string.Join(
@@ -3646,7 +3679,7 @@ details[open]>summary:before{content:'–'}
 
         html.AppendLine("<h3>Stable relationship lanes</h3>");
         html.AppendLine("<div class=\"section-note\"><strong>Stable relationship lanes.</strong> Lane counts and representative paths for process lineage, file, registry, network, and artifact proof; complete edges are card-listed below.</div>");
-        html.AppendLine("<div class=\"overview-strip relationship-lane-overview\">");
+        html.AppendLine("<div class=\"fact-list relationship-lane-overview\">");
         foreach (var lane in lanes)
         {
             var laneEdges = edgeList
@@ -3655,8 +3688,16 @@ details[open]>summary:before{content:'–'}
                 .Select(edge => $"{edge.From} → {edge.To}")
                 .ToList();
             var count = edgeList.Count(edge => string.Equals(edge.Relation, lane.Relation, StringComparison.OrdinalIgnoreCase));
-            var detail = laneEdges.Count == 0 ? lane.Detail : $"{lane.Detail} Examples: {string.Join("; ", laneEdges)}.";
-            AppendOverviewItem(html, lane.Title, count.ToString(CultureInfo.InvariantCulture), detail, count > 0 ? "risk-info" : "risk-low");
+            // Five lanes read as five lines; the lane definition and its sample
+            // paths stay behind the row instead of expanding into five tiles.
+            AppendFactRowOpen(
+                html,
+                lane.Title,
+                count.ToString(CultureInfo.InvariantCulture),
+                "edges",
+                lead: laneEdges.Count == 0 ? "-" : string.Join("; ", laneEdges));
+            html.AppendLine($"<p class=\"fact-note\">{E(lane.Detail)}</p>");
+            AppendFactRowClose(html);
         }
 
         html.AppendLine("</div>");
@@ -3741,9 +3782,15 @@ details[open]>summary:before{content:'–'}
         var pairCount = edge.Evidence
             .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Length;
+        // The chain head doubles as the disclosure summary, so each edge is a
+        // single line instead of a head line plus a "N fields" line.
         html.AppendLine("<li class=\"chain-item\">");
-        html.AppendLine($"<div class=\"chain-head\"><code>{E(edge.From)}</code> <span class=\"badge badge-info\">{E(edge.Relation)}</span> <code>{E(edge.To)}</code></div>");
-        html.AppendLine($"<details class=\"chain-evidence copyable\" data-copy=\"{A(edge.Evidence)}\"><summary>{E(pairCount.ToString())} fields</summary><div class=\"kv-flow\">");
+        html.AppendLine($"<details class=\"chain-evidence copyable\" data-copy=\"{A(edge.Evidence)}\">");
+        html.AppendLine("<summary>");
+        html.AppendLine($"<code>{E(edge.From)}</code> <span class=\"badge badge-info\">{E(edge.Relation)}</span> <code>{E(edge.To)}</code>");
+        html.AppendLine($"<span class=\"chain-fields\">{E(pairCount.ToString(CultureInfo.InvariantCulture))} <span class=\"finding-count-unit\">fields</span></span>");
+        html.AppendLine("</summary>");
+        html.AppendLine("<div class=\"kv-flow\">");
         AppendEvidenceFlow(html, edge.Evidence);
         html.AppendLine("</div></details>");
         html.AppendLine("</li>");
@@ -3763,9 +3810,69 @@ details[open]>summary:before{content:'–'}
     }
 
     /// <summary>
-    /// Appends operator-facing evidence summary cards for fast triage.
-    /// Inputs are graph nodes, edges, IOC lists, and artifacts already derived
-    /// for the graph; processing emits bounded copyable cards; return is none.
+    /// Opens one collapsed index row. Inputs are the row label plus optional
+    /// headline count, status badge, one-line lead, and right-hand counter;
+    /// processing writes only the summary line, so a dense board reads as a
+    /// table of contents. Callers write the body and then call
+    /// <see cref="AppendFactRowClose"/>.
+    /// </summary>
+    private static void AppendFactRowOpen(
+        StringBuilder html,
+        string name,
+        string? value = null,
+        string? unit = null,
+        string? badgeText = null,
+        string? badgeCss = null,
+        string? lead = null,
+        string? countValue = null,
+        string? countUnit = null,
+        bool codeName = false,
+        bool badgeTextIsMarkup = false)
+    {
+        html.AppendLine("<details class=\"fact-row\">");
+        html.AppendLine("<summary>");
+        html.AppendLine(codeName
+            ? $"<span class=\"fact-name\"><code>{E(name)}</code></span>"
+            : $"<span class=\"fact-name\">{E(name)}</span>");
+        if (!string.IsNullOrWhiteSpace(badgeText))
+        {
+            var badgeLabel = badgeTextIsMarkup ? badgeText : E(badgeText);
+            html.AppendLine($"<span class=\"fact-status badge badge-{E(badgeCss ?? "info")}\">{badgeLabel}</span>");
+        }
+
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            html.AppendLine(string.IsNullOrWhiteSpace(unit)
+                ? $"<span class=\"fact-value\"><b>{E(value)}</b></span>"
+                : $"<span class=\"fact-value\"><b>{E(value)}</b><span class=\"finding-count-unit\">{E(unit)}</span></span>");
+        }
+
+        if (!string.IsNullOrWhiteSpace(lead))
+        {
+            html.AppendLine($"<span class=\"fact-lead\">{E(lead)}</span>");
+        }
+
+        if (!string.IsNullOrWhiteSpace(countValue))
+        {
+            html.AppendLine(string.IsNullOrWhiteSpace(countUnit)
+                ? $"<span class=\"fact-count\">{E(countValue)}</span>"
+                : $"<span class=\"fact-count\">{E(countValue)} <span class=\"finding-count-unit\">{E(countUnit)}</span></span>");
+        }
+
+        html.AppendLine("</summary>");
+        html.AppendLine("<div class=\"fact-body\">");
+    }
+
+    private static void AppendFactRowClose(StringBuilder html)
+    {
+        html.AppendLine("</div></details>");
+    }
+
+    /// <summary>
+    /// Appends the evidence summary: one copyable narrative line plus one
+    /// collapsed index row per evidence family. Inputs are graph nodes, edges,
+    /// IOC lists, and artifacts already derived for the graph; processing
+    /// emits no expanded payload until a row is opened; return is none.
     /// </summary>
     private static void AppendEvidenceSummaryCards(
         StringBuilder html,
@@ -3775,26 +3882,34 @@ details[open]>summary:before{content:'–'}
         IReadOnlyCollection<string> fileIocs,
         IReadOnlyCollection<string> registryIocs,
         IReadOnlyCollection<string> networkIocs,
-        IReadOnlyCollection<string> artifactIocs)
+        IReadOnlyCollection<string> artifactIocs,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var cards = BuildEvidenceSummaryCards(report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
-        html.AppendLine("<h3 id=\"evidence-summary-cards\" class=\"anchor-offset\">Evidence summary cards</h3>");
-        html.AppendLine("<div class=\"evidence-summary-grid\">");
+        var spineCopy = BuildNarrativeSpineCopyText(
+            BuildEvidenceNarrativeCards(report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts));
+        html.AppendLine("<h3 id=\"evidence-summary-cards\" class=\"anchor-offset\">Evidence summary</h3>");
+        // Execution -> storage -> network -> artifact proof is one sentence of
+        // chrome, not four tiles repeating the counts printed in the rows.
+        html.AppendLine($"<div class=\"narrative-spine-lead copyable\" data-copy=\"{A(spineCopy)}\"><strong>Narrative spine summary</strong><span>Execution → storage → network → artifact proof, with copyable bounded evidence and no raw event wall.</span>{CopyButton("Copy narrative spine", spineCopy)}</div>");
+        html.AppendLine("<div class=\"fact-list\">");
         foreach (var card in cards)
         {
             var detailLineCount = card.CopyText.Split('\n').Length;
-            html.AppendLine($"<article class=\"evidence-summary-card copyable\" data-copy=\"{A(card.CopyText)}\">");
-            html.AppendLine("<div class=\"relationship-title\">");
-            html.AppendLine($"<h3>{E(card.Title)}</h3><span class=\"lane-actions\"><span class=\"badge badge-{E(card.Css)}\">{E(card.Value)}</span>{CopyIconButton(card.CopyText)}</span>");
-            html.AppendLine("</div>");
-            html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
-            // The badge already carries the count, so the payload folds instead
-            // of repeating the headline and then dumping every row inline. The
-            // copy action rides in the header instead of a one-button row.
-            html.AppendLine($"<details class=\"relation-evidence copyable\" data-copy=\"{A(card.CopyText)}\"><summary>Detail ({E(detailLineCount.ToString(CultureInfo.InvariantCulture))} rows)</summary><div class=\"kv-flow\">");
+            // The count is part of the row header, so the payload stays behind
+            // the disclosure instead of repeating the headline before dumping
+            // every evidence row.
+            AppendFactRowOpen(
+                html,
+                card.Title,
+                card.Value,
+                card.Unit,
+                countValue: detailLineCount.ToString(CultureInfo.InvariantCulture),
+                countUnit: "evidence rows",
+                lead: card.Detail);
             AppendEvidenceFlow(html, card.CopyText);
-            html.AppendLine("</div></details>");
-            html.AppendLine("</article>");
+            html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy " + card.Title.ToLowerInvariant(), card.CopyText)}</div>");
+            AppendFactRowClose(html);
         }
 
         html.AppendLine("</div>");
@@ -3818,6 +3933,7 @@ details[open]>summary:before{content:'–'}
             .OrderBy(finding => SeverityRank(finding.Severity))
             .Select(finding => $"{finding.Severity}: {finding.Title}")
             .FirstOrDefault() ?? "No behavior rules matched";
+        var spawnEdgeCount = edges.Count(edge => string.Equals(edge.Relation, "spawn", StringComparison.OrdinalIgnoreCase));
         var topNetwork = networkIocs.Take(5).ToList();
         var topStorage = fileIocs.Concat(registryIocs).Take(5).ToList();
         var topArtifacts = artifactIocs.Take(5).ToList();
@@ -3826,27 +3942,27 @@ details[open]>summary:before{content:'–'}
         [
             new EvidenceSummaryCard(
                 "Process evidence",
-                processNodes.Count.ToString(),
-                $"Process nodes and {edges.Count(edge => string.Equals(edge.Relation, "spawn", StringComparison.OrdinalIgnoreCase))} spawn edges. Highest finding: {highestSeverity}.",
-                processNodes.Count > 0 ? "info" : "low",
-                string.Join(Environment.NewLine, ["Process evidence", $"nodes={processNodes.Count}", $"spawnEdges={edges.Count(edge => string.Equals(edge.Relation, "spawn", StringComparison.OrdinalIgnoreCase))}", $"highestFinding={highestSeverity}", .. processNodes.Take(8).Select(node => node.CopyText)])),
+                processNodes.Count.ToString(CultureInfo.InvariantCulture),
+                "nodes",
+                $"Spawn edges {spawnEdgeCount}. Highest finding: {highestSeverity}.",
+                string.Join(Environment.NewLine, ["Process evidence", $"nodes={processNodes.Count}", $"spawnEdges={spawnEdgeCount}", $"highestFinding={highestSeverity}", .. processNodes.Take(8).Select(node => node.CopyText)])),
             new EvidenceSummaryCard(
                 "Network evidence",
-                networkIocs.Count.ToString(),
+                networkIocs.Count.ToString(CultureInfo.InvariantCulture),
+                "indicators",
                 topNetwork.Count == 0 ? "No network indicators were extracted." : $"Top endpoints: {string.Join(", ", topNetwork)}",
-                networkIocs.Count > 0 ? "medium" : "low",
                 string.Join(Environment.NewLine, ["Network evidence", $"iocCount={networkIocs.Count}", .. topNetwork])),
             new EvidenceSummaryCard(
                 "File and registry evidence",
-                (fileIocs.Count + registryIocs.Count).ToString(),
+                (fileIocs.Count + registryIocs.Count).ToString(CultureInfo.InvariantCulture),
+                "paths",
                 topStorage.Count == 0 ? "No file or registry indicators were extracted." : $"Top paths: {string.Join(", ", topStorage)}",
-                fileIocs.Count + registryIocs.Count > 0 ? "medium" : "low",
                 string.Join(Environment.NewLine, ["File and registry evidence", $"fileIocCount={fileIocs.Count}", $"registryIocCount={registryIocs.Count}", .. topStorage])),
             new EvidenceSummaryCard(
                 "Artifact evidence",
-                artifactIocs.Count.ToString(),
+                artifactIocs.Count.ToString(CultureInfo.InvariantCulture),
+                "items",
                 topArtifacts.Count == 0 ? "No report artifact indicators were indexed." : $"Top artifacts: {string.Join(", ", topArtifacts)}",
-                artifactIocs.Count > 0 ? "info" : "low",
                 string.Join(Environment.NewLine, ["Artifact evidence", $"artifactIocCount={artifactIocs.Count}", .. topArtifacts]))
         ];
     }
@@ -3866,25 +3982,24 @@ details[open]>summary:before{content:'–'}
         var cards = BuildEvidenceStoryCards(report, artifacts);
         html.AppendLine("<h3 id=\"evidence-story-board\" class=\"anchor-offset\">Evidence story board</h3>");
         html.AppendLine("<div class=\"section-note\"><strong>Evidence story lanes.</strong> Process lineage, released files, screenshots, memory dumps, PCAP/network, and R0 collection quality, each with bounded copyable evidence; complete raw rows stay in indexed source JSON/JSONL and Artifact links.</div>");
-        html.AppendLine("<div class=\"evidence-story-board\">");
+        // Same index treatment as the behavior-fact list: one row per lane,
+        // payload collapsed until opened.
+        html.AppendLine("<div class=\"fact-list\">");
         foreach (var card in cards)
         {
             var observedEvidenceCount = card.SourceEvidenceCount;
             var shownEvidenceCount = observedEvidenceCount == 0
                 ? 0
                 : Math.Min(card.EvidenceLines.Count, observedEvidenceCount);
-            var evidenceScope = observedEvidenceCount == 0
-                ? "Evidence examples shown: 0 observed; lane includes guidance only."
-                : $"Evidence examples shown: {shownEvidenceCount}/{observedEvidenceCount}; expand stays bounded and complete raw source remains in indexed JSON/JSONL artifacts.";
-            html.AppendLine($"<article class=\"evidence-story-lane copyable\" data-copy=\"{A(card.CopyText)}\">");
-            html.AppendLine("<div class=\"relationship-title\">");
-            html.AppendLine($"<h3>{E(card.Title)}</h3><span class=\"lane-actions\"><span class=\"badge badge-{E(card.Css)}\">{E(card.Status)}</span>{CopyIconButton(card.CopyText)}</span>");
-            html.AppendLine("</div>");
-            html.AppendLine($"<p class=\"story-lead\">{E(card.Lead)}</p>");
+            html.AppendLine("<details class=\"fact-row\">");
+            html.AppendLine("<summary>");
+            html.AppendLine($"<span class=\"fact-name\">{E(card.Title)}</span>");
+            html.AppendLine($"<span class=\"fact-status badge badge-{E(card.Css)}\">{E(card.Status)}</span>");
+            html.AppendLine($"<span class=\"fact-lead\">{E(card.Lead)}</span>");
+            html.AppendLine($"<span class=\"fact-count\">{E(shownEvidenceCount.ToString(CultureInfo.InvariantCulture))}/{E(observedEvidenceCount.ToString(CultureInfo.InvariantCulture))} <span class=\"finding-count-unit\">examples</span></span>");
+            html.AppendLine("</summary>");
+            html.AppendLine("<div class=\"fact-body\">");
             html.AppendLine("<div class=\"story-metrics\">");
-            // The shown/total counter used to be a full sentence repeated in
-            // every lane. A chip carries the same number without the prose.
-            html.AppendLine($"<span class=\"copyable\" data-copy=\"{A(evidenceScope)}\">examples {E(shownEvidenceCount.ToString(CultureInfo.InvariantCulture))}/{E(observedEvidenceCount.ToString(CultureInfo.InvariantCulture))}</span>");
             foreach (var metric in card.Metrics.Take(8))
             {
                 html.AppendLine($"<span class=\"copyable\" data-copy=\"{A(metric)}\">{E(metric)}</span>");
@@ -3893,10 +4008,9 @@ details[open]>summary:before{content:'–'}
             html.AppendLine("</div>");
             html.AppendLine("<div class=\"evidence-expansion-card\">");
             AppendEvidenceExpansionSummary(html, "Story evidence", shownEvidenceCount, observedEvidenceCount, "Sampled report view and indexed source JSON/JSONL artifacts", card.EvidenceLines);
-            var inlineStoryLines = card.EvidenceLines.Take(BehaviorFactInlineLines).ToList();
-            var foldedStoryLines = card.EvidenceLines.Skip(BehaviorFactInlineLines).Take(12).ToList();
+            var storyLines = card.EvidenceLines.Take(StoryEvidenceLineLimit).ToList();
             html.AppendLine("<ol class=\"story-evidence-list\">");
-            foreach (var line in inlineStoryLines)
+            foreach (var line in storyLines)
             {
                 html.AppendLine("<li><div class=\"kv-flow\">");
                 AppendEvidenceFlow(html, line, StoryEvidenceSegmentBudget);
@@ -3904,21 +4018,14 @@ details[open]>summary:before{content:'–'}
             }
 
             html.AppendLine("</ol>");
-            if (foldedStoryLines.Count > 0)
+            if (card.EvidenceLines.Count > storyLines.Count)
             {
-                html.AppendLine($"<details class=\"story-more\"><summary>More evidence: {E(foldedStoryLines.Count.ToString())}</summary><ol class=\"story-evidence-list\">");
-                foreach (var line in foldedStoryLines)
-                {
-                    html.AppendLine("<li><div class=\"kv-flow\">");
-                    AppendEvidenceFlow(html, line, StoryEvidenceSegmentBudget);
-                    html.AppendLine("</div></li>");
-                }
-
-                html.AppendLine("</ol></details>");
+                html.AppendLine($"<p class=\"copy-hint\">{E((card.EvidenceLines.Count - storyLines.Count).ToString(CultureInfo.InvariantCulture))} more rows stay in the indexed source artifacts.</p>");
             }
 
             html.AppendLine("</div>");
-            html.AppendLine("</article>");
+            html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy story lane", card.CopyText)}</div>");
+            html.AppendLine("</div></details>");
         }
 
         html.AppendLine("</div>");
@@ -4751,20 +4858,24 @@ details[open]>summary:before{content:'–'}
             return;
         }
 
-        html.AppendLine("<div class=\"evidence-summary-grid collection-coverage-gap-grid copyable\" data-copy=\"" + A(copy) + "\">");
+        html.AppendLine("<div class=\"fact-list copyable\" data-copy=\"" + A(copy) + "\">");
         foreach (var gap in gaps)
         {
             var css = TextEqualsAny(gap.State, "partial", "capture_failed", "failed", "disabled", "disabled/missing", "missing", "not-subscribed", "job-id mismatch") ? "medium" : "info";
             var evidence = string.IsNullOrWhiteSpace(gap.Evidence) ? "-" : gap.Evidence;
-            html.AppendLine("<article class=\"evidence-summary-card\">");
-            html.AppendLine("<div class=\"relationship-title\">");
-            html.AppendLine($"<h3>{E(gap.Name)}</h3><span class=\"badge badge-{E(css)}\">coverage gap · {E(CollectionGapStateLabel(gap.State))}</span>");
-            html.AppendLine("</div>");
-            html.AppendLine($"<p class=\"muted\">{E(gap.Detail)}</p>");
-            html.AppendLine($"<div class=\"evidence-expansion-card copyable\" data-copy=\"{A(evidence)}\"><div class=\"kv-flow\">");
+            // Name, state, and the one-line reason stay visible; the raw
+            // collection evidence folds so a dozen gaps read as one list.
+            AppendFactRowOpen(
+                html,
+                gap.Name,
+                badgeText: $"coverage gap · {E(CollectionGapStateLabel(gap.State))}",
+                badgeCss: css,
+                lead: gap.Detail,
+                badgeTextIsMarkup: true);
+            html.AppendLine($"<div class=\"kv-flow copyable\" data-copy=\"{A(evidence)}\">");
             AppendEvidenceFlow(html, evidence);
-            html.AppendLine("</div></div>");
-            html.AppendLine("</article>");
+            html.AppendLine("</div>");
+            AppendFactRowClose(html);
         }
 
         html.AppendLine("</div>");
@@ -5021,32 +5132,27 @@ details[open]>summary:before{content:'–'}
             return;
         }
 
-        // Artifact rows read as cards: identity and size/hash on the left, the
-        // safe Open/Download selector on the right, and the folded index
-        // evidence underneath. A seven-column table forced hashes and MIME
-        // types to wrap into unreadable slivers.
-        html.AppendLine("<div class=\"artifact-cards\">");
+        // Artifact rows read as one index line each: name, kind, size, and the
+        // relative selector. Hash, MIME type, index evidence, the safe
+        // Open/Download control, and any screenshot preview stay folded, so a
+        // nine-artifact job no longer renders nine expanded preview cards.
+        html.AppendLine("<div class=\"fact-list artifact-list-rows\">");
         foreach (var artifact in artifacts)
         {
             var plain = ArtifactToPlainText(artifact);
             var sha256 = ArtifactSha256(artifact);
             var mime = string.IsNullOrWhiteSpace(artifact.MimeType) ? "-" : artifact.MimeType;
-            html.AppendLine($"<article class=\"artifact-card copyable\" data-copy=\"{A(plain)}\">");
-            html.AppendLine("<div class=\"artifact-card-main\">");
-            html.AppendLine("<div class=\"artifact-card-head\">");
-            html.AppendLine($"<span class=\"artifact-card-name\">{E(artifact.Name)}</span>");
-            html.AppendLine($"<span class=\"artifact-card-kind\">{E(artifact.Kind.ToString())}</span>");
-            html.AppendLine($"<span class=\"chip chip-info\">{E(artifact.Category)}</span>");
-            html.AppendLine("</div>");
-            html.AppendLine("<div class=\"artifact-card-meta\">");
-            html.AppendLine($"<span>{E(FormatArtifactSize(artifact.SizeBytes))}</span>");
-            html.AppendLine($"<span><code class=\"copyable\" data-copy=\"{A(sha256)}\" title=\"{A(sha256)}\">{E(ShortenMiddle(sha256, 26))}</code></span>");
-            html.AppendLine($"<span>{E(mime)}</span>");
-            html.AppendLine("</div>");
-            html.AppendLine("</div>");
+            AppendFactRowOpen(
+                html,
+                artifact.Name,
+                FormatArtifactSize(artifact.SizeBytes),
+                badgeText: artifact.Kind.ToString(),
+                badgeCss: "info",
+                lead: $"{artifact.Category} · {(string.IsNullOrWhiteSpace(artifact.RelativePath) ? artifact.SafeLink : artifact.RelativePath)} · {mime}");
             html.AppendLine($"<div class=\"artifact-card-path\">{RenderArtifactLocation(artifact)}</div>");
+            html.AppendLine($"<div class=\"artifact-card-meta\"><span>size {E(FormatArtifactSize(artifact.SizeBytes))}</span><span><code class=\"copyable\" data-copy=\"{A(sha256)}\" title=\"{A(sha256)}\">{E(ShortenMiddle(sha256, 26))}</code></span><span>{E(mime)}</span></div>");
             html.AppendLine($"<div class=\"artifact-card-evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}{RenderArtifactPreview(artifact)}</div>");
-            html.AppendLine("</article>");
+            AppendFactRowClose(html);
         }
 
         html.AppendLine("</div>");
@@ -5356,27 +5462,23 @@ details[open]>summary:before{content:'–'}
         var matrixRows = BuildArtifactEvidenceMatrixRows(report.Events, artifacts);
         var cards = BuildArtifactCollectionStatusCards(report, artifacts, matrixRows);
         html.AppendLine("<h3>Artifact collection status</h3>");
-        html.AppendLine("<div class=\"evidence-summary-grid artifact-status-grid\">");
+        // One status row per collection lane. The lane counters live inside the
+        // row instead of a padded tile, so five lanes fit in the space two cards
+        // used to take.
+        html.AppendLine("<div class=\"fact-list\">");
         foreach (var card in cards)
         {
-            html.AppendLine($"<article class=\"evidence-summary-card copyable\" data-copy=\"{A(card.CopyText)}\">");
-            html.AppendLine("<div class=\"relationship-title\">");
-            html.AppendLine($"<h3>{E(card.Name)}</h3><span class=\"badge badge-{E(card.Css)}\">{E(card.Status)}</span>");
-            html.AppendLine("</div>");
-            // One line of context, then aligned counters. The lane description
-            // used to repeat verbatim inside a bordered "compact summary" box
-            // directly below it, which doubled the card height without adding
-            // a single new fact.
-            html.AppendLine($"<p class=\"muted\">{E(card.Description)}</p>");
+            AppendFactRowOpen(html, card.Name, badgeText: card.Status, badgeCss: card.Css, lead: card.Description);
             html.AppendLine("<div class=\"lane-health\">");
             html.AppendLine("<span class=\"lane-health-key\">Artifact lane health</span>");
             html.AppendLine($"<span>artifacts<b>{E(card.ArtifactCount.ToString(CultureInfo.InvariantCulture))}</b></span>");
             html.AppendLine($"<span>events<b>{E(card.EventCount.ToString(CultureInfo.InvariantCulture))}</b></span>");
             html.AppendLine("</div>");
-            html.AppendLine($"<details class=\"relation-evidence copyable\" data-copy=\"{A(card.CopyText)}\"><summary>Collection detail</summary><div class=\"kv-flow\">");
+            html.AppendLine($"<div class=\"kv-flow copyable\" data-copy=\"{A(card.CopyText)}\">");
             AppendEvidenceFlow(html, card.CopyText);
-            html.AppendLine("</div></details>");
-            html.AppendLine("</article>");
+            html.AppendLine("</div>");
+            html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy " + card.Name.ToLowerInvariant() + " collection detail", card.CopyText)}</div>");
+            AppendFactRowClose(html);
         }
 
         html.AppendLine("</div>");
@@ -7550,17 +7652,29 @@ details[open]>summary:before{content:'–'}
             return;
         }
 
-        html.AppendLine("<div class=\"relation-grid\">");
+        html.AppendLine("<div class=\"fact-list\">");
         foreach (var card in cards)
         {
-            html.AppendLine($"<article class=\"relation-card copyable\" data-copy=\"{A(card.CopyText)}\">");
-            html.AppendLine("<div class=\"relationship-title\">");
-            html.AppendLine($"<h3><code>{E(card.Label)}</code></h3><span class=\"badge badge-{E(card.RiskCss)}\">{E(card.EventCount.ToString())} events</span>");
-            html.AppendLine("</div>");
+            // The row header carries the counts an analyst triages on; the
+            // relationship map, child list, and evidence rows stay folded.
+            var lead = string.Join(
+                " · ",
+                $"children {card.ChildCount}",
+                $"files {card.FileCount}",
+                $"registry {card.RegistryCount}",
+                $"network {card.NetworkCount}",
+                $"artifacts {card.RelatedArtifacts.Count}",
+                $"{card.FirstSeen} → {card.LastSeen}");
+            AppendFactRowOpen(
+                html,
+                card.Label,
+                card.EventCount.ToString(CultureInfo.InvariantCulture),
+                "events",
+                lead: lead,
+                countValue: card.EvidenceLines.Count.ToString(CultureInfo.InvariantCulture),
+                countUnit: "evidence rows",
+                codeName: true);
             html.AppendLine("<div class=\"relationship-meta\">");
-            html.AppendLine($"<span>Children: {E(card.ChildCount.ToString())}</span><span>Files: {E(card.FileCount.ToString())}</span>");
-            html.AppendLine($"<span>Registry: {E(card.RegistryCount.ToString())}</span><span>Network: {E(card.NetworkCount.ToString())}</span>");
-            html.AppendLine($"<span>First seen: {E(card.FirstSeen)}</span><span>Last seen: {E(card.LastSeen)}</span>");
             html.AppendLine($"<span>Parent: {E(card.ParentLabel)}</span><span>Relationship lines: {E(card.RelationshipLines.Count.ToString())}</span>");
             html.AppendLine($"<span>Artifacts: {E(card.RelatedArtifacts.Count.ToString())}</span><span>Evidence lines: {E(card.EvidenceLines.Count.ToString())}</span>");
             html.AppendLine("</div>");
@@ -7610,19 +7724,19 @@ details[open]>summary:before{content:'–'}
             html.AppendLine(CopyButton("Copy process card", card.CopyText));
             html.AppendLine("</div>");
             // Evidence stays folded: a nine-event process would otherwise render
-            // every field pair inline and turn one card into three screens.
+            // every field pair inline and turn one row into three screens.
             var cardEvidence = string.Join(Environment.NewLine, card.EvidenceLines);
             html.AppendLine($"<details class=\"relation-evidence copyable\" data-copy=\"{A(cardEvidence)}\"><summary>Evidence detail ({E(card.EvidenceLines.Count.ToString())})</summary><div class=\"kv-flow\">");
             AppendEvidenceFlow(html, cardEvidence);
             html.AppendLine("</div></details>");
-            html.AppendLine("</article>");
+            AppendFactRowClose(html);
         }
 
         html.AppendLine("</div>");
         if (hiddenCardCount > 0)
         {
             var copy = $"hiddenProcessRelationshipCards={hiddenCardCount}; renderedProcessRelationshipCards={cards.Count}; completeSource=indexed source JSON/JSONL artifacts";
-            html.AppendLine($"<div class=\"section-note copyable\" data-copy=\"{A(copy)}\">{E(hiddenCardCount.ToString(CultureInfo.InvariantCulture))} additional process relationship cards are hidden from inline cards; use indexed source JSON/JSONL artifacts for complete process relationships.</div>");
+            html.AppendLine($"<div class=\"section-note copyable\" data-copy=\"{A(copy)}\">{E(hiddenCardCount.ToString(CultureInfo.InvariantCulture))} additional process relationship cards are hidden from the inline list; use indexed source JSON/JSONL artifacts for complete process relationships.</div>");
         }
     }
 
@@ -7788,20 +7902,33 @@ details[open]>summary:before{content:'–'}
         AppendNetworkRelationshipOverview(html, allCards, cards.Count, networkEvents.Count);
         html.AppendLine("<div class=\"section-note\"><strong>Endpoint-centric view.</strong> Events are grouped by domain, SNI, URL, IP, or endpoint; rows without an observed target stay in raw evidence.</div>");
         html.AppendLine("<div class=\"section-note\"><strong>Network category view / 网络分类视图.</strong> Cards split DNS, HTTP, TLS, flow, and linked PCAP/source artifacts; badges appear only when indexed data links them to the endpoint.</div>");
-        html.AppendLine("<div class=\"relation-grid\">");
+        html.AppendLine("<div class=\"fact-list\">");
         foreach (var card in cards)
         {
-            html.AppendLine($"<article class=\"relation-card copyable\" data-copy=\"{A(card.CopyText)}\">");
-            html.AppendLine("<div class=\"relationship-title\">");
-            html.AppendLine($"<h3><code>{E(card.Target)}</code></h3><span class=\"badge badge-{E(card.RiskCss)}\">{E(card.Protocols)}</span>");
-            html.AppendLine("</div>");
+            // Endpoint rows keep the counts an analyst scans for; protocol
+            // chips, process lists, and evidence stay folded behind the row.
+            var lead = string.Join(
+                " · ",
+                string.Join(" / ", card.Categories),
+                $"{card.Processes.Count} processes",
+                $"dns {card.DnsCount}",
+                $"http {card.HttpCount}",
+                $"tls {card.TlsCount}",
+                $"{card.FirstSeen} → {card.LastSeen}");
+            AppendFactRowOpen(
+                html,
+                card.Target,
+                card.EventCount.ToString(CultureInfo.InvariantCulture),
+                "events",
+                badgeText: card.Protocols,
+                badgeCss: card.RiskCss,
+                lead: lead,
+                countValue: card.EvidenceLines.Count.ToString(CultureInfo.InvariantCulture),
+                countUnit: "evidence rows",
+                codeName: true);
             html.AppendLine("<div class=\"relationship-meta\">");
-            html.AppendLine($"<span>Events: {E(card.EventCount.ToString())}</span><span>Processes: {E(card.Processes.Count.ToString())}</span>");
-            html.AppendLine($"<span>First seen: {E(card.FirstSeen)}</span><span>Last seen: {E(card.LastSeen)}</span>");
-            html.AppendLine($"<span>Categories: {E(string.Join(" / ", card.Categories))}</span><span>DNS: {E(card.DnsCount.ToString())}</span>");
-            html.AppendLine($"<span>HTTP: {E(card.HttpCount.ToString())}</span><span>TLS: {E(card.TlsCount.ToString())}</span>");
-            html.AppendLine($"<span>Flow/other: {E(card.FlowCount.ToString())}</span><span>Event types: {E(card.EventTypes.Count.ToString())}</span>");
-            html.AppendLine($"<span>Artifacts: {E(card.RelatedArtifacts.Count.ToString())}</span><span>Evidence lines: {E(card.EvidenceLines.Count.ToString())}</span>");
+            html.AppendLine($"<span>Processes: {E(card.Processes.Count.ToString())}</span><span>Flow/other: {E(card.FlowCount.ToString())}</span>");
+            html.AppendLine($"<span>Event types: {E(card.EventTypes.Count.ToString())}</span><span>Artifacts: {E(card.RelatedArtifacts.Count.ToString())}</span>");
             html.AppendLine("</div>");
             AppendNetworkRelationFlow(html, card);
             html.AppendLine(RenderInlineArtifactBadges(card.RelatedArtifacts, "Network artifacts / 网络证据"));
@@ -7832,14 +7959,14 @@ details[open]>summary:before{content:'–'}
             html.AppendLine($"<details class=\"relation-evidence copyable\" data-copy=\"{A(networkEvidence)}\"><summary>Evidence detail ({E(card.EvidenceLines.Count.ToString())})</summary><div class=\"kv-flow\">");
             AppendEvidenceFlow(html, networkEvidence);
             html.AppendLine("</div></details></div>");
-            html.AppendLine("</article>");
+            AppendFactRowClose(html);
         }
 
         html.AppendLine("</div>");
         if (hiddenCardCount > 0)
         {
             var copy = $"hiddenNetworkRelationshipCards={hiddenCardCount}; renderedNetworkRelationshipCards={cards.Count}; completeSource=indexed source JSON/JSONL and packet artifacts";
-            html.AppendLine($"<div class=\"section-note copyable\" data-copy=\"{A(copy)}\">{E(hiddenCardCount.ToString(CultureInfo.InvariantCulture))} additional network relationship cards are hidden from inline cards; use indexed source JSON/JSONL and packet artifacts for complete endpoint evidence.</div>");
+            html.AppendLine($"<div class=\"section-note copyable\" data-copy=\"{A(copy)}\">{E(hiddenCardCount.ToString(CultureInfo.InvariantCulture))} additional network relationship cards are hidden from the inline list; use indexed source JSON/JSONL and packet artifacts for complete endpoint evidence.</div>");
         }
     }
 
@@ -8663,27 +8790,29 @@ details[open]>summary:before{content:'–'}
     }
 
     /// <summary>
-    /// Appends one IOC card with copy support.
-    /// Inputs are a title and bounded indicators; processing writes a compact
-    /// list or an empty state; the method returns no value.
+    /// Appends one IOC index row with copy support. Inputs are a title and
+    /// bounded indicators; processing writes the count in the row header and
+    /// keeps the indicator list folded; the method returns no value.
     /// </summary>
     private static void AppendIocCard(StringBuilder html, string title, IReadOnlyCollection<string> values, string emptyMessage)
     {
-        html.AppendLine("<div class=\"ioc-card\">");
         var copy = values.Count == 0 ? string.Empty : string.Join(Environment.NewLine, values);
-        html.AppendLine($"<h3>{E(title)}</h3>");
-        if (values.Count > 0)
-        {
-            html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy IOCs", copy)}</div>");
-        }
-
+        AppendFactRowOpen(
+            html,
+            title,
+            values.Count.ToString(CultureInfo.InvariantCulture),
+            "IOCs",
+            lead: values.Count == 0 ? emptyMessage : string.Join(" · ", values.Take(3)));
         if (values.Count == 0)
         {
             Empty(html, emptyMessage);
         }
         else
         {
-            html.AppendLine("<ul>");
+            html.AppendLine("<div class=\"toolbar\">");
+            html.AppendLine(CopyButton("Copy IOCs", copy));
+            html.AppendLine("</div>");
+            html.AppendLine($"<ul class=\"copyable\" data-copy=\"{A(copy)}\">");
             foreach (var value in values)
             {
                 html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</code></li>");
@@ -8692,7 +8821,7 @@ details[open]>summary:before{content:'–'}
             html.AppendLine("</ul>");
         }
 
-        html.AppendLine("</div>");
+        AppendFactRowClose(html);
     }
 
     /// <summary>
@@ -13142,7 +13271,15 @@ details[open]>summary:before{content:'–'}
         ["IOCs"] = "个 IOC",
         ["items"] = "项",
         ["indexed"] = "个已索引",
-        ["evidence rows"] = "条证据"
+        ["evidence rows"] = "条证据",
+        ["examples"] = "个示例",
+        ["edges"] = "条边",
+        ["fields"] = "个字段",
+        ["indicators"] = "个指标",
+        ["nodes"] = "个进程",
+        ["paths"] = "条路径",
+        ["artifacts"] = "个证据文件",
+        ["events"] = "个事件"
     };
 
     private static Dictionary<string, string>? normalizedFieldLabels;
@@ -14308,7 +14445,7 @@ details[open]>summary:before{content:'–'}
         ("Event families:", "事件族："),
         ("Event types:", "事件类型："),
         ("additional events in this group are hidden; open Raw normalized events or report.json for complete evidence.", "条此分组内的额外事件已隐藏；打开原始事件或 report.json 查看完整证据。"),
-        ("Evidence summary cards", "证据摘要卡"),
+        ("Evidence summary", "证据摘要"),
         ("Process evidence", "进程证据"),
         ("Network evidence", "网络证据"),
         ("File and registry evidence", "文件和注册表证据"),

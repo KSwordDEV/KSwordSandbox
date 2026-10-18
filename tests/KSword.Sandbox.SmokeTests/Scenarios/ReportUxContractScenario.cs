@@ -62,7 +62,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Stable relationship lanes", "Report renderer should expose stable weak-interaction relationship lanes before dense edge tables.");
         RequireContains(rendererSource, "Copy stable relationship lanes", "Report renderer should make relationship lane summaries explicitly copyable.");
         RequireContains(rendererSource, "AppendEvidenceSummaryCards", "Report renderer should expose evidence summary cards.");
-        RequireContains(rendererSource, "Evidence summary cards", "Report renderer should expose evidence summary cards title.");
+        RequireContains(rendererSource, "Evidence summary", "Report renderer should expose evidence summary title.");
         RequireContains(rendererSource, "AppendEvidenceStoryBoard", "Report renderer should expose a narrative evidence story board.");
         RequireContains(rendererSource, "Evidence story board", "Report renderer should expose the evidence story board title.");
         RequireContains(rendererSource, "AppendEvidenceHealthNarrative", "Report renderer should expose R0/VT/artifact evidence health narrative cards.");
@@ -631,7 +631,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "behavior-chain", "Rendered HTML should style the top behavior chain.");
         RequireContains(englishHtml, "contract-sample.exe pid:4242 --network--&gt; 203.0.113.10:443", "Rendered behavior chain should include the sample network edge.");
         RequireContains(englishHtml, "id=\"evidence-summary-cards\"", "Rendered HTML should include evidence summary card anchor.");
-        RequireContains(englishHtml, "Evidence summary cards", "Rendered HTML should include evidence summary cards.");
+        RequireContains(englishHtml, "<h3 id=\"evidence-summary-cards\" class=\"anchor-offset\">Evidence summary</h3>", "Rendered HTML should keep the evidence summary as a collapsed index instead of a card board.");
         RequireContains(englishHtml, "data-copy-button=\"true\"", "Rendered evidence summary cards should include icon copy buttons.");
         RequireContains(englishHtml, "Narrative spine summary", "Rendered HTML should include a narrative-spine summary.");
         RequireContains(englishHtml, "data-copy-button=\"true\"", "Rendered HTML should include a narrative-spine copy button.");
@@ -683,10 +683,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "launcher.exe pid:4100 ppid:-", "Rendered process tree should include the launcher root.");
         RequireContains(englishHtml, "contract-sample.exe pid:4242 ppid:4100", "Rendered process tree should include the sample child.");
         RequireContains(englishHtml, "cmd.exe pid:4243 ppid:4242", "Rendered process tree should include the command child.");
-        RequireContains(englishHtml, "Children: 1", "Rendered process relationship card should aggregate child count.");
-        RequireContains(englishHtml, "Files: 1", "Rendered process relationship card should aggregate file count.");
-        RequireContains(englishHtml, "Registry: 1", "Rendered process relationship card should aggregate registry count.");
-        RequireContains(englishHtml, "Network: 1", "Rendered process relationship card should aggregate network count.");
+        RequireContains(englishHtml, "children 1", "Rendered process relationship row should aggregate child count.");
+        RequireContains(englishHtml, "files 1", "Rendered process relationship row should aggregate file count.");
+        RequireContains(englishHtml, "registry 1", "Rendered process relationship row should aggregate registry count.");
+        RequireContains(englishHtml, "network 1", "Rendered process relationship row should aggregate network count.");
         RequireContains(englishHtml, "Stable relationship map", "Rendered process relationship card should include stable relationship map details.");
         RequireContains(englishHtml, "Process relation path", "Rendered process relationship card should include a visible process relation path.");
         RequireContains(englishHtml, "parentProcess=launcher.exe pid:4100", "Rendered process card copy text should include parent process evidence.");
@@ -883,7 +883,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         "证据故事板",
         "时间线",
         "关键行为链",
-        "证据摘要卡",
+        "证据摘要",
         "证据采集状态",
         "进程详情",
         "进程关系卡",
