@@ -22,10 +22,10 @@ param(
     [string]$OutputRoot = '',
 
     # Build output root. Must stay outside the repository.
-    [string]$BuildRoot = 'D:\Temp\KSwordSandbox\build\KSword.Sandbox.HarmlessSample',
+    [string]$BuildRoot = '',
 
     # Intermediate output root. Must stay outside the repository.
-    [string]$IntermediateRoot = 'D:\Temp\KSwordSandbox\obj\KSword.Sandbox.HarmlessSample',
+    [string]$IntermediateRoot = '',
 
     # Build configuration for the sample executable.
     [ValidateSet('Debug', 'Release')]
@@ -50,6 +50,10 @@ Set-StrictMode -Version 3.0
 $script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
 $script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $OutputRoot -InstallStatePath $script:PortableInstallStatePath
 $script:PortableDerivedRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'samples\KSword.Sandbox.HarmlessSample'
+# Portable default for $IntermediateRoot; the declaration default is '' so a missing drive cannot break parameter binding.
+if ([string]::IsNullOrWhiteSpace($IntermediateRoot)) { $IntermediateRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'obj\KSword.Sandbox.HarmlessSample' }
+# Portable default for $BuildRoot; the declaration default is '' so a missing drive cannot break parameter binding.
+if ([string]::IsNullOrWhiteSpace($BuildRoot)) { $BuildRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'build\KSword.Sandbox.HarmlessSample' }
 
 # Blank the declaration default to '' so a missing drive cannot break
 # parameter binding, then restore the portable location here.

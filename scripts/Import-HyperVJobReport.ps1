@@ -15,7 +15,7 @@ param(
     [Parameter(Mandatory)][string]$SamplePath,
     [string]$EventsPath = '',
     [string]$RunbookExecutionPath = '',
-    [string]$ConfigPath = 'D:\Temp\KSwordSandbox\config\sandbox.local.json',
+    [string]$ConfigPath = '',
     [string]$RepoRoot = '',
     [string]$RuntimeRoot = '',
     [int]$DurationSeconds = 30,
@@ -29,6 +29,13 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot
 }
 
+# Resolve machine-local defaults through the shared portable-path module. The
+# original defaults pinned the authoring lab's D:\Temp\KSwordSandbox, so a fresh
+# operator without a D: drive silently probed a directory that does not exist.
+. (Join-Path $PSScriptRoot 'Common-PortablePaths.ps1')
+$script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
+$script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $RuntimeRoot -InstallStatePath $script:PortableInstallStatePath
+
 $resolver = Join-Path $PSScriptRoot 'Resolve-PortableTool.ps1'
 if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) {
     throw "错误：找不到 portable tool resolver：$resolver。下一步：确认 scripts\Resolve-PortableTool.ps1 已随源码/便携包提供。"
@@ -37,7 +44,10 @@ if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) {
 
 $jobIdNoDash = $JobId -replace '-', ''
 if ([string]::IsNullOrWhiteSpace($RuntimeRoot)) {
-    $RuntimeRoot = 'D:\Temp\KSwordSandbox'
+    $RuntimeRoot = $script:PortableRuntimeRoot
+}
+if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+    $ConfigPath = Join-Path $script:PortableRuntimeRoot 'config\sandbox.local.json'
 }
 
 $jobRoot = Join-Path (Join-Path $RuntimeRoot 'jobs') $jobIdNoDash

@@ -29,7 +29,7 @@ param(
     [string]$PayloadRoot = '',
 
     # Temporary build/publish root outside the repository.
-    [string]$BuildRoot = 'D:\Temp\KSwordSandbox\payload-build',
+    [string]$BuildRoot = '',
 
     # Build configuration for both Guest Agent and R0Collector.
     [ValidateSet('Debug', 'Release')]
@@ -73,6 +73,8 @@ Set-StrictMode -Version 3.0
 $script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
 $script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $PayloadRoot -InstallStatePath $script:PortableInstallStatePath
 $script:PortableDerivedRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'payload\guest-tools'
+# Portable default for $BuildRoot; the declaration default is '' so a missing drive cannot break parameter binding.
+if ([string]::IsNullOrWhiteSpace($BuildRoot)) { $BuildRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'payload-build' }
 
 # Blank the declaration default to '' so a missing drive cannot break
 # parameter binding, then restore the portable location here.

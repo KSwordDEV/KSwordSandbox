@@ -27,7 +27,7 @@ param(
 
     [string]$RuntimePublishRoot = '',
 
-    [string]$BuildRoot = 'D:\Temp\KSwordSandbox\publish-build',
+    [string]$BuildRoot = '',
 
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
@@ -65,6 +65,8 @@ Set-StrictMode -Version 3.0
 $script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
 $script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $RuntimePublishRoot -InstallStatePath $script:PortableInstallStatePath
 $script:PortableDerivedRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'publish'
+# Portable default for $BuildRoot; the declaration default is '' so a missing drive cannot break parameter binding.
+if ([string]::IsNullOrWhiteSpace($BuildRoot)) { $BuildRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'publish-build' }
 
 # Blank the declaration default to '' so a missing drive cannot break
 # parameter binding, then restore the portable location here.
