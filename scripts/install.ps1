@@ -28,9 +28,12 @@ param(
 
     [string]$VirusTotalSecretName = 'KSWORDBOX_VIRUSTOTAL_API_KEY',
 
-    [string]$RuntimeRoot = 'D:\Temp\KSwordSandbox',
+    # Resolved by the shared portable-path module below rather than pinned here:
+    # a machine without the authoring lab's D: drive must not inherit it, and
+    # this value locates the local config profile before the root installer runs.
+    [string]$RuntimeRoot = '',
 
-    [string]$GuestPayloadRoot = 'D:\Temp\KSwordSandbox\payload\guest-tools',
+    [string]$GuestPayloadRoot = '',
 
     [string]$DriverHostPath = '',
 
@@ -396,13 +399,22 @@ function Import-ScriptSelectedVirtualizationProfile {
     }
 }
 
+# Resolve machine-local defaults before any profile lookup reads $RuntimeRoot,
+# so a machine without the authoring lab's D: drive still finds its local config
+# instead of silently probing a directory that does not exist. The resolution
+# order is owned by the shared module so every operational script agrees.
+. (Join-Path $PSScriptRoot 'Common-PortablePaths.ps1')
+$script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
+$script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $RuntimeRoot -InstallStatePath $script:PortableInstallStatePath
+if ([string]::IsNullOrWhiteSpace($RuntimeRoot)) {
+    $RuntimeRoot = $script:PortableRuntimeRoot
+}
+if ([string]::IsNullOrWhiteSpace($GuestPayloadRoot)) {
+    $GuestPayloadRoot = Get-PortableGuestPayloadRoot -Explicit '' -RuntimeRoot $script:PortableRuntimeRoot
+}
+
 function Read-ScriptInstallState {
-    $statePath = if ([string]::IsNullOrWhiteSpace($env:ProgramData)) {
-        ''
-    }
-    else {
-        Join-Path $env:ProgramData 'KSwordSandbox\install-state.json'
-    }
+    $statePath = $script:PortableInstallStatePath
 
     if ([string]::IsNullOrWhiteSpace($statePath) -or -not (Test-Path -LiteralPath $statePath -PathType Leaf)) {
         return $null

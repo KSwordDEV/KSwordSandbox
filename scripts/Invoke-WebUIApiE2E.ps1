@@ -81,10 +81,23 @@ param(
 
     [switch]$RequireCleanSource,
 
-    [string]$SummaryPath = 'D:\Temp\KSwordSandbox\webui-api-e2e\last-summary.json'
+    [string]$SummaryPath = ''
 )
 
 Set-StrictMode -Version Latest
+
+# Resolve machine-local defaults through the shared portable-path module. The
+# original defaults pointed at the authoring lab's D:\Temp\KSwordSandbox, so a
+# fresh operator without a D: drive failed before any diagnostic could run.
+. (Join-Path $PSScriptRoot 'Common-PortablePaths.ps1')
+$script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
+$script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $SummaryPath -InstallStatePath $script:PortableInstallStatePath
+$script:PortableDerivedRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'webui-api-e2e\last-summary.json'
+
+# Blank the declaration default to '' so a missing drive cannot break
+# parameter binding, then restore the portable location here.
+if ([string]::IsNullOrWhiteSpace($SummaryPath)) { $SummaryPath = $script:PortableDerivedRoot }
+
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot

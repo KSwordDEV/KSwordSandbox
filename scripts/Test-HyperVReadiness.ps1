@@ -51,7 +51,7 @@ param(
     # Input: host-staged guest payload root from config/sandbox.example.json.
     # Processing: checks required payload files with Test-Path only.
     # Return behavior: no payload files are built, copied, or deleted.
-    [string]$GuestPayloadRoot = 'D:\Temp\KSwordSandbox\payload\guest-tools',
+    [string]$GuestPayloadRoot = '',
 
     # Input: expected R0Collector executable name under the r0collector payload
     # folder. Processing uses it for host and guest payload file checks only.
@@ -62,7 +62,7 @@ param(
     # Processing: checks existence and ACLs only; no write probe file is made.
     # Return behavior: a failed result is emitted when writability cannot be
     # inferred from read-only ACL inspection.
-    [string]$RuntimeRoot = 'D:\Temp\KSwordSandbox',
+    [string]$RuntimeRoot = '',
 
     # Input: optional sandbox config path. When omitted, the script attempts to
     # reuse the installed local config path from Sandbox__ConfigPath or
@@ -110,6 +110,19 @@ param(
 )
 
 Set-StrictMode -Version 3.0
+
+# Resolve machine-local defaults through the shared portable-path module. The
+# original defaults pointed at the authoring lab's D:\Temp\KSwordSandbox, so a
+# fresh operator without a D: drive failed before any diagnostic could run.
+. (Join-Path $PSScriptRoot 'Common-PortablePaths.ps1')
+$script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
+$script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $RuntimeRoot -InstallStatePath $script:PortableInstallStatePath
+$script:PortableDerivedRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath ''
+
+# This parameter *is* the runtime root, so it maps to the resolved root
+# rather than to any derived subfolder.
+if ([string]::IsNullOrWhiteSpace($RuntimeRoot)) { $RuntimeRoot = $script:PortableRuntimeRoot }
+
 $ErrorActionPreference = 'Stop'
 $script:GuestServiceInterfaceComponentId = '6C09BB55-D683-4DA0-8931-C9BF705F6480'
 $script:InitialBoundParameters = @{}
@@ -448,13 +461,19 @@ function Resolve-ReadinessInputConfiguration {
         (Get-ObjectPropertyString -Object $guest -Name 'workingDirectory'))
     Set-ReadinessParameterDefault -VariableName 'GuestAgentExecutableName' -ParameterName 'GuestAgentExecutableName' -Candidates @(
         (Get-ObjectPropertyString -Object $guest -Name 'agentExecutableName'))
+    # Portable resolution is the last candidate: an explicit -RuntimeRoot, then
+    # install-state, then the historical D:\Temp location when D: exists, then
+    # %LOCALAPPDATA%. A machine without the authoring lab's drive still gets a
+    # usable root instead of an empty string.
     Set-ReadinessParameterDefault -VariableName 'GuestPayloadRoot' -ParameterName 'GuestPayloadRoot' -Candidates @(
         (Get-ObjectPropertyString -Object $state -Name 'guestPayloadRoot'),
-        (Get-ObjectPropertyString -Object $paths -Name 'guestPayloadRoot'))
+        (Get-ObjectPropertyString -Object $paths -Name 'guestPayloadRoot'),
+        (Get-PortableGuestPayloadRoot -Explicit '' -RuntimeRoot $script:PortableRuntimeRoot))
     Set-ReadinessParameterDefault -VariableName 'R0CollectorExecutableName' -ParameterName 'R0CollectorExecutableName' -Candidates @($collectorLeaf)
     Set-ReadinessParameterDefault -VariableName 'RuntimeRoot' -ParameterName 'RuntimeRoot' -Candidates @(
         (Get-ObjectPropertyString -Object $state -Name 'runtimeRoot'),
-        (Get-ObjectPropertyString -Object $paths -Name 'runtimeRoot'))
+        (Get-ObjectPropertyString -Object $paths -Name 'runtimeRoot'),
+        $script:PortableRuntimeRoot)
 
     return [pscustomobject][ordered]@{
         RepositoryRoot        = $resolvedRepositoryRoot

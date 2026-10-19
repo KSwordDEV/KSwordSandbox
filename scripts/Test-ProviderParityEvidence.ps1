@@ -15,10 +15,23 @@ param(
     [Parameter(Mandatory)][string]$HyperVSummaryPath,
     [Parameter(Mandatory)][string]$VMwareSummaryPath,
     [Parameter(Mandatory)][string]$QemuSummaryPath,
-    [string]$OutputPath = 'D:\Temp\KSwordSandbox\parity\provider-parity-validation.json'
+    [string]$OutputPath = ''
 )
 
 Set-StrictMode -Version Latest
+
+# Resolve machine-local defaults through the shared portable-path module. The
+# original defaults pointed at the authoring lab's D:\Temp\KSwordSandbox, so a
+# fresh operator without a D: drive failed before any diagnostic could run.
+. (Join-Path $PSScriptRoot 'Common-PortablePaths.ps1')
+$script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
+$script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $OutputPath -InstallStatePath $script:PortableInstallStatePath
+$script:PortableDerivedRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'parity\provider-parity-validation.json'
+
+# Blank the declaration default to '' so a missing drive cannot break
+# parameter binding, then restore the portable location here.
+if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = $script:PortableDerivedRoot }
+
 $ErrorActionPreference = 'Stop'
 
 function Assert-ParityEvidence {

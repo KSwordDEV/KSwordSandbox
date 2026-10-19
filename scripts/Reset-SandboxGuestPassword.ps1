@@ -18,7 +18,7 @@ param(
     [string]$CheckpointName = 'Clean',
     [string]$GuestUserName = 'SandboxUser',
     [string]$SecretName = 'KSWORDBOX_GUEST_PASSWORD',
-    [string]$RuntimeRoot = 'D:\Temp\KSwordSandbox',
+    [string]$RuntimeRoot = '',
     [string]$GuestWorkingDirectory = 'C:\KSwordSandbox',
     [string]$NewPassword = '',
     [switch]$PromptPassword,
@@ -30,6 +30,19 @@ param(
 )
 
 Set-StrictMode -Version 3.0
+
+# Resolve machine-local defaults through the shared portable-path module. The
+# original defaults pointed at the authoring lab's D:\Temp\KSwordSandbox, so a
+# fresh operator without a D: drive failed before any diagnostic could run.
+. (Join-Path $PSScriptRoot 'Common-PortablePaths.ps1')
+$script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
+$script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $RuntimeRoot -InstallStatePath $script:PortableInstallStatePath
+$script:PortableDerivedRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath ''
+
+# This parameter *is* the runtime root, so it maps to the resolved root
+# rather than to any derived subfolder.
+if ([string]::IsNullOrWhiteSpace($RuntimeRoot)) { $RuntimeRoot = $script:PortableRuntimeRoot }
+
 $ErrorActionPreference = 'Stop'
 
 $script:StateDirectory = Join-Path $env:ProgramData 'KSwordSandbox'

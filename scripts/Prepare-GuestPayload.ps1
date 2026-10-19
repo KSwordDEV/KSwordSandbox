@@ -26,7 +26,7 @@ param(
     [string]$DotnetPath = '',
 
     # Final host-side payload directory copied into or from the Hyper-V guest.
-    [string]$PayloadRoot = 'D:\Temp\KSwordSandbox\payload\guest-tools',
+    [string]$PayloadRoot = '',
 
     # Temporary build/publish root outside the repository.
     [string]$BuildRoot = 'D:\Temp\KSwordSandbox\payload-build',
@@ -65,6 +65,19 @@ param(
 )
 
 Set-StrictMode -Version 3.0
+
+# Resolve machine-local defaults through the shared portable-path module. The
+# original defaults pointed at the authoring lab's D:\Temp\KSwordSandbox, so a
+# fresh operator without a D: drive failed before any diagnostic could run.
+. (Join-Path $PSScriptRoot 'Common-PortablePaths.ps1')
+$script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
+$script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $PayloadRoot -InstallStatePath $script:PortableInstallStatePath
+$script:PortableDerivedRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'payload\guest-tools'
+
+# Blank the declaration default to '' so a missing drive cannot break
+# parameter binding, then restore the portable location here.
+if ([string]::IsNullOrWhiteSpace($PayloadRoot)) { $PayloadRoot = $script:PortableDerivedRoot }
+
 $ErrorActionPreference = 'Stop'
 
 # Write-PrepStep prints a stable progress prefix.

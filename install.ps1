@@ -46,9 +46,14 @@ param(
 
     [string]$VirusTotalSecretName = 'KSWORDBOX_VIRUSTOTAL_API_KEY',
 
-    [string]$RuntimeRoot = 'D:\Temp\KSwordSandbox',
+    # Left empty on purpose. The resolved value is derived once in
+    # Resolve-InstallRuntimeRoots below so a machine without a D: drive is
+    # not broken by a hardcoded default. Pass an explicit -RuntimeRoot to
+    # pin a location.
+    [string]$RuntimeRoot = '',
 
-    [string]$GuestPayloadRoot = 'D:\Temp\KSwordSandbox\payload\guest-tools',
+    # Left empty for the same reason; defaults to <runtime root>\payload\guest-tools.
+    [string]$GuestPayloadRoot = '',
 
     [string]$DriverHostPath = '',
 
@@ -192,6 +197,26 @@ $script:InstallStateDirectory = Join-Path $env:ProgramData 'KSwordSandbox'
 $script:InstallStatePath = Join-Path $script:InstallStateDirectory 'install-state.json'
 $script:SecretBackupPath = Join-Path $script:InstallStateDirectory 'guest-password.dpapi'
 $script:WebConfigPathEnvironmentName = 'Sandbox__ConfigPath'
+
+<#
+    Resolve the runtime root once, before any function that reads
+    $RuntimeRoot can run. A copied install-state or a default parameter value
+    may point at a drive that does not exist on this machine (the historical
+    default was D:\Temp\KSwordSandbox, which fails outright on a laptop with
+    only C:). scripts/Common-PortablePaths.ps1 owns the resolution order so
+    every operational script agrees on it; see that file for the contract.
+#>
+$script:PortablePathsModule = @(
+    (Join-Path $PSScriptRoot 'scripts\Common-PortablePaths.ps1'),
+    (Join-Path $PSScriptRoot 'Common-PortablePaths.ps1')
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($script:PortablePathsModule)) {
+    throw "错误：找不到共享路径模块 scripts\Common-PortablePaths.ps1。此文件必须与 install.ps1 一起分发。下一步：请使用完整仓库/发行包，或手动传入 -RuntimeRoot 指定路径。"
+}
+. $script:PortablePathsModule
+
+$script:RuntimeRoot = Get-PortableRuntimeRoot -Explicit $RuntimeRoot -InstallStatePath $script:InstallStatePath
+$script:GuestPayloadRoot = Get-PortableGuestPayloadRoot -Explicit $GuestPayloadRoot -RuntimeRoot $script:RuntimeRoot
 
 function Write-InstallInfo {
     param([Parameter(Mandatory)][string]$Message)

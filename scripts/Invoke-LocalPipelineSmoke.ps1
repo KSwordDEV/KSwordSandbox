@@ -31,7 +31,7 @@ Path or command name for the dotnet host.
 #>
 [CmdletBinding()]
 param(
-    [string]$RuntimeRoot = 'D:\Temp\KSwordSandbox\pipeline-smoke',
+    [string]$RuntimeRoot = '',
 
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Debug',
@@ -45,6 +45,19 @@ param(
 )
 
 Set-StrictMode -Version Latest
+
+# Resolve machine-local defaults through the shared portable-path module. The
+# original defaults pointed at the authoring lab's D:\Temp\KSwordSandbox, so a
+# fresh operator without a D: drive failed before any diagnostic could run.
+. (Join-Path $PSScriptRoot 'Common-PortablePaths.ps1')
+$script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
+$script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $RuntimeRoot -InstallStatePath $script:PortableInstallStatePath
+$script:PortableDerivedRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'pipeline-smoke'
+
+# This parameter *is* the runtime root, so it maps to the resolved root
+# rather than to any derived subfolder.
+if ([string]::IsNullOrWhiteSpace($RuntimeRoot)) { $RuntimeRoot = $script:PortableRuntimeRoot }
+
 $ErrorActionPreference = 'Stop'
 
 # Resolve the repository once so every generated path is explicit and all

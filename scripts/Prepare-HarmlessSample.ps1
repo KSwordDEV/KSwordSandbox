@@ -19,7 +19,7 @@ param(
     [string]$ProjectPath = '',
 
     # Publish output root. Must stay outside the repository.
-    [string]$OutputRoot = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample',
+    [string]$OutputRoot = '',
 
     # Build output root. Must stay outside the repository.
     [string]$BuildRoot = 'D:\Temp\KSwordSandbox\build\KSword.Sandbox.HarmlessSample',
@@ -42,6 +42,19 @@ param(
 )
 
 Set-StrictMode -Version 3.0
+
+# Resolve machine-local defaults through the shared portable-path module. The
+# original defaults pointed at the authoring lab's D:\Temp\KSwordSandbox, so a
+# fresh operator without a D: drive failed before any diagnostic could run.
+. (Join-Path $PSScriptRoot 'Common-PortablePaths.ps1')
+$script:PortableInstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' })
+$script:PortableRuntimeRoot = Get-PortableRuntimeRoot -Explicit $OutputRoot -InstallStatePath $script:PortableInstallStatePath
+$script:PortableDerivedRoot = Get-PortableDerivedPath -RuntimeRoot $script:PortableRuntimeRoot -RelativePath 'samples\KSword.Sandbox.HarmlessSample'
+
+# Blank the declaration default to '' so a missing drive cannot break
+# parameter binding, then restore the portable location here.
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = $script:PortableDerivedRoot }
+
 $ErrorActionPreference = 'Stop'
 
 # Write-SamplePrepStep prints a stable progress prefix.
