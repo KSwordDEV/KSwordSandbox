@@ -693,7 +693,7 @@ public sealed class HyperVRunbookBuilder
             BuildClearGuestSecretEnvironment(config),
             BuildNativeToolResolution("qemuSystem", config.Qemu.QemuSystemPath, "qemu-system"),
             $"$pidPath = {Q(pidPath)};",
-            "$qemuRuntimeRoot = Split-Path -Parent $pidPath;",
+            "$qemuRuntimeRoot = [IO.Path]::GetDirectoryName($pidPath);",
             "$qemuStdoutPath = Join-Path $qemuRuntimeRoot 'qemu.stdout.log'; $qemuStderrPath = Join-Path $qemuRuntimeRoot 'qemu.stderr.log';",
             "Remove-Item -LiteralPath @($pidPath, $qemuStdoutPath, $qemuStderrPath) -Force -ErrorAction SilentlyContinue;",
             $"$qemuArguments = @({argumentArray});",
@@ -910,7 +910,7 @@ public sealed class HyperVRunbookBuilder
             $"$pidPath = {Q(pidPath)};",
             $"$expectedVmName = {Q(targetVmName)};",
             $"$expectedDiskPath = {Q(diskPath)};",
-            "$vmRoot = Split-Path -Parent $pidPath;",
+            "$vmRoot = [IO.Path]::GetDirectoryName($pidPath);",
             "$expectedDiskArgumentPath = $expectedDiskPath.Replace(',', ',,');",
             "if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw \"QEMU display verification requires the current job pid marker: $pidPath\" };",
             "$pidText = (Get-Content -LiteralPath $pidPath -Raw -ErrorAction Stop).Trim(); $qemuPid = 0; if (-not [int]::TryParse($pidText, [ref]$qemuPid) -or $qemuPid -le 0) { throw \"Invalid QEMU pid marker '$pidPath'; display verification stopped.\" };",
@@ -1184,7 +1184,12 @@ public sealed class HyperVRunbookBuilder
             $"$shareName = {Q(shareName)};",
             "$removeOutput = @(& $vmrun -T $vmType removeSharedFolder $vmxPath $shareName 2>&1);",
             "$removeExitCode = $LASTEXITCODE;",
-            "if ($removeExitCode -ne 0) { Write-Host \"Shared folder mapping '$shareName' was already gone: $($removeOutput -join ' ')\" } else { Write-Host \"Shared folder mapping '$shareName' removed.\" };"
+            "if ($removeExitCode -ne 0) { Write-Host \"Shared folder mapping '$shareName' was already gone: $($removeOutput -join ' ')\" } else { Write-Host \"Shared folder mapping '$shareName' removed.\" };",
+            // The mapping removal runs after the VM is powered off, so it
+            // normally reports a non-zero exit code. Reset it explicitly:
+            // otherwise the step inherits that code and reports a failed
+            // cleanup even though the snapshot restore already succeeded.
+            "$global:LASTEXITCODE = 0;"
         });
     }
 
@@ -1262,7 +1267,7 @@ public sealed class HyperVRunbookBuilder
 
         steps.Add(Step("run-agent", "Start guest collector and sample on the interactive desktop", BuildStartGuestAgentCommand(config, provider, targetVmName, jobId, guestRoot, agentPath, guestSample, guestOut, driverEventsPath, agentPidPath, agentExitPath, agentTaskName)));
         steps.Add(Step("sync-live-output", "Live-sync guest events while sample runs", BuildLiveOutputSyncCommand(config, provider, targetVmName, guestOut, hostOut, agentPidPath, agentExitPath, agentTaskName, writesDirectlyToHost: hostOutputShare is not null)));
-        steps.Add(Step("collect-output", "Collect final guest JSON output", BuildCollectOutputCommand(config, provider, targetVmName, guestOut, hostOut)));
+        steps.Add(Step("collect-output", "Collect final guest JSON output", BuildCollectOutputCommand(config, provider, targetVmName, guestOut, hostOut, writesDirectlyToHost: hostOutputShare is not null)));
     }
 
     /// <summary>
@@ -1535,7 +1540,7 @@ public sealed class HyperVRunbookBuilder
             "$session = $null;",
             BuildGuestSessionAssignment(config, provider, targetVmName),
             "try {",
-            $"Invoke-Command -Session $session -ScriptBlock {{ param($path) New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null }} -ArgumentList {Q(guestPath)} -ErrorAction Stop;",
+            $"Invoke-Command -Session $session -ScriptBlock {{ param($path) New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($path)) | Out-Null }} -ArgumentList {Q(guestPath)} -ErrorAction Stop;",
             $"Copy-Item -ToSession $session -LiteralPath {Q(sourcePath)} -Destination {Q(guestPath)} -Force -ErrorAction Stop;",
             "}",
             "finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
@@ -1722,7 +1727,7 @@ public sealed class HyperVRunbookBuilder
             BuildGuestSessionAssignment(config, provider, targetVmName),
             // Keep the guest query read-only.  NetFx3 is the Windows feature
             // that provides CLR 2.0/3.5 (including v2.0.50727 samples).
-            "$guestRuntime = Invoke-Command -Session $session -ScriptBlock { param($samplePath, $outputRoot) $feature = $null; try { $feature = Get-WindowsOptionalFeature -Online -FeatureName NetFx3 -ErrorAction Stop } catch { $feature = $null }; $netFx3State = if ($null -eq $feature) { 'query-failed' } else { [string]$feature.State }; $netFx3Enabled = $netFx3State -eq 'Enabled'; $framework4 = @(); foreach ($registryPath in @('HKLM:\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full','HKLM:\\SOFTWARE\\Wow6432Node\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full')) { try { $item = Get-ItemProperty -LiteralPath $registryPath -ErrorAction Stop; if ($null -ne $item) { $framework4 += [pscustomobject]@{ path = $registryPath; version = [string]$item.Version; release = if ($null -ne $item.Release) { [int64]$item.Release } else { $null } } } } catch {} }; $samplePresent = Test-Path -LiteralPath $samplePath -PathType Leaf; $volume = Split-Path -Path $outputRoot -Qualifier; [pscustomobject]@{ samplePresent = $samplePresent; netFx3State = $netFx3State; netFx3Enabled = $netFx3Enabled; framework4 = @($framework4); guestComputerName = [string]$env:COMPUTERNAME; outputVolume = $volume } } -ArgumentList $guestSamplePath, $guestOut -ErrorAction Stop;",
+            "$guestRuntime = Invoke-Command -Session $session -ScriptBlock { param($samplePath, $outputRoot) $feature = $null; try { $feature = Get-WindowsOptionalFeature -Online -FeatureName NetFx3 -ErrorAction Stop } catch { $feature = $null }; $netFx3State = if ($null -eq $feature) { 'query-failed' } else { [string]$feature.State }; $netFx3Enabled = $netFx3State -eq 'Enabled'; $framework4 = @(); foreach ($registryPath in @('HKLM:\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full','HKLM:\\SOFTWARE\\Wow6432Node\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full')) { try { $item = Get-ItemProperty -LiteralPath $registryPath -ErrorAction Stop; if ($null -ne $item) { $framework4 += [pscustomobject]@{ path = $registryPath; version = [string]$item.Version; release = if ($null -ne $item.Release) { [int64]$item.Release } else { $null } } } } catch {} }; $samplePresent = Test-Path -LiteralPath $samplePath -PathType Leaf; $volume = if ($outputRoot -match '^(?<qualifier>\\\\[^\\\\]+\\[^\\\\]+)') { $Matches['qualifier'] } else { '' }; [pscustomobject]@{ samplePresent = $samplePresent; netFx3State = $netFx3State; netFx3Enabled = $netFx3Enabled; framework4 = @($framework4); guestComputerName = [string]$env:COMPUTERNAME; outputVolume = $volume } } -ArgumentList $guestSamplePath, $guestOut -ErrorAction Stop;",
             "$guestRuntime = @($guestRuntime)[-1];",
             "$runtimeQueryFailed = $null -eq $guestRuntime -or -not [bool]$guestRuntime.samplePresent -or [string]$guestRuntime.netFx3State -eq 'query-failed';",
             "$netFx3Enabled = $false; if ($null -ne $guestRuntime) { $netFx3Enabled = [bool]$guestRuntime.netFx3Enabled };",
@@ -1730,7 +1735,7 @@ public sealed class HyperVRunbookBuilder
             "$failureCode = if ($legacyClrDetected -and $runtimeQueryFailed) { 'sample-runtime-preflight-query-failed' } elseif ($legacyClrDetected -and -not $netFx3Enabled) { 'sample-runtime-blocked-netfx3-disabled' } else { $null };",
             "$diagnostic = [ordered]@{ schema = 'ksword.sample-runtime-preflight.v1'; state = $state; failureCode = $failureCode; sampleFileName = [IO.Path]::GetFileName($hostSamplePath); sampleSizeBytes = [int64]$sampleFile.Length; scanBytes = [int64]$sampleBytesRead; managedClrDetected = $managedClrDetected; legacyClrDetected = $legacyClrDetected; legacyMetadataDetected = $legacyMetadataDetected; legacyMarkers = @($legacyMarkers); guestSamplePresent = if ($null -ne $guestRuntime) { [bool]$guestRuntime.samplePresent } else { $false }; guestNetFx3State = if ($null -ne $guestRuntime) { [string]$guestRuntime.netFx3State } else { 'query-failed' }; guestNetFx3Enabled = $netFx3Enabled; guestFramework4 = if ($null -ne $guestRuntime) { @($guestRuntime.framework4) } else { @() }; guestComputerName = if ($null -ne $guestRuntime) { [string]$guestRuntime.guestComputerName } else { '' }; checkedAtUtc = (Get-Date).ToUniversalTime().ToString('o'); readOnly = $true; sampleExecuted = $false };",
             "New-Item -ItemType Directory -Force -Path (Split-Path -Parent $hostDiagnosticPath) | Out-Null; $diagnostic | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $hostDiagnosticPath -Encoding UTF8;",
-            "try { Invoke-Command -Session $session -ScriptBlock { param($path, $json) New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null; Set-Content -LiteralPath $path -Value $json -Encoding UTF8 } -ArgumentList $guestDiagnosticPath, ($diagnostic | ConvertTo-Json -Depth 8) -ErrorAction Stop } catch { Write-Warning \"Could not persist guest CLR preflight copy: $($_.Exception.Message)\" };",
+            "try { Invoke-Command -Session $session -ScriptBlock { param($path, $json) New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($path)) | Out-Null; Set-Content -LiteralPath $path -Value $json -Encoding UTF8 } -ArgumentList $guestDiagnosticPath, ($diagnostic | ConvertTo-Json -Depth 8) -ErrorAction Stop } catch { Write-Warning \"Could not persist guest CLR preflight copy: $($_.Exception.Message)\" };",
             "Write-Host (\"Sample CLR preflight: state={0}; managedClrDetected={1}; legacyClrDetected={2}; markers={3}; NetFx3={4}; sampleExecuted=False\" -f $state,$managedClrDetected,$legacyClrDetected,($legacyMarkers -join ','),($(if ($null -ne $guestRuntime) { [string]$guestRuntime.netFx3State } else { 'query-failed' })));",
             "if ($legacyClrDetected -and $runtimeQueryFailed) { throw (\"SAMPLE_RUNTIME_BLOCKED: unable to verify guest .NET Framework state or copied legacy CLR sample; failureCode={0}; sampleExecuted=False\" -f $failureCode) };",
             "if ($legacyClrDetected -and -not $netFx3Enabled) { throw (\"SAMPLE_RUNTIME_BLOCKED: legacy CLR sample requires NetFx3/CLR 2.0-3.5; guest state={0}; markers={1}; failureCode={2}; sampleExecuted=False\" -f $guestRuntime.netFx3State,($legacyMarkers -join ','),$failureCode) };",
@@ -1867,7 +1872,7 @@ public sealed class HyperVRunbookBuilder
                 // launched but before the host receives the response.  A
                 // reconnect retry must preserve that run instead of starting
                 // a second sample; prepare/collect will keep its evidence.
-                "$existingOutputRoot = Split-Path -Parent $pidPath; $existingPidFile = Test-Path -LiteralPath $pidPath -PathType Leaf; $existingPid = 0; $existingPidText = if ($existingPidFile) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '' }; [void][int]::TryParse($existingPidText, [ref]$existingPid); $existingProcess = if ($existingPid -gt 0) { Get-Process -Id $existingPid -ErrorAction SilentlyContinue } else { $null }; $existingEvents = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'events.json') -PathType Leaf; $existingExit = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'agent.exit') -PathType Leaf; if ($existingPidFile -or $existingEvents -or $existingExit -or $null -ne $existingProcess) { Write-Host 'KSWORDBOX_AGENT_MARKERS_PRESENT'; return; }",
+                "$existingOutputRoot = [IO.Path]::GetDirectoryName($pidPath); $existingPidFile = Test-Path -LiteralPath $pidPath -PathType Leaf; $existingPid = 0; $existingPidText = if ($existingPidFile) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '' }; [void][int]::TryParse($existingPidText, [ref]$existingPid); $existingProcess = if ($existingPid -gt 0) { Get-Process -Id $existingPid -ErrorAction SilentlyContinue } else { $null }; $existingEvents = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'events.json') -PathType Leaf; $existingExit = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'agent.exit') -PathType Leaf; if ($existingPidFile -or $existingEvents -or $existingExit -or $null -ne $existingProcess) { Write-Host 'KSWORDBOX_AGENT_MARKERS_PRESENT'; return; }",
                 "Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue;",
                 "$agentStablePath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.exe'; $runtimePath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.runtimeconfig.json'; $depsPath = Join-Path $workingDirectory 'agent\\KSword.Sandbox.AgentStable.deps.json'; $agentStableTemp = \"$agentStablePath.refresh\"; $runtimeTemp = \"$runtimePath.refresh\"; $depsTemp = \"$depsPath.refresh\"; [IO.File]::WriteAllBytes($agentStableTemp, [Convert]::FromBase64String($agentExeBase64)); [IO.File]::WriteAllBytes($runtimeTemp, [Convert]::FromBase64String($runtimeConfigBase64)); [IO.File]::WriteAllBytes($depsTemp, [Convert]::FromBase64String($depsBase64)); Move-Item -LiteralPath $agentStableTemp -Destination $agentStablePath -Force; Move-Item -LiteralPath $runtimeTemp -Destination $runtimePath -Force; Move-Item -LiteralPath $depsTemp -Destination $depsPath -Force;",
                 "$stablePayloadChecks = 0; for ($payloadAttempt = 0; $payloadAttempt -lt 20 -and $stablePayloadChecks -lt 3; $payloadAttempt++) { Start-Sleep -Milliseconds 500; $agentBytes = [IO.File]::ReadAllBytes($agentStablePath); $runtimeBytes = [IO.File]::ReadAllBytes($runtimePath); $depsBytes = [IO.File]::ReadAllBytes($depsPath); if ($agentBytes.Length -gt 0 -and $runtimeBytes.Length -gt 0 -and $depsBytes.Length -gt 0 -and $runtimeBytes[0] -eq 0x7B -and $depsBytes[0] -eq 0x7B) { $stablePayloadChecks++; } else { $stablePayloadChecks = 0; [IO.File]::WriteAllBytes($agentStableTemp, [Convert]::FromBase64String($agentExeBase64)); [IO.File]::WriteAllBytes($runtimeTemp, [Convert]::FromBase64String($runtimeConfigBase64)); [IO.File]::WriteAllBytes($depsTemp, [Convert]::FromBase64String($depsBase64)); Move-Item -LiteralPath $agentStableTemp -Destination $agentStablePath -Force; Move-Item -LiteralPath $runtimeTemp -Destination $runtimePath -Force; Move-Item -LiteralPath $depsTemp -Destination $depsPath -Force; } }; if ($stablePayloadChecks -lt 3) { throw 'Guest Agent stable payload did not remain valid before launch.' };",
@@ -1904,7 +1909,7 @@ public sealed class HyperVRunbookBuilder
             // Keep a reconnect retry idempotent.  If the first remoting stream
             // died after scheduling/starting the Agent, return without
             // unregistering its task or deleting its markers.
-            "$existingOutputRoot = Split-Path -Parent $pidPath; $existingPidFile = Test-Path -LiteralPath $pidPath -PathType Leaf; $existingPid = 0; $existingPidText = if ($existingPidFile) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '' }; [void][int]::TryParse($existingPidText, [ref]$existingPid); $existingProcess = if ($existingPid -gt 0) { Get-Process -Id $existingPid -ErrorAction SilentlyContinue } else { $null }; $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue; $existingTaskRunning = $null -ne $existingTask -and [string]$existingTask.State -eq 'Running'; $existingEvents = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'events.json') -PathType Leaf; $existingExit = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'agent.exit') -PathType Leaf; if ($existingPidFile -or $existingEvents -or $existingExit -or $null -ne $existingProcess -or $existingTaskRunning) { Write-Host 'KSWORDBOX_AGENT_MARKERS_PRESENT'; return; }",
+            "$existingOutputRoot = [IO.Path]::GetDirectoryName($pidPath); $existingPidFile = Test-Path -LiteralPath $pidPath -PathType Leaf; $existingPid = 0; $existingPidText = if ($existingPidFile) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '' }; [void][int]::TryParse($existingPidText, [ref]$existingPid); $existingProcess = if ($existingPid -gt 0) { Get-Process -Id $existingPid -ErrorAction SilentlyContinue } else { $null }; $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue; $existingTaskRunning = $null -ne $existingTask -and [string]$existingTask.State -eq 'Running'; $existingEvents = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'events.json') -PathType Leaf; $existingExit = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'agent.exit') -PathType Leaf; if ($existingPidFile -or $existingEvents -or $existingExit -or $null -ne $existingProcess -or $existingTaskRunning) { Write-Host 'KSWORDBOX_AGENT_MARKERS_PRESENT'; return; }",
             "if (-not (Get-Command New-ScheduledTaskAction -ErrorAction SilentlyContinue)) { throw 'The ScheduledTasks PowerShell module is required for interactive sample launch.' };",
             "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue;",
             "Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue;",
@@ -1934,7 +1939,7 @@ public sealed class HyperVRunbookBuilder
             "if (-not [string]::IsNullOrWhiteSpace([string]$interactiveStopError)) { Write-Warning \"Interactive Guest Agent task stop reported: $interactiveStopError\" };",
             "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue;",
             "Write-Warning 'Interactive desktop is unavailable; starting Guest Agent in the remoting session.';",
-            "$existingOutputRoot = Split-Path -Parent $pidPath; $existingPidFile = Test-Path -LiteralPath $pidPath -PathType Leaf; $existingPid = 0; $existingPidText = if ($existingPidFile) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '' }; [void][int]::TryParse($existingPidText, [ref]$existingPid); $existingProcess = if ($existingPid -gt 0) { Get-Process -Id $existingPid -ErrorAction SilentlyContinue } else { $null }; $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue; $existingTaskRunning = $null -ne $existingTask -and [string]$existingTask.State -eq 'Running'; $existingEvents = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'events.json') -PathType Leaf; $existingExit = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'agent.exit') -PathType Leaf; if ($existingPidFile -or $existingEvents -or $existingExit -or $null -ne $existingProcess -or $existingTaskRunning) { Write-Host 'KSWORDBOX_AGENT_MARKERS_PRESENT'; return; }",
+            "$existingOutputRoot = [IO.Path]::GetDirectoryName($pidPath); $existingPidFile = Test-Path -LiteralPath $pidPath -PathType Leaf; $existingPid = 0; $existingPidText = if ($existingPidFile) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '' }; [void][int]::TryParse($existingPidText, [ref]$existingPid); $existingProcess = if ($existingPid -gt 0) { Get-Process -Id $existingPid -ErrorAction SilentlyContinue } else { $null }; $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue; $existingTaskRunning = $null -ne $existingTask -and [string]$existingTask.State -eq 'Running'; $existingEvents = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'events.json') -PathType Leaf; $existingExit = Test-Path -LiteralPath (Join-Path $existingOutputRoot 'agent.exit') -PathType Leaf; if ($existingPidFile -or $existingEvents -or $existingExit -or $null -ne $existingProcess -or $existingTaskRunning) { Write-Host 'KSWORDBOX_AGENT_MARKERS_PRESENT'; return; }",
             // A WinRM child process can be placed in the remoting job and be
             // terminated when this step returns.  A local S4U scheduled task
             // gives the fallback an independent lifetime while remaining
@@ -2219,8 +2224,14 @@ public sealed class HyperVRunbookBuilder
         VirtualizationProvider provider,
         string targetVmName,
         string guestOut,
-        string hostOut)
+        string hostOut,
+        bool writesDirectlyToHost = false)
     {
+        if (writesDirectlyToHost)
+        {
+            return BuildCollectOutputFromHostShareCommand(config, hostOut);
+        }
+
         var command = string.Join(" ", new[]
         {
             "$session = $null;",
@@ -2259,7 +2270,40 @@ public sealed class HyperVRunbookBuilder
     }
 
     /// <summary>
-    /// Adds VM cleanup steps after collection.
+    /// Builds the final collection step for a shared-folder run. Inputs are the
+    /// sandbox config and the host job output folder; processing judges
+    /// readiness on the host folder only, because the Guest Agent already wrote
+    /// there through the share. No remoting session is opened: a sample that
+    /// took the WinRM listener down must not be able to invalidate evidence
+    /// that already reached the host.
+    /// </summary>
+    private static string BuildCollectOutputFromHostShareCommand(SandboxConfig config, string hostOut)
+    {
+        var waitSeconds = Math.Max(30, config.Analysis.DefaultDurationSeconds + 30);
+        return string.Join(" ", new[]
+        {
+            BuildClearGuestSecretEnvironment(config),
+            $"$hostOut = {Q(hostOut)};",
+            "New-Item -ItemType Directory -Force -Path $hostOut | Out-Null;",
+            "$requiredNames = @('events.json', 'agent-summary.json', 'agent.pid', 'agent.exit');",
+            $"$deadline = (Get-Date).AddSeconds({waitSeconds});",
+            "do {",
+            "$missingNames = @($requiredNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $hostOut ([string]$_)) -PathType Leaf) });",
+            "if ($missingNames.Count -eq 0) { break };",
+            "if ((Get-Date) -ge $deadline) { break };",
+            "Start-Sleep -Seconds 3;",
+            "} while ($true);",
+            "$exitLocalPath = Join-Path $hostOut 'agent.exit'; $exitBytes = if (Test-Path -LiteralPath $exitLocalPath -PathType Leaf) { [IO.File]::ReadAllBytes($exitLocalPath) } else { [byte[]]@() };",
+            "$zeroByteCount = @($exitBytes | Where-Object { $_ -eq 0 }).Count; $exitRawText = if ($exitBytes.Length -gt 0) { [Text.Encoding]::ASCII.GetString($exitBytes) } else { '' }; $exitText = $exitRawText.Trim([char]0, [char]9, [char]10, [char]13, [char]32); $parsedExitCode = 0; $exitIsInteger = [int]::TryParse($exitText, [ref]$parsedExitCode);",
+            "$stdoutLocalPath = Join-Path $hostOut 'agent.stdout.log'; $stderrLocalPath = Join-Path $hostOut 'agent.stderr.log'; $stdoutBytes = if (Test-Path -LiteralPath $stdoutLocalPath -PathType Leaf) { (Get-Item -LiteralPath $stdoutLocalPath).Length } else { 0 }; $stderrBytes = if (Test-Path -LiteralPath $stderrLocalPath -PathType Leaf) { (Get-Item -LiteralPath $stderrLocalPath).Length } else { 0 };",
+            "$statusState = if ($missingNames.Count -gt 0) { 'incomplete-output' } elseif ($zeroByteCount -gt 0 -and $zeroByteCount -eq $exitBytes.Length -and $exitBytes.Length -gt 0) { 'invalid-zero-filled-marker' } elseif (-not $exitIsInteger) { 'invalid-exit-marker' } elseif ($parsedExitCode -ne 0) { 'agent-failed' } else { 'completed' };",
+            "$status = [ordered]@{ state = $statusState; exitCode = if ($exitIsInteger) { $parsedExitCode } else { $null }; exitText = $exitText; exitByteLength = $exitBytes.Length; exitZeroByteCount = $zeroByteCount; missingArtifacts = @($missingNames); stdoutBytes = $stdoutBytes; stderrBytes = $stderrBytes; collectionChannel = 'vmware-shared-folder'; capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o') };",
+            "$status | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $hostOut 'guest-agent-run-status.json') -Encoding UTF8;",
+            "Write-Host \"Guest output was written directly into the host folder through the shared folder mapping. Guest Agent status=$statusState, exit=$exitText, missing=$($missingNames -join ',').\";",
+            "if ($missingNames.Count -gt 0 -or -not $exitIsInteger -or $parsedExitCode -ne 0) { throw \"Guest output reached the host folder through the shared folder but the run is incomplete: status=$statusState, exit=$exitText, missing=$($missingNames -join ','). Raw diagnostics: $stdoutLocalPath; $stderrLocalPath; $exitLocalPath\" }",
+            "$global:LASTEXITCODE = 0;"
+        });
+    }
     /// Inputs are mode and target VM, processing appends stop/remove commands,
     /// and the method returns no value.
     /// </summary>

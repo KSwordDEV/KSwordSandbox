@@ -390,12 +390,23 @@ public static class SampleCorrelationClassifier
         // evidence, but a common file name under AppData/ProgramData must not
         // be promoted to confirmed sample behavior merely because it contains
         // the submitted sample's basename.
-        if (!IsUnattributedFileWatcherEvent(evt, data) && AnyFieldMatchesSamplePath(evt, data, context))
+        if (AnyFieldMatchesSamplePath(evt, data, context))
         {
-            return CorrelationDisposition.Confirmed(
-                "path-or-command-matched-submitted-sample",
-                "path",
-                NormalBehaviorBoundary(evt, data, context));
+            // An exact hit on the submitted sample stays confirmed even for
+            // watcher rows: the host-side sample path never matches a guest
+            // path, so the staged guest copy is identified by the incoming
+            // directory plus an exact file name. A sample deleting its own
+            // copy is a hallmark ransomware behavior that must not decay
+            // into unknown.
+            if (!IsUnattributedFileWatcherEvent(evt, data) ||
+                MutationTargets(evt).Any(value => ExactSamplePathMatches(value, context)) ||
+                MutationTargets(evt).Any(value => IsGuestStagedSamplePath(value, context)))
+            {
+                return CorrelationDisposition.Confirmed(
+                    "path-or-command-matched-submitted-sample",
+                    "path",
+                    NormalBehaviorBoundary(evt, data, context));
+            }
         }
 
         if (IsNetworkEvidence(evt))
@@ -2808,6 +2819,31 @@ public static class SampleCorrelationClassifier
         var normalized = NormalizeSlashes(value).ToLowerInvariant();
         return normalized.Contains(@"\kswordsandbox\incoming\", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains(@"\ksword\sandbox\incoming\", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Identifies the submitted sample's own guest-side staged copy. Inputs
+    /// are one candidate path and the correlation context; processing requires
+    /// the sandbox incoming directory plus an exact file name match, so an
+    /// unrelated file that merely shares the basename cannot qualify.
+    /// </summary>
+    private static bool IsGuestStagedSamplePath(string? value, CorrelationContext context)
+    {
+        if (string.IsNullOrWhiteSpace(value) || string.IsNullOrWhiteSpace(context.SampleFileName))
+        {
+            return false;
+        }
+
+        if (!IsSandboxIncomingPath(value))
+        {
+            return false;
+        }
+
+        var normalized = NormalizePath(value);
+        return string.Equals(
+            Path.GetFileName(normalized),
+            context.SampleFileName,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsPathTruncated(IReadOnlyDictionary<string, string> data)

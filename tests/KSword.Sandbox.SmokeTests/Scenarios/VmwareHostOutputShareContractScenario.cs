@@ -24,7 +24,7 @@ internal sealed class VmwareHostOutputShareContractScenario : ISmokeTestScenario
         Require(models, "public string OutputShareName { get; init; } = \"KSwordOutput\";", "The share needs a stable default name.");
 
         Require(builder, "provider is not VirtualizationProvider.VMware || !config.VMware.UseHostOutputShare", "The share must stay provider-specific and opt-in.");
-        Require(builder, "\\\\\\\\vmware-host\\\\Shared Folders\\\\{hostOutputShare.Value.Name}", "The guest output directory must point at the shared folder.");
+        Require(builder, "$\"\\\\\\\\vmware-host\\\\Shared Folders\\\\{hostOutputShare.Value.Name}\"", "The guest output directory must point at the shared folder.");
         Require(builder, "\"enable-vmware-output-share\"", "The runbook must plan the host output share mapping.");
         Require(builder, "vmrun enableSharedFolders failed", "A failed shared-folder enable must fail the run loudly.");
         Require(builder, "vmrun addSharedFolder failed", "A failed mapping must fail the run loudly.");
