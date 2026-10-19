@@ -2279,7 +2279,17 @@ public sealed class HyperVRunbookBuilder
     /// </summary>
     private static string BuildCollectOutputFromHostShareCommand(SandboxConfig config, string hostOut)
     {
-        var waitSeconds = Math.Max(30, config.Analysis.DefaultDurationSeconds + 30);
+        // The Guest Agent runs the sample for the requested duration and only
+        // then serializes events.json, agent-summary.json and agent.exit. Its
+        // post-run probes are separately bounded (60s for ordinary probes, 45s
+        // more for the ETW tracerpt decode of a multi-megabyte trace), so the
+        // host must wait for the whole of that, not just the sample window.
+        //
+        // Observed on Win32.Emotet: the Agent needed ~94s to finish but the old
+        // duration+30s budget expired at 90s, 0.8s before agent.exit landed.
+        // The run was then reported as incomplete-output even though every
+        // artifact was present on the host.
+        var waitSeconds = Math.Max(120, config.Analysis.DefaultDurationSeconds + 150);
         return string.Join(" ", new[]
         {
             BuildClearGuestSecretEnvironment(config),
@@ -2293,6 +2303,12 @@ public sealed class HyperVRunbookBuilder
             "if ((Get-Date) -ge $deadline) { break };",
             "Start-Sleep -Seconds 3;",
             "} while ($true);",
+            // agent.exit is written last by the Agent, so its presence means the
+            // run finished. Re-read the artifact set once after it appears:
+            // a shared-folder write can lag the check by a fraction of a second,
+            // and the files may land in a different order across the share.
+            "if (-not (Test-Path -LiteralPath (Join-Path $hostOut 'agent.exit') -PathType Leaf)) { Start-Sleep -Seconds 2 };",
+            "$missingNames = @($requiredNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $hostOut ([string]$_)) -PathType Leaf) });",
             "$exitLocalPath = Join-Path $hostOut 'agent.exit'; $exitBytes = if (Test-Path -LiteralPath $exitLocalPath -PathType Leaf) { [IO.File]::ReadAllBytes($exitLocalPath) } else { [byte[]]@() };",
             "$zeroByteCount = @($exitBytes | Where-Object { $_ -eq 0 }).Count; $exitRawText = if ($exitBytes.Length -gt 0) { [Text.Encoding]::ASCII.GetString($exitBytes) } else { '' }; $exitText = $exitRawText.Trim([char]0, [char]9, [char]10, [char]13, [char]32); $parsedExitCode = 0; $exitIsInteger = [int]::TryParse($exitText, [ref]$parsedExitCode);",
             "$stdoutLocalPath = Join-Path $hostOut 'agent.stdout.log'; $stderrLocalPath = Join-Path $hostOut 'agent.stderr.log'; $stdoutBytes = if (Test-Path -LiteralPath $stdoutLocalPath -PathType Leaf) { (Get-Item -LiteralPath $stdoutLocalPath).Length } else { 0 }; $stderrBytes = if (Test-Path -LiteralPath $stderrLocalPath -PathType Leaf) { (Get-Item -LiteralPath $stderrLocalPath).Length } else { 0 };",

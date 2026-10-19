@@ -35,6 +35,13 @@ internal sealed class VmwareHostOutputShareContractScenario : ISmokeTestScenario
         Require(builder, "Write-Warning \\\"Guest output reached the host folder", "Incomplete shared-folder collection must stay a visible warning.");
         Require(builder, "collectionChannel = 'vmware-shared-folder'", "The report must be able to state which channel produced the evidence.");
 
+        // The Agent serializes its output only after the sample window closes,
+        // and its post-run probes are separately bounded. Observed on
+        // Win32.Emotet: a duration+30s host budget expired 0.8s before
+        // agent.exit landed, so a complete run was reported incomplete.
+        Require(builder, "config.Analysis.DefaultDurationSeconds + 150", "The host wait budget must cover the Agent's post-run probe and ETW decode time, not just the sample window.");
+        Require(builder, "if (-not (Test-Path -LiteralPath (Join-Path $hostOut 'agent.exit') -PathType Leaf)) { Start-Sleep -Seconds 2 }", "The artifact set must be re-read after agent.exit appears, because shared-folder writes can lag the check.");
+
         Require(facts, "\"enable-vmware-output-share\" => \"guest-prepare\"", "The new step needs a runbook phase.");
         Require(facts, "\"enable-vmware-output-share\" => \"guest-output-share\"", "The new step needs an operator-facing category.");
         Require(facts, "共享目录让来宾证据不再依赖 WinRM", "The new step needs a Chinese remediation hint.");
