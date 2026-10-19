@@ -2299,8 +2299,14 @@ public sealed class HyperVRunbookBuilder
             "$statusState = if ($missingNames.Count -gt 0) { 'incomplete-output' } elseif ($zeroByteCount -gt 0 -and $zeroByteCount -eq $exitBytes.Length -and $exitBytes.Length -gt 0) { 'invalid-zero-filled-marker' } elseif (-not $exitIsInteger) { 'invalid-exit-marker' } elseif ($parsedExitCode -ne 0) { 'agent-failed' } else { 'completed' };",
             "$status = [ordered]@{ state = $statusState; exitCode = if ($exitIsInteger) { $parsedExitCode } else { $null }; exitText = $exitText; exitByteLength = $exitBytes.Length; exitZeroByteCount = $zeroByteCount; missingArtifacts = @($missingNames); stdoutBytes = $stdoutBytes; stderrBytes = $stderrBytes; collectionChannel = 'vmware-shared-folder'; capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o') };",
             "$status | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $hostOut 'guest-agent-run-status.json') -Encoding UTF8;",
-            "Write-Host \"Guest output was written directly into the host folder through the shared folder mapping. Guest Agent status=$statusState, exit=$exitText, missing=$($missingNames -join ',').\";",
-            "if ($missingNames.Count -gt 0 -or -not $exitIsInteger -or $parsedExitCode -ne 0) { throw \"Guest output reached the host folder through the shared folder but the run is incomplete: status=$statusState, exit=$exitText, missing=$($missingNames -join ','). Raw diagnostics: $stdoutLocalPath; $stderrLocalPath; $exitLocalPath\" }",
+"Write-Host \"Guest output was written directly into the host folder through the shared folder mapping. Guest Agent status=$statusState, exit=$exitText, missing=$($missingNames -join ',').\";",
+            // A sample that terminates the Guest Agent leaves partial evidence
+            // behind: the ETW trace, the packet capture and the status file
+            // are written by independent producers and are already on the
+            // host. Throwing here would discard all of it, because the next
+            // step reverts the snapshot. Report the incomplete state instead
+            // and let the importer degrade to what actually survived.
+            "if ($missingNames.Count -gt 0 -or -not $exitIsInteger -or $parsedExitCode -ne 0) { Write-Warning \"Guest output reached the host folder through the shared folder but the run is incomplete: status=$statusState, exit=$exitText, missing=$($missingNames -join ','). Raw diagnostics: $stdoutLocalPath; $stderrLocalPath; $exitLocalPath\" }",
             "$global:LASTEXITCODE = 0;"
         });
     }

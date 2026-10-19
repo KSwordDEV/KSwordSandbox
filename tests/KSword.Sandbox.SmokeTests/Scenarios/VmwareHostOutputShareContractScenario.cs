@@ -31,6 +31,9 @@ internal sealed class VmwareHostOutputShareContractScenario : ISmokeTestScenario
         Require(builder, "No previous '$shareName' mapping had to be removed", "A stale mapping from an earlier job must be replaced, not reused.");
         Require(builder, "Shared folder mapping '$shareName' removed", "Cleanup must drop the mapping because a snapshot revert keeps the VMX.");
         Require(builder, "live remoting sync is not required", "Live sync must not open a WinRM session when the guest already writes to the host.");
+        Require(builder, "run is incomplete: status=$statusState", "A killed Guest Agent must degrade the shared-folder collection instead of discarding the run.");
+        Require(builder, "Write-Warning \\\"Guest output reached the host folder", "Incomplete shared-folder collection must stay a visible warning.");
+        Require(builder, "collectionChannel = 'vmware-shared-folder'", "The report must be able to state which channel produced the evidence.");
 
         Require(facts, "\"enable-vmware-output-share\" => \"guest-prepare\"", "The new step needs a runbook phase.");
         Require(facts, "\"enable-vmware-output-share\" => \"guest-output-share\"", "The new step needs an operator-facing category.");
