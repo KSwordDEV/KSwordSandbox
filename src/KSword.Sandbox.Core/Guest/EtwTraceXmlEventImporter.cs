@@ -84,13 +84,22 @@ public static class EtwTraceXmlEventImporter
         var imported = new List<SandboxEvent>();
         if (!HasDecodedRows(existingEvents))
         {
-            imported.AddRange(Import(guestOutputRoot));
+            var xmlRows = Import(guestOutputRoot);
+            imported.AddRange(xmlRows);
             // The XML fallback above only helps when the Agent survived long
             // enough to run its own tracerpt pass. A sample that kills the Agent
             // leaves a raw ETL and no XML at all, which used to mean the report
             // showed zero dynamic evidence even though the trace was sitting on
             // the host. Decode it there as the last recovery step.
-            imported.AddRange(HostEtlTraceDecoder.ImportFallback(existingEvents, guestOutputRoot));
+            //
+            // Only when the guest XML yielded no semantic rows of its own. The
+            // Agent can write the decoded XML and then die before serializing
+            // events.json; re-decoding that same trace on the host would append
+            // a second copy of rows the guest already produced.
+            if (!HasSemanticRows(xmlRows))
+            {
+                imported.AddRange(HostEtlTraceDecoder.ImportFallback(existingEvents, guestOutputRoot));
+            }
         }
 
         var existingZeroDiagnostics = existingEvents
@@ -119,6 +128,15 @@ public static class EtwTraceXmlEventImporter
 
     private static bool IsCapturedSummary(SandboxEvent evt) =>
         evt.EventType.Equals("etw_live.captured", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns whether a decoded XML pass produced real behavior rows. A
+    /// document that only yields import-failure diagnostics carries no evidence,
+    /// so a host-side ETL decode is still worth attempting for it.
+    /// </summary>
+    private static bool HasSemanticRows(IReadOnlyCollection<SandboxEvent> rows) =>
+        rows.Any(evt => !evt.EventType.StartsWith("etw.", StringComparison.OrdinalIgnoreCase) &&
+            !evt.EventType.StartsWith("etw_live.", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsZeroParsedDiagnostic(SandboxEvent evt) =>
         evt.EventType.Equals("etw_live.decode_failed", StringComparison.OrdinalIgnoreCase) &&

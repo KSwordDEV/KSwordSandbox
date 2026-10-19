@@ -104,6 +104,26 @@ internal sealed class HostEtlDecodeFallbackContractScenario : ISmokeTestScenario
         SmokeAssert.True(health.TotalRows > 0 && health.FailureRows > 0,
             "A host decode failure must enter CollectionHealth as a failure so the report cannot imply a clean run.");
 
+        // 8. An Agent can write its decoded XML and then die before it
+        //    serializes events.json. Observed on Shamoon: the guest produced a
+        //    46 MB XML, yet the host decoder ran anyway and appended a second
+        //    copy of rows the guest had already decoded. Once the guest XML
+        //    yields semantic rows there is nothing left to recover.
+        var withGuestXml = Path.Combine(context.RuntimeRoot, "host-etl-decode-guestxml", "guest");
+        var withGuestXmlEtw = Path.Combine(withGuestXml, "etw-traces");
+        Directory.CreateDirectory(withGuestXmlEtw);
+        File.WriteAllBytes(Path.Combine(withGuestXmlEtw, "KSEtw_guest-decoded.etl"), [1, 2, 3, 4]);
+        File.WriteAllText(Path.Combine(withGuestXmlEtw, "KSEtw_guest-decoded.xml"), """
+            <Events><Event><System><Provider Name="Microsoft-Windows-Kernel-Process"/><EventID>1</EventID><TimeCreated SystemTime="2026-01-01T00:00:00Z"/><Execution ProcessID="777" ThreadID="11"/></System><RenderingInfo><Task>Process</Task><Opcode>Start</Opcode><EventName>ProcessStart</EventName></RenderingInfo><EventData><Data Name="ProcessId">777</Data><Data Name="ParentProcessId">4</Data><Data Name="ImageFileName">guest-decoded.exe</Data></EventData></Event></Events>
+            """);
+        var bothFallback = EtwTraceXmlEventImporter.ImportFallbackAndCoverage([], withGuestXml);
+        SmokeAssert.True(bothFallback.All(evt => evt.EventType != "etw.host_decode.failed"),
+            "Host ETW decode must not run when the guest already produced decoded XML rows for the same trace.");
+        SmokeAssert.True(bothFallback.Any(evt => evt.EventType == "process.start" && evt.ProcessId == 777),
+            "The guest's own decoded XML rows must still be imported.");
+        SmokeAssert.True(!Directory.Exists(Path.Combine(withGuestXml, HostEtlTraceDecoder.DecodeDirectoryName)),
+            "No host decode scratch folder may be created when the guest XML already yielded rows.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
