@@ -85,6 +85,12 @@ public static class EtwTraceXmlEventImporter
         if (!HasDecodedRows(existingEvents))
         {
             imported.AddRange(Import(guestOutputRoot));
+            // The XML fallback above only helps when the Agent survived long
+            // enough to run its own tracerpt pass. A sample that kills the Agent
+            // leaves a raw ETL and no XML at all, which used to mean the report
+            // showed zero dynamic evidence even though the trace was sitting on
+            // the host. Decode it there as the last recovery step.
+            imported.AddRange(HostEtlTraceDecoder.ImportFallback(existingEvents, guestOutputRoot));
         }
 
         var existingZeroDiagnostics = existingEvents
@@ -201,21 +207,43 @@ public static class EtwTraceXmlEventImporter
         return null;
     }
 
+    /// <summary>
+    /// Host import ceiling for one decoded tracerpt document. Exposed so a
+    /// host-driven decode can discard an oversized XML dump before paying the
+    /// XDocument load cost.
+    /// </summary>
+    public static long XmlImportLimitBytes => MaxXmlBytes;
+
+    /// <summary>
+    /// Parses one already-decoded tracerpt XML document. Inputs are the XML
+    /// path; processing returns semantic rows, or a single structured failure
+    /// row when the document cannot be read. The method never throws for
+    /// ordinary IO or XML faults.
+    /// </summary>
+    public static IReadOnlyList<SandboxEvent> ImportXmlFile(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return [];
+        }
+
+        try
+        {
+            return Parse(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+        {
+            return [CreateFailure(path, ex)];
+        }
+    }
+
     public static IReadOnlyList<SandboxEvent> Import(string? guestOutputRoot)
     {
         if (string.IsNullOrWhiteSpace(guestOutputRoot) || !Directory.Exists(guestOutputRoot)) return [];
         var rows = new List<SandboxEvent>();
         foreach (var path in EnumerateXml(guestOutputRoot))
         {
-            try
-            {
-                var parsed = Parse(path);
-                rows.AddRange(parsed);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
-            {
-                rows.Add(CreateFailure(path, ex));
-            }
+            rows.AddRange(ImportXmlFile(path));
         }
         return rows;
     }
