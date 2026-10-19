@@ -203,6 +203,40 @@ public static class ReportEventSampler
         "driverEventsPaths"
     ];
 
+    // A refused sample launch is the only row that explains why a report has
+    // no dynamic behavior at all.  Its generic correlation envelope carries
+    // ~20 keys, so the ordinary pair budget silently dropped the actual cause
+    // (guestNetFx3State / sampleExecuted / legacyClrDetected) and left a report
+    // that said only "preflight failed".  Keep the refusal verdict ahead of the
+    // correlation metadata for this terminal diagnostic.
+    private static readonly string[] SampleLaunchRefusalPriorityDataKeys =
+    [
+        "failureType",
+        "failureReason",
+        "status",
+        "captureState",
+        "sampleRuntimePreflight",
+        "sampleRuntimeState",
+        "sampleRuntimeFailureCode",
+        "sampleExecuted",
+        "sampleFileName",
+        "guestSamplePresent",
+        "managedClrDetected",
+        "legacyClrDetected",
+        "guestNetFx3State",
+        "error",
+        "stderrPreview",
+        "preflightPath",
+        "preflightState",
+        "availableFreeBytes",
+        "requiredFreeBytes",
+        "volumeRoot",
+        "agentOutputRoot",
+        "outputSpacePreflightFailure",
+        "zhMessage",
+        "zhHint"
+    ];
+
     private static readonly string[] CollectionHealthPriorityDataKeys =
     [
         "healthStatus",
@@ -2393,6 +2427,18 @@ public static class ReportEventSampler
     private static bool IsAgentFailureEvent(SandboxEvent evt)
     {
         var eventType = NormalizeEventType(evt.EventType);
+        // A launch refusal is a terminal collection diagnostic even though it
+        // is not emitted under the agent.* namespace. Observed on njRAT-v0.6.4:
+        // the CLR/NetFx3 preflight refused to launch, the guest folder held only
+        // the preflight and policy markers, and 100 static.managed.* rows
+        // crowded the diagnostic out of the report entirely, so a sample that
+        // never ran was presented as a clean static-only analysis.
+        if (eventType.Equals("sample.runtime.preflight.failed", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Equals("guest.output.preflight.failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         if (!eventType.StartsWith("agent.", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -2587,7 +2633,7 @@ public static class ReportEventSampler
         }
 
         var prioritySeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var maxPairs = IsR0ReportEvent(evt) || IsReportSamplingMarkerEvent(evt)
+        var maxPairs = IsR0ReportEvent(evt) || IsReportSamplingMarkerEvent(evt) || IsSampleLaunchRefusalEvent(evt)
             ? Math.Max(options.MaxEventDataPairs, 40)
             : options.MaxEventDataPairs;
         foreach (var key in BuildPriorityDataKeys(evt))
@@ -2636,6 +2682,15 @@ public static class ReportEventSampler
         (evt.EventType ?? string.Empty).StartsWith("image.", StringComparison.OrdinalIgnoreCase) ||
         (evt.EventType ?? string.Empty).StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A refused sample launch is a single terminal diagnostic whose verdict is
+    /// only useful together with the reason it was refused.  These rows are
+    /// bounded by construction (one per run), so they keep the wider data
+    /// budget used for collector/marker rows instead of the small per-event cap.
+    /// </summary>
+    private static bool IsSampleLaunchRefusalEvent(SandboxEvent evt) =>
+        TextEqualsAny(evt.EventType, "sample.runtime.preflight.failed", "guest.output.preflight.failed");
 
     private static IEnumerable<string> BuildPriorityDataKeys(SandboxEvent evt)
     {
@@ -2742,6 +2797,14 @@ public static class ReportEventSampler
             TextEqualsAny(DataValue(evt.Data, "success"), "false", "0", "no", "failed"))
         {
             foreach (var key in OperationalFailurePriorityDataKeys)
+            {
+                yield return key;
+            }
+        }
+
+        if (IsSampleLaunchRefusalEvent(evt))
+        {
+            foreach (var key in SampleLaunchRefusalPriorityDataKeys)
             {
                 yield return key;
             }

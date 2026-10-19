@@ -1384,10 +1384,21 @@ public sealed partial class SandboxJobService
         // Preserve a deterministic import anchor when the Agent crashed before
         // creating events.json. The importer will still load guest-agent-run-
         // status/stderr and ETW XML diagnostics from this sibling folder.
+        //
+        // A run that aborts before the Agent is even started leaves none of the
+        // Agent markers: observed on njRAT-v0.6.4, where the CLR/NetFx3 preflight
+        // refused to launch the sample at step 16 of 20. Without a preflight or
+        // policy anchor this method threw, no report was regenerated, and the
+        // stale report looked like a clean static-only analysis with no hint that
+        // the sample had never run.
         var failureMarker = SafeEnumerateFiles(guestRoot, path =>
                 string.Equals(Path.GetFileName(path), "guest-agent-run-status.json", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(Path.GetFileName(path), "agent.stderr.log", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(Path.GetFileName(path), "agent.exit", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetFileName(path), "sample-runtime-preflight.json", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetFileName(path), "guest-output-preflight.json", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetFileName(path), "driver-collection-diagnostic.json", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetFileName(path), "artifact-collection-policy.json", StringComparison.OrdinalIgnoreCase) ||
                 (string.Equals(Path.GetExtension(path), ".xml", StringComparison.OrdinalIgnoreCase) && path.Contains("etw-traces", StringComparison.OrdinalIgnoreCase)))
             .OrderByDescending(SafeGetLastWriteTimeUtc)
             .FirstOrDefault();
