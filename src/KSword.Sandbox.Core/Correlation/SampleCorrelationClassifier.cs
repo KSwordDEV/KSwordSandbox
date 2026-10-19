@@ -1509,14 +1509,21 @@ public static class SampleCorrelationClassifier
         {
             var eventType = evt.EventType ?? string.Empty;
             if (eventType.Equals("process.start", StringComparison.OrdinalIgnoreCase) &&
-                EventLooksLikeSubmittedSample(evt, sampleFullPath, sampleFileName) &&
-                EventProcessId(evt, evt.Data) is int processId)
+                EventProcessId(evt, evt.Data) is int processId &&
+                !IsGuestCollectorProcess(evt))
             {
-                // Imported guest/R0 rows may carry the PID only in the
-                // normalized data envelope.  ResolveRootProcessIds used to
-                // require SandboxEvent.ProcessId, so those rows never seeded
-                // the sample tree and every child mutation stayed unknown.
-                rootPids.Add(processId);
+                // The Guest Agent is launched as
+                //   KSword.Sandbox.Agent.exe --sample <path> --out <dir>
+                // so its own command line necessarily contains the submitted
+                // sample path. Seeding it as a sample root made
+                // ExpandSampleProcessTree sweep every collector tool the Agent
+                // starts (wevtutil, auditpol, logman, pktmon, ipconfig) into
+                // the sample tree, and the report presented the harness's own
+                // instrumentation as confirmed sample behavior.
+                if (EventLooksLikeSubmittedSample(evt, sampleFullPath, sampleFileName))
+                {
+                    rootPids.Add(processId);
+                }
             }
 
             if ((eventType.Equals("process.tree.summary", StringComparison.OrdinalIgnoreCase) ||
@@ -2060,6 +2067,31 @@ public static class SampleCorrelationClassifier
             PathOrCommandMatchesSample(Value(data, "serviceDll"), context) ||
             PathOrCommandMatchesSample(Value(data, "registryKeyPath"), context) ||
             PathOrCommandMatchesSample(Value(data, "keyPath"), context);
+    }
+
+    /// <summary>
+    /// Returns whether a process row describes the sandbox's own collector
+    /// rather than the submitted sample. The Agent is launched with the sample
+    /// path on its command line, so path matching alone cannot separate the
+    /// two; the collector is identified by its own image instead.
+    /// </summary>
+    private static bool IsGuestCollectorProcess(SandboxEvent evt)
+    {
+        var image = FirstNonEmpty(
+            evt.Path,
+            Value(evt.Data, "imagefilename"),
+            Value(evt.Data, "imagename"),
+            Value(evt.Data, "processname"),
+            Value(evt.Data, "imagepath"),
+            Value(evt.Data, "processimagepath"));
+        if (string.IsNullOrWhiteSpace(image))
+        {
+            return false;
+        }
+
+        var imageName = image.Replace('/', '\\').TrimEnd('\\').Split('\\').LastOrDefault() ?? string.Empty;
+        return imageName.Equals("KSword.Sandbox.Agent.exe", StringComparison.OrdinalIgnoreCase) ||
+            imageName.Equals("KSword.Sandbox.R0Collector.exe", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool EventLooksLikeSubmittedSample(SandboxEvent evt, string sampleFullPath, string sampleFileName)
