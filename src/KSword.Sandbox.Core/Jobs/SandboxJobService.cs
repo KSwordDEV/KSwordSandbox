@@ -2837,6 +2837,24 @@ public sealed partial class SandboxJobService
         metrics["etw.parsedEventCount"] = ToMetricInt(parsed);
         metrics["events.etw.etlDecodeRequired"] = captured.Any(evt =>
             EventDataBoolTrue(evt, "etlDecodeRequired")) ? 1 : 0;
+
+        // The XML fallback reports the decoded-row boundary explicitly. Keep
+        // that boundary in report.json so a 0.43% retention trace can never
+        // look like a complete ETW capture again.
+        var decodeSummary = rawEvents.LastOrDefault(evt =>
+            evt.EventType.Equals("etw.trace.decode_summary", StringComparison.OrdinalIgnoreCase));
+        var xmlEventCount = decodeSummary is null ? 0 : ToMetricInt(MaxDataUnsigned([decodeSummary], "xmlEventCount"));
+        var importedEventCount = decodeSummary is null ? 0 : ToMetricInt(MaxDataUnsigned([decodeSummary], "importedEventCount"));
+        var eventsLost = ToMetricInt(MaxDataUnsigned(rawEvents, "EventsLost", "eventsLost", "lostEvents"));
+        var retention = decodeSummary is null
+            ? 0
+            : ToMetricInt(MaxDataUnsigned([decodeSummary], "decodeRetentionBasisPoints"));
+        metrics["etw.xmlEventCount"] = xmlEventCount;
+        metrics["etw.importedEventCount"] = importedEventCount;
+        metrics["etw.eventsLost"] = eventsLost;
+        metrics["events.etw.eventsLost"] = eventsLost;
+        metrics["etw.decode.retention"] = retention;
+        metrics["events.etw.decode.retention"] = retention;
     }
 
     private static bool IsR0DriverTelemetryRow(SandboxEvent evt) =>

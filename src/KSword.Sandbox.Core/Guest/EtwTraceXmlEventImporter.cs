@@ -29,6 +29,15 @@ public static class EtwTraceXmlEventImporter
         $"(?ix)(?<![A-Za-z0-9_.-])(?<key>{UnnamedPayloadKeyPattern})\\s*=\\s*(?<value>.*?)(?=(?:\\s*[;,]\\s*|\\r?\\n|\\s+)(?:{UnnamedPayloadKeyPattern})\\s*=|$)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
+    // tracerpt writes the guest's time-zone offset as +HH:MM. Some Windows
+    // builds emit +07:59 instead of +08:00, which shifts every row 60 seconds
+    // later and makes a child process look like it started after its parent
+    // exited. Detect a non-zero minute component and calibrate from the
+    // trace header FILETIME (StartTime) when it is present.
+    private static readonly Regex SystemTimeOffsetRegex = new(
+        "(?<sign>[+-])(?<hour>\\d{2}):(?<minute>\\d{2})$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     /// <summary>
     /// Returns whether the guest stream already contains semantic ETW rows.
     /// The same predicate is used by live import and offline PostProcess so
@@ -290,8 +299,15 @@ public static class EtwTraceXmlEventImporter
         }
 
         var document = XDocument.Load(path, LoadOptions.PreserveWhitespace);
+        var elements = document.Descendants()
+            .Where(element => element.Name.LocalName.Equals("Event", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var correction = ResolveFileTimeCorrection(elements, out var offsetAnomaly);
         var rows = new List<SandboxEvent>();
-        foreach (var element in document.Descendants().Where(element => element.Name.LocalName.Equals("Event", StringComparison.OrdinalIgnoreCase)))
+        var importedCount = 0;
+        var skippedCount = 0;
+        long eventsLost = 0;
+        foreach (var element in elements)
         {
             var system = element.Elements().FirstOrDefault(child => child.Name.LocalName.Equals("System", StringComparison.OrdinalIgnoreCase));
             if (system is null) continue;
@@ -307,7 +323,14 @@ public static class EtwTraceXmlEventImporter
                 task,
                 opcode,
                 provider + ":" + eventId);
-            var timestamp = ParseTimestamp(system.Elements().FirstOrDefault(child => child.Name.LocalName.Equals("TimeCreated", StringComparison.OrdinalIgnoreCase))?.Attribute("SystemTime")?.Value) ?? DateTimeOffset.UtcNow;
+            var timestamp = ParseTimestamp(
+                system.Elements().FirstOrDefault(child => child.Name.LocalName.Equals("TimeCreated", StringComparison.OrdinalIgnoreCase))?.Attribute("SystemTime")?.Value,
+                out var rowOffsetAnomaly) ?? DateTimeOffset.UtcNow;
+            offsetAnomaly |= rowOffsetAnomaly;
+            if (correction.HasValue)
+            {
+                timestamp += correction.Value;
+            }
             var execution = system.Elements().FirstOrDefault(child => child.Name.LocalName.Equals("Execution", StringComparison.OrdinalIgnoreCase));
             var processId = ParsePid(First(execution?.Attribute("ProcessID")?.Value, execution?.Attribute("ProcessId")?.Value));
             var payload = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -324,14 +347,22 @@ public static class EtwTraceXmlEventImporter
             processId = ParsePid(First(Value(payload, "processid", "pid"), processId?.ToString(CultureInfo.InvariantCulture)));
             var parentPid = ParsePid(Value(payload, "parentprocessid", "parentpid", "parentid"));
             eventName = First(Value(payload, "eventname", "taskname"), eventName);
+            var payloadEventsLost = ParseUnsigned(Value(payload, "eventslost", "events_lost"));
+            if (payloadEventsLost > 0)
+            {
+                eventsLost = Math.Max(eventsLost, payloadEventsLost);
+            }
+
             var image = Value(payload, "imagefilename", "imagename", "processname", "image", "process");
             var commandLine = Value(payload, "commandline", "command");
             var pathValue = Value(payload, "filename", "file", "path", "imagepath", "keyname", "keypath", "objectname");
             var type = MapType(eventName, provider, task, opcode, payload, eventId);
             if (!IsUsefulType(type))
             {
+                skippedCount++;
                 continue;
             }
+
             var dataValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["captureSource"] = "etw-live-tracerpt",
@@ -348,6 +379,16 @@ public static class EtwTraceXmlEventImporter
                 ["attributionStatus"] = processId is null ? "unattributed-no-pid" : "pid-present-unjoined",
                 ["rawPayload"] = string.Join("; ", rawPayload)
             };
+            if (rowOffsetAnomaly)
+            {
+                dataValues["etwTimestampOffsetAnomaly"] = "true";
+            }
+
+            if (correction.HasValue)
+            {
+                dataValues["etwTimestampCorrectionSeconds"] = correction.Value.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+            }
+
             foreach (var pair in payload) dataValues.TryAdd(pair.Key, pair.Value);
             rows.Add(new SandboxEvent
             {
@@ -361,17 +402,25 @@ public static class EtwTraceXmlEventImporter
                 CommandLine = commandLine,
                 Data = dataValues
             });
+            importedCount++;
             if (rows.Count >= MaxRowsPerTrace)
             {
                 rows.Add(CreateLimitDiagnostic(path, MaxRowsPerTrace));
                 break;
             }
         }
+
+        if (offsetAnomaly)
+        {
+            rows.Add(CreateTimestampAnomaly(path, correction));
+        }
+
+        rows.Add(CreateDecodeSummary(path, elements.Count, importedCount, skippedCount, eventsLost));
         return rows;
     }
 
     private static bool IsUsefulType(string type) =>
-        type is "process.start" or "process.exit" or "process.event" or "image.load" or "image.unload" or "thread.start" or "thread.exit" or "thread.event" or "registry.etw" ||
+        type is "etw.event" or "process.start" or "process.exit" or "process.event" or "image.load" or "image.unload" or "thread.start" or "thread.exit" or "thread.event" or "registry.etw" ||
         type.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
         type.StartsWith("network.", StringComparison.OrdinalIgnoreCase);
 
@@ -407,6 +456,30 @@ public static class EtwTraceXmlEventImporter
                 case "6": return "image.unload";
             }
         }
+        // NT Kernel Logger rows frequently carry no rendering name and only
+        // GUID providers, so EventID/Task/Opcode are all zero. Classify those
+        // rows by payload shape instead of dropping the whole trace. Order
+        // matters: an image-load row also has FileName, and a network row can
+        // carry process identity, so the most specific shape wins.
+        if (!string.IsNullOrWhiteSpace(Value(payload, "imagebase")) &&
+            !string.IsNullOrWhiteSpace(Value(payload, "filename", "imagename", "imagefilename")))
+        {
+            return "image.load";
+        }
+
+        if (!string.IsNullOrWhiteSpace(Value(payload, "keyname", "keypath")))
+        {
+            return "registry.etw";
+        }
+
+        if (!string.IsNullOrWhiteSpace(Value(payload, "tcpip", "saddr", "daddr", "sport", "dport", "localaddr", "remoteaddr")))
+        {
+            return "network.etw";
+        }
+
+        // A process payload alone does not prove a start event: DCStart
+        // bookkeeping and generic Process rows carry the same fields. The
+        // explicit name/task/opcode checks above own start/stop semantics.
         if (value.Contains("file", StringComparison.Ordinal) || value.Contains("fileio", StringComparison.Ordinal)) return "file.etw";
         if (value.Contains("network", StringComparison.Ordinal) || value.Contains("tcp", StringComparison.Ordinal)) return "network.etw";
         // tracerpt can omit RenderingInfo for kernel rows. Mirror the live
@@ -523,5 +596,175 @@ public static class EtwTraceXmlEventImporter
 
         return int.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pid) && pid > 0 ? pid : null;
     }
-    private static DateTimeOffset? ParseTimestamp(string? value) => DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var timestamp) ? timestamp : null;
+    /// <summary>
+    /// Parses one tracerpt SystemTime value. A non-zero offset minute component
+    /// is not a legal Windows time-zone offset and is normalized to the nearest
+    /// whole hour; the caller records the anomaly and may apply a FILETIME
+    /// correction from the trace header.
+    /// </summary>
+    private static DateTimeOffset? ParseTimestamp(string? value, out bool offsetAnomaly)
+    {
+        offsetAnomaly = false;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var text = value.Trim();
+        var match = SystemTimeOffsetRegex.Match(text);
+        if (match.Success)
+        {
+            var minuteText = match.Groups["minute"].Value;
+            if (!string.Equals(minuteText, "00", StringComparison.Ordinal))
+            {
+                offsetAnomaly = true;
+                var hour = int.Parse(match.Groups["hour"].Value, CultureInfo.InvariantCulture);
+                var minute = int.Parse(minuteText, CultureInfo.InvariantCulture);
+                if (minute >= 30)
+                {
+                    hour++;
+                }
+
+                // A +23:5x anomaly rounds past the day boundary. Clamp rather
+                // than throw; the header FILETIME correction still wins when
+                // the trace provides one.
+                hour = Math.Min(hour, 23);
+                text = text[..match.Index] + match.Groups["sign"].Value + hour.ToString("00", CultureInfo.InvariantCulture) + ":00";
+            }
+        }
+
+        return DateTimeOffset.TryParse(
+            text,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var timestamp)
+            ? timestamp
+            : null;
+    }
+
+    /// <summary>
+    /// Derives an exact UTC correction from the EventTrace header FILETIME.
+    /// Inputs are parsed XML events; processing compares the header StartTime
+    /// (FILETIME) with the header SystemTime, and the method returns null when
+    /// the trace has no usable anchor or the two already agree.
+    /// </summary>
+    private static TimeSpan? ResolveFileTimeCorrection(IReadOnlyList<XElement> events, out bool offsetAnomaly)
+    {
+        offsetAnomaly = false;
+        DateTimeOffset? headerTimestamp = null;
+        long? startFileTime = null;
+        foreach (var element in events.Take(64))
+        {
+            var system = element.Elements().FirstOrDefault(child => child.Name.LocalName.Equals("System", StringComparison.OrdinalIgnoreCase));
+            var rawTimestamp = system?.Elements()
+                .FirstOrDefault(child => child.Name.LocalName.Equals("TimeCreated", StringComparison.OrdinalIgnoreCase))
+                ?.Attribute("SystemTime")?.Value;
+            var parsed = ParseTimestamp(rawTimestamp, out var anomaly);
+            offsetAnomaly |= anomaly;
+            if (parsed is null)
+            {
+                continue;
+            }
+
+            var startTimeText = element.Descendants()
+                .Where(child => child.Name.LocalName.Equals("Data", StringComparison.OrdinalIgnoreCase))
+                .FirstOrDefault(child => string.Equals(child.Attribute("Name")?.Value, "StartTime", StringComparison.OrdinalIgnoreCase))
+                ?.Value;
+            if (!long.TryParse(startTimeText?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var fileTime) ||
+                fileTime <= 0)
+            {
+                continue;
+            }
+
+            headerTimestamp = parsed;
+            startFileTime = fileTime;
+            break;
+        }
+
+        if (headerTimestamp is null || startFileTime is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var headerUtc = new DateTimeOffset(DateTime.FromFileTimeUtc(startFileTime.Value), TimeSpan.Zero);
+            var delta = headerUtc - headerTimestamp.Value;
+            return Math.Abs(delta.TotalSeconds) >= 1 ? delta : null;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
+    private static long ParseUnsigned(string? value) =>
+        long.TryParse(value?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed > 0
+            ? parsed
+            : 0;
+
+    private static SandboxEvent CreateTimestampAnomaly(string path, TimeSpan? correction)
+    {
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["captureSource"] = "etw-live-tracerpt",
+            ["collectionHealth"] = "true",
+            ["captureState"] = "degraded",
+            ["status"] = "degraded",
+            ["failureType"] = "etwTimestampOffsetAnomaly",
+            ["diagnosticReason"] = "SystemTime offset minute component was not zero",
+            ["etwTimestampCorrectionSeconds"] = correction?.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture) ?? "0",
+            ["sampleCorrelation"] = "unattributed",
+            ["behaviorCounted"] = "false",
+            ["nonbehavior"] = "true",
+            ["notSampleBehavior"] = "true",
+            ["eventKind"] = "diagnostic",
+            ["evidenceRole"] = "collection-diagnostic",
+            ["sourceComponent"] = "etw-live-tracerpt",
+            ["zhMessage"] = "ETW 时间戳时区偏移的分钟位不为 0；已按文件内 FILETIME 校准，避免事件整体偏移。",
+            ["zhHint"] = "检查来宾时区配置；时间戳偏移会导致父子进程时序判断错误。"
+        };
+        return new SandboxEvent
+        {
+            EventType = "etw.timestamp.offset_anomaly",
+            Timestamp = DateTimeOffset.UtcNow,
+            Source = "etwLive",
+            Path = path,
+            Data = data
+        };
+    }
+
+    private static SandboxEvent CreateDecodeSummary(string path, int xmlEventCount, int importedCount, int skippedCount, long eventsLost)
+    {
+        var retention = xmlEventCount <= 0
+            ? 0
+            : (int)Math.Min(10000, importedCount * 10000L / xmlEventCount);
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["captureSource"] = "etw-live-tracerpt",
+            ["collectionHealth"] = "true",
+            ["captureState"] = "observed",
+            ["status"] = "observed",
+            ["xmlEventCount"] = xmlEventCount.ToString(CultureInfo.InvariantCulture),
+            ["importedEventCount"] = importedCount.ToString(CultureInfo.InvariantCulture),
+            ["skippedEventCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
+            ["eventsLost"] = eventsLost.ToString(CultureInfo.InvariantCulture),
+            ["decodeRetentionBasisPoints"] = retention.ToString(CultureInfo.InvariantCulture),
+            ["sampleCorrelation"] = "unattributed",
+            ["behaviorCounted"] = "false",
+            ["nonbehavior"] = "true",
+            ["notSampleBehavior"] = "true",
+            ["eventKind"] = "diagnostic",
+            ["evidenceRole"] = "collection-diagnostic",
+            ["sourceComponent"] = "etw-live-tracerpt"
+        };
+        return new SandboxEvent
+        {
+            EventType = "etw.trace.decode_summary",
+            Timestamp = DateTimeOffset.UtcNow,
+            Source = "etwLive",
+            Path = path,
+            Data = data
+        };
+    }
 }

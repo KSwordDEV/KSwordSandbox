@@ -88,8 +88,16 @@ internal sealed class HostEtlDecodeFallbackContractScenario : ISmokeTestScenario
             <Events><Event><System><Provider Name="Microsoft-Windows-Kernel-Process"/><EventID>1</EventID><TimeCreated SystemTime="2026-01-01T00:00:00Z"/><Execution ProcessID="4242" ThreadID="11"/></System><RenderingInfo><Task>Process</Task><Opcode>Start</Opcode><EventName>ProcessStart</EventName></RenderingInfo><EventData><Data Name="ProcessId">4242</Data><Data Name="ParentProcessId">4</Data><Data Name="ImageFileName">sample.exe</Data></EventData></Event></Events>
             """);
         var parsed = EtwTraceXmlEventImporter.ImportXmlFile(xmlPath);
-        SmokeAssert.True(parsed.Count == 1 && parsed[0].EventType == "process.start" && parsed[0].ProcessId == 4242,
+        // Every import appends one etw.trace.decode_summary diagnostic so the
+        // report can publish retention and EventsLost; only semantic rows
+        // describe evidence.
+        var parsedSemantic = parsed
+            .Where(row => !row.EventType.StartsWith("etw.", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        SmokeAssert.True(parsedSemantic.Count == 1 && parsedSemantic[0].EventType == "process.start" && parsedSemantic[0].ProcessId == 4242,
             "ImportXmlFile must expose the same row mapping the guest decoder uses.");
+        SmokeAssert.True(parsed.Any(row => row.EventType == "etw.trace.decode_summary"),
+            "ImportXmlFile must publish an ETW decode summary row for retention and events-lost reporting.");
         SmokeAssert.True(EtwTraceXmlEventImporter.ImportXmlFile(Path.Combine(etw, "does-not-exist.xml")).Count == 0,
             "A missing decoded file must return no rows instead of throwing.");
 
