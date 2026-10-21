@@ -288,6 +288,21 @@ public static class SampleCorrelationClassifier
         Dictionary<string, string> data,
         CorrelationContext context)
     {
+        // Windows Error Reporting rows are OS crash-handling side effects,
+        // not sample behavior. WerFault/WerFaultSecure/WerMgr are launched
+        // (often with the crashed sample PID as parent or actor) precisely
+        // because the sample died, and their WER report-queue writes land on
+        // system-owned paths. Neither the process identity nor the WER path
+        // may promote a row to sample behavior, so this identity exclusion
+        // runs before every confirmed/probable path below.
+        if (IsWerReportingProcess(evt, data) ||
+            IsWerReportingTarget(evt, data))
+        {
+            return CorrelationDisposition.Environment(
+                "windows-error-reporting-process-or-wer-path",
+                "processName/path");
+        }
+
         // Guest event-log probes conservatively mark rows as nonbehavior when
         // they cannot see the full process tree in real time.  Once the host
         // has reconstructed a child PID under the submitted sample, that
@@ -2152,6 +2167,72 @@ public static class SampleCorrelationClassifier
         var imageName = image.Replace('/', '\\').TrimEnd('\\').Split('\\').LastOrDefault() ?? string.Empty;
         return imageName.Equals("KSword.Sandbox.Agent.exe", StringComparison.OrdinalIgnoreCase) ||
             imageName.Equals("KSword.Sandbox.R0Collector.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Recognizes Windows Error Reporting runtime processes. Inputs are one
+    /// event and its data; processing inspects the same identity candidate
+    /// fields the collector check uses; the method returns true when the row
+    /// belongs to WerFault/WerFaultSecure/WerMgr, which the OS spawns because
+    /// an application crashed and which must never inherit sample attribution
+    /// from the crashed process's PID or lineage.
+    /// </summary>
+    private static bool IsWerReportingProcess(SandboxEvent evt, IReadOnlyDictionary<string, string> data)
+    {
+        foreach (var candidate in new[]
+        {
+            evt.ProcessName,
+            evt.Path,
+            Value(data, "imagefilename"),
+            Value(data, "imagename"),
+            Value(data, "processname"),
+            Value(data, "imagepath"),
+            Value(data, "processimagepath")
+        })
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+
+            // Guest snapshot rows often carry a bare "WerFault" process name
+            // without the .exe extension, so compare the trimmed executable
+            // name instead of the raw file name.
+            var imageName = TrimExe(candidate.Replace('/', '\\').TrimEnd('\\').Split('\\').LastOrDefault());
+            if (imageName.Equals("WerFault", StringComparison.OrdinalIgnoreCase) ||
+                imageName.Equals("WerFaultSecure", StringComparison.OrdinalIgnoreCase) ||
+                imageName.Equals("WerMgr", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Recognizes WER report-queue paths. Inputs are one event and its data;
+    /// processing normalizes the primary target candidates; the method returns
+    /// true when the row targets the system-owned Windows Error Reporting
+    /// directories (ReportQueue/ReportArchive/Temp under Windows\WER), which
+    /// crash reporting writes regardless of which process crashed.
+    /// </summary>
+    private static bool IsWerReportingTarget(SandboxEvent evt, IReadOnlyDictionary<string, string> data)
+    {
+        var target = FirstNonEmpty(
+            evt.Path,
+            Value(data, "path"),
+            Value(data, "filePath"),
+            Value(data, "targetPath"),
+            Value(data, "keyPath"),
+            Value(data, "objectPath"));
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return false;
+        }
+
+        var normalized = NormalizePath(target);
+        return normalized.Contains("\\WINDOWS\\WER\\", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool EventLooksLikeSubmittedSample(SandboxEvent evt, string sampleFullPath, string sampleFileName)
