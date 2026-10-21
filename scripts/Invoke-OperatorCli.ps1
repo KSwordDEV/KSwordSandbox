@@ -50,6 +50,16 @@ param(
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 
+# Keep direct Operator CLI launches aligned with install.ps1/run.ps1 on a
+# fresh machine.  The CLI is also shipped in the runtime package, so it must
+# not inherit the authoring lab's D: drive when no local profile exists.
+$portablePathsModule = Join-Path $PSScriptRoot 'Common-PortablePaths.ps1'
+if (-not (Test-Path -LiteralPath $portablePathsModule -PathType Leaf)) {
+    throw "错误：找不到共享路径模块：$portablePathsModule。下一步：请确认 Common-PortablePaths.ps1 已随源码/便携包提供。"
+}
+. $portablePathsModule
+$script:PortableInstallStatePath = if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' }
+
 function Resolve-OperatorRepoRoot {
     param([string]$Value)
 
@@ -146,12 +156,24 @@ function Resolve-OperatorRuntimeRoot {
         $pathsProperty = $config.PSObject.Properties['paths']
         if ($null -eq $pathsProperty) { $null } else { $pathsProperty.Value }
     }
-    $runtime = Get-ObjectPropertyString -Object $paths -Name 'runtimeRoot' -DefaultValue 'D:\Temp\KSwordSandbox'
+    $runtime = Get-ObjectPropertyString -Object $paths -Name 'runtimeRoot' -DefaultValue ''
     if ([System.IO.Path]::IsPathRooted($runtime)) {
-        return [System.IO.Path]::GetFullPath($runtime)
+        $resolved = [System.IO.Path]::GetFullPath($runtime)
+        if (Test-PortableDriveAvailable -Path $resolved) {
+            return $resolved
+        }
+
+        # A checked-in example or copied install-state can retain the
+        # authoring machine's drive. Fall back to the same local portable root
+        # used by the installer and runtime wrapper when that drive is absent.
+        return Get-PortableRuntimeRoot -Explicit '' -InstallStatePath $script:PortableInstallStatePath
     }
 
-    return [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $runtime))
+    if (-not [string]::IsNullOrWhiteSpace($runtime)) {
+        return [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $runtime))
+    }
+
+    return Get-PortableRuntimeRoot -Explicit '' -InstallStatePath $script:PortableInstallStatePath
 }
 
 function Get-OperatorPowerShellExecutable {

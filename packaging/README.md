@@ -15,9 +15,14 @@ DPAPI 备份、`.env`、样本、报告、VM 磁盘/快照、仓库二进制、�
   driver status management、三 provider Web API E2E 和只读聚合证据校验器），但绝不复制仓库内 `bin/`、`obj/`、`x64/`、VM、
   report、sample 或本机 secret files。
 - runtime 便携包面向普通操作者的入口是包根 `Start-KSwordSandbox.cmd`：双击后打开双语 WebUI，
-  没有本机配置时进入后端设置。来宾初始化脚本 `scripts/Bootstrap-VMwareGuest.ps1` 和
+  没有本机配置时进入后端设置。首次使用请在后端设置中选择 **VMware Workstation Pro**；
+  `config/sandbox.example.json` 的 `HyperV` 只是旧 profile 兼容默认值，Hyper-V/QEMU 仅在
+  你已有对应环境时选择。来宾初始化脚本 `scripts/Bootstrap-VMwareGuest.ps1` 和
   `docs/vmware-first-run.md` 一同打包，页面可直接下载该脚本。需要控制台配置时仍可运行
   `install.ps1` 的安装向导；显式参数主要保留给自动化/CI。
+- `scripts/Common-PortablePaths.ps1` 是运行时必需的共享模块：根 `install.ps1`、guest payload
+  准备和 readiness/reset helpers 都会从发行包的 `scripts/` 目录加载它；runtime manifest
+  必须保留该文件。缺失时首次运行会在打开设置页前直接失败。
 
 使用 `scripts/package-portable.ps1` staging 本地 package tree，并可选择在仓库外
 output directory 创建 `.zip`。脚本只做 local-only 操作，故意没有 push/publish 步骤。

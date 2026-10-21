@@ -388,6 +388,13 @@
     },
     {
       "sourceType": "repository",
+      "source": "scripts/Common-PortablePaths.ps1",
+      "target": "scripts/Common-PortablePaths.ps1",
+      "required": true,
+      "note": "Required by the packaged root installer and guest/readiness helpers for portable runtime-root resolution."
+    },
+    {
+      "sourceType": "repository",
       "source": "scripts/install.ps1",
       "target": "scripts/install.ps1",
       "required": true

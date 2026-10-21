@@ -74,12 +74,15 @@
     "collectDroppedFiles": false,
     "captureScreenshots": false,
     "captureMemoryDumps": false,
-    "capturePacketCapture": false
+    "capturePacketCapture": false,
+    "_keepRawEvidenceNote": "Default false: after the report is generated, the host sweeps oversized intermediates (decoded ETW XML, raw ETL/pktmon traces, rotated R0 JSONL segments) because each live job otherwise leaves hundreds of MB behind. Set true (or use run.ps1 -KeepRawEvidence / the WebUI switch) to retain every raw byte for incident response.",
+    "keepRawEvidence": false
   },
   "paths": {
-    "runtimeRoot": "D:\\Temp\\KSwordSandbox",
+    "_note": "Leave runtimeRoot empty so install.ps1 resolves a portable location (D:\\Temp\\KSwordSandbox when D: exists, otherwise %LOCALAPPDATA%\\KSwordSandbox). Do not copy the authoring machine's absolute path. jobs/plans/uploads/reports/pcaps must stay outside the repository.",
+    "runtimeRoot": "",
     "rulesDirectory": "rules",
-    "guestPayloadRoot": "D:\\Temp\\KSwordSandbox\\payload\\guest-tools"
+    "guestPayloadRoot": ""
   },
   "driver": {
     "enabled": true,

@@ -10,12 +10,12 @@ namespace KSword.Sandbox.SmokeTests.Scenarios;
 /// <summary>
 /// Builds and runs the native R0Collector executable for no-device smoke tests.
 /// Inputs are repository/runtime paths and collector CLI arguments; processing
-/// writes only under D:\Temp\KSwordSandbox\verify and never opens the driver
-/// device; return values expose the collector process result and parsed JSONL.
+/// writes only under the smoke context's external runtime root and never opens
+/// the driver device; return values expose the collector process result and
+/// parsed JSONL.
 /// </summary>
 internal static class R0CollectorExecutableSmokeHelper
 {
-    private const string VerifyRoot = @"D:\Temp\KSwordSandbox\verify\r0collector-smoke";
     private static readonly SemaphoreSlim BuildLock = new(1, 1);
     private static R0CollectorBuildResult? cachedBuild;
 
@@ -46,7 +46,11 @@ internal static class R0CollectorExecutableSmokeHelper
             SmokeAssert.True(File.Exists(projectPath), $"R0Collector native project is missing: {projectPath}");
 
             var msbuildPath = ResolveMsBuildPath();
-            var outputRoot = Path.Combine(VerifyRoot, Guid.NewGuid().ToString("N"));
+            // Keep native verification output under the scenario runtime root.
+            // The old D:\Temp default is not portable and can be inaccessible
+            // in restricted hosts, causing the smoke to fail before MSBuild.
+            var verifyRoot = Path.Combine(context.RuntimeRoot, "verify", "r0collector-smoke");
+            var outputRoot = Path.Combine(verifyRoot, Guid.NewGuid().ToString("N"));
             var outDir = AddTrailingSeparator(Path.Combine(outputRoot, "bin"));
             var intDir = AddTrailingSeparator(Path.Combine(outputRoot, "obj"));
             Directory.CreateDirectory(outDir);
@@ -60,6 +64,12 @@ internal static class R0CollectorExecutableSmokeHelper
                     "/p:Platform=x64",
                     $"/p:OutDir={outDir}",
                     $"/p:IntDir={intDir}",
+                    // FileTracker initialization can be denied by managed
+                    // test hosts even though the compiler and linker are
+                    // available.  The no-device smoke does not rely on
+                    // incremental tracking, so disable it for this isolated
+                    // verification build.
+                    "/p:TrackFileAccess=false",
                     "/m:1",
                     "/v:minimal"
                 ],

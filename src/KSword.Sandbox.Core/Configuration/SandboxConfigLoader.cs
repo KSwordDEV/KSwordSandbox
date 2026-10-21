@@ -143,10 +143,18 @@ public static class SandboxConfigLoader
     {
         var paths = config.Paths with
         {
-            RuntimeRoot = ExpandPath(config.Paths.RuntimeRoot, repositoryRoot),
+            RuntimeRoot = ResolvePortableRoot(config.Paths.RuntimeRoot, repositoryRoot),
             RulesDirectory = ExpandPath(config.Paths.RulesDirectory, repositoryRoot),
-            GuestPayloadRoot = ExpandPath(config.Paths.GuestPayloadRoot, repositoryRoot)
+            GuestPayloadRoot = ResolvePortableRoot(config.Paths.GuestPayloadRoot, repositoryRoot)
         };
+
+        // An empty guestPayloadRoot means "derive it from the runtime root"
+        // rather than "use the repository root", which would put build output
+        // inside the source tree.
+        if (string.IsNullOrWhiteSpace(config.Paths.GuestPayloadRoot))
+        {
+            paths = paths with { GuestPayloadRoot = Path.Combine(paths.RuntimeRoot, "payload", "guest-tools") };
+        }
 
         var configuredDriverPath = ExpandOptionalPath(config.Driver.HostDriverPath, repositoryRoot);
         var driver = config.Driver with
@@ -206,6 +214,49 @@ public static class SandboxConfigLoader
             Address = string.IsNullOrWhiteSpace(remoting.Address) ? null : remoting.Address.Trim(),
             Authentication = (remoting.Authentication ?? string.Empty).Trim()
         };
+    }
+
+    /// <summary>
+    /// Resolves a configured host root that may be left empty by an operator or
+    /// by the shipped example config.
+    ///
+    /// The shipped sandbox.example.json intentionally leaves runtimeRoot empty:
+    /// it used to hardcode the authoring machine's D:\Temp\KSwordSandbox, which
+    /// silently pointed a fresh operator at a drive they do not have. Resolution
+    /// order matches scripts/Common-PortablePaths.ps1 so the PowerShell installer
+    /// and the host agree on one location:
+    ///
+    ///   1. an explicit configured path;
+    ///   2. the historical D:\Temp\KSwordSandbox, only when D: is present;
+    ///   3. %LOCALAPPDATA%\KSwordSandbox.
+    ///
+    /// An empty result is never returned: falling through to the repository root
+    /// would place jobs, reports, and pcaps inside the source tree.
+    /// </summary>
+    private static string ResolvePortableRoot(string? configured, string repositoryRoot)
+    {
+        var trimmed = configured?.Trim() ?? string.Empty;
+        if (trimmed.Length > 0)
+        {
+            return Path.IsPathRooted(trimmed)
+                ? Path.GetFullPath(trimmed)
+                : Path.GetFullPath(Path.Combine(repositoryRoot, trimmed));
+        }
+
+        const string HistoricalDefault = @"D:\Temp\KSwordSandbox";
+        var historicalRoot = Path.GetPathRoot(HistoricalDefault);
+        if (!string.IsNullOrWhiteSpace(historicalRoot) && Directory.Exists(historicalRoot))
+        {
+            return HistoricalDefault;
+        }
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localAppData))
+        {
+            localAppData = Path.GetTempPath();
+        }
+
+        return Path.Combine(localAppData, "KSwordSandbox");
     }
 
     /// <summary>

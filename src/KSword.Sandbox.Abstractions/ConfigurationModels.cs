@@ -284,11 +284,21 @@ public sealed record ArtifactCollectionConfig
 /// </summary>
 public sealed record SandboxPaths
 {
-    public string RuntimeRoot { get; init; } = "D:\\Temp\\KSwordSandbox";
+    /// <summary>
+    /// Empty by default. SandboxConfigLoader resolves an empty runtime root to
+    /// a portable location (%LOCALAPPDATA%\KSwordSandbox, or the historical
+    /// D:\Temp\KSwordSandbox when that drive exists) instead of assuming the
+    /// authoring machine's layout.
+    /// </summary>
+    public string RuntimeRoot { get; init; } = string.Empty;
 
     public string RulesDirectory { get; init; } = "rules";
 
-    public string GuestPayloadRoot { get; init; } = "D:\\Temp\\KSwordSandbox\\payload\\guest-tools";
+    /// <summary>
+    /// Empty by default; derived from the resolved runtime root by
+    /// SandboxConfigLoader so payload never lands inside the source tree.
+    /// </summary>
+    public string GuestPayloadRoot { get; init; } = string.Empty;
 }
 
 /// <summary>

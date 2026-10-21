@@ -95,7 +95,14 @@ function Get-PortableRuntimeRoot {
     if ([string]::IsNullOrWhiteSpace($resolved)) {
         $recorded = Get-PortableRecordedConfigPath -InstallStatePath $InstallStatePath
         if (-not [string]::IsNullOrWhiteSpace($recorded) -and (Test-PortableDriveAvailable -Path $recorded)) {
-            $resolved = Split-Path -Parent $recorded
+            # install-state records <runtime>\config\sandbox.local.json, so the
+            # parent of the file is the config directory, not the runtime root.
+            $recordedRoot = Split-Path -Parent $recorded
+            if ((Split-Path -Leaf $recordedRoot) -eq 'config') {
+                $recordedRoot = Split-Path -Parent $recordedRoot
+            }
+
+            $resolved = $recordedRoot
         }
     }
 

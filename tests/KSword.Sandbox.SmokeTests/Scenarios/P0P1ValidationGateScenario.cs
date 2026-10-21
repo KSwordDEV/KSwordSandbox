@@ -487,8 +487,12 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         var shell = OperatingSystem.IsWindows() ? "powershell.exe" : "pwsh";
         var rejectResult = await RunProcessAsync(
             shell,
-            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", policyScript],
-            tempRoot,
+            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", policyScript, "-RepositoryRoot", tempRoot],
+            // Windows PowerShell launched by the restricted test host can fail
+            // before script dispatch when its process working directory is a
+            // freshly-created %TEMP% directory.  The policy root is explicit,
+            // so use the known repository directory as the child CWD instead.
+            context.RepositoryRoot,
             cancellationToken);
         SmokeAssert.True(rejectResult.ExitCode != 0, "Repository policy must reject forbidden binary/build-output candidates.");
         SmokeAssert.True(
@@ -499,8 +503,8 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         File.Delete(Path.Combine(binRoot, "blocked.exe"));
         var passResult = await RunProcessAsync(
             shell,
-            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", policyScript],
-            tempRoot,
+            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", policyScript, "-RepositoryRoot", tempRoot],
+            context.RepositoryRoot,
             cancellationToken);
         SmokeAssert.True(passResult.ExitCode == 0, $"Repository policy should pass after forbidden files are removed. Output: {passResult.CombinedOutput}");
 

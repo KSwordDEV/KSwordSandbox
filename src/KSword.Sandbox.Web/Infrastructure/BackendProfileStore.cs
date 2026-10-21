@@ -81,9 +81,13 @@ internal sealed class BackendProfileStore
             runtimeRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KSwordSandbox");
         }
 
-        var payloadRoot = string.Equals(runtimeRoot, current.Paths.RuntimeRoot, StringComparison.OrdinalIgnoreCase)
-            ? current.Paths.GuestPayloadRoot
-            : ResolvePayloadRoot(runtimeRoot, current.Paths.GuestPayloadRoot);
+        // Re-resolve the payload even when the runtime root did not change.
+        // A portable package starts from sandbox.example.json, whose loader
+        // derives a runtime-root payload path before the setup page is saved.
+        // Keeping that non-existent derived path would hide the packaged
+        // payload at <packageRoot>\payload\guest-tools and make first-run
+        // configuration appear successful while live execution later fails.
+        var payloadRoot = ResolvePayloadRoot(runtimeRoot, current.Paths.GuestPayloadRoot);
 
         var remoting = new GuestRemotingConfig
         {
