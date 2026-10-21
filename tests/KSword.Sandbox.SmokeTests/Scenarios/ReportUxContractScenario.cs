@@ -523,8 +523,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "R0&#183;驱动&#183;网络&#183;状态", "Chinese event-type filters should localize camel-case R0 status tokens.");
         RequireNotContains(chineseHtml, "network&#183;late&#183;dynamic&#183;129", "Chinese event-type filters must not leak English machine tokens in visible labels.");
         RequireNotContains(chineseHtml, "r0collector&#183;driverNetworkStatus", "Chinese event-type filters must not leak camel-case R0 machine tokens.");
-        RequireContains(chineseHtml, "<option value=\"medium\">中</option>", "Chinese severity filter should show a compact medium alias while retaining the machine value.");
-        RequireContains(chineseHtml, "<option value=\"info\">信息</option>", "Chinese severity filter should show a compact info alias while retaining the machine value.");
+        RequireContains(chineseHtml, "<option value=\"medium\">中等及以上</option>", "Chinese severity filter should show a medium-and-above alias while retaining the machine value.");
+        RequireContains(chineseHtml, "<option value=\"info\">信息及以上</option>", "Chinese severity filter should show an info-and-above alias while retaining the machine value.");
         RequireContains(chineseHtml, "class=\"copy-btn copy-icon\"", "Chinese event evidence should expose an icon copy button.");
         RequireContains(chineseHtml, "<span class=\"sr-only\">复制</span>", "Chinese icon copy button should keep an accessible localized label.");
         RequireNotContains(chineseVisibleText, "行为规则命中“命令和脚本解释器”", "Chinese behavior cards must not repeat verbose rule-hit guidance.");
@@ -620,8 +620,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
 
         RequireNotContains(englishHtml, "Technical evidence:", "Generic technical evidence prefixes should not repeat on every event row.");
         RequireNotContains(englishHtml, "Additional detail:", "Generic additional-detail prompts should not repeat on every event row.");
-        RequireContains(englishHtml, "aria-label=\"复制\"", "Icon copy buttons should retain a short accessible label.");
-        RequireContains(englishHtml, "<span class=\"sr-only\">复制</span>", "Icon copy button should keep a short accessible label.");
+        RequireContains(englishHtml, "aria-label=\"Copy\"", "Icon copy buttons should retain a short accessible label.");
+        RequireContains(englishHtml, "<span class=\"sr-only\">Copy</span>", "Icon copy button should keep a short accessible label.");
+        RequireNotContains(englishHtml, "复制", "English HTML must not carry CJK copy labels; the Chinese pass rewrites them.");
+        RequireContains(chineseHtml, "aria-label=\"复制\"", "Chinese icon copy buttons should be localized.");
+        RequireContains(chineseHtml, "<span class=\"sr-only\">复制</span>", "Chinese icon copy buttons should be localized.");
         RequireNotContains(englishHtml, "<br><span class=\"muted\">cmd.exe /c whoami</span>", "Rendered event tables should not inline command lines directly.");
         RequireContains(englishHtml, "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>", "Rendered HTML should include the behavior graph section.");
         RequireContains(englishHtml, "Evidence graph edges", "Rendered HTML should include graph edge evidence.");

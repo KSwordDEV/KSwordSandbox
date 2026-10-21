@@ -115,6 +115,10 @@ internal sealed class ReportSignalOnlyUiContractScenario : ISmokeTestScenario
         var rawStart = html.IndexOf("<section id=\"events\"", StringComparison.Ordinal);
         SmokeAssert.True(rawStart > 0, "Rendered report must include a raw evidence section.");
         var main = html[..rawStart];
+        // The noise-transparency note intentionally names the raw event types
+        // it quantifies. It is a measurement of excluded noise, not a rendered
+        // behavior row, so remove that note before scanning the main view.
+        main = RemoveNoiseQuantificationNote(main);
         foreach (var forbidden in new[]
         {
             "Behavior story counts exclude rows marked",
@@ -135,5 +139,28 @@ internal sealed class ReportSignalOnlyUiContractScenario : ISmokeTestScenario
         {
             SmokeAssert.True(!main.Contains(forbidden, StringComparison.Ordinal), $"Main report view must hide '{forbidden}'.");
         }
+    }
+
+    /// <summary>
+    /// Removes the bounded noise-quantification note so the main-view scan only
+    /// inspects rendered evidence, not the note's type names.
+    /// </summary>
+    private static string RemoveNoiseQuantificationNote(string main)
+    {
+        const string marker = "<div class=\"section-note focus-noise\">";
+        var start = main.IndexOf(marker, StringComparison.Ordinal);
+        while (start >= 0)
+        {
+            var end = main.IndexOf("</div>", start, StringComparison.Ordinal);
+            if (end < 0)
+            {
+                break;
+            }
+
+            main = main.Remove(start, end + "</div>".Length - start);
+            start = main.IndexOf(marker, StringComparison.Ordinal);
+        }
+
+        return main;
     }
 }

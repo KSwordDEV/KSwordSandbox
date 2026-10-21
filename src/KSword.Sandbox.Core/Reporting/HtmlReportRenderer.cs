@@ -42,6 +42,10 @@ public sealed class HtmlReportRenderer
     private const long ArtifactPreviewImageByteLimit = 2 * 1024 * 1024;
     private const int ProcessTreeDefaultOpenDepth = 1;
     private const int TimelineEventInlineLimit = 60;
+    // Normal runtime module loads render inside their own collapsed fold in
+    // the event explorer and timeline; the cap keeps the fold bounded while
+    // the count in the summary still reports the full population.
+    private const int RuntimeModuleLoadInlineLimit = 60;
     private const int TimelineGroupEventInlineLimit = 10;
     private const int EventTableInlineLimit = 28;
     private const int StaticStringInlineLimit = 200;
@@ -258,6 +262,19 @@ public sealed class HtmlReportRenderer
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
+    // Folded list summaries carry an entry count ("PE imports (132 entries)").
+    private static readonly Regex ChineseVisibleEntryCountRegex = new(
+        "\\((?<count>\\d+) entries?\\)",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    // The demoted runtime-module-load fold carries a row count
+    // ("Normal runtime module loads (3954 rows)").
+    private static readonly Regex ChineseVisibleRowCountRegex = new(
+        "\\((?<count>\\d+) rows\\)",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
     // Event cards, behavior chips, and count badges carry raw machine text as
     // visible content while data-copy keeps the payload. These spans are the
     // only place where the value is operator chrome rather than raw evidence.
@@ -434,14 +451,93 @@ public sealed class HtmlReportRenderer
         ];
     }
 
+    /// <summary>
+    /// Removes localized (zh*) evidence fields before the English render.
+    /// Inputs are the report model; processing clones only events that carry
+    /// such keys and the method returns a report safe for English output.
+    /// </summary>
+    private static AnalysisReport WithoutLocalizedEvidenceFields(AnalysisReport report)
+    {
+        var needsFiltering = report.Events.Any(evt =>
+            evt.Data.Keys.Any(key => key.StartsWith("zh", StringComparison.OrdinalIgnoreCase)));
+        if (!needsFiltering)
+        {
+            return report;
+        }
+
+        var filteredEvents = report.Events
+            .Select(evt =>
+            {
+                if (!evt.Data.Keys.Any(key => key.StartsWith("zh", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return evt;
+                }
+
+                var data = evt.Data
+                    .Where(pair => !pair.Key.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+                return evt with { Data = data };
+            })
+            .ToList();
+        return report with { Events = filteredEvents };
+    }
+
+    /// <summary>
+    /// Returns true when a metadata key is a localized (Chinese) copy of an
+    /// English value. Both prefixes (zhMessage) and suffixes (downloadHintZh)
+    /// occur in artifact-index.json; neither belongs in the English document.
+    /// </summary>
+    private static bool IsLocalizedMetadataKey(string key) =>
+        key.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ||
+        key.EndsWith("Zh", StringComparison.OrdinalIgnoreCase);
+
+    private static Dictionary<string, string> WithoutLocalizedMetadata(IReadOnlyDictionary<string, string> metadata) =>
+        metadata
+            .Where(pair => !IsLocalizedMetadataKey(pair.Key))
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Drops zh* event fields plus localized artifact/collection metadata
+    /// before the English render. The Chinese pass re-renders the original
+    /// model, so only the English document loses these keys.
+    /// </summary>
+    private static List<ArtifactDescriptor> WithoutLocalizedArtifactMetadata(
+        IEnumerable<ArtifactDescriptor>? artifacts)
+    {
+        return artifacts?
+            .Select(artifact => artifact.Metadata.Keys.Any(IsLocalizedMetadataKey)
+                ? artifact with { Metadata = WithoutLocalizedMetadata(artifact.Metadata) }
+                : artifact)
+            .ToList() ?? [];
+    }
+
+    private static List<ArtifactCollectionDescriptor> WithoutLocalizedCollectionMetadata(
+        IEnumerable<ArtifactCollectionDescriptor>? collections)
+    {
+        return collections?
+            .Select(collection => collection.Metadata.Keys.Any(IsLocalizedMetadataKey)
+                ? collection with { Metadata = WithoutLocalizedMetadata(collection.Metadata) }
+                : collection)
+            .ToList() ?? [];
+    }
+
     private static string RenderEnglishCore(
         AnalysisReport report,
         IEnumerable<ArtifactDescriptor>? artifacts,
         IEnumerable<ArtifactCollectionDescriptor>? collections)
     {
+        // The English document must never inherit the guest's localized
+        // guidance fields. Strip zh* keys before any section reads event data;
+        // the Chinese pass re-renders from the original model and keeps them.
+        report = WithoutLocalizedEvidenceFields(report);
+        artifacts = WithoutLocalizedArtifactMetadata(artifacts);
+        collections = WithoutLocalizedCollectionMetadata(collections);
         var artifactLinks = BuildReportArtifactList(report, artifacts);
         var collectionList = collections?.ToList() ?? [];
         var artifactLookup = BuildArtifactLookup(artifactLinks);
+        var peDataEvents = report.Events
+            .Where(static evt => evt.Data.Keys.Any(static key => key.StartsWith("pe.", StringComparison.OrdinalIgnoreCase)))
+            .ToList();
         var html = new StringBuilder();
         html.AppendLine("<!doctype html>");
         html.AppendLine("<html lang=\"en\">");
@@ -466,14 +562,14 @@ public sealed class HtmlReportRenderer
         AppendAggregatedBehaviorFacts(html, report, artifactLinks);
         AppendMitreDetections(html, report);
         AppendRuleHits(html, report);
-        AppendStaticAnalysis(html, report);
+        AppendStaticAnalysis(html, report, peDataEvents);
         AppendDynamicAnalysis(html, report);
         AppendVirusTotalSummary(html, report, artifactLookup, artifactLinks);
         if (!largeReport)
         {
             AppendBehaviorGraph(html, report, artifactLookup, artifactLinks, collectionList);
         }
-        AppendArtifactLinks(html, report, artifactLinks);
+        AppendArtifactLinks(html, report, artifactLinks, collectionList, peDataEvents);
         if (!largeReport)
         {
             AppendTimeline(html, report, artifactLookup, artifactLinks);
@@ -493,7 +589,113 @@ public sealed class HtmlReportRenderer
         html.AppendLine("</main></div>");
         AppendReportScripts(html);
         html.AppendLine("</body></html>");
-        return html.ToString();
+        // Host paths the operator marked as hidden must not survive anywhere in
+        // the document — including expanded details, tooltips, copy-button
+        // payloads, search attributes, and raw JSON views that individual
+        // render sites may not sanitize. Redact the finished document so a
+        // leak in any section is corrected by one guaranteed pass.
+        var completedHtml = RedactHiddenHostPathsInDocument(html.ToString());
+        // The explorer script carries zh-CN literals for the Chinese build of
+        // the same document. Escape them as JS unicode escapes so report.en.html
+        // contains no CJK code points while the browser still renders the
+        // Chinese strings when lang="zh-CN".
+        return EscapeCjkInScriptBlocks(completedHtml);
+    }
+
+    private static readonly Regex HiddenHostPathTokenRegex = new(
+        @"(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|\\\\)[^\s<>""'|;,)\]]+",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(30));
+
+    private static readonly Regex ScriptOrStyleBlockRedactionRegex = new(
+        "<(?:script|style)\\b[^>]*>.*?</(?:script|style)>",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(30));
+
+    /// <summary>
+    /// Replaces hidden host-path tokens with their file-name leaf across an
+    /// entire rendered document. Inputs are the completed English HTML;
+    /// processing keeps script and style blocks untouched and applies the
+    /// same hide-list policy as visible evidence text to every other byte,
+    /// so copy payloads, title tooltips, data-search attributes, and raw
+    /// views can never resurface a host path the operator asked to mask;
+    /// the method returns the redacted document.
+    /// </summary>
+    private static string RedactHiddenHostPathsInDocument(string html)
+    {
+        if (string.IsNullOrEmpty(html))
+        {
+            return html;
+        }
+
+        // Redact only the markup between script/style blocks: paths inside
+        // those blocks are static renderer code, and touching them could
+        // corrupt the document.
+        var redacted = new StringBuilder(html.Length);
+        var cursor = 0;
+        foreach (Match block in ScriptOrStyleBlockRedactionRegex.Matches(html))
+        {
+            redacted.Append(RedactHiddenHostPathsInText(html.AsSpan(cursor, block.Index - cursor)));
+            redacted.Append(block.Value);
+            cursor = block.Index + block.Length;
+        }
+
+        redacted.Append(RedactHiddenHostPathsInText(html.AsSpan(cursor)));
+        return redacted.ToString();
+    }
+
+    private static string RedactHiddenHostPathsInText(ReadOnlySpan<char> text)
+    {
+        if (text.IsEmpty)
+        {
+            return string.Empty;
+        }
+
+        return HiddenHostPathTokenRegex.Replace(
+            text.ToString(),
+            static tokenMatch =>
+            {
+                var token = tokenMatch.Value.TrimEnd('.', ',', ';', ')', ']');
+                if (!ShouldHideVisiblePath(token))
+                {
+                    return tokenMatch.Value;
+                }
+
+                var leaf = SafePathLeaf(token);
+                var suffix = tokenMatch.Value[token.Length..];
+                return (string.IsNullOrWhiteSpace(leaf) ? "path" : leaf) + suffix;
+            });
+    }
+
+    /// <summary>
+    /// Replaces CJK code points inside script blocks with \\uXXXX escapes.
+    /// Inputs are the rendered English document; processing leaves markup and
+    /// styles untouched, and the method returns CJK-free HTML that still
+    /// executes identically in a browser.
+    /// </summary>
+    private static string EscapeCjkInScriptBlocks(string html)
+    {
+        return Regex.Replace(
+            html,
+            "<script\\b[^>]*>.*?</script>",
+            match =>
+            {
+                var script = match.Value;
+                var builder = new StringBuilder(script.Length + 64);
+                foreach (var character in script)
+                {
+                    if (character >= 0x2E80)
+                    {
+                        builder.Append("\\u").Append(((int)character).ToString("X4", CultureInfo.InvariantCulture));
+                        continue;
+                    }
+
+                    builder.Append(character);
+                }
+
+                return builder.ToString();
+            },
+            RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
     }
 
     /// <summary>
@@ -507,80 +709,106 @@ public sealed class HtmlReportRenderer
         html.AppendLine("<style>");
         html.AppendLine("""
 /* ==========================================================================
-   KSword Sandbox report stylesheet
-   Design rules: square corners (radius 0), no shadows, one container level,
-   summary-first reading order, hairline separators instead of nested frames.
+   KSword Sandbox report stylesheet — light professional security report
+   Design rules: 8px card radius with a whisper shadow, severity color
+   semantics (CN security-report convention), pill tags, sticky table
+   headers with zebra rows, amber (not red) for runtime/harness states,
+   and a print stylesheet that strips shadows and backgrounds.
    ========================================================================== */
 
 :root{
   --primary:#43A0FF;
-  --primary-deep:#1f5e7b;
-  --primary-ink:#0b5f8a;
-  --primary-soft:#eaf4fd;
-  --ink:#16202b;
+  --primary-deep:#1565c0;
+  --primary-ink:#0d5c9e;
+  --primary-soft:#e8f3fd;
+  --ink:#1a2433;
   --ink-2:#3a4a5c;
-  --muted:#667788;
-  --line:#dce4ee;
-  --line-soft:#edf2f8;
+  --muted:#66788c;
+  --line:#e3e8ef;
+  --line-soft:#edf1f6;
   --surface:#ffffff;
-  --band:#f5f8fb;
-  --band-2:#eef4fa;
-  --hot:#b42318;
-  --warm:#b54708;
-  --ok:#067647;
-  --info:#175cd3;
+  --band:#f5f7fa;
+  --band-2:#eef2f7;
+  --hot:#d32f2f;
+  --warm:#f57c00;
+  --low:#1976d2;
+  --infosev:#616161;
+  --ok:#2e7d32;
+  --amber-bg:#fff8e1;
+  --amber-line:#f57c00;
+  --amber-ink:#8d4e00;
+  --radius:8px;
+  --radius-sm:6px;
+  --radius-pill:10px;
+  --shadow:0 1px 2px rgba(15,23,42,.07);
   --raw-evidence-max:58vh;
-  --ui:"Segoe UI","Microsoft YaHei","PingFang SC","Hiragino Sans GB","Noto Sans SC",system-ui,sans-serif;
-  --mono:"Cascadia Mono",Consolas,"SFMono-Regular","Courier New",monospace;
+  --ui:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+  --mono:Consolas,"Courier New",monospace;
 }
 
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{margin:0;background:#eef2f7;color:var(--ink);font-family:var(--ui);font-size:14px;line-height:1.6}
+body{margin:0;background:#f5f7fa;color:var(--ink);font-family:var(--ui);font-size:14px;line-height:1.6}
 .modern-sandbox-report{font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
-body.modern-sandbox-report:before{background:var(--primary);content:'';display:block;height:3px;width:100%}
+body.modern-sandbox-report:before{background:var(--primary);content:'';display:block;height:4px;width:100%}
+body.modern-sandbox-report:has(.triage-verdict .badge-critical):before,
+body.modern-sandbox-report:has(.triage-verdict .badge-high):before{background:var(--hot)}
+body.modern-sandbox-report:has(.triage-verdict .badge-medium):before{background:var(--warm)}
+body.modern-sandbox-report:has(.triage-verdict .badge-low):before{background:var(--low)}
+body.modern-sandbox-report:has(.triage-verdict .badge-info):before{background:var(--infosev)}
 b,strong{font-weight:600}
 a{color:var(--primary-ink)}
 code,kbd,samp{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
 /* ---------- cover ---------- */
-header#cover{background:linear-gradient(140deg,#0f2438,#17496b 62%,#1a6d86);color:#fff;padding:34px clamp(24px,4vw,56px) 30px}
+/* Verdict banner: white surface, full-width severity band on top
+   (via body strip + matching header border), verdict name below. */
+header#cover{background:var(--surface);border-bottom:1px solid var(--line);border-top:5px solid var(--primary);box-shadow:var(--shadow);color:var(--ink);padding:30px clamp(24px,4vw,56px) 26px}
+header#cover:has(.triage-verdict .badge-critical),header#cover:has(.triage-verdict .badge-high){border-top-color:var(--hot)}
+header#cover:has(.triage-verdict .badge-medium){border-top-color:var(--warm)}
+header#cover:has(.triage-verdict .badge-low){border-top-color:var(--low)}
+header#cover:has(.triage-verdict .badge-info){border-top-color:var(--infosev)}
+/* Runtime-blocked / harness-failure runs are engineering states, not sample
+   malice: the full-width band turns amber even when the verdict badge itself
+   carries a high-severity class. */
+body.modern-sandbox-report:has(.execution-failure-banner):before{background:var(--amber-line)!important}
+header#cover:has(.execution-failure-banner){border-top-color:var(--amber-line)!important}
 header#cover .cover-main{max-width:1120px}
-header#cover .eyebrow{color:#a9cfe6;font-size:11.5px;font-weight:600;letter-spacing:.14em;margin:0 0 8px;text-transform:uppercase}
+header#cover .eyebrow{color:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.14em;margin:0 0 8px;text-transform:uppercase}
 header#cover h1{font-size:clamp(24px,2.6vw,32px);font-weight:600;letter-spacing:-.01em;line-height:1.25;margin:0 0 14px}
-header#cover .muted{color:#b7d4e6;font-size:12.5px;margin:0}
+header#cover .muted{color:var(--muted);font-size:12.5px;margin:0}
 header#cover p{margin:0 0 6px}
 header#cover .cover-verdict{align-items:center;display:flex;flex-wrap:wrap;gap:8px;margin:0 0 22px}
-header#cover .cover-meta{color:#a9cfe6;font-size:12.5px;margin-left:4px}
-header#cover table{background:rgba(7,24,39,.28);border-collapse:collapse;margin-top:14px;max-width:1000px;width:100%}
-header#cover td,header#cover th{border-bottom:1px solid rgba(255,255,255,.13);color:#fff;font-size:13px;line-height:1.55;padding:8px 14px;text-align:left;vertical-align:top}
-header#cover th{background:rgba(255,255,255,.06);font-weight:600;white-space:nowrap;width:190px}
+header#cover .cover-meta{color:var(--muted);font-size:12.5px;margin-left:4px}
+header#cover table{background:var(--band);border-collapse:collapse;border:1px solid var(--line);margin-top:14px;max-width:1000px;width:100%}
+header#cover td,header#cover th{border-bottom:1px solid var(--line-soft);color:var(--ink);font-size:13px;line-height:1.55;padding:8px 14px;text-align:left;vertical-align:top}
+header#cover th{background:var(--band-2);color:var(--ink-2);font-weight:600;white-space:nowrap;width:190px}
 header#cover tr:last-child td,header#cover tr:last-child th{border-bottom:0}
-header#cover code{background:rgba(255,255,255,.1);color:#eaf6ff;font-size:12.5px;padding:1px 5px}
-header#cover .cover-facts{display:grid;gap:0 40px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin:0;max-width:1120px}
-header#cover .cover-fact{border-bottom:1px solid rgba(255,255,255,.13);display:grid;gap:0 18px;grid-template-columns:104px minmax(0,1fr);padding:8px 0}
-header#cover .cover-fact dt{color:#a9cfe6;font-size:12.5px;line-height:1.55;margin:0}
-header#cover .cover-fact dd{color:#fff;font-size:13px;line-height:1.55;margin:0;overflow-wrap:anywhere}
-header#cover .cover-fact dd code{background:rgba(255,255,255,.1);color:#eaf6ff;display:inline-block;max-width:100%;overflow-wrap:anywhere;vertical-align:bottom;white-space:normal}
+header#cover code{background:var(--band-2);color:var(--ink-2);font-size:12.5px;padding:1px 5px}
+header#cover .cover-facts{background:var(--band);border:1px solid var(--line);border-radius:var(--radius);display:grid;gap:0 40px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin:0;max-width:1120px;padding:4px 18px}
+header#cover .cover-fact{border-bottom:1px solid var(--line-soft);display:grid;gap:0 18px;grid-template-columns:104px minmax(0,1fr);padding:8px 0}
+header#cover .cover-fact dt{color:var(--muted);font-size:12.5px;line-height:1.55;margin:0}
+header#cover .cover-fact dd{color:var(--ink);font-size:13px;line-height:1.55;margin:0;overflow-wrap:anywhere}
+header#cover .cover-fact dd code{background:#fff;border:1px solid var(--line-soft);color:var(--ink-2);display:inline-block;max-width:100%;overflow-wrap:anywhere;vertical-align:bottom;white-space:normal}
 .triage-verdict{font-size:12.5px}
 
-/* ---------- badges / chips ---------- */
-.badge{border-radius:0;display:inline-block;font-size:11.5px;font-weight:600;line-height:1.5;padding:3px 8px;white-space:nowrap}
-.badge-critical,.chip-critical{background:#fde8e6;color:#8a1c12}
-.badge-high,.chip-high{background:#fdeeda;color:#8a3c05}
-.badge-medium,.chip-medium{background:#fdf3d6;color:#7a4a06}
-.badge-low,.chip-low{background:#e3f6e9;color:#04543a}
-.badge-info,.chip-info{background:#e6effc;color:#144a9e}
-.static-only-badge{background:#eceafd;color:#3a2f8f}
-.chip{border-radius:0;display:inline-block;font-size:11px;font-weight:600;line-height:1.5;margin:0 4px 0 0;padding:2px 7px;white-space:nowrap}
+/* ---------- badges / chips (severity pills) ---------- */
+.badge{border-radius:var(--radius-pill);display:inline-block;font-size:11.5px;font-weight:600;line-height:1.5;padding:3px 10px;white-space:nowrap}
+.badge-critical,.chip-critical{background:#fdecea;color:#b71c1c}
+.badge-high,.chip-high{background:#fdecea;color:#b71c1c}
+.badge-medium,.chip-medium{background:#fdf1e3;color:#e65100}
+.badge-low,.chip-low{background:#e7f0fa;color:#1565c0}
+.badge-info,.chip-info{background:#eceff1;color:#455a64}
+.chip-muted{background:#eceff1;color:#546e7a}
+.static-only-badge{background:#f3e8fd;color:#6a3fb5}
+.chip{border-radius:var(--radius-pill);display:inline-block;font-size:11px;font-weight:600;line-height:1.5;margin:0 4px 0 0;padding:2px 9px;white-space:nowrap}
 
 /* ---------- language bar / fallbacks ---------- */
-.language-entry,.no-js-fallback{max-width:1600px;margin:16px auto 0;padding:10px 24px}
+.language-entry,.no-js-fallback{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);max-width:1600px;margin:16px auto 0;padding:10px 24px}
 .language-entry{align-items:center;display:flex;flex-wrap:wrap;gap:8px}
 .language-entry strong{color:var(--ink-2);font-size:12.5px;font-weight:600}
-.language-entry a{background:var(--primary);color:#fff;font-size:12.5px;font-weight:600;padding:5px 11px;text-decoration:none}
+.language-entry a{background:var(--primary);border-radius:var(--radius-sm);color:#fff;font-size:12.5px;font-weight:600;padding:5px 11px;text-decoration:none}
 .language-entry a.secondary{background:#fff;border:1px solid var(--line);color:var(--ink-2)}
-.language-entry a:hover{filter:brightness(1.05)}
 .language-entry a.secondary:hover{background:var(--band);filter:none}
 .language-entry .hint,.copy-hint{display:none}
 .modern-sandbox-report .section-note{display:block}
@@ -588,17 +816,17 @@ header#cover .cover-fact dd code{background:rgba(255,255,255,.1);color:#eaf6ff;d
 
 /* ---------- shell ---------- */
 .report-layout{align-items:start;display:grid;gap:26px;grid-template-columns:minmax(248px,280px) minmax(0,1fr);margin:18px auto;max-width:1600px;padding:0 24px}
-.report-sidebar{background:var(--surface);border:1px solid var(--line);max-height:calc(100vh - 32px);overflow:auto;position:sticky;scrollbar-width:thin;top:18px}
+.report-sidebar{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);max-height:calc(100vh - 32px);overflow:auto;position:sticky;scrollbar-width:thin;top:18px}
 .sidebar-heading{align-items:center;border-bottom:1px solid var(--line);display:flex;gap:10px;justify-content:space-between;padding:14px 16px}
 .sidebar-heading strong{display:block;font-size:13.5px;font-weight:600;line-height:1.4}
 .sidebar-heading div>span{color:var(--muted);display:block;font-size:11.5px;margin-top:2px}
-.sidebar-toggle{align-items:center;background:#fff;border:1px solid var(--line);color:var(--primary-ink);cursor:pointer;display:none;font-size:12px;font-weight:600;gap:6px;min-height:30px;padding:4px 9px}
+.sidebar-toggle{align-items:center;background:#fff;border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--primary-ink);cursor:pointer;display:none;font-size:12px;font-weight:600;gap:6px;min-height:30px;padding:4px 9px}
 .sidebar-navigation{display:block}
 .sidebar-section{padding:12px 12px 14px}
 .sidebar-section+.sidebar-section{border-top:1px solid var(--line-soft)}
 .sidebar-section h2{color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.1em;margin:0 6px 8px;text-transform:uppercase}
 .quick-links,.toc-links{display:grid;gap:1px}
-.quick-link,.toc-link{align-items:center;border-left:2px solid transparent;color:var(--ink-2);display:grid;font-size:12.5px;gap:10px;grid-template-columns:minmax(0,1fr) auto;line-height:1.4;min-height:30px;padding:5px 8px 5px 10px;text-decoration:none}
+.quick-link,.toc-link{align-items:center;border-left:2px solid transparent;border-radius:var(--radius-sm);color:var(--ink-2);display:grid;font-size:12.5px;gap:10px;grid-template-columns:minmax(0,1fr) auto;line-height:1.4;min-height:30px;padding:5px 8px 5px 10px;text-decoration:none}
 .quick-link strong{font-size:12.5px;font-weight:400;overflow-wrap:anywhere}
 .quick-link small{color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums;min-width:22px;text-align:right}
 .toc-link{display:block;padding-left:10px}
@@ -609,10 +837,10 @@ header#cover .cover-fact dd code{background:rgba(255,255,255,.1);color:#eaf6ff;d
 
 /* ---------- section chrome ---------- */
 section.card{scroll-margin-top:56px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:0;box-shadow:none;margin:0 0 18px;padding:20px 24px 22px}
-section.card>h2{align-items:center;background:var(--surface);border-bottom:1px solid var(--line);display:flex;font-size:16px;font-weight:600;gap:10px;line-height:1.4;margin:-20px -24px 18px;padding:12px 24px;position:sticky;top:0;z-index:5}
-section.card>h2:before{background:var(--primary);content:'';display:inline-block;flex:0 0 auto;height:14px;width:3px}
-section.card>h2:after{background:var(--band);border:1px solid var(--line-soft);color:var(--muted);content:'Section ' counter(report-section);counter-increment:report-section;font-size:10.5px;font-weight:600;letter-spacing:.06em;margin-left:auto;padding:1px 7px;text-transform:uppercase;white-space:nowrap}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin:0 0 18px;padding:20px 24px 22px}
+section.card>h2{align-items:center;background:var(--surface);border-bottom:1px solid var(--line);border-radius:var(--radius) var(--radius) 0 0;display:flex;font-size:16px;font-weight:600;gap:10px;line-height:1.4;margin:-20px -24px 18px;padding:12px 24px;position:sticky;top:0;z-index:5}
+section.card>h2:before{background:var(--primary);border-radius:2px;content:'';display:inline-block;flex:0 0 auto;height:14px;width:3px}
+section.card>h2:after{background:var(--band);border:1px solid var(--line-soft);border-radius:var(--radius-pill);color:var(--muted);content:'Section ' counter(report-section);counter-increment:report-section;font-size:10.5px;font-weight:600;letter-spacing:.06em;margin-left:auto;padding:1px 9px;text-transform:uppercase;white-space:nowrap}
 .card h3{align-items:baseline;display:flex;font-size:14px;font-weight:600;gap:8px;line-height:1.45;margin:22px 0 8px}
 .card h3:first-child{margin-top:0}
 .card>h3:after{background:var(--line-soft);content:'';flex:1 1 auto;height:1px}
@@ -621,31 +849,31 @@ section.card>h2:after{background:var(--band);border:1px solid var(--line-soft);c
 .eyebrow{color:var(--primary-ink);font-size:11px;font-weight:600;letter-spacing:.12em;margin:0 0 4px;text-transform:uppercase}
 .section-lead{color:var(--muted);font-size:13px;line-height:1.6;margin:2px 0 0}
 .section-subtitle{color:var(--muted);display:block;font-size:12.5px;margin:-10px 0 12px}
-.section-note{background:var(--band);border-left:2px solid var(--line);color:var(--ink-2);font-size:12.5px;line-height:1.6;margin:12px 0;padding:10px 14px}
+.section-note{background:var(--band);border-left:3px solid var(--line);border-radius:var(--radius-sm);color:var(--ink-2);font-size:12.5px;line-height:1.6;margin:12px 0;padding:10px 14px}
 .section-note strong{color:var(--ink)}
 .anchor-offset{display:block;height:0;overflow:hidden;position:relative;top:-56px;visibility:hidden}
 .sr-only{clip:rect(0,0,0,0);height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;white-space:nowrap;width:1px}
 
 /* ---------- metrics ---------- */
-.grid{display:grid;gap:1px;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));margin:12px 0}
-.metric{background:var(--band);border-left:2px solid var(--primary);display:flex;flex-direction:column;gap:2px;min-width:0;padding:10px 14px}
+.grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));margin:12px 0}
+.metric{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--primary);border-radius:var(--radius);display:flex;flex-direction:column;gap:2px;min-width:0;padding:10px 14px}
 .metric .muted{display:block;font-size:12px;font-weight:400;line-height:1.4;order:2}
 .metric b{display:block;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.2;order:1}
 .risk-critical{color:var(--hot)}
 .risk-high{color:var(--hot)}
 .risk-medium{color:var(--warm)}
-.risk-low{color:var(--ok)}
-.risk-info{color:var(--info)}
+.risk-low{color:var(--low)}
+.risk-info{color:var(--infosev)}
 
 /* risk summary: verdict tiles + aligned metric table */
-.risk-tiles{display:grid;gap:1px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin:0 0 4px}
-.risk-tile{background:var(--band);border-top:2px solid var(--primary);padding:14px 16px}
+.risk-tiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin:0 0 4px}
+.risk-tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);border-top:3px solid var(--primary);padding:14px 16px}
 .risk-tile-label{color:var(--ink-2);display:block;font-size:12.5px;line-height:1.4}
-.risk-tile-value{display:block;font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.15;margin:2px 0 0}
+.risk-tile-value{display:block;font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.15;margin:2px 0 0}
 .risk-tile-hint{color:var(--muted);display:block;font-size:11.5px;line-height:1.45}
 .risk-tile.tone-high{border-top-color:var(--hot)}
 .risk-tile.tone-medium{border-top-color:var(--warm)}
-.risk-tile.tone-info{border-top-color:var(--info)}
+.risk-tile.tone-info{border-top-color:var(--infosev)}
 .risk-tile.tone-ok{border-top-color:var(--ok)}
 .metric-table{border-top:1px solid var(--line);display:grid;gap:0 32px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin:16px 0 0}
 .metric-row{align-items:baseline;border-bottom:1px solid var(--line-soft);display:flex;gap:12px;justify-content:space-between;padding:7px 0}
@@ -657,24 +885,29 @@ section.card>h2:after{background:var(--band);border:1px solid var(--line-soft);c
 .focus-heading{align-items:flex-start;display:flex;gap:16px;justify-content:space-between;margin-bottom:4px}
 .focus-heading h2{margin:0}
 .focus-verdict{font-size:12.5px}
-.focus-grid{display:grid;gap:1px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:16px}
-.focus-metric{background:var(--band);border-left:2px solid var(--primary);display:flex;flex-direction:column;gap:2px;padding:10px 14px}
+.focus-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:16px}
+.focus-metric{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--primary);border-radius:var(--radius);display:flex;flex-direction:column;gap:2px;padding:10px 14px}
 .focus-metric>span{color:var(--ink-2);font-size:12px;line-height:1.4;order:2}
 .focus-metric>strong{font-size:22px;font-variant-numeric:tabular-nums;font-weight:600;line-height:1.2;order:1}
 .focus-next{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
-.focus-action{background:var(--primary);color:#fff;font-size:12.5px;font-weight:600;padding:6px 12px;text-decoration:none}
+.focus-action{background:var(--primary);border-radius:var(--radius-sm);color:#fff;font-size:12.5px;font-weight:600;padding:6px 12px;text-decoration:none}
 .focus-action.secondary{background:#fff;border:1px solid var(--line);color:var(--primary-ink)}
-.focus-action:hover{filter:brightness(1.05)}
-.focus-action.secondary:hover{background:var(--band);filter:none}
-.focus-coverage-warning,.collection-gap-banner{background:#fdf6e8;border-left:2px solid #d97706;color:#6f3410;display:flex;flex-wrap:wrap;font-size:12.5px;gap:4px 12px;line-height:1.6;margin:14px 0;padding:10px 14px}
-.focus-coverage-warning strong,.collection-gap-banner strong{color:#8a3c05}
+.focus-action.secondary:hover{background:var(--band)}
+.focus-coverage-warning,.collection-gap-banner{background:var(--amber-bg);border:1px solid var(--amber-line);border-left:3px solid var(--amber-line);border-radius:var(--radius-sm);color:var(--amber-ink);display:flex;flex-wrap:wrap;font-size:12.5px;gap:4px 12px;line-height:1.6;margin:14px 0;padding:10px 14px}
+.focus-coverage-warning strong,.collection-gap-banner strong{color:var(--amber-ink)}
 .collection-gap-banner a{color:var(--primary-ink);font-weight:600}
 
 /* ---------- tables ---------- */
 table{border-collapse:collapse;font-variant-numeric:tabular-nums;margin:12px 0;width:100%}
-th{background:var(--band);border-bottom:1px solid var(--line);color:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.04em;padding:9px 14px;text-align:left;vertical-align:bottom;white-space:nowrap}
+th{background:var(--band-2);border-bottom:1px solid var(--line);color:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.04em;padding:9px 14px;text-align:left;vertical-align:bottom;white-space:nowrap}
 td{border-bottom:1px solid var(--line-soft);line-height:1.55;padding:10px 14px;text-align:left;vertical-align:top}
-tbody tr:hover td{background:#fafcfe}
+tbody tr:hover td{background:#f3f7fc}
+.event-table tbody tr:nth-child(even) td,
+.behavior-findings-table tbody tr:nth-child(even) td,
+.artifact-index-table tbody tr:nth-child(even) td{background:#fafbfc}
+.event-table tbody tr:nth-child(even):hover td,
+.behavior-findings-table tbody tr:nth-child(even):hover td,
+.artifact-index-table tbody tr:nth-child(even):hover td{background:#f3f7fc}
 table.kv-table th{width:230px}
 .event-table,.event-explorer-table{table-layout:fixed;min-width:0;width:100%}
 .event-explorer-table{min-width:0;width:100%}
@@ -686,23 +919,26 @@ table.kv-table th{width:230px}
 .event-explorer-table th:nth-child(2),.event-explorer-table td:nth-child(2){width:15rem}
 .event-explorer-table th:nth-child(3),.event-explorer-table td:nth-child(3){width:6.5rem;white-space:nowrap}
 .event-explorer-table th:nth-child(4),.event-explorer-table td:nth-child(4){min-width:0;width:auto}
-.event-explorer-table tbody tr[data-severity="critical"] td{box-shadow:inset 2px 0 0 var(--hot)}
-.event-explorer-table tbody tr[data-severity="high"] td{box-shadow:inset 2px 0 0 #d97706}
-.event-explorer-table tbody tr[data-severity="medium"] td{box-shadow:inset 2px 0 0 #b9a12a}
-.event-explorer-table tbody tr[data-severity="critical"] td,.event-explorer-table tbody tr[data-severity="high"] td{background:#fffbfa}
+.event-explorer-table tbody tr[data-severity="critical"] td{box-shadow:inset 3px 0 0 var(--hot)}
+.event-explorer-table tbody tr[data-severity="high"] td{box-shadow:inset 3px 0 0 var(--hot)}
+.event-explorer-table tbody tr[data-severity="medium"] td{box-shadow:inset 3px 0 0 var(--warm)}
+.event-explorer-table tbody tr[data-severity="low"] td{box-shadow:inset 3px 0 0 var(--low)}
+.event-explorer-table tbody tr[data-severity="info"] td{box-shadow:inset 3px 0 0 var(--infosev)}
+.event-explorer-table tbody tr[data-severity="critical"] td{background:#fdf2f2}
+.event-explorer-table tbody tr[data-severity="high"] td{background:#fdf6f0}
 .event-explorer-table .chip{min-width:0;text-align:left}
 .modern-sandbox-report .event-explorer-table td{line-height:1.55;padding:9px 14px}
 
 /* event explorer toolbar */
-.event-explorer-toolbar{align-items:end;background:var(--band);border:1px solid var(--line-soft);display:flex;flex-wrap:wrap;gap:10px 14px;margin:14px 0 10px;padding:12px 14px}
+.event-explorer-toolbar{align-items:end;background:var(--band);border:1px solid var(--line-soft);border-radius:var(--radius-sm);display:flex;flex-wrap:wrap;gap:10px 14px;margin:14px 0 10px;padding:12px 14px}
 .event-explorer-toolbar label{color:var(--muted);display:grid;font-size:11.5px;font-weight:600;gap:4px}
 .event-explorer-toolbar .event-search{flex:1 1 300px}
 .event-explorer-toolbar .event-search input{width:100%}
-.event-explorer-toolbar input,.event-explorer-toolbar select{background:#fff;border:1px solid var(--line);border-radius:0;color:var(--ink);font-family:var(--ui);font-size:12.5px;min-height:30px;padding:4px 8px}
+.event-explorer-toolbar input,.event-explorer-toolbar select{background:#fff;border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--ink);font-family:var(--ui);font-size:12.5px;min-height:30px;padding:4px 8px}
 .event-explorer-toolbar input:focus,.event-explorer-toolbar select:focus{border-color:var(--primary);outline:2px solid rgba(67,160,255,.18)}
 .event-explorer-status{color:var(--muted);font-size:12px;margin:6px 2px 2px}
-.event-table-wrap{border:1px solid var(--line);margin:10px 0}
-.event-explorer-wrap{contain:layout paint;isolation:isolate;max-height:75vh;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.event-table-wrap{border:1px solid var(--line);border-radius:var(--radius);margin:10px 0}
+.event-explorer-wrap{border:1px solid var(--line);border-radius:var(--radius);contain:layout paint;isolation:isolate;max-height:75vh;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
 .event-table-wrap table{margin:0}
 .event-table-wrap th,.raw-events-panel th,.raw-event-page th{position:sticky;top:0;z-index:1}
 .event-evidence-cell{align-items:flex-start;display:flex;flex-wrap:wrap;gap:8px 10px;min-width:0;width:100%}
@@ -716,25 +952,56 @@ table.kv-table th{width:230px}
 
 /* event explorer rows as cards: stacked time/type on the left, evidence wide */
 .event-list{display:grid}
-.event-card{border-bottom:1px solid var(--line-soft);border-left:2px solid transparent;display:grid;gap:0 22px;grid-template-columns:9.5rem minmax(0,1fr);padding:12px 16px 12px 14px}
+.event-card{border-bottom:1px solid var(--line-soft);background:var(--surface);border-left:3px solid transparent;display:grid;gap:0 22px;grid-template-columns:9.5rem minmax(0,1fr);padding:12px 16px 12px 14px}
 .event-card:last-child{border-bottom:0}
-.event-card:hover{background:#fafcfe}
-.event-card[data-severity="critical"]{background:#fffafa;border-left-color:var(--hot)}
-.event-card[data-severity="high"]{background:#fffcf7;border-left-color:#d97706}
-.event-card[data-severity="medium"]{border-left-color:#c2a72f}
-.event-card[data-severity="low"]{border-left-color:var(--ok)}
-.event-card[data-severity="info"]{border-left-color:var(--line)}
+.event-card:hover{background:#f6f9fc}
+.event-card[data-severity="critical"]{background:#fdf2f2;border-left-color:var(--hot)}
+.event-card[data-severity="high"]{background:#fdf6f0;border-left-color:var(--hot)}
+.event-card[data-severity="medium"]{background:#fdfaf4;border-left-color:var(--warm)}
+.event-card[data-severity="low"]{border-left-color:var(--low)}
+.event-card[data-severity="info"]{border-left-color:var(--infosev)}
 .event-card-meta{align-content:start;display:grid;gap:3px;min-width:0}
 .event-time{color:var(--muted);font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;line-height:1.5;white-space:nowrap}
 .event-type{background:none;color:var(--primary-ink);font-family:var(--mono);font-size:11.5px;line-height:1.5;overflow-wrap:anywhere;padding:0}
 .event-card-body{min-width:0}
 .event-card-target{font-size:12px;line-height:1.6;margin:0 0 4px;overflow-wrap:anywhere}
-.event-card-target code{background:var(--band);font-size:11.5px;padding:1px 6px}
+.event-card-target code{background:var(--band-2);border-radius:4px;font-size:11.5px;padding:1px 6px}
 /* Command evidence hugs its text instead of stretching an empty full-width box */
 .event-card-target .technical-field{align-items:baseline;display:flex;flex-wrap:wrap;gap:2px 8px;margin:3px 0 0}
-.event-card-target .technical-field>pre{background:var(--band);border-left:2px solid var(--line-soft);display:inline-block;flex:1 1 16rem;margin:0;max-height:120px;max-width:100%;padding:3px 9px}
+.event-card-target .technical-field>pre{background:var(--band-2);border:1px solid var(--line-soft);border-left:3px solid var(--line);border-radius:var(--radius-sm);display:inline-block;flex:1 1 16rem;margin:0;max-height:120px;max-width:100%;padding:3px 9px}
 .event-table-card+.event-table-card{border-top:1px solid var(--line-soft)}
 .event-table-card:first-child{border-top:0}
+
+/* per-row accordion: the summary strip stays visible; full fields fold per row */
+details.event-table-card>summary{align-items:baseline;cursor:pointer;display:flex;flex-wrap:wrap;gap:2px 12px;grid-column:1/-1;list-style:none;min-width:0}
+details.event-table-card>summary::-webkit-details-marker{display:none}
+details.event-table-card>summary::before{color:var(--muted);content:"+ ";font-family:var(--mono)}
+details.event-table-card[open]>summary::before{content:"- "}
+details.event-table-card[open]>summary{border-bottom:1px solid var(--line-soft);margin:0 0 8px;padding-bottom:6px}
+details.event-table-card>.event-card-body{grid-column:1/-1}
+.event-summary-target{color:var(--ink);flex:1 1 18rem;font-size:12px;line-height:1.6;min-width:0;overflow-wrap:anywhere}
+.event-severity-badge{border-radius:10px;font-size:10.5px;font-weight:600;letter-spacing:.4px;line-height:1;padding:2px 8px;text-transform:uppercase;white-space:nowrap}
+.event-severity-badge.sev-critical{background:#fbe4e4;color:#a12622}
+.event-severity-badge.sev-high{background:#fdf0e6;color:#9a4a12}
+.event-severity-badge.sev-medium{background:#fdf6e3;color:#8a6d1a}
+.event-severity-badge.sev-low{background:#eef4fb;color:#33587d}
+.event-severity-badge.sev-info{background:var(--band-2);color:var(--muted)}
+
+/* normal runtime module loads are demoted evidence: muted, folded, sorted last */
+.runtime-load-fold{margin:6px 0 0}
+.runtime-load-fold>summary{color:var(--muted);cursor:pointer;font-size:12.5px;padding:6px 0}
+.runtime-load-fold>summary:hover{color:var(--primary-ink)}
+.runtime-load-fold .runtime-load-count{color:var(--muted);font-variant-numeric:tabular-nums}
+.runtime-load-fold>summary small{color:var(--muted);display:block;font-size:11.5px;font-weight:400;margin-top:2px}
+.runtime-load-fold .event-card{background:var(--surface);border-left-color:var(--line)}
+.runtime-load-fold .event-card[data-severity="critical"],.runtime-load-fold .event-card[data-severity="high"]{background:var(--surface);border-left-color:var(--line)}
+.runtime-load-fold .event-card[data-severity="medium"]{background:var(--surface);border-left-color:var(--line)}
+.runtime-load-fold .event-card[data-severity="low"],.runtime-load-fold .event-card[data-severity="info"]{border-left-color:var(--line)}
+.runtime-load-fold .event-card:hover{background:var(--surface)}
+.timeline-item.timeline-item-muted{opacity:.62}
+.timeline-item.timeline-item-muted:hover{opacity:1}
+.timeline-item.timeline-item-muted .badge,.timeline-item.timeline-item-muted .chip{filter:grayscale(1);opacity:.75}
+.timeline-runtime-loads>summary .timeline-group-summary,.timeline-runtime-loads>summary{color:var(--muted)}
 
 /* behavior-fact lanes fold their tail instead of growing without bound */
 .story-more{margin:4px 0 0}
@@ -801,21 +1068,21 @@ table.kv-table th{width:230px}
 .raw-technical-field .ui-field-label{max-width:100%;overflow-wrap:anywhere;white-space:normal}
 .raw-technical-field .ui-field-label:after{content:':'}
 .ui-field-label{color:var(--muted);font-size:12px;line-height:1.5}
-code{background:var(--band-2);border-radius:0;font-family:var(--mono);font-size:12.5px;overflow-wrap:anywhere;padding:1px 5px;word-break:normal}
+code{background:var(--band-2);border-radius:4px;font-family:var(--mono);font-size:12.5px;overflow-wrap:anywhere;padding:1px 5px;word-break:normal}
 code[data-token-kind=type]{background:var(--primary-soft);color:var(--primary-ink);font-weight:600}
-pre{background:var(--band);border-left:2px solid var(--line);font-family:var(--mono);font-size:12px;line-height:1.6;margin:8px 0;max-height:300px;overflow:auto;padding:10px 12px;white-space:pre-wrap;word-break:break-word}
+pre{background:var(--band);border:1px solid var(--line-soft);border-left:3px solid var(--line);border-radius:var(--radius-sm);font-family:var(--mono);font-size:12px;line-height:1.6;margin:8px 0;max-height:300px;overflow:auto;padding:10px 12px;white-space:pre-wrap;word-break:break-word}
 pre code{background:none;padding:0}
 
 /* ---------- copy actions ---------- */
 .copyable{cursor:copy}
-.copy-btn,.artifact-btn{background:var(--band);border:1px solid var(--line-soft);border-radius:0;color:var(--primary-ink);cursor:pointer;display:inline-block;font-family:var(--ui);font-size:11.5px;font-weight:600;line-height:1.5;padding:3px 9px;text-decoration:none}
+.copy-btn,.artifact-btn{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--primary-ink);cursor:pointer;display:inline-block;font-family:var(--ui);font-size:11.5px;font-weight:600;line-height:1.5;padding:3px 9px;text-decoration:none}
 .copy-btn:hover,.artifact-btn:hover{background:var(--primary-soft);border-color:#c8e2f8}
 .copy-btn.copy-icon,.copy-icon{align-items:center;display:inline-flex;height:24px;justify-content:center;padding:2px;width:24px}
 .copy-icon svg{fill:none;height:13px;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8;width:13px}
 .toolbar,.inline-actions{align-items:center;display:inline-flex;flex-wrap:wrap;gap:6px;margin:6px 0}
-.exit-code{background:#fdf3d6;color:#7a4a06;font-weight:600}
-.empty{background:var(--band);border:1px dashed var(--line);color:var(--muted);font-size:12.5px;line-height:1.6;margin:12px 0;padding:10px 14px}
-.fold-label{background:var(--band-2);border:1px solid var(--line-soft);color:var(--primary-ink);font-size:11px;font-weight:600;margin-right:6px;padding:1px 6px}
+.exit-code{background:var(--amber-bg);border:1px solid var(--amber-line);border-radius:var(--radius-sm);color:var(--amber-ink);font-weight:600}
+.empty{background:var(--band);border:1px dashed var(--line);border-radius:var(--radius-sm);color:var(--muted);font-size:12.5px;line-height:1.6;margin:12px 0;padding:10px 14px}
+.fold-label{background:var(--band-2);border:1px solid var(--line-soft);border-radius:4px;color:var(--primary-ink);font-size:11px;font-weight:600;margin-right:6px;padding:1px 6px}
 details{margin:8px 0}
 summary{cursor:pointer;font-weight:600;list-style:none}
 summary::-webkit-details-marker{display:none}
@@ -824,11 +1091,11 @@ details[open]>summary:before{content:'–'}
 
 /* ---------- behavior findings (cards) ---------- */
 .finding-list{display:grid;gap:10px;margin:14px 0}
-.finding-card{border:1px solid var(--line);border-left:3px solid var(--line);padding:14px 16px}
+.finding-card{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:var(--radius);padding:14px 16px}
 .finding-card.sev-critical,.finding-card.sev-high{border-left-color:var(--hot)}
 .finding-card.sev-medium{border-left-color:var(--warm)}
-.finding-card.sev-low{border-left-color:var(--ok)}
-.finding-card.sev-info{border-left-color:var(--info)}
+.finding-card.sev-low{border-left-color:var(--low)}
+.finding-card.sev-info{border-left-color:var(--infosev)}
 .finding-head{align-items:baseline;display:flex;flex-wrap:wrap;gap:8px 12px;justify-content:space-between}
 .finding-title{font-size:14px;font-weight:600;line-height:1.5;margin:0;overflow-wrap:anywhere}
 .finding-meta{color:var(--muted);display:flex;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;gap:4px 14px}
@@ -859,7 +1126,7 @@ details[open]>summary:before{content:'–'}
 .lane-actions .copy-icon{height:22px;width:22px}
 /* folded tail of a long, repetitive list */
 .fold-block{margin:10px 0}
-.fold-block>summary{background:var(--band);border:1px solid var(--line-soft);font-size:12px;padding:7px 12px}
+.fold-block>summary{background:var(--band);border:1px solid var(--line-soft);border-radius:var(--radius-sm);font-size:12px;padding:7px 12px}
 .fold-block[open]>summary{margin-bottom:8px}
 
 /* ---------- collapsed fact index ---------- */
@@ -887,7 +1154,7 @@ details[open]>summary:before{content:'–'}
 /* ---------- panels ---------- */
 .evidence-summary-grid,.relation-grid,.overview-strip,.ioc-grid,.graph-map{align-items:start;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin:12px 0}
 .relation-grid{align-items:stretch;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
-.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane,.ioc-card,.graph-node{background:var(--band);border-left:2px solid var(--primary);max-height:none;min-width:0;overflow:visible;overflow-wrap:anywhere;padding:13px 15px;position:relative}
+.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane,.ioc-card,.graph-node{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--primary);border-radius:var(--radius);max-height:none;min-width:0;overflow:visible;overflow-wrap:anywhere;padding:13px 15px;position:relative}
 .graph-node strong{display:block;font-size:12.5px;line-height:1.5;margin-bottom:4px;overflow-wrap:anywhere}
 .graph-node .node-flow{gap:2px 12px}
 .evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3,.ioc-card h3{font-size:13px;font-weight:600;line-height:1.5;margin:0 0 6px}
@@ -906,23 +1173,23 @@ details[open]>summary:before{content:'–'}
 .summary-value,.overview-value{color:var(--primary-ink);display:block;font-size:22px;font-variant-numeric:tabular-nums;font-weight:600;letter-spacing:-.01em;line-height:1.2}
 .overview-value.risk-medium{color:var(--warm)}
 .overview-value.risk-high{color:var(--hot)}
-.overview-value.risk-low{color:var(--ok)}
-.overview-value.risk-info{color:var(--info)}
+.overview-value.risk-low{color:var(--low)}
+.overview-value.risk-info{color:var(--infosev)}
 .overview-item p,.story-lead{color:var(--muted);font-size:12px;line-height:1.6;margin:6px 0 0}
 .relationship-title{align-items:baseline;display:flex;flex-wrap:wrap;gap:6px 12px;justify-content:space-between;margin-bottom:8px}
 .relationship-title h3{margin:0}
 .relationship-meta{display:flex;flex-wrap:wrap;font-size:12px;gap:2px 16px;line-height:1.6}
 .relationship-meta span{color:var(--ink-2);white-space:nowrap}
 .relationship-tags{margin:6px 0}
-.relation-flow{background:#fff;border-left:2px solid var(--primary);font-size:12px;line-height:1.65;margin:6px 0;max-width:100%;overflow-wrap:anywhere;padding:7px 10px}
+.relation-flow{background:var(--surface);border:1px solid var(--line-soft);border-left:3px solid var(--primary);border-radius:var(--radius-sm);font-size:12px;line-height:1.65;margin:6px 0;max-width:100%;overflow-wrap:anywhere;padding:7px 10px}
 .relationship-details summary{font-size:12.5px}
 .mono-list{list-style:none;margin:4px 0;padding-left:0}
 .mono-list li{margin:3px 0}
-.compact-evidence-summary{background:#fff;border-left:2px solid var(--line);font-size:12px;line-height:1.6;margin:8px 0;overflow-wrap:anywhere;padding:8px 12px}
+.compact-evidence-summary{background:var(--surface);border:1px solid var(--line-soft);border-left:3px solid var(--line);border-radius:var(--radius-sm);font-size:12px;line-height:1.6;margin:8px 0;overflow-wrap:anywhere;padding:8px 12px}
 .compact-evidence-summary pre{background:none;border-left:0;margin:6px 0 0;max-height:220px;padding:0}
 .evidence-expansion-card pre{max-height:260px}
 .story-metrics{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
-.story-metrics span{background:#fff;border:1px solid var(--line-soft);color:var(--ink-2);font-size:11.5px;padding:1px 7px}
+.story-metrics span{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--radius-pill);color:var(--ink-2);font-size:11.5px;padding:1px 9px}
 .story-evidence-list{line-height:1.6;margin:8px 0 0;padding-left:0;list-style:none}
 .story-evidence-list li{border-top:1px solid rgba(22,32,43,.07);padding:4px 0}
 .story-evidence-list li:first-child{border-top:0}
@@ -946,42 +1213,49 @@ details[open]>summary:before{content:'–'}
 .lane-unit{color:var(--muted);font-size:12px}
 
 .narrative-spine{counter-reset:narrative-step;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin:12px 0}
-.narrative-spine-lead{background:var(--band);border-left:2px solid var(--primary);font-size:12.5px;line-height:1.65;margin:10px 0;padding:10px 14px}
-.narrative-step{background:var(--band);border-left:2px solid var(--primary);max-height:none;overflow:hidden;padding:13px 15px}
-.narrative-step-index{background:var(--primary);color:#fff;display:inline-flex;font-size:11.5px;font-weight:600;height:20px;justify-content:center;line-height:20px;margin-right:8px;width:20px}
+.narrative-spine-lead{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--primary);border-radius:var(--radius);font-size:12.5px;line-height:1.65;margin:10px 0;padding:10px 14px}
+.narrative-step{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--primary);border-radius:var(--radius);max-height:none;overflow:hidden;padding:13px 15px}
+.narrative-step-index{background:var(--primary);border-radius:50%;color:#fff;display:inline-flex;font-size:11.5px;font-weight:600;height:20px;justify-content:center;line-height:20px;margin-right:8px;width:20px}
 .narrative-step h3{display:inline;font-size:13px;margin:0}
 .narrative-step .overview-value{font-size:20px;margin:6px 0 2px}
 .narrative-step p{color:var(--muted);font-size:12px;line-height:1.6;margin:0}
 
 /* ---------- timeline ---------- */
 .timeline-groups{display:grid;gap:10px;margin:12px 0}
-.timeline-group{border:1px solid var(--line);overflow:hidden}
+.timeline-group{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
 .timeline-group>summary{align-items:flex-start;background:var(--band);display:flex;gap:12px;justify-content:space-between;padding:10px 14px}
 .timeline-group small{color:var(--muted);display:block;font-size:12px;line-height:1.55;margin-top:2px}
 .timeline{border-left:1px solid var(--line);margin:0 14px 12px 20px;padding:12px 0 0 16px}
-.timeline-item{border:1px solid var(--line-soft);margin:0 0 8px;padding:9px 12px;position:relative}
-.timeline-item:before{background:var(--primary);content:'';height:7px;left:-20px;position:absolute;top:14px;width:7px}
-.timeline-overflow{background:var(--band);border:1px dashed var(--line);color:var(--muted);font-size:12px;margin:0 0 8px;padding:8px 12px}
+.timeline-item{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--radius-sm);margin:0 0 8px;padding:9px 12px;position:relative}
+.timeline-item:before{background:var(--primary);border-radius:50%;content:'';height:7px;left:-20px;position:absolute;top:14px;width:7px}
+.timeline-overflow{background:var(--band);border:1px dashed var(--line);border-radius:var(--radius-sm);color:var(--muted);font-size:12px;margin:0 0 8px;padding:8px 12px}
 
 /* ---------- process tree ---------- */
 .tree{font-family:var(--mono);font-size:12.5px;line-height:1.65;margin:12px 0}
 .tree ul{border-left:1px dashed var(--line);list-style:none;margin:0 0 0 16px;padding-left:12px}
 .tree li{margin:4px 0}
-.process-tree{border:1px solid var(--line);padding:12px 14px}
+.process-tree{background:var(--band);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
 .process-tree summary,.process-tree-leaf{align-items:flex-start;cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;list-style:none}
 .process-tree-line{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
 .process-tree-label{font-weight:600}
 .process-tree-path{color:var(--muted);font-size:12px;max-width:56ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tree-badge{background:var(--band-2);border:1px solid var(--line-soft);color:var(--ink-2);font-size:11px;font-weight:600;padding:1px 6px}
+.tree-badge{background:var(--band-2);border:1px solid var(--line-soft);border-radius:4px;color:var(--ink-2);font-size:11px;font-weight:600;padding:1px 6px}
 .process-tree-sparkline{align-items:center;display:inline-grid;gap:2px;grid-template-columns:repeat(4,16px);height:12px;margin-top:2px}
-.process-tree-sparkline span{background:#e2ecf7;display:block;height:10px}
+.process-tree-sparkline span{background:#dbe7f5;display:block;height:10px}
 .process-tree-sparkline .hot{background:var(--primary)}
-.modern-sandbox-report ::selection{background:var(--primary);color:#fff}
 .process-tree-sparkline-label{color:var(--muted);font-size:11px;margin-left:2px}
 
 .columns{display:grid;gap:20px;grid-template-columns:1fr 1fr}
 
 /* ---------- artifacts ---------- */
+.artifact-group-list{display:grid;gap:8px}
+.artifact-group{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--radius)}
+.artifact-group>summary{align-items:baseline;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px 14px;list-style:none;padding:9px 14px}
+.artifact-group>summary::-webkit-details-marker{display:none}
+.artifact-group>summary:before{color:var(--muted);content:'+ ';font-family:var(--mono)}
+.artifact-group[open]>summary:before{content:'- '}
+.artifact-group[open]>summary{border-bottom:1px solid var(--line-soft)}
+.artifact-group .artifact-list-rows{border-top:0}
 .artifact-ref{font-weight:600}
 .artifact-list{list-style:none;margin:8px 0 0;padding:0}
 .artifact-list li{border-top:1px solid var(--line-soft);margin-top:8px;padding-top:8px}
@@ -999,7 +1273,7 @@ details[open]>summary:before{content:'–'}
 .artifact-index-table th:nth-child(5){width:19%}
 .artifact-index-detail{min-width:0}
 .artifact-cards{display:grid;gap:10px;margin:14px 0}
-.artifact-card{border:1px solid var(--line);display:grid;gap:4px 20px;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);padding:13px 16px}
+.artifact-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);display:grid;gap:4px 20px;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);padding:13px 16px}
 .artifact-card-main{min-width:0}
 .artifact-card-head{align-items:baseline;display:flex;flex-wrap:wrap;gap:4px 10px;min-width:0}
 .artifact-card-name{font-size:13.5px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
@@ -1011,30 +1285,39 @@ details[open]>summary:before{content:'–'}
 .artifact-card-evidence{grid-column:1/-1;margin-top:6px;min-width:0}
 
 /* ---------- raw events ---------- */
-.raw-events-shell{border:1px solid var(--line);margin:12px 0}
-.raw-events-shell>summary{background:var(--band);font-size:12.5px;padding:10px 14px}
+.raw-events-shell{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin:12px 0}
+.raw-events-shell>summary{background:var(--band);border-radius:var(--radius) var(--radius) 0 0;font-size:12.5px;padding:10px 14px}
 .raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto;padding:12px 14px}
 .raw-events-panel .event-table-wrap{max-height:none}
 .raw-event-pages{display:grid;gap:10px}
-.raw-event-page{border:1px solid var(--line);overflow:hidden;scroll-margin-top:60px}
+.raw-event-page{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;scroll-margin-top:60px}
 .raw-event-page>summary{background:var(--band-2);color:var(--primary-ink);font-size:12px;font-weight:600;padding:9px 12px}
 .raw-page-nav{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
-.raw-page-nav a{background:#fff;border:1px solid var(--line);color:var(--primary-ink);font-size:11.5px;font-weight:600;padding:3px 8px;text-decoration:none}
+.raw-page-nav a{background:#fff;border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--primary-ink);font-size:11.5px;font-weight:600;padding:3px 8px;text-decoration:none}
 .raw-page-nav a:hover{background:var(--band)}
-.health-pill{background:var(--band);border:1px solid var(--line-soft);color:var(--primary-ink);display:inline-block;font-size:11.5px;font-weight:600;padding:3px 8px}
-.raw-source-hints{background:var(--band);margin-top:12px;padding:12px 14px}
+.health-pill{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--radius-pill);color:var(--primary-ink);display:inline-block;font-size:11.5px;font-weight:600;padding:3px 9px}
+.raw-source-hints{background:var(--band);border-radius:var(--radius-sm);margin-top:12px;padding:12px 14px}
 .raw-source-hints ul{list-style:none;margin:8px 0 0;padding:0}
 .raw-source-hints li{border-top:1px solid var(--line-soft);margin-top:8px;padding-top:8px}
 .raw-source-hints li:first-child{border-top:0;margin-top:0;padding-top:0}
 .raw-source-hints .hint-label{font-weight:600}
 .coverage-stats{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
-.coverage-stats span{background:#fff;border:1px solid var(--line-soft);color:var(--ink-2);font-size:11.5px;padding:1px 7px;white-space:nowrap}
+.coverage-stats span{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--radius-pill);color:var(--ink-2);font-size:11.5px;padding:1px 9px;white-space:nowrap}
 .coverage-source{display:block;margin-top:4px}
 .source-artifact-link{display:inline-flex;margin:6px 6px 0 0}
 
+/* ---------- PE data block (offline parse / event pe.* fields) ---------- */
+.pe-block{background:var(--band);border:1px solid var(--line-soft);border-radius:var(--radius-sm);margin:10px 0;padding:10px 14px}
+.pe-block h4{font-size:12.5px;font-weight:600;margin:0 0 6px}
+.pe-block table{margin:8px 0 4px}
+.pe-imports{margin:6px 0 2px}
+.pe-imports .chip{margin:2px 4px 2px 0}
+
 /* ---------- notices ---------- */
-.failure-note{background:#fdf6e8;border-left:2px solid #d97706;color:#6f3410;display:block;font-size:12.5px;line-height:1.65;margin:12px 0;padding:10px 14px}
-.failure-note.execution-failure-banner{background:#fdf1e7;border-left-color:#b54708;margin:14px 0;padding:11px 15px}
+/* Runtime-blocked / harness failures are engineering states, not sample
+   malice: amber warning bars, never the red reserved for malicious severity. */
+.failure-note{background:var(--amber-bg);border:1px solid var(--amber-line);border-left:3px solid var(--amber-line);border-radius:var(--radius-sm);color:var(--amber-ink);display:block;font-size:12.5px;line-height:1.65;margin:12px 0;padding:10px 14px}
+.failure-note.execution-failure-banner{margin:14px 0;padding:11px 15px}
 .failure-note.execution-failure-banner strong{display:block;margin-bottom:2px}
 
 /* ---------- graph edges ---------- */
@@ -1088,7 +1371,10 @@ details[open]>summary:before{content:'–'}
   .report-sidebar{display:none}
   .copy-btn,.copy-icon,.toolbar,.inline-actions,.event-explorer-toolbar{display:none!important}
   section.card>h2{position:static}
-  .card,.event-table-wrap,.raw-events-panel,.process-tree,.relation-card,.evidence-story-lane,.evidence-summary-card,.raw-event-page,.finding-card,.artifact-card{break-inside:avoid;max-height:none!important;overflow:visible!important}
+  *{box-shadow:none!important}
+  body.modern-sandbox-report:before{display:none}
+  header#cover{border-top:0;box-shadow:none}
+  .card,.event-table-wrap,.raw-events-panel,.process-tree,.relation-card,.evidence-story-lane,.evidence-summary-card,.raw-event-page,.finding-card,.artifact-card,.risk-tile,.metric,.focus-metric{break-inside:avoid;max-height:none!important;overflow:visible!important}
   .process-tree-path{white-space:normal}
   .raw-events-shell>summary:after,.raw-event-page>summary:after,.event-evidence-fields>summary:after,.technical-field>summary:after,.raw-technical-fields>summary:after{color:#64748b;content:' (folded in screen view; expand in browser for full evidence)';font-weight:400}
   /* A one-line index truncates with an ellipsis on screen; print it in full. */
@@ -1220,7 +1506,7 @@ details[open]>summary:before{content:'–'}
     {
         html.AppendLine("<nav class=\"card language-entry\" data-copy=\"report.html&#10;report.zh.html&#10;report.en.html\">");
         html.AppendLine("<strong>Report language</strong>");
-        html.AppendLine("<a href=\"report.zh.html\">中文报告</a>");
+        html.AppendLine("<a href=\"report.zh.html\">Chinese report</a>");
         html.AppendLine("<a class=\"secondary\" href=\"report.en.html\">English report</a>");
         html.AppendLine("<a class=\"secondary\" href=\"report.html\">Default report</a>");
         html.AppendLine("<span class=\"hint\">Default report.html uses Simplified Chinese; report.en.html keeps English operator chrome. Evidence values stay original in both reports. The WebUI also serves these through /api/jobs/{jobId}/report/html?lang=zh and ?lang=en.</span>");
@@ -1368,10 +1654,27 @@ details[open]>summary:before{content:'–'}
         MetricRow(html, "Rule hits", report.Findings.Count.ToString());
         MetricRow(html, "Static tags", (report.StaticAnalysis?.Tags.Count ?? 0).ToString());
         MetricRow(html, "Static URL refs", (report.StaticAnalysis?.Urls.Count ?? 0).ToString());
-        MetricRow(html, "File events", report.Events.Count(IsSampleBehaviorFileEvent).ToString());
-        MetricRow(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString());
-        MetricRow(html, "Registry events", report.Events.Count(IsSampleBehaviorRegistryEvent).ToString());
-        MetricRow(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString());
+        MetricRow(html, "File events (raw / attributed / excluded)", BehaviorLaneCount(report, IsFileEvent, IsSampleBehaviorFileEvent));
+        MetricRow(html, "Network events (raw / attributed / excluded)", BehaviorLaneCount(report, IsNetworkEvent, IsSampleBehaviorNetworkEvent));
+        MetricRow(html, "Registry events (raw / attributed / excluded)", BehaviorLaneCount(report, IsRegistryEvent, IsSampleBehaviorRegistryEvent));
+        if (HasR0TelemetryChannel(report))
+        {
+            MetricRow(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString());
+        }
+        else
+        {
+            MetricRowHtml(html, "R0 sample telemetry", "<a href=\"#collection-coverage-gaps\">—</a>");
+        }
+
+        var etwEventsLost = ReportMetric(report, "etw.eventsLost");
+        var etwRetention = ReportMetric(report, "etw.decode.retention");
+        var etwXmlCount = ReportMetric(report, "etw.xmlEventCount");
+        if (etwXmlCount > 0 || etwEventsLost > 0 || etwRetention > 0)
+        {
+            MetricRow(html, "ETW XML events / imported", $"{etwXmlCount.ToString(CultureInfo.InvariantCulture)} / {ReportMetric(report, "etw.importedEventCount").ToString(CultureInfo.InvariantCulture)}");
+            MetricRow(html, "ETW decode retention", FormatBasisPointsPercent(etwRetention));
+            MetricRow(html, "ETW events lost", etwEventsLost.ToString(CultureInfo.InvariantCulture));
+        }
         var processRaw = ReportMetric(report, "events.process.raw");
         var processReport = ReportMetric(report, "events.process.report");
         var threadRaw = ReportMetric(report, "events.thread.raw");
@@ -1420,13 +1723,17 @@ details[open]>summary:before{content:'–'}
             var qualityWarnings = ReportMetric(report, "events.r0.driver.qualityWarningRows");
             var lossRate = $"{lossRateBasisPoints / 100}.{lossRateBasisPoints % 100:00}%";
             var completeness = qualityWarnings == 0 && remainingUnread == 0 && lostCount == 0
-                ? "采集完整性：无丢失或有界排空警告。"
+                ? "Collection completeness: no loss or bounded-drain warning."
                 : "Collection completeness requires review; a zero lostCount alone does not prove that every record was drained.";
             html.AppendLine($"<div class=\"section-note\"><strong>R0 driver coverage.</strong> Raw/report rows by class (raw/report): {E(driverClassSummary)}. Collector loss markers: {E(loss.ToString(CultureInfo.InvariantCulture))}; lost count: {E(lostCount.ToString(CultureInfo.InvariantCulture))}/{E(processed.ToString(CultureInfo.InvariantCulture))} processed ({E(lossRate)}); backpressure markers: {E(backpressure.ToString(CultureInfo.InvariantCulture))}; queue depth/remaining unread: {E(queueDepth.ToString(CultureInfo.InvariantCulture))}/{E(remainingUnread.ToString(CultureInfo.InvariantCulture))}; suppressed events: {E(eventsSuppressed.ToString(CultureInfo.InvariantCulture))} (expected-disabled={E(expectedSuppressed.ToString(CultureInfo.InvariantCulture))}, unexpected={E(unexpectedSuppressed.ToString(CultureInfo.InvariantCulture))}, unsupported={E(unsupportedProducer.ToString(CultureInfo.InvariantCulture))}); drain deadline/batch-limit stops: {E(deadlineStop.ToString(CultureInfo.InvariantCulture))}/{E(batchLimitStop.ToString(CultureInfo.InvariantCulture))}; quality warnings: {E(qualityWarnings.ToString(CultureInfo.InvariantCulture))}. {E(completeness)} Complete raw R0 evidence is available through the indexed driver JSONL stream and all rotated segments.</div>");
         }
         if (HasExecutionBlockedVerdict(report))
         {
             html.AppendLine("<div class=\"section-note failure-note\"><strong>Execution boundary:</strong> sample execution was blocked or ended before complete runtime behavior, so the runtime verdict is indeterminate. Static findings remain static-only evidence and do not establish execution.</div>");
+            if (HasNetFx3MissingExit(report))
+            {
+                html.AppendLine("<div class=\"section-note failure-note\"><strong>Root cause (0x80131700):</strong> .NET Framework 3.5 is missing; the child process Fondue.exe /enable-feature:NetFx3 failed. Preinstall NetFx3 in the clean guest baseline, then rerun the sample.</div>");
+            }
         }
 
         html.AppendLine("</section>");
@@ -1468,8 +1775,55 @@ details[open]>summary:before{content:'–'}
         {
             html.AppendLine("<div class=\"focus-coverage-warning\"><strong>Collection coverage warning</strong><span>Runtime evidence coverage is incomplete; review Collection coverage gaps before treating a quiet result as evidence that the sample had no behavior.</span></div>");
         }
+
+        var noise = CountNoiseRows(report);
+        var noiseBasis = Math.Max(1, noise.RawTotal);
+        if (noise.Snapshot + noise.Probe + noise.PssFile > 0)
+        {
+            html.AppendLine($"<div class=\"section-note focus-noise\"><strong>Noise quantification.</strong> process.snapshot {noise.Snapshot.ToString(CultureInfo.InvariantCulture)} ({E(FormatPercent(noise.Snapshot, noiseBasis))}); probe.summary {noise.Probe.ToString(CultureInfo.InvariantCulture)} ({E(FormatPercent(noise.Probe, noiseBasis))}); __PSScriptPolicyTest_* files {noise.PssFile.ToString(CultureInfo.InvariantCulture)} ({E(FormatPercent(noise.PssFile, noiseBasis))}) of {noise.RawTotal.ToString(CultureInfo.InvariantCulture)} raw events. These rows are lifecycle/inventory noise and are excluded from sample behavior.</div>");
+        }
+
+        var etwXmlCount = ReportMetric(report, "etw.xmlEventCount");
+        if (etwXmlCount > 0)
+        {
+            var etwImported = ReportMetric(report, "etw.importedEventCount");
+            var etwRetention = ReportMetric(report, "etw.decode.retention");
+            var etwLost = ReportMetric(report, "etw.eventsLost");
+            html.AppendLine($"<div class=\"section-note focus-etw-health\"><strong>ETW decode health.</strong> XML events {etwXmlCount.ToString(CultureInfo.InvariantCulture)}; imported {etwImported.ToString(CultureInfo.InvariantCulture)}; decode retention {E(FormatBasisPointsPercent(etwRetention))}; events lost {etwLost.ToString(CultureInfo.InvariantCulture)}.</div>");
+        }
+
+        // Highest severity must describe the evidence the operator is looking
+        // at, not only the primary lane: a medium-only sample must not report
+        // "info" just because no primary behavior rule matched.
+        var highestSeverity = report.Findings.Count > 0
+            ? NormalizeSeverity(report.Findings.OrderBy(finding => SeverityRank(finding.Severity)).First().Severity)
+            : "info";
+        var keyEvidence = primaryFindings.Count > 0
+            ? primaryFindings[0].Title
+            : report.Findings.Count > 0
+                ? report.Findings.OrderBy(finding => SeverityRank(finding.Severity)).First().Title
+                : report.Events
+                    .Where(IsSampleBehaviorEvent)
+                    .OrderBy(evt => evt.Timestamp)
+                    .Select(EventOneLine)
+                    .FirstOrDefault() ?? "-";
+        var nextReview = sampleEvents == 0
+            ? "No sample-attributed behavior was observed in the captured runtime events."
+            : $"Observed {sampleEvents.ToString(CultureInfo.InvariantCulture)} sample behavior events; highest severity [{highestSeverity}]; key evidence: {ShortenMiddle(keyEvidence, 160)}.";
+        var focusCopy = string.Join(
+            Environment.NewLine,
+            [
+                "Analyst focus",
+                $"verdict={verdict.Label}",
+                $"primaryFindings={primaryFindings.Count.ToString(CultureInfo.InvariantCulture)}",
+                $"sampleBehaviorEvents={sampleEvents.ToString(CultureInfo.InvariantCulture)}",
+                $"failureEvents={failures.ToString(CultureInfo.InvariantCulture)}",
+                $"sampleExitOutcomes={sampleExitOutcomes.ToString(CultureInfo.InvariantCulture)}",
+                $"artifacts={artifactCount.ToString(CultureInfo.InvariantCulture)}",
+                $"next={nextReview}"
+            ]);
         html.AppendLine("<div class=\"focus-next\">");
-        // Next-review prose is intentionally omitted; action links remain below.
+        html.AppendLine($"<div class=\"focus-next-copy copyable\" data-copy=\"{A(focusCopy)}\"><strong>Next review</strong><br><span>{E(nextReview)}</span></div>");
         html.AppendLine($"<a class=\"focus-action\" href=\"#event-explorer\">Open filtered event table</a><a class=\"focus-action secondary\" href=\"#failure\">Open failure log</a>");
         html.AppendLine("</div>");
         html.AppendLine("</section>");
@@ -1498,7 +1852,7 @@ details[open]>summary:before{content:'–'}
             .Where(evt => IsEventExplorerEvent(report, evt))
             .ToList();
         var rows = explorerEvents
-            .OrderByDescending(IsKeyOperationalEvent)
+            .OrderBy(evt => SeverityRank(EventExplorerSeverity(report, evt)))
             .ThenBy(evt => evt.Timestamp)
             .Select(evt => new EventExplorerRow(
                 evt,
@@ -1512,16 +1866,25 @@ details[open]>summary:before{content:'–'}
         // Reserve visible slots for process exits and collection gaps. Dense
         // driver/file telemetry must not push the execution outcome out of
         // the first screen where operators look for it.
+        // Normal runtime module loads never occupy inline or priority slots;
+        // they render in their own collapsed, muted fold at the end.
         var priorityRows = rows
-            .Where(row => IsEventExplorerPriority(report, row.Event))
+            .Where(row => IsEventExplorerPriority(report, row.Event) && !IsNormalRuntimeModuleLoadEvent(row.Event))
             .Take(Math.Min(40, inlineRows))
             .ToList();
         var priorityKeys = priorityRows.Select(row => EventIdentityKey(row.Event)).ToHashSet(StringComparer.Ordinal);
         var fillerRows = rows
-            .Where(row => !priorityKeys.Contains(EventIdentityKey(row.Event)) && !string.Equals(row.Disposition, "unattributed", StringComparison.OrdinalIgnoreCase))
+            .Where(row => !priorityKeys.Contains(EventIdentityKey(row.Event)) && !string.Equals(row.Disposition, "unattributed", StringComparison.OrdinalIgnoreCase) && !IsNormalRuntimeModuleLoadEvent(row.Event))
             .Take(Math.Max(0, inlineRows - priorityRows.Count))
             .ToList();
-        var inlineRowsSelected = priorityRows.Concat(fillerRows).ToList();
+        // Priority rows are still reserved visible slots (process exits and
+        // collection gaps must not be pushed out of the inline budget by
+        // dense telemetry), but the default on-screen order is severity
+        // first, oldest first within one severity, per the operator request.
+        var inlineRowsSelected = priorityRows.Concat(fillerRows)
+            .OrderBy(row => SeverityRank(row.Severity))
+            .ThenBy(row => row.Event.Timestamp)
+            .ToList();
         var inlineKeySet = inlineRowsSelected.Select(row => EventIdentityKey(row.Event)).ToHashSet(StringComparer.Ordinal);
         var hidden = Math.Max(0, rows.Count - inlineRowsSelected.Count);
         var overflowRows = rows
@@ -1593,7 +1956,8 @@ details[open]>summary:before{content:'–'}
                 // Render selected evidence inline so every row is readable
                 // without a second disclosure control. Raw event pages remain
                 // the place for large, paged payloads.
-                var evidenceTitle = evt.ProcessName ?? DisplayEventTarget(evt, target) ?? "Evidence";
+                var displayedTarget = DisplayEventTarget(evt, target);
+                var evidenceTitle = evt.ProcessName ?? (string.IsNullOrWhiteSpace(displayedTarget) ? null : displayedTarget) ?? "Evidence";
                 var titleHtml = string.IsNullOrWhiteSpace(evidenceTitle) || evidenceTitle == "-"
                     ? string.Empty
                     : $"<strong class=\"event-evidence-title\">{E(evidenceTitle)}</strong>";
@@ -1606,7 +1970,79 @@ details[open]>summary:before{content:'–'}
 
         html.AppendLine("<div class=\"empty event-filter-empty\" data-event-empty hidden>No matching evidence rows. Clear a filter or open Raw normalized events.</div>");
 
+        AppendRuntimeModuleLoadFold(html, report, artifactLookup, artifacts);
+
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends normal runtime module loads as one collapsed, muted aggregate
+    /// fold at the end of the event explorer. Inputs are the report plus
+    /// artifact lookup data; processing selects image.load rows the
+    /// correlation classifier marked with the normal-runtime-module-load
+    /// boundary or environmental attribution, bounds the inline list, and
+    /// renders the same card markup muted so suspicious image loads keep the
+    /// highlighted treatment in the main list; return is none.
+    /// </summary>
+    private static void AppendRuntimeModuleLoadFold(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var runtimeModuleLoadEvents = report.Events
+            .Where(IsNormalRuntimeModuleLoadEvent)
+            .OrderBy(evt => evt.Timestamp)
+            .ToList();
+        if (runtimeModuleLoadEvents.Count == 0)
+        {
+            return;
+        }
+
+        var inlineEvents = runtimeModuleLoadEvents.Take(RuntimeModuleLoadInlineLimit).ToList();
+        var hiddenCount = runtimeModuleLoadEvents.Count - inlineEvents.Count;
+        html.AppendLine("<details class=\"runtime-load-fold\">");
+        html.AppendLine($"<summary><span class=\"fold-label\">Normal runtime module loads</span> <span class=\"runtime-load-count\">({runtimeModuleLoadEvents.Count} rows)</span><small>System-directory DLL loads during normal operation; demoted from the signal list. Suspicious image loads (user-writable paths, injection candidates) stay highlighted in the list above.</small></summary>");
+        html.AppendLine("<div class=\"event-list runtime-load-list\">");
+        foreach (var evt in inlineEvents)
+        {
+            var target = ExtractReadableEventTarget(evt);
+            var exitCode = ProcessExitCodeText(evt);
+            var family = EventFamilyLabel(evt);
+            var stage = EventExplorerStage(evt);
+            var severity = EventExplorerSeverity(report, evt);
+            var disposition = EventExplorerDisposition(evt);
+            var search = string.Join(" ", evt.EventType, evt.Source, evt.ProcessName, evt.Path, target, exitCode, family, stage, severity, disposition);
+            var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
+            var plain = EventToBoundedPlainText(evt, maxDataPairs: 24, maxValueLength: 220);
+            html.AppendLine($"<div class=\"event-card event-explorer-row runtime-load-row\" data-event-row data-runtime-load=\"true\" data-event-overflow=\"false\" data-type=\"{A(evt.EventType)}\" data-source=\"{A(evt.Source)}\" data-family=\"{A(family)}\" data-stage=\"{A(stage)}\" data-severity=\"{A(severity)}\" data-sample=\"{(IsSampleBehaviorEvent(evt) ? "true" : "false")}\" data-event-disposition=\"{A(disposition)}\" data-search=\"{A(search)}\">");
+            html.AppendLine("<div class=\"event-card-meta\">");
+            html.AppendLine($"<span class=\"event-time copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</span>");
+            html.AppendLine($"<code class=\"event-type\" data-token-kind=\"type\" data-event-token=\"{A(evt.EventType)}\">{E(evt.EventType)}</code>");
+            if (!string.IsNullOrWhiteSpace(exitCode))
+            {
+                html.AppendLine($"<code class=\"exit-code\">{E(exitCode)}</code>");
+            }
+
+            html.AppendLine($"<span class=\"sr-only\">Severity {E(severity)}</span>");
+            html.AppendLine("</div>");
+            var detail = $"<div class=\"event-evidence-cell\">{RenderEventEvidenceDetails(evt)}<span class=\"inline-actions\">{CopyIconButton(plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span></div>";
+            var evidenceTitle = evt.ProcessName ?? DisplayEventTarget(evt, target) ?? "Evidence";
+            var titleHtml = string.IsNullOrWhiteSpace(evidenceTitle) || evidenceTitle == "-"
+                ? string.Empty
+                : $"<strong class=\"event-evidence-title\">{E(evidenceTitle)}</strong>";
+            html.AppendLine($"<div class=\"event-card-body\"><div class=\"event-explorer-detail\">{titleHtml}{detail}</div></div>");
+            html.AppendLine("</div>");
+        }
+
+        html.AppendLine("</div>");
+        if (hiddenCount > 0)
+        {
+            html.AppendLine($"<div class=\"copy-hint\">{E(hiddenCount.ToString(CultureInfo.InvariantCulture))} additional normal runtime module loads are retained in report.json and the indexed source JSON/JSONL.</div>");
+            html.AppendLine("<div class=\"copy-hint\">The inline fold is capped; open the sampled report view for the complete list.</div>");
+        }
+
+        html.AppendLine("</details>");
     }
 
     /// <summary>
@@ -1684,6 +2120,21 @@ details[open]>summary:before{content:'–'}
         if (attribute.Contains("event-disposition", StringComparison.OrdinalIgnoreCase))
         {
             return DisplayDispositionLabel(value);
+        }
+
+        if (attribute.Contains("event-severity", StringComparison.OrdinalIgnoreCase))
+        {
+            // The severity filter means "selected level and above", so the
+            // option label carries that semantics explicitly in both locales.
+            return value.ToLowerInvariant() switch
+            {
+                "critical" => "严重及以上",
+                "high" => "高及以上",
+                "medium" => "中等及以上",
+                "low" => "低及以上",
+                "info" => "信息及以上",
+                _ => DisplayExplorerLabel(value)
+            };
         }
 
         return DisplayExplorerLabel(value);
@@ -1880,11 +2331,60 @@ details[open]>summary:before{content:'–'}
             // Chinese label marker. The localization pass removes the marker
             // after applying the label, so English output remains unchanged to
             // operators and filtering continues to compare stable values.
+            // The label is emitted as numeric character references so the
+            // English document (which is also the source of the Chinese
+            // translation pass) contains no CJK code points.
             var chineseLabel = DisplayExplorerOptionLabel(attribute, value);
-            html.Append($"<option value=\"{A(value)}\" data-zh-label=\"{A(chineseLabel)}\">{E(value)}</option>");
+            var englishLabel = ExplorerOptionEnglishLabel(attribute, value);
+            html.Append($"<option value=\"{A(value)}\" data-zh-label=\"{NonAsciiEntityEncode(chineseLabel)}\">{E(englishLabel)}</option>");
         }
 
         html.AppendLine("</select></label>");
+    }
+
+    /// <summary>
+    /// Builds the visible English option text for explorer filters. Severity
+    /// options read "Medium and above" because the filter keeps the selected
+    /// level and everything more severe; every other option keeps the raw
+    /// machine value so filtering compares stable tokens.
+    /// </summary>
+    private static string ExplorerOptionEnglishLabel(string attribute, string value)
+    {
+        if (!attribute.Contains("event-severity", StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        return value + " and above";
+    }
+
+    /// <summary>
+    /// Encodes non-ASCII characters as decimal numeric character references so
+    /// an attribute can carry Chinese labels without putting CJK code points
+    /// into the English document. Browsers decode these references normally.
+    /// </summary>
+    private static string NonAsciiEntityEncode(string value)
+    {
+        var builder = new StringBuilder(value.Length + 16);
+        foreach (var character in value)
+        {
+            if (character < 0x80)
+            {
+                builder.Append(character switch
+                {
+                    '&' => "&amp;",
+                    '"' => "&quot;",
+                    '<' => "&lt;",
+                    '>' => "&gt;",
+                    _ => character.ToString()
+                });
+                continue;
+            }
+
+            builder.Append("&#x").Append(((int)character).ToString("X", CultureInfo.InvariantCulture)).Append(';');
+        }
+
+        return builder.ToString();
     }
 
     private static string EventExplorerDisposition(SandboxEvent evt)
@@ -2707,7 +3207,7 @@ details[open]>summary:before{content:'–'}
     /// Inputs are a report and output builder, processing writes hash and file
     /// metadata available in v1, and the method returns no value.
     /// </summary>
-    private static void AppendStaticAnalysis(StringBuilder html, AnalysisReport report)
+    private static void AppendStaticAnalysis(StringBuilder html, AnalysisReport report, IReadOnlyCollection<SandboxEvent> peDataEvents)
     {
         var staticAnalysis = report.StaticAnalysis;
         html.AppendLine("<section id=\"static\" class=\"card\"><h2>Static analysis</h2>");
@@ -2735,6 +3235,7 @@ details[open]>summary:before{content:'–'}
         }
 
         AppendSectionTable(html, staticAnalysis);
+        AppendPeHeaderBlock(html, report, staticAnalysis, peDataEvents);
         AppendStaticResourceStory(html, staticAnalysis, report.Events);
         AppendStaticEvidenceGroups(html, staticAnalysis);
         AppendStringList(html, "Interesting strings", staticAnalysis.InterestingStrings);
@@ -2982,20 +3483,21 @@ details[open]>summary:before{content:'–'}
             .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .Take(80)
             .ToList();
-        html.AppendLine($"<h4>{E(title)}</h4>");
         if (items.Count == 0)
         {
+            html.AppendLine($"<h4>{E(title)}</h4>");
             Empty(html, emptyMessage);
             return;
         }
 
+        html.AppendLine($"<details class=\"fold-block evidence-list-fold\"><summary>{E(title)} ({items.Count} {(items.Count == 1 ? "entry" : "entries")})</summary>");
         html.AppendLine("<ul class=\"compact-list\">");
         foreach (var value in items)
         {
             html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</code></li>");
         }
 
-        html.AppendLine("</ul>");
+        html.AppendLine("</ul></details>");
     }
 
     /// <summary>
@@ -3005,9 +3507,9 @@ details[open]>summary:before{content:'–'}
     /// </summary>
     private static void AppendStringList(StringBuilder html, string title, IReadOnlyCollection<string> values)
     {
-        html.AppendLine($"<h3>{E(title)}</h3>");
         if (values.Count == 0)
         {
+            html.AppendLine($"<h3>{E(title)}</h3>");
             Empty(html, $"No {title.ToLowerInvariant()} recorded.");
             return;
         }
@@ -3017,6 +3519,7 @@ details[open]>summary:before{content:'–'}
             .ToList();
         if (nonEmptyValues.Count == 0)
         {
+            html.AppendLine($"<h3>{E(title)}</h3>");
             Empty(html, $"No {title.ToLowerInvariant()} recorded.");
             return;
         }
@@ -3025,6 +3528,7 @@ details[open]>summary:before{content:'–'}
             .Take(StaticStringInlineLimit)
             .ToList();
         var hiddenCount = Math.Max(0, nonEmptyValues.Count - inlineValues.Count);
+        html.AppendLine($"<details class=\"fold-block string-list-fold\"><summary>{E(title)} ({nonEmptyValues.Count} {(nonEmptyValues.Count == 1 ? "entry" : "entries")})</summary>");
         if (hiddenCount > 0)
         {
             html.AppendLine($"<div class=\"section-note\"><strong>Static list capped for readability.</strong> Inline entries: {E(inlineValues.Count.ToString())}/{E(nonEmptyValues.Count.ToString())}. Hidden entries: {E(hiddenCount.ToString())}. Open report.json for all retained static rows; source artifacts contain the original sample bytes.</div>");
@@ -3036,7 +3540,7 @@ details[open]>summary:before{content:'–'}
             html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</code></li>");
         }
 
-        html.AppendLine("</ul>");
+        html.AppendLine("</ul></details>");
     }
 
     /// <summary>
@@ -3061,11 +3565,11 @@ details[open]>summary:before{content:'–'}
         html.AppendLine("<section id=\"dynamic\" class=\"card\"><h2>Dynamic analysis</h2><div class=\"grid\">");
         Metric(html, "Process starts", CountSampleBehaviorEvents(report, "process.start").ToString(), "risk-info");
         Metric(html, "Process exits", CountSampleBehaviorEvents(report, "process.exit").ToString(), "risk-info");
-        Metric(html, "Registry events", report.Events.Count(IsSampleBehaviorRegistryEvent).ToString(), "risk-medium");
-        Metric(html, "File events", report.Events.Count(IsSampleBehaviorFileEvent).ToString(), "risk-medium");
+        Metric(html, "Registry events (raw / attributed / excluded)", BehaviorLaneCount(report, IsRegistryEvent, IsSampleBehaviorRegistryEvent), "risk-medium");
+        Metric(html, "File events (raw / attributed / excluded)", BehaviorLaneCount(report, IsFileEvent, IsSampleBehaviorFileEvent), "risk-medium");
         Metric(html, "Startup diff events", report.Events.Count(IsSampleBehaviorStartupEvent).ToString(), "risk-medium");
-        Metric(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString(), "risk-medium");
-        Metric(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString(), "risk-info");
+        Metric(html, "Network events (raw / attributed / excluded)", BehaviorLaneCount(report, IsNetworkEvent, IsSampleBehaviorNetworkEvent), "risk-medium");
+        Metric(html, "R0 sample telemetry", HasR0TelemetryChannel(report) ? report.Events.Count(IsSampleBehaviorR0Event).ToString() : "—", "risk-info");
         Metric(html, "Runtime actions (raw)", rawDynamicActionCount.ToString(CultureInfo.InvariantCulture), "risk-info");
         Metric(html, "Attributable actions (raw)", attributedRawDynamicActionCount.ToString(CultureInfo.InvariantCulture), "risk-info");
         Metric(html, "Attributable actions (report)", attributedReportDynamicActionCount.ToString(CultureInfo.InvariantCulture), "risk-info");
@@ -3114,7 +3618,7 @@ details[open]>summary:before{content:'–'}
         Metric(html, "VT status issues", vtEvents.Count(IsVirusTotalStatusIssue).ToString(), "risk-info");
         Metric(html, "VT rule hits", vtFindings.Count.ToString(), vtFindings.Any(finding => SeverityRank(finding.Severity) <= SeverityRank("high")) ? "risk-high" : "risk-info");
         html.AppendLine("</div>");
-        AppendVirusTotalReputationStory(html, vtEvents);
+        AppendVirusTotalReputationStory(html, report, vtEvents);
 
         if (vtFindings.Count > 0)
         {
@@ -3131,7 +3635,7 @@ details[open]>summary:before{content:'–'}
         }
         else
         {
-            AppendEventRows(html, vtEvents, artifactLookup, artifacts);
+            AppendEventRows(html, report, vtEvents, artifactLookup, artifacts);
         }
 
         html.AppendLine("</section>");
@@ -3143,7 +3647,7 @@ details[open]>summary:before{content:'–'}
     /// reputation/community score, engine stats, last analysis time, and
     /// permalink in copyable cards without mixing them into local behavior.
     /// </summary>
-    private static void AppendVirusTotalReputationStory(StringBuilder html, IReadOnlyCollection<SandboxEvent> vtEvents)
+    private static void AppendVirusTotalReputationStory(StringBuilder html, AnalysisReport report, IReadOnlyCollection<SandboxEvent> vtEvents)
     {
         if (vtEvents.Count == 0)
         {
@@ -4821,9 +5325,22 @@ details[open]>summary:before{content:'–'}
                 "No usable R0Collector health or telemetry rows were observed; kernel coverage is disabled or missing for this run.",
                 r0Events.Count == 0 ? "no r0collector/driver events" : string.Join("; ", r0Events.Take(4).Select(EventOneLine))));
         }
+        else if (report.CollectionHealth.R0OutputBudgetReached)
+        {
+            // A clean cumulative-budget stop is intentionally not a failure:
+            // surface it as an informational coverage boundary so the report
+            // reads "complete but R0 truncated" instead of degrading into an
+            // output-write-failure story.
+            var budgetMb = report.CollectionHealth.R0OutputBudgetBytes / 1_000_000d;
+            gaps.Add((
+                "R0Collector",
+                "output-budget-reached",
+                $"R0 output budget reached: {budgetMb:0.#} MB / {report.CollectionHealth.R0OutputBudgetSegments} segments; events beyond the budget were intentionally not captured (clean stop, not a write failure).",
+                $"budgetBytes={report.CollectionHealth.R0OutputBudgetBytes}; bytesWritten={report.CollectionHealth.R0OutputBudgetBytesWritten}; segmentsWritten={report.CollectionHealth.R0OutputBudgetSegments}"));
+        }
 
         var matrixRows = BuildArtifactEvidenceMatrixRows(report.Events, artifacts);
-        foreach (var card in BuildArtifactCollectionStatusCards(report, artifacts, matrixRows)
+        foreach (var card in BuildArtifactCollectionStatusCards(report, artifacts, matrixRows, collections)
                      .Where(card => !TextEqualsAny(card.Status, "captured", "observed", "observed-empty")))
         {
             var state = TextEqualsAny(card.Status, "not-run", "skipped") ? "missing" : card.Status;
@@ -4897,7 +5414,9 @@ details[open]>summary:before{content:'–'}
             "job-id mismatch" => "manifest identity mismatch",
             "capture_failed" => "capture failed",
             "not-run" => "not run",
+            "disabled-by-policy" => "disabled by policy",
             "enabled-empty" => "enabled but empty",
+            "output-budget-reached" => "output budget reached",
             _ => state.Replace('_', ' ')
         };
     }
@@ -4920,6 +5439,8 @@ details[open]>summary:before{content:'–'}
             "failed" => "failed",
             "missing" => "missing",
             "disabled" => "disabled",
+            "disabled-by-policy" => "disabled by policy",
+            "not-run" => "not run",
             _ => status.Replace('_', ' ')
         };
     }
@@ -4978,14 +5499,15 @@ details[open]>summary:before{content:'–'}
 
         var status = FirstEventDataValue(evt, "auditPolicyStatus", "captureState", "status", "reason");
         return TextEqualsAny(status ?? string.Empty, "partial", "targetPoliciesNotFullySuccessEnabled", "auditPolicyCoverageGap") ||
-            EventTextContainsAny(evt, "auditPolicyCoverageGap", "targetPoliciesNotFullySuccessEnabled", "auditPolicyPartial") ||
+            EventDataHasAnyKey(evt, "auditPolicyCoverageGap", "auditPolicyPartial") ||
+            EventTextContainsAny(evt, "targetPoliciesNotFullySuccessEnabled") ||
             EventDataBoolFalse(evt, "auditPolicyReady", "auditPolicyFullySuccessEnabled");
     }
 
     private static bool IsPacketCaptureFailureEvent(SandboxEvent evt)
     {
         return TextContainsAny(evt.EventType, "packet_capture.failed", "packet-capture.failed", "pcap.failed", "pktmon.failed") ||
-            EventTextContainsAny(evt, "pktmonStartFailed", "pktmonStopFailed", "pktmonConvertFailed");
+            EventDataHasAnyKey(evt, "pktmonStartFailed", "pktmonStopFailed", "pktmonConvertFailed");
     }
 
     private static void AppendHealthPill(StringBuilder html, string label, string state, string detail)
@@ -5019,7 +5541,8 @@ details[open]>summary:before{content:'–'}
 
         return evt.EventType.StartsWith("screenshot.", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(FirstEventDataValue(evt, "collectionName"), "screenshots", StringComparison.OrdinalIgnoreCase) ||
-            EventTextContainsAny(evt, "screenshotRelativePath", "screenshotPath", "screenshots");
+            EventDataHasAnyKey(evt, "screenshotRelativePath", "screenshotPath") ||
+            EventTextContainsAny(evt, "screenshots");
     }
 
     private static bool IsMemoryDumpEvidenceEvent(SandboxEvent evt)
@@ -5032,7 +5555,8 @@ details[open]>summary:before{content:'–'}
         return evt.EventType.StartsWith("memory_dump.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("memory-dump.", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(FirstEventDataValue(evt, "collectionName"), "memory-dumps", StringComparison.OrdinalIgnoreCase) ||
-            EventTextContainsAny(evt, "memoryDumpRelativePath", "memoryDumpPath", "memory-dumps", ".dmp");
+            EventDataHasAnyKey(evt, "memoryDumpRelativePath", "memoryDumpPath") ||
+            EventTextContainsAny(evt, "memory-dumps", ".dmp");
     }
 
     private static bool IsPacketCaptureEvidenceEvent(SandboxEvent evt)
@@ -5046,7 +5570,8 @@ details[open]>summary:before{content:'–'}
             evt.EventType.StartsWith("packet-capture.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(FirstEventDataValue(evt, "collectionName"), "packet-captures", StringComparison.OrdinalIgnoreCase) ||
-            EventTextContainsAny(evt, "packetCaptureRelativePath", "pcapRelativePath", "pcapngRelativePath", "pktmon", ".pcap", ".pcapng", ".etl");
+            EventDataHasAnyKey(evt, "packetCaptureRelativePath", "pcapRelativePath", "pcapngRelativePath", "pktmon") ||
+            EventTextContainsAny(evt, ".pcap", ".pcapng", ".etl");
     }
 
     private static bool IsDisabledArtifactCollectionEvent(SandboxEvent evt)
@@ -5113,16 +5638,48 @@ details[open]>summary:before{content:'–'}
         return false;
     }
 
+    // The artifact index records operator decisions as Enabled=false plus a
+    // disabled status or a *NotRequested reason. Those lanes never ran and were
+    // never supposed to run, so the report must not present them as a gap.
+    private static bool IsCollectionDisabledByPolicy(ArtifactCollectionDescriptor collection)
+    {
+        if (collection.Enabled)
+        {
+            return false;
+        }
+
+        if (TextEqualsAny(collection.Status, "disabled", "not-enabled", "not_enabled", "off"))
+        {
+            return true;
+        }
+
+        var reason = collection.Reason ?? string.Empty;
+        return TextContainsAny(
+            reason,
+            "notrequested",
+            "not-requested",
+            "not_requested",
+            "notenabled",
+            "not-enabled",
+            "not_enabled",
+            "disabled");
+    }
+
     /// <summary>
     /// Appends host-safe artifact links and paths.
     /// Inputs are normalized artifact descriptors; processing renders links for
     /// safe relative paths and plain text for guest-local or unsafe paths; the
     /// method returns no value.
     /// </summary>
-    private static void AppendArtifactLinks(StringBuilder html, AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    private static void AppendArtifactLinks(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts,
+        IReadOnlyCollection<ArtifactCollectionDescriptor> collections,
+        IReadOnlyCollection<SandboxEvent> peDataEvents)
     {
         html.AppendLine("<section id=\"artifacts\" class=\"card\"><h2>Artifact links</h2>");
-        AppendArtifactCollectionStatusCards(html, report, artifacts);
+        AppendArtifactCollectionStatusCards(html, report, artifacts, collections);
         AppendArtifactEvidenceMatrixNarrative(html, report, artifacts);
         AppendArtifactIndexStory(html, report, artifacts);
         if (artifacts.Count == 0)
@@ -5136,28 +5693,76 @@ details[open]>summary:before{content:'–'}
         // relative selector. Hash, MIME type, index evidence, the safe
         // Open/Download control, and any screenshot preview stay folded, so a
         // nine-artifact job no longer renders nine expanded preview cards.
-        html.AppendLine("<div class=\"fact-list artifact-list-rows\">");
-        foreach (var artifact in artifacts)
+        // Rows further aggregate into one collapsed group per artifact
+        // category ("Dropped files (7)") so large wiper-style jobs do not
+        // print one row per dropped file up front; opening a group reveals
+        // the per-file cards unchanged.
+        var artifactGroups = artifacts
+            .GroupBy(artifact => string.IsNullOrWhiteSpace(artifact.Category) ? "other" : artifact.Category, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        html.AppendLine("<div class=\"artifact-group-list\">");
+        foreach (var artifactGroup in artifactGroups)
         {
-            var plain = ArtifactToPlainText(artifact);
-            var sha256 = ArtifactSha256(artifact);
-            var mime = string.IsNullOrWhiteSpace(artifact.MimeType) ? "-" : artifact.MimeType;
-            AppendFactRowOpen(
-                html,
-                artifact.Name,
-                FormatArtifactSize(artifact.SizeBytes),
-                badgeText: artifact.Kind.ToString(),
-                badgeCss: "info",
-                lead: $"{artifact.Category} · {(string.IsNullOrWhiteSpace(artifact.RelativePath) ? artifact.SafeLink : artifact.RelativePath)} · {mime}");
-            html.AppendLine($"<div class=\"artifact-card-path\">{RenderArtifactLocation(artifact)}</div>");
-            html.AppendLine($"<div class=\"artifact-card-meta\"><span>size {E(FormatArtifactSize(artifact.SizeBytes))}</span><span><code class=\"copyable\" data-copy=\"{A(sha256)}\" title=\"{A(sha256)}\">{E(ShortenMiddle(sha256, 26))}</code></span><span>{E(mime)}</span></div>");
-            html.AppendLine($"<div class=\"artifact-card-evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}{RenderArtifactPreview(artifact)}</div>");
-            AppendFactRowClose(html);
+            var groupArtifacts = artifactGroup.OrderBy(artifact => artifact.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            var groupBytes = groupArtifacts.Sum(artifact => Math.Max(0, artifact.SizeBytes));
+            html.AppendLine($"<details class=\"artifact-group\" data-artifact-group=\"{A(artifactGroup.Key)}\">");
+            html.AppendLine("<summary>");
+            html.AppendLine($"<span class=\"fact-name\">{E(ArtifactCategoryDisplayName(artifactGroup.Key))}</span>");
+            html.AppendLine($"<span class=\"fact-count\">{E(groupArtifacts.Count.ToString(CultureInfo.InvariantCulture))} {(groupArtifacts.Count == 1 ? "file" : "files")}</span>");
+            html.AppendLine($"<span class=\"fact-lead\">{E(FormatBytes(groupBytes))}</span>");
+            html.AppendLine("</summary>");
+            html.AppendLine("<div class=\"fact-list artifact-list-rows\">");
+            foreach (var artifact in groupArtifacts)
+            {
+                var plain = ArtifactToPlainText(artifact);
+                var sha256 = ArtifactSha256(artifact);
+                var mime = string.IsNullOrWhiteSpace(artifact.MimeType) ? "-" : artifact.MimeType;
+                AppendFactRowOpen(
+                    html,
+                    artifact.Name,
+                    FormatArtifactSize(artifact.SizeBytes),
+                    badgeText: artifact.Kind.ToString(),
+                    badgeCss: "info",
+                    lead: $"{artifact.Category} · {(string.IsNullOrWhiteSpace(artifact.RelativePath) ? artifact.SafeLink : artifact.RelativePath)} · {mime}");
+                html.AppendLine($"<div class=\"artifact-card-path\">{RenderArtifactLocation(artifact)}</div>");
+                html.AppendLine($"<div class=\"artifact-card-meta\"><span>size {E(FormatArtifactSize(artifact.SizeBytes))}</span><span><code class=\"copyable\" data-copy=\"{A(sha256)}\" title=\"{A(sha256)}\">{E(ShortenMiddle(sha256, 26))}</code></span><span>{E(mime)}</span></div>");
+                html.AppendLine($"<div class=\"artifact-card-evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}{RenderArtifactPreview(artifact)}</div>");
+                AppendArtifactPeBlock(html, artifact, peDataEvents);
+                AppendFactRowClose(html);
+            }
+
+            html.AppendLine("</div></details>");
         }
 
         html.AppendLine("</div>");
         html.AppendLine("</section>");
     }
+
+    /// <summary>
+    /// Maps an artifact category token to its operator-facing group label.
+    /// Inputs are the raw category string; processing falls back to the raw
+    /// token for unknown categories, and the method returns an English label
+    /// that the Chinese pass localizes through the translation table.
+    /// </summary>
+    private static string ArtifactCategoryDisplayName(string? category) => (category ?? string.Empty).ToLowerInvariant() switch
+    {
+        "dropped-file" => "Dropped files",
+        "screenshot" => "Screenshots",
+        "memory-dump" => "Memory dumps",
+        "packet-capture" => "Packet captures",
+        "driver-events" => "Driver events",
+        "guest-events" => "Guest events",
+        "artifact-manifest" => "Artifact manifests",
+        "telemetry" => "Telemetry artifacts",
+        "log" => "Log artifacts",
+        "trace" => "Trace artifacts",
+        "report" => "Report artifacts",
+        "runbook" => "Runbook artifacts",
+        "other" or "" => "Other artifacts",
+        _ => string.IsNullOrWhiteSpace(category) ? "Other artifacts" : category,
+    };
 
     /// <summary>
     /// Appends a compact artifact-evidence matrix narrative before the dense
@@ -5346,8 +5951,10 @@ details[open]>summary:before{content:'–'}
             manifestMismatches.Count == 0 ? "risk-low" : "risk-medium");
         html.AppendLine("</div>");
         html.AppendLine($"<div class=\"evidence-expansion-card artifact-index-detail\" data-copy=\"{A(copy)}\">");
+        var shownArtifacts = artifacts.Take(12).ToList();
+        html.AppendLine($"<details class=\"fold-block artifact-index-fold\"><summary>Artifact index rows ({shownArtifacts.Count} {(shownArtifacts.Count == 1 ? "entry" : "entries")})</summary>");
         html.AppendLine("<div class=\"ref-list\">");
-        foreach (var artifact in artifacts.Take(12))
+        foreach (var artifact in shownArtifacts)
         {
             var selector = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadSelector"), artifact.RelativePath, ArtifactHref(artifact), "-");
             var groupCount = FirstNonEmpty(MetadataValue(artifact.Metadata, "duplicateGroupCount"), "-");
@@ -5358,7 +5965,7 @@ details[open]>summary:before{content:'–'}
             }.Where(value => !string.IsNullOrWhiteSpace(value)));
             html.AppendLine($"<div class=\"ref-row\"><strong class=\"ref-key\">{E(ArtifactDisplayName(artifact))}</strong><span class=\"ref-meta\">{E(artifact.Kind.ToString())}</span><code class=\"ref-path\">{E(VisibleEvidenceText(selector))}</code><span class=\"ref-meta\">Duplicate groups {E(groupCount)}</span><span class=\"ref-tail\">{E(string.IsNullOrWhiteSpace(status) ? "-" : status)}</span></div>");
         }
-        html.AppendLine("</div></div>");
+        html.AppendLine("</div></details></div>");
     }
 
     private static IReadOnlyList<ArtifactManifestJobIdMismatch> FindArtifactManifestJobIdMismatches(
@@ -5457,10 +6064,11 @@ details[open]>summary:before{content:'–'}
     private static void AppendArtifactCollectionStatusCards(
         StringBuilder html,
         AnalysisReport report,
-        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+        IReadOnlyCollection<ArtifactDescriptor> artifacts,
+        IReadOnlyCollection<ArtifactCollectionDescriptor> collections)
     {
         var matrixRows = BuildArtifactEvidenceMatrixRows(report.Events, artifacts);
-        var cards = BuildArtifactCollectionStatusCards(report, artifacts, matrixRows);
+        var cards = BuildArtifactCollectionStatusCards(report, artifacts, matrixRows, collections);
         html.AppendLine("<h3>Artifact collection status</h3>");
         // One status row per collection lane. The lane counters live inside the
         // row instead of a padded tile, so five lanes fit in the space two cards
@@ -5487,7 +6095,8 @@ details[open]>summary:before{content:'–'}
     private static IReadOnlyList<ArtifactCollectionStatusCard> BuildArtifactCollectionStatusCards(
         AnalysisReport report,
         IReadOnlyCollection<ArtifactDescriptor> artifacts,
-        IReadOnlyCollection<ArtifactEvidenceMatrixRow> matrixRows)
+        IReadOnlyCollection<ArtifactEvidenceMatrixRow> matrixRows,
+        IReadOnlyCollection<ArtifactCollectionDescriptor> collections)
     {
         return
         [
@@ -5499,7 +6108,8 @@ details[open]>summary:before{content:'–'}
                 report.Events,
                 evt => evt.EventType.StartsWith("artifact.dropped_file.", StringComparison.OrdinalIgnoreCase),
                 "Copied files released or modified by the sample when collection was enabled.",
-                FindArtifactEvidenceMatrixRow(matrixRows, "dropped-files")),
+                FindArtifactEvidenceMatrixRow(matrixRows, "dropped-files"),
+                collections),
             BuildArtifactCollectionStatusCard(
                 "Screenshots",
                 "screenshots",
@@ -5508,7 +6118,8 @@ details[open]>summary:before{content:'–'}
                 report.Events,
                 evt => evt.EventType.StartsWith("screenshot.", StringComparison.OrdinalIgnoreCase),
                 "Desktop screenshots captured around sample execution when enabled.",
-                FindArtifactEvidenceMatrixRow(matrixRows, "screenshots")),
+                FindArtifactEvidenceMatrixRow(matrixRows, "screenshots"),
+                collections),
             BuildArtifactCollectionStatusCard(
                 "Memory dumps",
                 "memory-dumps",
@@ -5517,7 +6128,8 @@ details[open]>summary:before{content:'–'}
                 report.Events,
                 evt => evt.EventType.StartsWith("memory_dump.", StringComparison.OrdinalIgnoreCase),
                 "Opt-in process and child-process memory dump artifacts.",
-                FindArtifactEvidenceMatrixRow(matrixRows, "memory-dumps")),
+                FindArtifactEvidenceMatrixRow(matrixRows, "memory-dumps"),
+                collections),
             BuildArtifactCollectionStatusCard(
                 "Packet captures",
                 "packet-captures",
@@ -5529,7 +6141,8 @@ details[open]>summary:before{content:'–'}
                     evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
                     IsPacketCaptureFailureEvent(evt),
                 "Opt-in pktmon/PCAP artifacts and imported DNS/HTTP/TLS/flow rows.",
-                FindArtifactEvidenceMatrixRow(matrixRows, "packet-captures")),
+                FindArtifactEvidenceMatrixRow(matrixRows, "packet-captures"),
+                collections),
             BuildArtifactCollectionStatusCard(
                 "Driver events",
                 "driver-events",
@@ -5538,7 +6151,8 @@ details[open]>summary:before{content:'–'}
                 report.Events,
                 IsR0Event,
                 "R0Collector JSONL and driver-originated telemetry.",
-                null)
+                null,
+                collections)
         ];
     }
 
@@ -5550,7 +6164,8 @@ details[open]>summary:before{content:'–'}
         IReadOnlyCollection<SandboxEvent> events,
         Func<SandboxEvent, bool> eventPredicate,
         string defaultDetail,
-        ArtifactEvidenceMatrixRow? matrixRow)
+        ArtifactEvidenceMatrixRow? matrixRow,
+        IReadOnlyCollection<ArtifactCollectionDescriptor> collections)
     {
         var collectionArtifacts = artifacts
             .Where(artifact => artifact.Kind == kind ||
@@ -5563,14 +6178,28 @@ details[open]>summary:before{content:'–'}
                 !IsCollectorSelfNoiseEvent(evt))
             .OrderBy(evt => evt.Timestamp)
             .ToList();
+        var collection = collections.FirstOrDefault(candidate =>
+            string.Equals(candidate.Name, collectionName, StringComparison.OrdinalIgnoreCase));
         var status = string.Equals(collectionName, "driver-events", StringComparison.OrdinalIgnoreCase)
             ? InferDriverArtifactCollectionStatus(collectionArtifacts, collectionEvents)
             : InferArtifactCollectionStatus(collectionArtifacts, collectionEvents);
+        // A policy switch (collectDroppedFiles/captureScreenshots=false) is a
+        // decision, not a failure or a lane that silently never ran. The
+        // artifact index records that state on the collection descriptor.
+        if (collection is not null && IsCollectionDisabledByPolicy(collection))
+        {
+            status = "disabled-by-policy";
+        }
+        else if (collection is not null && string.Equals(collection.Status, "failed", StringComparison.OrdinalIgnoreCase))
+        {
+            status = "failed";
+        }
         var css = status switch
         {
             "captured" => "low",
             "failed" => "high",
             "disabled" => "info",
+            "disabled-by-policy" => "info",
             "skipped" => "medium",
             "partial" => "medium",
             "observed" => "info",
@@ -5628,7 +6257,9 @@ details[open]>summary:before{content:'–'}
         if (artifacts.Count == 0 &&
             events.Any(IsDisabledArtifactCollectionEvent))
         {
-            return "disabled";
+            // A policy decision (collectDroppedFiles/captureScreenshots=false)
+            // is not the same as a lane that was requested but never ran.
+            return "disabled-by-policy";
         }
 
         if (artifacts.Any(artifact =>
@@ -5651,7 +6282,7 @@ details[open]>summary:before{content:'–'}
             return "skipped";
         }
 
-            return events.Count > 0 ? "observed-empty" : "not-run";
+        return events.Count > 0 ? "observed-empty" : "not-run";
     }
 
     private static string InferDriverArtifactCollectionStatus(
@@ -5713,19 +6344,29 @@ details[open]>summary:before{content:'–'}
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         html.AppendLine("<section id=\"timeline\" class=\"card\"><h2>Timeline</h2>");
-        var events = report.Events
+        var userFacingEvents = report.Events
             .Where(IsUserFacingEvent)
             .OrderBy(e => e.Timestamp)
+            .ToList();
+        // Normal runtime module loads stay available but demoted: they render
+        // in their own collapsed, muted group after the chronological groups
+        // instead of competing with real sample behavior for the inline cap.
+        var events = userFacingEvents
+            .Where(e => !IsNormalRuntimeModuleLoadEvent(e))
             .Take(TimelineEventInlineLimit)
             .ToList();
-        if (events.Count == 0)
+        var runtimeModuleLoadEvents = userFacingEvents
+            .Where(IsNormalRuntimeModuleLoadEvent)
+            .Take(TimelineEventInlineLimit)
+            .ToList();
+        if (events.Count == 0 && runtimeModuleLoadEvents.Count == 0)
         {
             Empty(html, "No timeline events were collected.");
             html.AppendLine("</section>");
             return;
         }
 
-        var hiddenEvents = Math.Max(0, report.Events.Count(IsUserFacingEvent) - events.Count);
+        var hiddenEvents = Math.Max(0, userFacingEvents.Count - events.Count - runtimeModuleLoadEvents.Count);
         var groups = BuildTimelineGroups(events);
         html.AppendLine("<div class=\"section-note\"><strong>Timeline grouping.</strong> Grouped by UTC minute with process/type summaries; large buckets show representative events first.</div>");
         if (hiddenEvents > 0)
@@ -5752,6 +6393,27 @@ details[open]>summary:before{content:'–'}
             if (groupHidden > 0)
             {
             html.AppendLine($"<div class=\"timeline-overflow\">{E(groupHidden.ToString())} additional events in this group are hidden; open the sampled report view or indexed source JSON/JSONL for complete evidence.</div>");
+            }
+
+            html.AppendLine("</div></details>");
+        }
+
+        if (runtimeModuleLoadEvents.Count > 0)
+        {
+            html.AppendLine("<details class=\"timeline-group timeline-runtime-loads\">");
+            html.AppendLine($"<summary class=\"timeline-group-summary\"><span><strong>Normal runtime module loads</strong><small>System-directory DLL loads during normal operation; demoted from the chronological list.</small></span><span class=\"badge badge-info\">{E(runtimeModuleLoadEvents.Count.ToString())} events</span></summary>");
+            html.AppendLine("<div class=\"timeline\">");
+            foreach (var evt in runtimeModuleLoadEvents)
+            {
+                var copy = EventToPlainText(evt);
+                var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
+                html.AppendLine($"<div class=\"timeline-item timeline-item-muted copyable\" data-copy=\"{A(copy)}\"><strong>{E(evt.Timestamp.ToString("u"))}</strong> <span class=\"badge badge-info\">{E(evt.EventType)}</span> <span class=\"chip chip-info\">{E(EventFamilyLabel(evt))}</span><br><span class=\"muted\">{E(evt.ProcessName ?? evt.Source)} {RenderInlineEventLocation(evt, relatedArtifacts)}</span></div>");
+            }
+
+            var runtimeHidden = userFacingEvents.Count(evt => IsNormalRuntimeModuleLoadEvent(evt)) - runtimeModuleLoadEvents.Count;
+            if (runtimeHidden > 0)
+            {
+                html.AppendLine($"<div class=\"timeline-overflow\">{E(runtimeHidden.ToString())} additional normal runtime module loads are hidden; open the sampled report view or indexed source JSON/JSONL for complete evidence.</div>");
             }
 
             html.AppendLine("</div></details>");
@@ -5833,7 +6495,7 @@ details[open]>summary:before{content:'–'}
         html.AppendLine("<section id=\"process\" class=\"card\"><h2>Process details</h2>");
         AppendProcessTree(html, report);
         AppendProcessRelationshipCards(html, report, artifactLookup, artifacts);
-        AppendEventRows(html, report.Events.Where(IsSampleBehaviorProcessEvent).ToList(), artifactLookup, artifacts);
+        AppendEventRows(html, report, report.Events.Where(IsSampleBehaviorProcessEvent).ToList(), artifactLookup, artifacts);
         html.AppendLine("</section>");
     }
 
@@ -5930,7 +6592,7 @@ details[open]>summary:before{content:'–'}
         }
         else
         {
-            AppendEventRows(html, telemetryEvents, artifactLookup, artifacts);
+            AppendEventRows(html, report, telemetryEvents, artifactLookup, artifacts);
         }
 
         html.AppendLine("</section>");
@@ -5947,7 +6609,7 @@ details[open]>summary:before{content:'–'}
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        AppendEventTable(html, "files", "File system activity", report.Events.Where(IsSampleBehaviorFileEvent), artifactLookup, artifacts);
+        AppendEventTable(html, report, "files", "File system activity", report.Events.Where(IsSampleBehaviorFileEvent), artifactLookup, artifacts);
     }
 
     /// <summary>
@@ -6025,7 +6687,7 @@ details[open]>summary:before{content:'–'}
         }
 
         html.AppendLine("</div>");
-        AppendEventRows(html, startupEvents, artifactLookup, artifacts);
+        AppendEventRows(html, report, startupEvents, artifactLookup, artifacts);
         html.AppendLine("</section>");
     }
 
@@ -6040,7 +6702,7 @@ details[open]>summary:before{content:'–'}
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        AppendEventTable(html, "registry", "Registry behavior", report.Events.Where(IsSampleBehaviorRegistryEvent), artifactLookup, artifacts);
+        AppendEventTable(html, report, "registry", "Registry behavior", report.Events.Where(IsSampleBehaviorRegistryEvent), artifactLookup, artifacts);
     }
 
     /// <summary>
@@ -6058,7 +6720,7 @@ details[open]>summary:before{content:'–'}
         var networkEvents = report.Events.Where(IsSampleBehaviorNetworkEvent).ToList();
         html.AppendLine("<section id=\"network\" class=\"card\"><h2>Network behavior</h2>");
         AppendNetworkRelationshipCards(html, networkEvents, artifactLookup, artifacts);
-        AppendEventRows(html, networkEvents, artifactLookup, artifacts);
+        AppendEventRows(html, report, networkEvents, artifactLookup, artifacts);
         html.AppendLine("</section>");
     }
 
@@ -6264,14 +6926,14 @@ details[open]>summary:before{content:'–'}
         if (telemetryEvents.Count == 0)
         {
             Empty(html, "No sample-attributed driver behavior was captured.");
-            AppendR0CollectionHealthStatus(html, healthEvents, networkStatusEvents, artifactLookup, artifacts);
+            AppendR0CollectionHealthStatus(html, report, healthEvents, networkStatusEvents, artifactLookup, artifacts);
             html.AppendLine("</section>");
             return;
         }
 
         html.AppendLine("<h3>Driver telemetry evidence</h3>");
-        AppendEventRows(html, telemetryEvents, artifactLookup, artifacts);
-        AppendR0CollectionHealthStatus(html, healthEvents, networkStatusEvents, artifactLookup, artifacts);
+        AppendEventRows(html, report, telemetryEvents, artifactLookup, artifacts);
+        AppendR0CollectionHealthStatus(html, report, healthEvents, networkStatusEvents, artifactLookup, artifacts);
 
         html.AppendLine("</section>");
     }
@@ -6315,6 +6977,7 @@ details[open]>summary:before{content:'–'}
     /// </summary>
     private static void AppendR0CollectionHealthStatus(
         StringBuilder html,
+        AnalysisReport report,
         IReadOnlyCollection<SandboxEvent> healthEvents,
         IReadOnlyCollection<SandboxEvent> networkStatusEvents,
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
@@ -6341,7 +7004,7 @@ details[open]>summary:before{content:'–'}
             .ToList();
         var hiddenHealthEvents = Math.Max(0, healthEvents.Count - inlineHealthEvents.Count);
         html.AppendLine($"<details open class=\"relationship-details r0-health-evidence\"><summary>R0 health evidence ({E(inlineHealthEvents.Count.ToString())}/{E(healthEvents.Count.ToString())}; {E(hiddenHealthEvents.ToString())} hidden)</summary>");
-        AppendEventRows(html, inlineHealthEvents, artifactLookup, artifacts);
+        AppendEventRows(html, report, inlineHealthEvents, artifactLookup, artifacts);
         html.AppendLine("</details>");
     }
 
@@ -6486,7 +7149,13 @@ details[open]>summary:before{content:'–'}
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        var failures = report.Events.Where(IsOperationalFailureEvent).ToList();
+        // Imported R0 output-failure sidecar rows carry collectionHealth=true
+        // and are therefore classified as collection health, not operational
+        // failure; their readable write/space/open summary must still surface
+        // in this section, so include any row that has one.
+        var failures = report.Events.Where(evt =>
+            IsOperationalFailureEvent(evt) ||
+            BuildR0OutputWriteFailureSummary(evt) is not null).ToList();
         var sampleExitOutcomes = report.Events.Where(evt => IsNonZeroSampleExitEvent(report, evt)).ToList();
         var collectionFailureRows = Math.Max(0, report.CollectionHealth.FailureRows);
         var collectionLossRows = Math.Max(0, report.CollectionHealth.LossRows);
@@ -6504,26 +7173,36 @@ details[open]>summary:before{content:'–'}
         }
         else if (failures.Count == 0 && report.Status == AnalysisStatus.Failed)
         {
-            html.AppendLine("<div class=\"section-note failure-note\"><strong>Failure attribution:</strong> Analysis environment / 分析环境. The job is marked Failed, but no normalized failure event was imported.</div>");
+            html.AppendLine("<div class=\"section-note failure-note\"><strong>Failure attribution:</strong> Analysis environment. The job is marked Failed, but no normalized failure event was imported.</div>");
         }
         else if (failures.Count > 0)
         {
             foreach (var failure in failures)
             {
                 var message = FirstEventDataValue(failure, "failureHint", "message", "error", "failureReason", "reason");
+                // An R0 output-write failure carries the exact write position,
+                // error code and surviving segment count; prefer the readable
+                // summary over the generic English stream message.
+                var r0WriteSummary = BuildR0OutputWriteFailureSummary(failure);
+                if (!string.IsNullOrWhiteSpace(r0WriteSummary))
+                {
+                    html.AppendLine($"<div class=\"section-note failure-note\"><strong>Failure attribution:</strong> {E(FailureAttribution(failure))}<br>{E(r0WriteSummary)}</div>");
+                    continue;
+                }
+
                 if (!string.IsNullOrWhiteSpace(message))
                 {
                     html.AppendLine($"<div class=\"section-note failure-note\"><strong>Failure attribution:</strong> {E(FailureAttribution(failure))}<br>{E(message)}</div>");
                 }
             }
 
-            AppendEventRows(html, failures, artifactLookup, artifacts);
+            AppendEventRows(html, report, failures, artifactLookup, artifacts);
         }
 
         if (sampleExitOutcomes.Count > 0)
         {
             html.AppendLine("<div class=\"section-note failure-note\"><strong>Sample execution outcome:</strong> the sample process ended with a non-zero exit code. This indicates an incomplete or failed execution attempt; it is not a maliciousness verdict.</div>");
-            AppendEventRows(html, sampleExitOutcomes, artifactLookup, artifacts);
+            AppendEventRows(html, report, sampleExitOutcomes, artifactLookup, artifacts);
         }
 
         if (collectionHealthAlert)
@@ -6532,6 +7211,84 @@ details[open]>summary:before{content:'–'}
         }
 
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Builds the first-screen readable summary for an R0 output failure row
+    /// (write failure, disk-reserve exhaustion, or output-open failure).
+    /// Inputs are one failure event; processing reads the output-failure
+    /// sidecar fields (bytesAttempted/lineNumber/availableFreeBytes/
+    /// requiredFreeBytes/win32Error/rotatedSegmentCount) and returns text such
+    /// as "R0 输出在 290.1MB / 13.02 万行处写失败（win32 1394 句柄耗尽），已保留 4 个分片，事件未完整采集"
+    /// or "R0 输出在 359.7MB / 16.2 万行处写失败（输出盘空间不足：可用 267.5MB / 需要 268.4MB），已保留 5 个分片，事件未完整采集"，
+    /// or null for events that are not R0 output failures.
+    /// </summary>
+    private static string? BuildR0OutputWriteFailureSummary(SandboxEvent evt)
+    {
+        if (!string.Equals(evt.EventType, "r0collector.finalStatus", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var data = evt.Data;
+        if (data is null ||
+            !data.TryGetValue("failureType", out var failureType) ||
+            !string.Equals(failureType, "outputWriteFailure", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(failureType, "outputSpaceInsufficient", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(failureType, "outputOpenFailure", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var isSpaceFailure = string.Equals(failureType, "outputSpaceInsufficient", StringComparison.OrdinalIgnoreCase);
+        var isOpenFailure = string.Equals(failureType, "outputOpenFailure", StringComparison.OrdinalIgnoreCase);
+
+        var parts = new List<string>();
+        if (TryGetEventDataLong(data, "bytesAttempted", out var bytesAttempted) && bytesAttempted > 0)
+        {
+            parts.Add($"{bytesAttempted / 1_000_000d:0.#}MB");
+        }
+
+        if (TryGetEventDataLong(data, "lineNumber", out var lineNumber) && lineNumber > 0)
+        {
+            parts.Add($"{lineNumber / 10_000d:0.##} 万行");
+        }
+
+        string position;
+        if (isOpenFailure)
+        {
+            position = "R0 输出文件无法打开";
+        }
+        else
+        {
+            position = parts.Count > 0 ? $"R0 输出在 {string.Join(" / ", parts)}处写失败" : "R0 输出写失败";
+        }
+
+        var error = string.Empty;
+        if (isSpaceFailure &&
+            TryGetEventDataLong(data, "availableFreeBytes", out var availableFreeBytes) &&
+            TryGetEventDataLong(data, "requiredFreeBytes", out var requiredFreeBytes))
+        {
+            error = $"（输出盘空间不足：可用 {availableFreeBytes / 1_000_000d:0.#}MB / 需要 {requiredFreeBytes / 1_000_000d:0.#}MB）";
+        }
+        else if (TryGetEventDataLong(data, "win32Error", out var win32Error) && win32Error > 0)
+        {
+            var meaning = win32Error == 1394 ? "句柄耗尽" : "写错误";
+            error = $"（win32 {win32Error} {meaning}）";
+        }
+
+        var segments = TryGetEventDataLong(data, "rotatedSegmentCount", out var rotatedSegmentCount) && rotatedSegmentCount > 0
+            ? $"，已保留 {rotatedSegmentCount} 个分片"
+            : string.Empty;
+        return $"{position}{error}{segments}，事件未完整采集";
+    }
+
+    private static bool TryGetEventDataLong(IReadOnlyDictionary<string, string>? data, string key, out long value)
+    {
+        value = 0;
+        return data is not null &&
+            data.TryGetValue(key, out var text) &&
+            long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
     }
 
     private static string FailureAttribution(SandboxEvent evt)
@@ -6692,7 +7449,7 @@ details[open]>summary:before{content:'–'}
             html.AppendLine($"<details class=\"raw-events-shell\"><summary><span class=\"fold-label\">Closed by default</span> Show inline raw events ({inlineEvents.Count}/{orderedEvents.Count}; {hiddenCount} hidden; {RawEventPageCount(inlineEvents.Count)} native pages)</summary>");
             html.AppendLine("<div class=\"raw-events-panel\">");
             AppendRawPageNavigation(html, inlineEvents.Count);
-            AppendRawEventPages(html, inlineEvents, orderedEvents.Count, artifactLookup, artifacts);
+            AppendRawEventPages(html, report, inlineEvents, orderedEvents.Count, artifactLookup, artifacts);
             html.AppendLine("</div>");
             html.AppendLine("</details>");
         }
@@ -6785,6 +7542,7 @@ details[open]>summary:before{content:'–'}
     /// </summary>
     private static void AppendRawEventPages(
         StringBuilder html,
+        AnalysisReport report,
         IReadOnlyList<SandboxEvent> inlineEvents,
         int totalEventCount,
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
@@ -6821,7 +7579,7 @@ details[open]>summary:before{content:'–'}
             html.AppendLine($"<details id=\"raw-page-{pageNumber}\" class=\"raw-event-page copyable\" data-copy=\"{A(copy)}\"{open}><summary>Raw event page {pageNumber}/{pageCount}: rows {first}-{last} of {totalEventCount}; families {E(FirstNonEmpty(pageFamilies, "-"))}; top types {E(FirstNonEmpty(pageTypes, "-"))}</summary>");
             html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy raw page", copy)}</div>");
             html.AppendLine("<div class=\"copy-hint\">Page evidence sample. This page is a bounded native-details chunk; long command/output/script fields remain folded. Use the copy button or right-click to copy this inline page; report.json contains all retained rows, while events.json/driver JSONL contain complete raw payloads when indexed.</div>");
-            AppendEventRows(html, pageEvents, artifactLookup, artifacts);
+            AppendEventRows(html, report, pageEvents, artifactLookup, artifacts);
             html.AppendLine("</details>");
             pageNumber++;
         }
@@ -7134,6 +7892,7 @@ details[open]>summary:before{content:'–'}
     /// </summary>
     private static void AppendEventTable(
         StringBuilder html,
+        AnalysisReport report,
         string id,
         string title,
         IEnumerable<SandboxEvent> events,
@@ -7141,17 +7900,20 @@ details[open]>summary:before{content:'–'}
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         html.AppendLine($"<section id=\"{E(id)}\" class=\"card\"><h2>{E(title)}</h2>");
-        AppendEventRows(html, events.ToList(), artifactLookup, artifacts);
+        AppendEventRows(html, report, events.ToList(), artifactLookup, artifacts);
         html.AppendLine("</section>");
     }
 
     /// <summary>
     /// Appends event rows without opening a section.
     /// Inputs are event records, processing encodes row fields and data, and
-    /// the method returns no value.
+    /// the method returns no value. Long activity lists render as per-row
+    /// accordions: the summary line carries time, type, target, and severity,
+    /// and the full field payload stays folded until the row is opened.
     /// </summary>
     private static void AppendEventRows(
         StringBuilder html,
+        AnalysisReport report,
         IReadOnlyCollection<SandboxEvent> events,
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
@@ -7174,11 +7936,11 @@ details[open]>summary:before{content:'–'}
             html.AppendLine($"<div class=\"section-note\"><strong>Event table capped for readability.</strong> Inline rows: {E(inlineEvents.Count.ToString())}/{E(orderedEvents.Count.ToString())}. Hidden rows: {E(hiddenCount.ToString())}. Open the sampled report view for all retained rows; use indexed source JSON/JSONL artifacts for complete raw evidence.</div>");
         }
 
-        // Rows render as cards, matching the event explorer: a narrow meta
-        // column carries time plus event type, the body carries process,
-        // target, and evidence fields. A five-column table starved the data
-        // column (one character per line at 1024px) while the timestamp column
-        // stayed mostly empty, so the table was replaced rather than retuned.
+        // Rows render as per-row accordions: the summary strip shows time,
+        // event type, target, and severity, while process details, evidence
+        // fields, and copy actions stay inside the fold. Dense lists such as
+        // file system activity and driver telemetry stay scannable without
+        // sacrificing full-field access per row.
         html.AppendLine("<div class=\"event-table-wrap event-card-list\">");
         foreach (var evt in inlineEvents)
         {
@@ -7187,17 +7949,20 @@ details[open]>summary:before{content:'–'}
             var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
             var processText = (evt.ProcessName ?? "-") + " (" + (evt.ProcessId?.ToString() ?? "-") + ")";
             var targetText = VisibleEvidenceText(ExtractReadableEventTarget(evt));
-            html.AppendLine($"<article class=\"event-card event-table-card\" data-event-row data-type=\"{A(evt.EventType)}\">");
-            html.AppendLine("<div class=\"event-card-meta\">");
+            var severity = NormalizeSeverity(EventExplorerSeverity(report, evt));
+            html.AppendLine($"<details class=\"event-card event-table-card\" data-event-row data-type=\"{A(evt.EventType)}\" data-severity=\"{A(severity)}\">");
+            html.AppendLine("<summary class=\"event-card-summary\">");
             html.AppendLine($"<span class=\"event-time copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</span>");
             html.AppendLine($"<code class=\"event-type\" data-event-token=\"{A(evt.EventType)}\">{E(evt.EventType)}</code>");
-            html.AppendLine("</div>");
+            html.AppendLine($"<span class=\"event-summary-target copyable\" data-copy=\"{A(targetText)}\">{E(targetText)}</span>");
+            html.AppendLine($"<span class=\"event-severity-badge sev-{E(severity)}\">Severity: {E(severity)}</span>");
+            html.AppendLine("</summary>");
             html.AppendLine("<div class=\"event-card-body\">");
             html.AppendLine($"<strong class=\"event-evidence-title copyable\" data-copy=\"{A(processText)}\">{E(processText)}</strong>");
             html.AppendLine($"<div class=\"event-card-target copyable\" data-copy=\"{A(targetText)}\">{RenderEventPathAndCommand(evt, relatedArtifacts)}</div>");
             html.AppendLine($"<div class=\"event-evidence-cell\">{RenderEventEvidenceDetails(evt, commandLineRenderedInline: true)}<span class=\"inline-actions\">{CopyButton("Copy event", visiblePlain)}{RenderCopyArtifactsButton(relatedArtifacts)}</span>{RenderRelatedArtifacts(relatedArtifacts)}</div>");
             html.AppendLine("</div>");
-            html.AppendLine("</article>");
+            html.AppendLine("</details>");
         }
 
         html.AppendLine("</div>");
@@ -7608,7 +8373,7 @@ details[open]>summary:before{content:'–'}
         // nested technical disclosure instead of exposing them in the label.
         var image = evt.Path;
         var displayImage = string.IsNullOrWhiteSpace(image) ? string.Empty : DisplayEventTarget(evt, image);
-        var imageHint = string.IsNullOrWhiteSpace(image)
+        var imageHint = string.IsNullOrWhiteSpace(displayImage)
             ? string.Empty
             : $"<span class=\"process-tree-path\" title=\"{A(displayImage)}\">image {E(AbbreviateEvidenceValue(displayImage, 96))}</span>";
         return $"<span class=\"process-tree-line\"><code class=\"process-tree-label\">{E(label)}</code>{badges}{ProcessTreeSparkline(activity)}{imageHint}</span>";
@@ -7690,7 +8455,10 @@ details[open]>summary:before{content:'–'}
                 if (!string.IsNullOrWhiteSpace(card.Path))
                 {
                     var displayPath = DisplayStandaloneTarget(card.Path);
-                    html.AppendLine($"<strong>Path</strong><br><code class=\"copyable\" data-copy=\"{A(card.Path)}\">{E(displayPath)}</code><br>");
+                    if (!string.IsNullOrWhiteSpace(displayPath))
+                    {
+                        html.AppendLine($"<strong>Path</strong><br><code class=\"copyable\" data-copy=\"{A(card.Path)}\">{E(displayPath)}</code><br>");
+                    }
                 }
 
                 if (!string.IsNullOrWhiteSpace(card.CommandLine))
@@ -8297,7 +9065,8 @@ details[open]>summary:before{content:'–'}
             IsPacketCaptureEvidenceEvent(evt) ||
             TextEqualsAny(FirstEventDataValue(evt, "sourceArtifactKind", "artifactKind", "kind") ?? string.Empty, nameof(ArtifactKind.PacketCapture), "packet-capture", "pcap", "pcapng") ||
             string.Equals(FirstEventDataValue(evt, "collectionName"), "packet-captures", StringComparison.OrdinalIgnoreCase) ||
-            EventTextContainsAny(evt, "packetCaptureRelativePath", "pcapRelativePath", "pcapngRelativePath", ".pcap", ".pcapng"));
+            EventDataHasAnyKey(evt, "packetCaptureRelativePath", "pcapRelativePath", "pcapngRelativePath") ||
+            EventTextContainsAny(evt, ".pcap", ".pcapng"));
     }
 
     private static string BuildProcessCompactSummary(
@@ -8686,6 +9455,16 @@ details[open]>summary:before{content:'–'}
     }
 
     /// <summary>
+    /// Appends one label/value pair whose value is pre-rendered HTML. Used for
+    /// indeterminate values that must link to the coverage-gap section; the
+    /// caller owns escaping of the value.
+    /// </summary>
+    private static void MetricRowHtml(StringBuilder html, string label, string valueHtml)
+    {
+        html.AppendLine($"<div class=\"metric-row\"><dt>{E(label)}</dt><dd>{valueHtml}</dd></div>");
+    }
+
+    /// <summary>
     /// Appends one flat overview panel.
     /// Inputs are title, value, detail, and CSS class; processing writes a
     /// copyable square panel that matches the report's blue theme.
@@ -8774,9 +9553,9 @@ details[open]>summary:before{content:'–'}
         }
 
         var leaf = SafePathLeaf(value);
-        return string.IsNullOrWhiteSpace(leaf)
-            ? "Host path hidden"
-            : $"Host path hidden ({leaf})";
+        // Host-only paths are implementation details: render nothing so the
+        // surrounding field is dropped instead of showing a mask placeholder.
+        return string.IsNullOrWhiteSpace(leaf) ? string.Empty : leaf;
     }
 
     /// <summary>
@@ -9513,6 +10292,100 @@ details[open]>summary:before{content:'–'}
     }
 
     /// <summary>
+    /// Formats one behavior lane as raw / attributed / excluded counts.
+    /// Inputs are a report and the family/attribution predicates; processing
+    /// keeps the raw evidence volume visible even when every row is excluded
+    /// from the sample story, and the method returns the display value.
+    /// </summary>
+    private static string BehaviorLaneCount(
+        AnalysisReport report,
+        Func<SandboxEvent, bool> family,
+        Func<SandboxEvent, bool> attributed)
+    {
+        var raw = report.Events.Count(family);
+        var sample = report.Events.Count(attributed);
+        var excluded = Math.Max(0, raw - sample);
+        return $"{raw.ToString(CultureInfo.InvariantCulture)} / {sample.ToString(CultureInfo.InvariantCulture)} / {excluded.ToString(CultureInfo.InvariantCulture)}";
+    }
+
+    /// <summary>
+    /// Returns whether any R0 driver/collector channel produced evidence.
+    /// A missing channel makes a zero telemetry count indeterminate rather
+    /// than a measured zero.
+    /// </summary>
+    private static bool HasR0TelemetryChannel(AnalysisReport report)
+    {
+        return report.Events.Any(evt =>
+            IsR0Event(evt) ||
+            evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.Source, "r0collector", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Counts high-volume lifecycle/inventory noise types that dominate guest
+    /// event streams without contributing behavior evidence. Inputs are the
+    /// report; processing combines retained rows with the sampler's omitted
+    /// type counts so a sampled report still exposes the true raw volume, and
+    /// the method returns the counts plus the raw event total.
+    /// </summary>
+    private static (int Snapshot, int Probe, int PssFile, int RawTotal) CountNoiseRows(AnalysisReport report)
+    {
+        var samplingMarker = report.Events.FirstOrDefault(evt =>
+            string.Equals(evt.EventType, "report.events.sampled", StringComparison.OrdinalIgnoreCase));
+        var omitted = ParseOmittedTypeCounts(samplingMarker);
+        var rawTotal = samplingMarker is not null &&
+            int.TryParse(samplingMarker.Data.GetValueOrDefault("rawEventCount"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var raw)
+                ? raw
+                : report.Events.Count;
+        var snapshot = report.Events.Count(evt =>
+            string.Equals(evt.EventType, "process.snapshot", StringComparison.OrdinalIgnoreCase)) +
+            omitted.GetValueOrDefault("process.snapshot");
+        var probe = report.Events.Count(evt =>
+            string.Equals(evt.EventType, "probe.summary", StringComparison.OrdinalIgnoreCase)) +
+            omitted.GetValueOrDefault("probe.summary");
+        var pssFile = report.Events.Count(evt =>
+            (evt.Path ?? string.Empty).Contains("__PSScriptPolicyTest_", StringComparison.OrdinalIgnoreCase) ||
+            (evt.CommandLine ?? string.Empty).Contains("__PSScriptPolicyTest_", StringComparison.OrdinalIgnoreCase) ||
+            evt.Data.GetValueOrDefault("relativePath", string.Empty).Contains("__PSScriptPolicyTest_", StringComparison.OrdinalIgnoreCase));
+        return (snapshot, probe, pssFile, rawTotal);
+    }
+
+    private static Dictionary<string, int> ParseOmittedTypeCounts(SandboxEvent? samplingMarker)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (samplingMarker is null ||
+            !samplingMarker.Data.TryGetValue("omittedEventTypeCounts", out var encoded) ||
+            string.IsNullOrWhiteSpace(encoded))
+        {
+            return counts;
+        }
+
+        foreach (var entry in encoded.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var separator = entry.LastIndexOf('=');
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            var type = entry[..separator].Trim();
+            if (int.TryParse(entry[(separator + 1)..].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var count))
+            {
+                counts[type] = count;
+            }
+        }
+
+        return counts;
+    }
+
+    private static string FormatPercent(int part, int total) =>
+        total <= 0 ? "0.0%" : $"{(part * 100.0 / total):0.0}%";
+
+    private static string FormatBasisPointsPercent(int basisPoints) =>
+        $"{basisPoints / 100}.{basisPoints % 100:00}%";
+
+    /// <summary>
     /// Counts events with a specific event-type prefix.
     /// Inputs are a report and prefix, processing compares case-insensitively,
     /// and the method returns the count.
@@ -9537,7 +10410,7 @@ details[open]>summary:before{content:'–'}
     /// Inputs are section size and entropy values; processing emits concise
     /// labels for report triage; the method returns a display string.
     /// </summary>
-    private static string DescribeSectionSignal(PeSectionInfo section)
+    private static string DescribeSectionSignal(KSword.Sandbox.Abstractions.PeSectionInfo section)
     {
         var signals = new List<string>();
         if (section.Entropy >= 7.2)
@@ -9571,7 +10444,7 @@ details[open]>summary:before{content:'–'}
     /// Inputs are section metadata and signal text; processing serializes a
     /// stable multiline block; the method returns clipboard text.
     /// </summary>
-    private static string SectionToPlainText(PeSectionInfo section, string signal)
+    private static string SectionToPlainText(KSword.Sandbox.Abstractions.PeSectionInfo section, string signal)
     {
         return string.Join(
             Environment.NewLine,
@@ -9583,6 +10456,349 @@ details[open]>summary:before{content:'–'}
                 $"entropy={section.Entropy:F3}",
                 $"signal={signal}"
             ]);
+    }
+
+    /// <summary>
+    /// Appends a PE header summary for the analyzed sample. Inputs are the
+    /// report, static analysis, and events carrying pe.* data keys; processing
+    /// prefers event-supplied pe.* fields and otherwise parses the sample file
+    /// on the host, and the method returns no value.
+    /// </summary>
+    private static void AppendPeHeaderBlock(
+        StringBuilder html,
+        AnalysisReport report,
+        StaticAnalysisResult? staticAnalysis,
+        IReadOnlyCollection<SandboxEvent> peDataEvents)
+    {
+        var resolved = ResolvePeInfo(report.Sample.FullPath, report.Sample.FileName, peDataEvents);
+        if (resolved is null)
+        {
+            return;
+        }
+
+        var (pe, signatureKnown) = resolved.Value;
+        html.AppendLine("<div class=\"pe-block\"><h4>PE header</h4><div class=\"kv-grid pe-header-grid\">");
+        Row(html, "Machine type", FirstNonEmpty(pe.Machine, staticAnalysis?.Machine, staticAnalysis?.Architecture));
+        Row(html, "Subsystem", FirstNonEmpty(pe.Subsystem, staticAnalysis?.Subsystem));
+        Row(
+            html,
+            "Compile timestamp (UTC)",
+            pe.CompileTimestampUtc?.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? "-");
+        Row(html, "Entry point RVA", pe.EntryPointRva > 0 ? $"0x{pe.EntryPointRva:X8}" : staticAnalysis?.EntryPointRva ?? "-");
+        Row(html, "Image base", pe.ImageBase > 0 ? $"0x{pe.ImageBase:X}" : "-");
+        Row(html, "Authenticode signature", !signatureKnown ? "-" : pe.HasSignature ? "Signature present" : "Signature absent");
+        html.AppendLine("</div>");
+        var preferParsedSections = staticAnalysis is null || staticAnalysis.Sections.Count == 0;
+        AppendPeSectionsAndImports(html, pe, preferParsedSections, staticAnalysis);
+        html.AppendLine("</div>");
+    }
+
+    /// <summary>
+    /// Appends a compact PE summary for one artifact file block. Inputs are the
+    /// artifact and the events carrying pe.* data keys; processing prefers
+    /// event-supplied pe.* fields matched by path and otherwise parses the
+    /// artifact file on the host, and the method returns no value.
+    /// </summary>
+    private static void AppendArtifactPeBlock(
+        StringBuilder html,
+        ArtifactDescriptor artifact,
+        IReadOnlyCollection<SandboxEvent> peDataEvents)
+    {
+        var resolved = ResolvePeInfo(artifact.FullPath, artifact.Name, peDataEvents, artifact.GuestPath);
+        if (resolved is null)
+        {
+            return;
+        }
+
+        var (pe, signatureKnown) = resolved.Value;
+        html.AppendLine("<div class=\"pe-block\"><h4>PE summary</h4><div class=\"kv-grid pe-header-grid\">");
+        Row(html, "Machine type", string.IsNullOrWhiteSpace(pe.Machine) ? "-" : pe.Machine);
+        Row(html, "Subsystem", string.IsNullOrWhiteSpace(pe.Subsystem) ? "-" : pe.Subsystem);
+        Row(
+            html,
+            "Compile timestamp (UTC)",
+            pe.CompileTimestampUtc?.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? "-");
+        Row(html, "Entry point RVA", pe.EntryPointRva > 0 ? $"0x{pe.EntryPointRva:X8}" : "-");
+        Row(html, "Image base", pe.ImageBase > 0 ? $"0x{pe.ImageBase:X}" : "-");
+        Row(html, "Authenticode signature", !signatureKnown ? "-" : pe.HasSignature ? "Signature present" : "Signature absent");
+        html.AppendLine("</div>");
+        AppendPeSectionsAndImports(html, pe, includeSectionTable: true, staticAnalysis: null);
+        html.AppendLine("</div>");
+    }
+
+    /// <summary>
+    /// Appends the parsed section table (raw size, entropy, signal) and import
+    /// DLL chips for one PE record. Inputs are the PE record, a flag choosing
+    /// whether the section table belongs here, and optional static analysis
+    /// whose structured imports fill in when the parse found none; processing
+    /// bounds every list, and the method returns no value.
+    /// </summary>
+    private static void AppendPeSectionsAndImports(
+        StringBuilder html,
+        PeFileInfo pe,
+        bool includeSectionTable,
+        StaticAnalysisResult? staticAnalysis)
+    {
+        if (includeSectionTable && pe.Sections.Count > 0)
+        {
+            html.AppendLine("<table><thead><tr><th>Name</th><th>Raw size</th><th>Entropy</th><th>Signal</th></tr></thead><tbody>");
+            foreach (var section in pe.Sections)
+            {
+                var signal = DescribePeFileSectionSignal(section);
+                var copy = string.Join(
+                    Environment.NewLine,
+                    $"name={section.Name}",
+                    $"rawSize={section.RawSize}",
+                    $"entropy={section.Entropy:F3}",
+                    $"signal={signal}");
+                html.AppendLine($"<tr class=\"copyable\" data-copy=\"{A(copy)}\"><td>{E(section.Name)}</td><td>{section.RawSize}</td><td>{section.Entropy:F3}</td><td>{E(signal)}</td></tr>");
+            }
+
+            html.AppendLine("</tbody></table>");
+        }
+
+        var importDlls = pe.ImportDlls;
+        if (importDlls.Count == 0 && staticAnalysis?.Imports.Count > 0)
+        {
+            importDlls = staticAnalysis.Imports
+                .Select(static import => import.ModuleName)
+                .Where(static name => !string.IsNullOrWhiteSpace(name))
+                .ToList();
+        }
+
+        if (importDlls.Count > 0)
+        {
+            html.AppendLine("<div class=\"pe-imports\"><span class=\"kv-label\">Import DLLs</span>");
+            foreach (var dll in importDlls.Take(16))
+            {
+                html.AppendLine($"<span class=\"chip chip-info copyable\" data-copy=\"{A(dll)}\">{E(dll)}</span>");
+            }
+
+            html.AppendLine("</div>");
+        }
+    }
+
+    /// <summary>
+    /// Describes PE section risk signals for offline-parsed sections.
+    /// Inputs are raw size and entropy values; processing emits concise labels
+    /// matching the static-analysis section signals, and the method returns a
+    /// display string.
+    /// </summary>
+    private static string DescribePeFileSectionSignal(PeFileSectionInfo section)
+    {
+        var signals = new List<string>();
+        if (section.Entropy >= 7.2)
+        {
+            signals.Add(section.Entropy >= 7.8 ? "very high entropy" : "high entropy");
+        }
+        else if (section.RawSize > 0 && section.Entropy <= 1.0)
+        {
+            signals.Add("low entropy");
+        }
+
+        if (section.RawSize == 0 && section.VirtualSize > 0)
+        {
+            signals.Add("virtual only");
+        }
+        else if (section.VirtualSize > section.RawSize * 4 && section.VirtualSize > 4096)
+        {
+            signals.Add("large virtual/raw gap");
+        }
+
+        if (section.Name.Contains("UPX", StringComparison.OrdinalIgnoreCase))
+        {
+            signals.Add("UPX-like");
+        }
+
+        return signals.Count == 0 ? "normal" : string.Join(", ", signals);
+    }
+
+    /// <summary>
+    /// Resolves PE metadata for one file. Inputs are a host path, a name hint,
+    /// optional guest path, and the events carrying pe.* data keys; processing
+    /// prefers event data matched by path and otherwise parses the host file
+    /// with the built-in minimal parser, and the method returns the PE record
+    /// plus whether the signature state is known, or null when unavailable.
+    /// </summary>
+    private static (PeFileInfo Info, bool SignatureKnown)? ResolvePeInfo(
+        string? fullPath,
+        string? nameHint,
+        IReadOnlyCollection<SandboxEvent> peDataEvents,
+        string? guestPathHint = null)
+    {
+        var eventData = PeEventDataForPath(peDataEvents, fullPath, nameHint, guestPathHint);
+        if (eventData.Count > 0)
+        {
+            return (PeFileInfoFromEventData(eventData), eventData.ContainsKey("pe.signed"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(fullPath) &&
+            File.Exists(fullPath) &&
+            PeFileInfoParser.LooksLikePe(fullPath))
+        {
+            var parsed = PeFileInfoParser.Parse(fullPath);
+            if (parsed.IsPe)
+            {
+                return (parsed, true);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Collects pe.* data keys from events that reference one file. Inputs are
+    /// the prefiltered pe.* events plus path and name hints; processing keeps
+    /// the first value seen per key from matching events, and the method
+    /// returns the merged dictionary (empty when nothing matches).
+    /// </summary>
+    private static Dictionary<string, string> PeEventDataForPath(
+        IReadOnlyCollection<SandboxEvent> peDataEvents,
+        string? fullPath,
+        string? nameHint,
+        string? guestPathHint)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var pathHints = new[] { fullPath, guestPathHint }
+            .Select(static value => string.IsNullOrWhiteSpace(value) ? null : value)
+            .Where(static value => value is not null)
+            .Select(static value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var nameHints = new[] { nameHint, SafePathLeaf(fullPath ?? string.Empty), SafePathLeaf(guestPathHint ?? string.Empty) }
+            .Select(static value => string.IsNullOrWhiteSpace(value) ? null : value)
+            .Where(static value => value is not null)
+            .Select(static value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (pathHints.Count == 0 && nameHints.Count == 0)
+        {
+            return result;
+        }
+
+        foreach (var evt in peDataEvents)
+        {
+            if (!IsPeEventForHints(evt, pathHints, nameHints))
+            {
+                continue;
+            }
+
+            foreach (var (key, value) in evt.Data)
+            {
+                if (key.StartsWith("pe.", StringComparison.OrdinalIgnoreCase) && !result.ContainsKey(key))
+                {
+                    result[key] = value;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static bool IsPeEventForHints(SandboxEvent evt, IReadOnlyCollection<string> pathHints, IReadOnlyCollection<string> nameHints)
+    {
+        var eventPath = evt.Path ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(eventPath))
+        {
+            if (pathHints.Any(hint => string.Equals(hint, eventPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            var eventName = SafePathLeaf(eventPath);
+            if (!string.IsNullOrWhiteSpace(eventName) &&
+                nameHints.Any(hint => string.Equals(hint, eventName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return evt.Data.TryGetValue("relativePath", out var relativePath) &&
+            nameHints.Any(hint => string.Equals(hint, relativePath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Builds a PE record from event Data pe.* fields. Inputs are the merged
+    /// pe.* keys; processing maps machine/subsystem/timestamp/entry point/image
+    /// base/signature/imports and a bounded "name:size:entropy" section list,
+    /// and the method returns the record.
+    /// </summary>
+    private static PeFileInfo PeFileInfoFromEventData(IReadOnlyDictionary<string, string> data)
+    {
+        string? Get(string key) => data.TryGetValue(key, out var value) ? value : null;
+
+        DateTimeOffset? timestamp = null;
+        var rawTimestamp = Get("pe.timestampUtc");
+        if (!string.IsNullOrWhiteSpace(rawTimestamp))
+        {
+            if (DateTimeOffset.TryParse(rawTimestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedTimestamp))
+            {
+                timestamp = parsedTimestamp.ToUniversalTime();
+            }
+            else if (long.TryParse(rawTimestamp, NumberStyles.Integer, CultureInfo.InvariantCulture, out var unixSeconds))
+            {
+                try
+                {
+                    timestamp = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    timestamp = null;
+                }
+            }
+        }
+
+        var sections = new List<PeFileSectionInfo>();
+        var rawSections = Get("pe.sections");
+        if (!string.IsNullOrWhiteSpace(rawSections))
+        {
+            foreach (var part in rawSections.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(24))
+            {
+                var fields = part.Split(':');
+                if (fields.Length < 3)
+                {
+                    continue;
+                }
+
+                sections.Add(new PeFileSectionInfo
+                {
+                    Name = fields[0],
+                    RawSize = long.TryParse(fields[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var rawSize) ? rawSize : 0,
+                    Entropy = double.TryParse(fields[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var entropy) ? entropy : 0,
+                });
+            }
+        }
+
+        return new PeFileInfo
+        {
+            IsPe = true,
+            Machine = Get("pe.machine") ?? string.Empty,
+            Subsystem = Get("pe.subsystem") ?? string.Empty,
+            CompileTimestampUtc = timestamp,
+            EntryPointRva = TryParseLongAuto(Get("pe.entryPointRva")),
+            ImageBase = TryParseLongAuto(Get("pe.imageBase")),
+            HasSignature = string.Equals(Get("pe.signed"), "true", StringComparison.OrdinalIgnoreCase) || Get("pe.signed") == "1",
+            Sections = sections,
+            ImportDlls = (Get("pe.imports") ?? string.Empty)
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Take(24)
+                .ToList(),
+        };
+    }
+
+    private static long TryParseLongAuto(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return 0;
+        }
+
+        if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            return long.TryParse(value[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hex) ? hex : 0;
+        }
+
+        return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) ? number : 0;
     }
 
     /// <summary>
@@ -9628,6 +10844,15 @@ details[open]>summary:before{content:'–'}
         }
 
         if (IsUserFacingEvent(evt))
+        {
+            return true;
+        }
+
+        // R0 health/status rows are collection diagnostics, not behavior, but
+        // the explorer is the evidence view that has to show whether the
+        // kernel channel reported a degraded or unavailable state. Keep them
+        // visible after the behavior predicates have excluded them.
+        if (IsR0CollectionHealthEvent(evt))
         {
             return true;
         }
@@ -9761,6 +10986,32 @@ details[open]>summary:before{content:'–'}
 
         var strength = FirstEventDataValue(evt, "sampleCorrelationStrength", "sample_correlation_strength");
         return TextEqualsAny(strength ?? string.Empty, "none", "weak", "session-only", "unattributed");
+    }
+
+    /// <summary>
+    /// Identifies ordinary system-DLL image.load rows that must be demoted
+    /// instead of highlighted as anomalies. Inputs are one normalized event;
+    /// processing keys off the classifier's normal-runtime-module-load
+    /// boundary marker or an environmental sample correlation, and the method
+    /// returns true only for image.load rows that are normal runtime module
+    /// loads rather than suspicious loads (user-writable paths, injection
+    /// candidates keep their existing highlighting).
+    /// </summary>
+    private static bool IsNormalRuntimeModuleLoadEvent(SandboxEvent evt)
+    {
+        if (!string.Equals(evt.EventType, "image.load", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var boundary = FirstEventDataValue(evt, "normalBehaviorBoundary", "sampleCorrelationBoundary", "boundary");
+        if (TextEqualsAny(boundary ?? string.Empty, "normal-runtime-module-load"))
+        {
+            return true;
+        }
+
+        var correlation = FirstEventDataValue(evt, "sampleCorrelation", "sample_correlation", "sampleCorrelationStatus", "sample_correlation_status");
+        return TextEqualsAny(correlation ?? string.Empty, "environment");
     }
 
     private static bool IsSampleBehaviorSecurityPrivilegeEvent(SandboxEvent evt) =>
@@ -10443,7 +11694,7 @@ details[open]>summary:before{content:'–'}
 
         if (EventDataBoolTrue(evt, "collectionHealth", "collection_health") ||
             (EventDataBoolTrue(evt, "nonbehavior", "notSampleBehavior", "not_sample_behavior") &&
-             EventTextContainsAny(evt, "capture_failed", "collection", "probe", "wmi")))
+             EventTypeOrSourceContainsAny(evt, "capture_failed", "collection", "probe", "wmi")))
         {
             return true;
         }
@@ -10463,19 +11714,33 @@ details[open]>summary:before{content:'–'}
             return true;
         }
 
-        if (EventTextContainsAny(
+        // Only the event identity carries health semantics. Data keys and
+        // arbitrary payload values describe the observation itself (for
+        // example actorPidStatus=unavailable-filesystem-watcher on a normal
+        // file row) and must never reclassify a behavior event as health.
+        if (EventTypeOrSourceContainsAny(
                 evt,
                 "collection.health",
                 "collector.health",
                 "collector.status",
                 "diagnostic",
                 "readiness",
-                "unavailable",
                 "ioctlFailure",
                 "protocolError",
                 "driverHealth",
                 "driverPoll",
                 "driverReadEvents"))
+        {
+            return true;
+        }
+
+        // captureState is a per-row observation marker on every normal event.
+        // Only an explicit failed/not-run value is a health signal; key presence
+        // alone used to classify the whole event stream as collection health.
+        if (EventDataEqualsAny(evt, "captureState", "failed") ||
+            EventDataEqualsAny(evt, "captureState", "not-run") ||
+            EventDataEqualsAny(evt, "captureState", "not_run") ||
+            EventDataEqualsAny(evt, "captureState", "notrun"))
         {
             return true;
         }
@@ -10499,7 +11764,6 @@ details[open]>summary:before{content:'–'}
             "totalEventsDropped",
             "totalEventsBackpressured",
             "backpressureObserved",
-            "captureState",
             "diagnosticStage",
             "readinessState");
     }
@@ -10626,6 +11890,36 @@ details[open]>summary:before{content:'–'}
 
         var exitCode = ProcessExitCodeRaw(evt);
         return TryParseExitCode(exitCode, out var parsed) && parsed != 0;
+    }
+
+    /// <summary>
+    /// Detects the CLR/.NET Framework 3.5 activation failure (0x80131700) so
+    /// the execution boundary can name the real remediation instead of leaving
+    /// an opaque HRESULT.
+    /// </summary>
+    private static bool HasNetFx3MissingExit(AnalysisReport report)
+    {
+        foreach (var evt in report.Events)
+        {
+            var raw = ProcessExitCodeRaw(evt);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            if (raw.Contains("80131700", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (TryParseExitCode(raw, out var parsed) &&
+                (parsed == 0x80131700L || parsed == unchecked((int)0x80131700)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsSubmittedSampleProcessExit(AnalysisReport report, SandboxEvent evt)
@@ -10912,7 +12206,8 @@ details[open]>summary:before{content:'–'}
     /// </summary>
     private static bool IsBackpressureOrDropHealthEvent(SandboxEvent evt)
     {
-        if (EventTextContainsAny(evt, "QueueBackpressure", "EventsDropped", "backpressure", "dropped"))
+        if (EventDataHasAnyKey(evt, "QueueBackpressure", "EventsDropped") ||
+            EventTextContainsAny(evt, "backpressure", "dropped"))
         {
             return true;
         }
@@ -10940,7 +12235,8 @@ details[open]>summary:before{content:'–'}
     private static bool IsDriverHealthPollEvent(SandboxEvent evt)
     {
         return IsR0Event(evt) &&
-            EventTextContainsAny(evt, "driverHealth", "driverPoll", "driverStatus", "driverReadEvents");
+            (EventDataHasAnyKey(evt, "driverHealth", "driverPoll", "driverStatus", "driverReadEvents") ||
+             TextContainsAny(evt.EventType, "driverHealth", "driverPoll", "driverStatus", "driverReadEvents"));
     }
 
     private static bool EventDataHasAnyKey(SandboxEvent evt, params string[] keys)
@@ -11016,6 +12312,20 @@ details[open]>summary:before{content:'–'}
         return false;
     }
 
+    /// <summary>
+    /// Matches only the event identity (type and source). Used where a token
+    /// must describe the producer's role, not any value carried in the row.
+    /// </summary>
+    private static bool EventTypeOrSourceContainsAny(SandboxEvent evt, params string[] tokens) =>
+        TextContainsAny(evt.EventType, tokens) || TextContainsAny(evt.Source, tokens);
+
+    /// <summary>
+    /// Matches evidence text (identity, path, command line, and Data values).
+    /// Inputs are one event and free-text tokens; processing deliberately does
+    /// not scan Data keys, because keys are schema labels rather than evidence.
+    /// Scanning keys made "processIdUnavailableReason" look like a device
+    /// failure and hid real file/network rows as collection health.
+    /// </summary>
     private static bool EventTextContainsAny(SandboxEvent evt, params string[] tokens)
     {
         if (TextContainsAny(evt.EventType, tokens) ||
@@ -11028,7 +12338,7 @@ details[open]>summary:before{content:'–'}
 
         foreach (var pair in evt.Data)
         {
-            if (TextContainsAny(pair.Key, tokens) || TextContainsAny(pair.Value, tokens))
+            if (TextContainsAny(pair.Value, tokens))
             {
                 return true;
             }
@@ -11499,15 +12809,18 @@ details[open]>summary:before{content:'–'}
 
     private static string CopyIconButton(string copyText)
     {
-        return CopyIconButton(copyText, "复制");
+        return CopyIconButton(copyText, "Copy");
     }
 
     private static string CopyIconButton(string copyText, string accessibleLabel)
     {
-        // Copy controls are intentionally icon-only.  Use one short Chinese
-        // label for both tooltip and accessibility text instead of leaking
-        // long English action names into every evidence row.
-        accessibleLabel = "复制";
+        // Copy controls are intentionally icon-only and use one short label for
+        // both tooltip and accessibility text. The Chinese pass rewrites this
+        // label, so the English document stays CJK-free.
+        if (string.IsNullOrWhiteSpace(accessibleLabel) || accessibleLabel.Any(ch => ch > 0x7f))
+        {
+            accessibleLabel = "Copy";
+        }
         return $"<button type=\"button\" class=\"copy-btn copy-icon\" aria-label=\"{A(accessibleLabel)}\" title=\"{A(accessibleLabel)}\" data-copy=\"{A(copyText)}\" data-copy-button=\"true\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"8\" y=\"8\" width=\"11\" height=\"11\" rx=\"1\"></rect><path d=\"M5 15V5a2 2 0 0 1 2-2h10\"></path></svg><span class=\"sr-only\">{E(accessibleLabel)}</span></button>";
     }
 
@@ -11840,10 +13153,10 @@ details[open]>summary:before{content:'–'}
 
         if (IsHostTechnicalPath(evt, target))
         {
-            var leaf = SafePathLeaf(target);
-            return string.IsNullOrWhiteSpace(leaf)
-                ? "Host path hidden"
-                : $"Host path hidden ({leaf})";
+            // Host-only paths are implementation details; the analyst gets no
+            // value from a "hidden" placeholder, so the field is dropped
+            // entirely (callers skip empty targets) instead of being masked.
+            return string.Empty;
         }
 
         return target;
@@ -12148,6 +13461,8 @@ details[open]>summary:before{content:'–'}
         html = ChineseVisibleEventCountRegex.Replace(html, " 个事件");
         html = ChineseVisibleExampleCountRegex.Replace(html, ">示例 ${count}<");
         html = ChineseVisibleFileCountRegex.Replace(html, ">${count} 个文件<");
+        html = ChineseVisibleEntryCountRegex.Replace(html, "（${count} 条）");
+        html = ChineseVisibleRowCountRegex.Replace(html, "（${count} 行）");
         // A few compact cards combine translated labels with interpolated
         // values, so the general dictionary cannot match the whole sentence.
         // Run this while raw evidence is still protected; machine-readable
@@ -12170,6 +13485,8 @@ details[open]>summary:before{content:'–'}
         html = ChineseVisibleEventCountRegex.Replace(html, " 个事件");
         html = ChineseVisibleExampleCountRegex.Replace(html, ">示例 ${count}<");
         html = ChineseVisibleFileCountRegex.Replace(html, ">${count} 个文件<");
+        html = ChineseVisibleEntryCountRegex.Replace(html, "（${count} 条）");
+        html = ChineseVisibleRowCountRegex.Replace(html, "（${count} 行）");
         foreach (var (english, chinese) in ChineseCssTranslations)
         {
             html = html.Replace(english, chinese, StringComparison.Ordinal);
@@ -12589,7 +13906,13 @@ details[open]>summary:before{content:'–'}
         return Regex.Replace(
             html,
             "<option\\b([^>]*?)\\sdata-zh-label=\\\"([^\\\"]*)\\\"([^>]*)>[^<]*</option>",
-            match => $"<option{match.Groups[1].Value}{match.Groups[3].Value}>{match.Groups[2].Value}</option>",
+            match =>
+            {
+                // Labels travel as numeric character references so the English
+                // document stays CJK-free; decode them for the Chinese file.
+                var label = WebUtility.HtmlDecode(match.Groups[2].Value);
+                return $"<option{match.Groups[1].Value}{match.Groups[3].Value}>{label}</option>";
+            },
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
@@ -12754,6 +14077,8 @@ details[open]>summary:before{content:'–'}
         // operator-facing search hint after those fragments are restored.
         html = html.Replace("placeholder=\"type, path, process, target\"", "placeholder=\"事件类型、路径、进程或目标\"", StringComparison.Ordinal);
         html = html.Replace(">Copy</button>", ">复制</button>", StringComparison.Ordinal);
+        html = html.Replace("aria-label=\"Copy\" title=\"Copy\"", "aria-label=\"复制\" title=\"复制\"", StringComparison.Ordinal);
+        html = html.Replace(">Copy</span>", ">复制</span>", StringComparison.Ordinal);
         html = html.Replace(">Diagnostics<", ">诊断<", StringComparison.Ordinal);
         html = html.Replace("R0 健康状态 evidence", "R0 健康状态证据", StringComparison.Ordinal);
         html = html.Replace("R0 health evidence", "R0 健康状态证据", StringComparison.Ordinal);
@@ -13740,7 +15065,30 @@ details[open]>summary:before{content:'–'}
         ("more evidence events; expand or copy to view all", "更多证据事件；展开或复制可查看全部"),
         ("Review static analysis and collection health", "检查静态分析和采集健康状态"),
         ("Open filtered event table", "打开筛选事件表"),
+        ("Full raw content hidden; use the evidence file link to open this artifact.", "完整原始内容已隐藏；请通过证据文件链接打开该证据文件。"),
         ("Open failure log", "打开失败日志"),
+        ("Chinese report", "中文报告"),
+        ("File events (raw / attributed / excluded)", "文件事件（原始 / 已归因 / 已排除）"),
+        ("Network events (raw / attributed / excluded)", "网络事件（原始 / 已归因 / 已排除）"),
+        ("Registry events (raw / attributed / excluded)", "注册表事件（原始 / 已归因 / 已排除）"),
+        ("ETW XML events / imported", "ETW XML 事件 / 已入库"),
+        ("ETW decode retention", "ETW 解码保留率"),
+        ("ETW events lost", "ETW 丢失事件数"),
+        ("Noise quantification.", "噪声量化。"),
+        ("ETW decode health.", "ETW 解码健康。"),
+        ("Root cause (0x80131700):", "根因（0x80131700）："),
+        (".NET Framework 3.5 is missing; the child process Fondue.exe /enable-feature:NetFx3 failed. Preinstall NetFx3 in the clean guest baseline, then rerun the sample.", ".NET Framework 3.5 缺失；子进程 Fondue.exe /enable-feature:NetFx3 失败。请在干净来宾基线中预装 NetFx3 后重跑样本。"),
+        ("Collection completeness: no loss or bounded-drain warning.", "采集完整性：无丢失或有界排空警告。"),
+        ("disabled by policy", "策略关闭"),
+        ("not run", "未运行"),
+        ("Observed ", "已观察到 "),
+        (" sample behavior events; ", " 条样本行为；"),
+        ("; key evidence: ", "；关键证据："),
+        ("highest severity [critical]", "最高等级 严重"),
+        ("highest severity [high]", "最高等级 高"),
+        ("highest severity [medium]", "最高等级 中"),
+        ("highest severity [low]", "最高等级 低"),
+        ("highest severity [info]", "最高等级 信息"),
         ("No primary behavior rule matched; verify collection quality before concluding that the sample was quiet.", "未命中主要样本行为规则；请先核对采集质量，再判断样本是否没有继续活动。"),
         ("No sample-attributed behavior was observed in the captured runtime events.", "捕获的运行时事件中未观察到归属于样本的行为。"),
         ("No sample-attributed driver behavior was captured.", "未捕获归属于样本的驱动行为。"),
@@ -13841,6 +15189,7 @@ details[open]>summary:before{content:'–'}
         ("; quality warnings=", "；质量警告="),
         ("Evidence import", "证据导入"),
         ("Collection quality", "采集质量"),
+        ("Analysis environment. The job is marked Failed, but no normalized failure event was imported.", "分析环境。作业已标记为失败，但未导入标准化的失败事件。"),
         ("Analysis environment", "分析环境"),
         ("Sample start", "样本启动"),
         ("Timeout", "超时"),
@@ -13848,6 +15197,11 @@ details[open]>summary:before{content:'–'}
         ("Source", "来源"),
         ("Stage", "阶段"),
         ("Severity", "严重性"),
+        ("Severity: critical", "严重性：严重"),
+        ("Severity: high", "严重性：高"),
+        ("Severity: medium", "严重性：中"),
+        ("Severity: low", "严重性：低"),
+        ("Severity: info", "严重性：信息"),
         ("Sample behavior", "样本行为"),
         ("Search", "搜索"),
         ("All", "全部"),
@@ -14137,6 +15491,11 @@ details[open]>summary:before{content:'–'}
         ("coverage gap · missing", "覆盖缺口 · 缺失"),
         ("coverage gap · disabled", "覆盖缺口 · 已禁用"),
         ("coverage gap · not run", "覆盖缺口 · 未运行"),
+        ("coverage gap · output budget reached", "覆盖缺口 · 已达输出预算"),
+        ("output budget reached", "已达输出预算"),
+        ("R0 output budget reached: ", "R0 已达输出预算："),
+        (" MB / ", " MB / "),
+        (" segments; events beyond the budget were intentionally not captured (clean stop, not a write failure).", " 段；超出预算的事件有意未采集（干净停止，非写失败）。"),
         ("capture not started", "未启动采集"),
         ("not subscribed", "未订阅"),
         ("ETW/Security surface subscription", "ETW/Security 安全面订阅"),
@@ -14345,6 +15704,20 @@ details[open]>summary:before{content:'–'}
         ("Screenshots", "截图"),
         ("Memory dumps", "内存转储"),
         ("Packet captures", "网络抓包"),
+        ("Artifact manifests", "证据文件清单"),
+        ("Guest events", "来宾事件"),
+        ("Telemetry artifacts", "遥测证据"),
+        ("Log artifacts", "日志证据"),
+        ("Trace artifacts", "跟踪证据"),
+        ("Report artifacts", "报告证据"),
+        ("Runbook artifacts", "运行手册证据"),
+        ("Other artifacts", "其他证据文件"),
+        ("Normal runtime module loads", "正常运行时加载"),
+        ("System-directory DLL loads during normal operation; demoted from the signal list. Suspicious image loads (user-writable paths, injection candidates) stay highlighted in the list above.", "系统目录 DLL 正常运行期间加载，已从信号列表降级。可疑映像加载（用户可写路径、注入候选）仍在上方的列表中高亮。"),
+        ("System-directory DLL loads during normal operation; demoted from the chronological list.", "系统目录 DLL 正常运行期间加载，已从按时间排序的列表中降级。"),
+        ("additional normal runtime module loads are hidden; open the sampled report view or indexed source JSON/JSONL for complete evidence.", "条额外正常运行时加载已隐藏；打开采样报告视图或索引源 JSON/JSONL 查看完整证据。"),
+        ("additional normal runtime module loads are retained in report.json and the indexed source JSON/JSONL.", "条额外正常运行时加载保留在 report.json 与索引源 JSON/JSONL 中。"),
+        ("The inline fold is capped; open the sampled report view for the complete list.", "内联折叠区已达上限；打开采样报告视图查看完整清单。"),
         ("Driver events", "驱动事件"),
         ("Artifacts:", "证据文件："),
         ("Timeline", "时间线"),
@@ -14731,6 +16104,16 @@ details[open]>summary:before{content:'–'}
         ("Child processes", "子进程"),
         ("Top evidence", "关键证据"),
         ("PE sections", "PE 节区"),
+        ("PE header", "PE 头信息"),
+        ("PE summary", "PE 摘要"),
+        ("Machine type", "机器类型"),
+        ("Compile timestamp (UTC)", "编译时间戳（UTC）"),
+        ("Image base", "映像基址"),
+        ("Authenticode signature", "Authenticode 签名"),
+        ("Signature present", "已签名"),
+        ("Signature absent", "未签名"),
+        ("Import DLLs", "导入 DLL"),
+        ("Artifact index rows", "证据清单行"),
         ("Static evidence map", "静态证据图"),
         ("Interesting strings", "可疑字符串"),
         ("Static warnings", "静态警告"),
@@ -17475,6 +18858,41 @@ details[open]>summary:before{content:'–'}
         return builder.ToString();
     }
 
+    /// <summary>
+    /// Returns true when a preview looks like decoded binary rather than text:
+    /// either it contains NUL, or a control character that never appears in a
+    /// normal text artifact.
+    /// </summary>
+    private static bool LooksBinaryPreview(string preview)
+    {
+        foreach (var character in preview)
+        {
+            if (character == '\0')
+            {
+                return true;
+            }
+
+            if (character < 0x20 && character is not ('\r' or '\n' or '\t'))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string ToPrintableAsciiPreview(string preview)
+    {
+        var builder = new StringBuilder(preview.Length);
+        foreach (var character in preview)
+        {
+            var keep = character is '\r' or '\n' or '\t' || (character >= 0x20 && character <= 0x7E);
+            builder.Append(keep ? character : '.');
+        }
+
+        return builder.ToString();
+    }
+
     private static bool IsPublicArtifactMetadataKey(string key)
     {
         var normalized = key.Replace("_", string.Empty, StringComparison.Ordinal)
@@ -17514,7 +18932,7 @@ details[open]>summary:before{content:'–'}
         // label and the indexed download link, but never inline raw payload.
         if (artifact.Kind is ArtifactKind.DriverEventsJsonLines or ArtifactKind.ArtifactManifest or ArtifactKind.GuestEventsJson)
         {
-            return $"完整原始内容已隐藏；请通过证据文件链接打开 {ArtifactDisplayName(artifact)}。";
+            return "Full raw content hidden; use the evidence file link to open this artifact.";
         }
 
         if (string.IsNullOrWhiteSpace(artifact.FullPath) || !File.Exists(artifact.FullPath))
@@ -17532,6 +18950,16 @@ details[open]>summary:before{content:'–'}
             if (read > ArtifactPreviewCharacterLimit || stream.Position < stream.Length)
             {
                 preview += $"{Environment.NewLine}... truncated after {ArtifactPreviewCharacterLimit} characters ...";
+            }
+
+            // Binary artifacts (packet captures, dumps) decoded as UTF-8 leak
+            // arbitrary code points, including CJK byte sequences. Keep the
+            // printable ASCII shape so the preview is readable and the English
+            // document carries no accidental CJK; the original bytes remain
+            // available through the artifact link.
+            if (LooksBinaryPreview(preview))
+            {
+                preview = ToPrintableAsciiPreview(preview);
             }
 
             return preview;
@@ -17673,6 +19101,14 @@ details[open]>summary:before{content:'–'}
       sample: explorer.querySelector('[data-event-sample]')
     };
     function explorerValue(control) { return control ? (control.value || 'all').toLowerCase() : 'all'; }
+    // Severity filtering means "selected level and above": picking Medium
+    // keeps Medium, High, and Critical rows. Rank order mirrors the renderer
+    // sort (lower rank = more severe).
+    function explorerSeverityRank(value) {
+      var order = ['critical', 'high', 'medium', 'low', 'info'];
+      var index = order.indexOf(value);
+      return index < 0 ? order.length : index;
+    }
     function applyExplorerFilters() {
       var query = explorerSearch ? (explorerSearch.value || '').toLowerCase().trim() : '';
       var hasFilter = !!query || Object.keys(explorerFilters).some(function (key) {
@@ -17685,7 +19121,7 @@ details[open]>summary:before{content:'–'}
           (explorerValue(explorerFilters.source) === 'all' || explorerValue(explorerFilters.source) === (row.getAttribute('data-source') || '').toLowerCase()) &&
           (explorerValue(explorerFilters.family) === 'all' || explorerValue(explorerFilters.family) === (row.getAttribute('data-family') || '').toLowerCase()) &&
           (explorerValue(explorerFilters.stage) === 'all' || explorerValue(explorerFilters.stage) === (row.getAttribute('data-stage') || '').toLowerCase()) &&
-          (explorerValue(explorerFilters.severity) === 'all' || explorerValue(explorerFilters.severity) === (row.getAttribute('data-severity') || '').toLowerCase()) &&
+          (explorerValue(explorerFilters.severity) === 'all' || explorerSeverityRank((row.getAttribute('data-severity') || '').toLowerCase()) <= explorerSeverityRank(explorerValue(explorerFilters.severity))) &&
           (explorerValue(explorerFilters.disposition) === 'all' || explorerValue(explorerFilters.disposition) === (row.getAttribute('data-event-disposition') || '').toLowerCase()) &&
           (explorerValue(explorerFilters.sample) === 'all' || explorerValue(explorerFilters.sample) === (row.getAttribute('data-sample') || '').toLowerCase());
         var overflow = row.getAttribute('data-event-overflow') === 'true';

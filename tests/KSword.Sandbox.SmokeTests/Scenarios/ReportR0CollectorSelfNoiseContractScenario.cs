@@ -134,13 +134,15 @@ internal sealed class ReportR0CollectorSelfNoiseContractScenario : ISmokeTestSce
         RequireContains(quickNav, "<a class=\"quick-link\" href=\"#network\"><strong>Network behavior</strong><small>0</small></a>", "Quick network count should exclude collector self-noise.");
 
         var riskSection = ExtractSection(englishHtml, "risk");
-        RequireMetricRow(riskSection, "File events", "1");
-        RequireMetricRow(riskSection, "Network events", "0");
-        RequireMetricRow(riskSection, "Registry events", "0");
+        // Raw / attributed / excluded keeps the collector row visible as raw
+        // evidence while proving it is excluded from the sample story.
+        RequireMetricRow(riskSection, "File events (raw / attributed / excluded)", "2 / 1 / 1");
+        RequireMetricRow(riskSection, "Network events (raw / attributed / excluded)", "1 / 0 / 1");
+        RequireMetricRow(riskSection, "Registry events (raw / attributed / excluded)", "0 / 0 / 0");
 
         var dynamicSection = ExtractSection(englishHtml, "dynamic");
-        RequireMetric(dynamicSection, "File events", "1", "risk-medium");
-        RequireMetric(dynamicSection, "Network events", "0", "risk-medium");
+        RequireMetric(dynamicSection, "File events (raw / attributed / excluded)", "2 / 1 / 1", "risk-medium");
+        RequireMetric(dynamicSection, "Network events (raw / attributed / excluded)", "1 / 0 / 1", "risk-medium");
 
         var fileSection = ExtractSection(englishHtml, "files");
         RequireContains(fileSection, @"C:\Users\Public\sample-drop.bin", "File behavior should retain the real sample driver row.");
