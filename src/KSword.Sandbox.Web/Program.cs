@@ -96,7 +96,11 @@ app.MapGet("/api/setup/status", (SandboxConfig currentConfig, BackendProfileStor
 {
     configPath = profiles.ConfigPath,
     configExists = File.Exists(profiles.ConfigPath),
-    provider = currentConfig.Virtualization.Provider.ToString(),
+    // On first run the setup page preselects VMware (the primary supported
+    // path). Report that same effective selection here instead of the template
+    // file's backward-compatible HyperV default, so /api/setup/status does not
+    // contradict what the operator sees in the wizard.
+    provider = firstRunNeedsSetup ? "VMware" : currentConfig.Virtualization.Provider.ToString(),
     vmware = new
     {
         vmName = currentConfig.VMware.VmName,

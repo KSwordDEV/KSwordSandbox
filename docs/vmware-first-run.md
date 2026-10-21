@@ -2,12 +2,17 @@
 
 本文把工作拆成**来宾层**和**宿主层**。先完成来宾层，再在主机 WebUI 保存配置；这样空白 Windows 10 VM 能按步骤产出第一份报告。全文以 VMware Workstation Pro（`vmrun.exe`、`vmType=ws`）为例。
 
+> **这是当前发行版优先支持、且有端到端 Live 验收记录的路径。** 示例配置中的
+> `virtualization.provider = HyperV` 只是旧 profile 的兼容默认值；首次使用请在
+> WebUI 的“选择后端”中选 **VMware Workstation Pro**。Hyper-V/QEMU 路径需要你自己
+> 准备对应环境并按同等标准验收。
+
 ## 交付给用户的最短步骤 / Minimum handoff
 
 1. 关机状态把 VM 网卡设为 **NAT**；可以在 VMX 中确认 `ethernet0.connectionType = "nat"`。命令行只需检查主机网络：`vmrun -T ws listHostNetworks`，看到 `vmnet8` 类型为 `nat` 即可。
 2. 启动 Windows 10，安装 VMware Tools，然后在来宾管理员 PowerShell 执行 `Bootstrap-VMwareGuest.ps1`，设置 `SandboxUser` 和 WinRM HTTPS。
 3. 关机并创建一个 powered-off 快照，名称记为 `Clean`（或把实际名称填进 WebUI）。
-4. 双击 `Start-KSwordSandbox.cmd`，在 `/setup` 填 VMX、快照、`vmrun.exe`、用户名和密码，运行只读预检并保存。
+4. 双击 `Start-KSwordSandbox.cmd`，在 `/setup` 填 VMX、快照、`vmrun.exe`、用户名和密码，运行只读预检并保存。`vmrun.exe` 默认不在 PATH 中；要么填完整路径（例如 `C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe`），要么先把 Workstation 安装目录加入 PATH。预检报 `VMWARE_VMRUN_MISSING` 就是这一步没填对。
 5. 首轮选择 Notepad、MSPaint、Calculator，关闭真实 R0 采集，策略选择“每个样本结束后停止并还原 Clean”，确认三份 HTML 报告后再启用 R0。
 
 本项目不要求用户配置 NAT 端口转发；宿主通过 VMware Tools 获取来宾地址后直接访问 WinRM 5986。只有主机无法直达来宾时，才额外使用 `vmrun setPortForwarding vmnet8 tcp <host-port> <guest-ip> 5986`。
@@ -15,7 +20,7 @@
 ## 0. 先看边界 / Boundaries
 
 - 来宾 VM 必须是可丢弃的 Windows 10，样本执行可能改变系统；不要放个人数据。
-- `E:\Projects\Ksword5.1` 只是外部只读参考。发行包和运行时配置都在 Sandbox 自己的目录/仓库外。
+- 发行包和运行时配置都在 Sandbox 自己的目录/仓库外。
 - **Host readiness 不是 guest connectivity**：宿主可以找到 `vmrun`、VMX、快照并通过 SLAT 检查，但这不代表来宾已开机、WinRM 已监听、凭据正确或 Tools 已报告 IP。两者必须分别通过。
 - 第一轮建议使用 `-NoR0Collector`（或 WebUI 中关闭真实 R0 采集）验证 VMware 开机、传输、任务编排和 HTML 报告链路。真实 R0 需要驱动文件、测试签名/测试模式和隔离环境，不能因为 WinRM 预检通过就宣称可用。
 
@@ -66,7 +71,7 @@ Test-NetConnection <guest-ip> -Port 5986
 
 1. 双击发行包根目录的 `Start-KSwordSandbox.cmd`，浏览器打开本机 WebUI（默认 `http://127.0.0.1:18080`）。
 2. 首次设置选择 **VMware Workstation**，填写：`vmrun.exe` 路径、VMX 路径、VM 显示名、`Clean` 快照名、来宾用户名、WinRM HTTPS 端口；通信模式选 **VMwareTools**，证书检查按上文选择。宿主密码只放进 `KSWORDBOX_GUEST_PASSWORD` 或页面支持的本地 secret 入口，不提交到 Git。
-3. 先点击**只读预检**，确认每一层：`vmrun`、VMX、快照、Tools 地址发现、来宾 TCP 5986、WinRM HTTPS 登录、工作目录和 staged payload。预检不能启动、关机、还原或修改 VM。
+3. 先点击**只读预检**，确认宿主侧的 `vmrun`、VMX、快照、主机加速、通信配置和 staged payload 路径。预检不会启动 VM、通过 VMware Tools 查询运行中来宾地址，也不会尝试 TCP 5986 或 WinRM 登录；这些来宾连通性检查会在 Live 启动阶段再次验证。预检不能关机、还原或修改 VM。
 4. 修复所有红项后保存配置；重新启动 WebUI 让运行时配置生效。保存后再次预检，确认使用的 VMX 和快照确实是可丢弃基线。
 
 ## 3. 三样本 Live 验收 / Three-sample live acceptance

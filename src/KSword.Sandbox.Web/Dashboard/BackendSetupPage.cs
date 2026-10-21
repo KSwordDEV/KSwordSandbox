@@ -28,6 +28,12 @@ internal static class BackendSetupPage
         var guestUserName = config.Guest.UserName;
         var guestWorkingDirectory = config.Guest.WorkingDirectory;
         var qemuGuest = qemu.GuestRemoting;
+        // First-run must not preselect real R0: the sample config enables the
+        // driver but has no host .sys, so Real would immediately fail the
+        // readiness gate. User-mode keeps the first sample path working.
+        var collectorMode = preferVmware && string.IsNullOrWhiteSpace(config.Driver.HostDriverPath)
+            ? "UserMode"
+            : (!config.Driver.Enabled ? "UserMode" : config.Driver.UseMockCollector ? "Mock" : "Real");
 
         return $$"""
         <!doctype html>
@@ -92,7 +98,7 @@ internal static class BackendSetupPage
             <div class="topline">
               <div>
                 <h1 data-zh="KSword Sandbox · 后端设置" data-en="KSword Sandbox · Backend setup">KSword Sandbox · 后端设置</h1>
-                <p class="subtle" data-zh="首次启动时完成主机与 Windows 10 VMware 虚拟机的连接。保存后即可进入样本选择；所有检查都先以只读方式运行。" data-en="Connect the host to a Windows 10 VMware guest during first launch. Save when ready, then continue to sample selection; checks are read-only until you save.">首次启动时完成主机与 Windows 10 VMware 虚拟机的连接。保存后即可进入样本选择；所有检查都先以只读方式运行。</p>
+                <p class="subtle" data-zh="首次启动时完成主机与 Windows 10 来宾虚拟机的连接。保存后请重新启动 WebUI，再进入样本选择；所有检查都先以只读方式运行。" data-en="Connect the host to a Windows 10 guest during first launch. Restart the WebUI after saving, then continue to sample selection; checks are read-only until you save.">首次启动时完成主机与 Windows 10 来宾虚拟机的连接。保存后请重新启动 WebUI，再进入样本选择；所有检查都先以只读方式运行。</p>
               </div>
               <button class="lang secondary" type="button" onclick="toggleLanguage()" data-zh="切换到 English" data-en="切换到中文">切换到 English</button>
             </div>
@@ -108,11 +114,11 @@ internal static class BackendSetupPage
 
             <section>
               <h2 data-zh="开始前：准备一台可丢弃的 Windows 10" data-en="Before you start: prepare a disposable Windows 10 guest">开始前：准备一台可丢弃的 Windows 10</h2>
-              <p class="subtle" data-zh="向导不会替你创建虚拟机、安装 VMware Tools 或配置 WinRM。按下面顺序准备一次，之后每个样本都会从干净快照启动并在结束时清理。" data-en="The wizard does not create the VM, install VMware Tools, or configure WinRM for you. Complete this checklist once; each sample then starts from the clean snapshot and is cleaned up afterwards.">向导不会替你创建虚拟机、安装 VMware Tools 或配置 WinRM。按下面顺序准备一次，之后每个样本都会从干净快照启动并在结束时清理。</p>
+              <p class="subtle" data-zh="向导不会替你创建虚拟机、安装来宾工具或配置来宾通信。按下面顺序准备一次，之后每个样本都会从干净基线启动并在结束时清理；VMware 完整清单见发行包 docs/vmware-first-run.md。" data-en="The wizard does not create the VM, install guest tools, or configure guest communication for you. Complete this checklist once; each sample then starts from the clean baseline and is cleaned up afterwards. See docs/vmware-first-run.md in the package for the full VMware checklist.">向导不会替你创建虚拟机、安装来宾工具或配置来宾通信。按下面顺序准备一次，之后每个样本都会从干净基线启动并在结束时清理；VMware 完整清单见发行包 docs/vmware-first-run.md。</p>
               <div class="checklist" role="list">
-                <div class="check-item" role="listitem"><span class="mark">1</span><div><strong data-zh="创建 Windows 10 x64 VM" data-en="Create a Windows 10 x64 VM">创建 Windows 10 x64 VM</strong><span data-zh="使用 NAT 或确保主机可访问来宾；不要放个人数据。" data-en="Use NAT or make sure the host can reach the guest; keep personal data out.">使用 NAT 或确保主机可访问来宾；不要放个人数据。</span></div></div>
-                <div class="check-item" role="listitem"><span class="mark">2</span><div><strong data-zh="安装 VMware Tools" data-en="Install VMware Tools">安装 VMware Tools</strong><span data-zh="用于发现来宾 IP 和可靠传输。" data-en="Used for guest IP discovery and reliable transfer.">用于发现来宾 IP 和可靠传输。</span></div></div>
-                <div class="check-item" role="listitem"><span class="mark">3</span><div><strong data-zh="配置 SandboxUser + WinRM HTTPS" data-en="Configure SandboxUser + WinRM HTTPS">配置 SandboxUser + WinRM HTTPS</strong><span data-zh="在 Windows 10 虚拟机内以管理员身份运行发行包脚本；脚本只修改来宾 VM。" data-en="Run the package script as Administrator inside the Windows 10 VM; it changes only the guest VM.">在 Windows 10 虚拟机内以管理员身份运行发行包脚本；脚本只修改来宾 VM。</span><a class="button secondary" href="/api/setup/guest-bootstrap" download="Bootstrap-VMwareGuest.ps1" data-zh="下载来宾初始化脚本" data-en="Download guest bootstrap">下载来宾初始化脚本</a></div></div>
+                <div class="check-item" role="listitem"><span class="mark">1</span><div><strong data-zh="创建 Windows 10 x64 VM" data-en="Create a Windows 10 x64 VM">创建 Windows 10 x64 VM</strong><span data-zh="使用 NAT 或确保主机可访问来宾；不要放个人数据。VMware 路径请安装 VMware Workstation Pro，并在来宾内安装 VMware Tools。" data-en="Use NAT or make sure the host can reach the guest; keep personal data out. For VMware, install Workstation Pro and VMware Tools in the guest.">使用 NAT 或确保主机可访问来宾；不要放个人数据。VMware 路径请安装 VMware Workstation Pro，并在来宾内安装 VMware Tools。</span></div></div>
+                <div class="check-item" role="listitem"><span class="mark">2</span><div><strong data-zh="准备来宾通信方式" data-en="Prepare guest communication">准备来宾通信方式</strong><span data-zh="VMware 需在来宾内安装并运行 VMware Tools 以自动发现地址；Hyper-V 使用 PowerShell Direct；QEMU 使用 provider NAT 或固定地址。" data-en="VMware needs VMware Tools running in the guest for address discovery; Hyper-V uses PowerShell Direct; QEMU uses provider NAT or a configured address.">VMware 需在来宾内安装并运行 VMware Tools 以自动发现地址；Hyper-V 使用 PowerShell Direct；QEMU 使用 provider NAT 或固定地址。</span></div></div>
+                <div class="check-item" role="listitem"><span class="mark">3</span><div><strong data-zh="配置 SandboxUser 与来宾通信" data-en="Configure SandboxUser and guest communication">配置 SandboxUser 与来宾通信</strong><span data-zh="VMware/QEMU 来宾使用 WinRM HTTPS；Hyper-V 不需要 WinRM。需要时在 Windows 10 来宾内以管理员身份运行初始化脚本；脚本只修改来宾 VM。" data-en="VMware/QEMU guests use WinRM HTTPS; Hyper-V does not need WinRM. When needed, run the bootstrap script as Administrator inside the Windows 10 guest; it changes only that guest.">VMware/QEMU 来宾使用 WinRM HTTPS；Hyper-V 不需要 WinRM。需要时在 Windows 10 来宾内以管理员身份运行初始化脚本；脚本只修改来宾 VM。</span><a class="button secondary" href="/api/setup/guest-bootstrap" download="Bootstrap-VMwareGuest.ps1" data-zh="下载来宾初始化脚本（VMware/QEMU）" data-en="Download guest bootstrap (VMware/QEMU)">下载来宾初始化脚本（VMware/QEMU）</a></div></div>
                 <div class="check-item" role="listitem"><span class="mark">4</span><div><strong data-zh="关机后创建 Clean 快照" data-en="Power off and create a Clean snapshot">关机后创建 Clean 快照</strong><span data-zh="快照必须是可回滚的干净基线，名称可在下方修改。" data-en="The snapshot must be a disposable clean baseline; its name can be changed below.">快照必须是可回滚的干净基线，名称可在下方修改。</span></div></div>
               </div>
             </section>
@@ -120,9 +126,9 @@ internal static class BackendSetupPage
             <section>
               <h2 data-zh="1. 选择虚拟化后端" data-en="1. Choose a virtualization backend">1. 选择虚拟化后端</h2>
               <div class="choice-row">
-                <label class="choice"><input type="radio" name="provider" value="VMware"{{(selectedProvider == VirtualizationProvider.VMware ? " checked" : "")}}>VMware Workstation Pro<div class="hint" data-zh="推荐：自动开机、传样本、采集、还原快照并关机。" data-en="Recommended: boot, transfer, collect, restore snapshot, and shut down automatically.">推荐：自动开机、传样本、采集、还原快照并关机。</div></label>
-                <label class="choice"><input type="radio" name="provider" value="HyperV"{{(selectedProvider == VirtualizationProvider.HyperV ? " checked" : "")}}>Hyper-V<div class="hint" data-zh="保留已有 Hyper-V 配置兼容性。" data-en="Keep compatibility with existing Hyper-V configurations.">保留已有 Hyper-V 配置兼容性。</div></label>
-                <label class="choice"><input type="radio" name="provider" value="Qemu"{{(selectedProvider == VirtualizationProvider.Qemu ? " checked" : "")}}>QEMU<div class="hint" data-zh="用于已有 QEMU 工作流。" data-en="For existing QEMU workflows.">用于已有 QEMU 工作流。</div></label>
+                <label class="choice"><input type="radio" name="provider" value="VMware"{{(selectedProvider == VirtualizationProvider.VMware ? " checked" : "")}}>VMware Workstation Pro<div class="hint" data-zh="推荐（当前优先支持）：首次使用请选此项；自动开机、传样本、采集、还原快照并关机。" data-en="Recommended (primary supported path): choose this for first use; boots, transfers, collects, restores the snapshot, and shuts down automatically.">推荐（当前优先支持）：首次使用请选此项；自动开机、传样本、采集、还原快照并关机。</div></label>
+                <label class="choice"><input type="radio" name="provider" value="HyperV"{{(selectedProvider == VirtualizationProvider.HyperV ? " checked" : "")}}>Hyper-V<div class="hint" data-zh="仅用于已有 Hyper-V 环境；首次使用不要选此项。" data-en="Only for an existing Hyper-V environment; do not choose this for first use.">仅用于已有 Hyper-V 环境；首次使用不要选此项。</div></label>
+                <label class="choice"><input type="radio" name="provider" value="Qemu"{{(selectedProvider == VirtualizationProvider.Qemu ? " checked" : "")}}>QEMU<div class="hint" data-zh="仅用于已有 QEMU 环境；首次使用不要选此项。" data-en="Only for an existing QEMU environment; do not choose this for first use.">仅用于已有 QEMU 环境；首次使用不要选此项。</div></label>
               </div>
             </section>
 
@@ -131,7 +137,7 @@ internal static class BackendSetupPage
               <div class="grid">
                 <div><label for="vmxPath" data-zh="虚拟机 VMX 路径" data-en="VMX path">虚拟机 VMX 路径</label><input id="vmxPath" name="vmxPath" value="{{Attr(vmxPath)}}" placeholder="E:\\VMs\\Windows10\\Windows 10 x64.vmx"><p class="hint" data-zh="发行包可以使用浏览器选择；本机路径不会上传。" data-en="The distribution can use a file picker; this local path is never uploaded.">发行包可以使用浏览器选择；本机路径不会上传。</p></div>
                 <div><label for="snapshot" data-zh="干净快照名称" data-en="Clean snapshot">干净快照名称</label><input id="snapshot" name="snapshot" value="{{Attr(snapshot)}}" placeholder="Clean"></div>
-                <div><label for="vmrun" data-zh="vmrun.exe 路径" data-en="vmrun.exe path">vmrun.exe 路径</label><input id="vmrun" name="vmrun" value="{{Attr(vmrun)}}" placeholder="vmrun.exe"></div>
+                <div><label for="vmrun" data-zh="vmrun.exe 路径（Workstation 安装目录）" data-en="vmrun.exe path (Workstation install folder)">vmrun.exe 路径（Workstation 安装目录）</label><input id="vmrun" name="vmrun" value="{{Attr(vmrun)}}" placeholder="C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe"></div>
                 <div><label for="vmName" data-zh="虚拟机显示名称" data-en="VM display name">虚拟机显示名称</label><input id="vmName" name="vmName" value="{{Attr(vmware.VmName)}}"></div>
               </div>
             </section>
@@ -139,12 +145,12 @@ internal static class BackendSetupPage
               <h2 data-zh="来宾通信与密码" data-en="Guest transport and password">来宾通信与密码</h2>
               <p class="hint" data-zh="Hyper-V 使用 PowerShell Direct，无需 WinRM。VMware / QEMU 使用 HTTPS；QEMU 自动 NAT 的端口是宿主转发端口，默认 55986。" data-en="Hyper-V uses PowerShell Direct and does not need WinRM. VMware / QEMU use HTTPS; QEMU user NAT uses a host forwarding port, default 55986.">Hyper-V 使用 PowerShell Direct，无需 WinRM。VMware / QEMU 使用 HTTPS；QEMU 自动 NAT 的端口是宿主转发端口，默认 55986。</p>
               <div class="checks">
-                <label><input id="tools" type="checkbox" checked disabled>VMware Tools<div class="hint" data-zh="必需：向导使用 VMware Tools 发现来宾 IP；请在虚拟机内安装并保持运行。" data-en="Required: the wizard uses VMware Tools for guest IP discovery; install it in the VM and keep it running.">必需：向导使用 VMware Tools 发现来宾 IP；请在虚拟机内安装并保持运行。</div></label>
+                <label><input id="tools" type="checkbox" checked disabled>VMware Tools（仅 VMware）<div class="hint" data-zh="仅 VMware 的 VMwareTools 地址模式需要；Hyper-V 使用 PowerShell Direct，QEMU 使用 QemuUserNat 或固定地址。" data-en="Required only for VMwareTools address mode; Hyper-V uses PowerShell Direct and QEMU uses QemuUserNat or a configured address.">仅 VMware 的 VMwareTools 地址模式需要；Hyper-V 使用 PowerShell Direct，QEMU 使用 QemuUserNat 或固定地址。</div></label>
                 <label><input id="ssl" type="checkbox"{{(guest.UseSsl ? " checked" : "")}}>WinRM HTTPS<div class="hint" data-zh="默认端口 5986；可跳过自签名证书校验。" data-en="Port 5986 by default; self-signed certificate checks may be skipped.">默认端口 5986；可跳过自签名证书校验。</div></label>
                 <label><input id="skipCert" type="checkbox"{{(guest.SkipCertificateChecks ? " checked" : "")}}>跳过证书校验 / Skip certificate checks</label>
               </div>
               <div class="grid">
-                <div><label for="guestAddress" data-zh="来宾地址（可留空让 VMware Tools 发现）" data-en="Guest address (leave blank for VMware Tools)">来宾地址（可留空让 VMware Tools 发现）</label><input id="guestAddress" value="{{Attr(address)}}" placeholder="192.168.56.101"></div>
+                <div><label for="guestAddress" data-zh="来宾地址（自动发现模式可留空）" data-en="Guest address (leave blank for automatic discovery)">来宾地址（自动发现模式可留空）</label><input id="guestAddress" value="{{Attr(address)}}" placeholder="192.168.56.101"></div>
                 <div><label for="guestPort" data-zh="WinRM 端口" data-en="WinRM port">WinRM 端口</label><input id="guestPort" type="number" min="1" max="65535" value="{{port}}"></div>
               </div>
               <div class="grid">
@@ -161,7 +167,7 @@ internal static class BackendSetupPage
                 <div><label for="guestWorkingDirectory" data-zh="来宾工作目录" data-en="Guest working directory">来宾工作目录</label><input id="guestWorkingDirectory" value="{{Attr(guestWorkingDirectory)}}" placeholder="C:\\KSwordSandbox"><p class="hint" data-zh="使用绝对 Windows 路径；分析任务会在其中暂存 payload 和输出。" data-en="Use an absolute Windows path; analysis stages payload and output there.">使用绝对 Windows 路径；分析任务会在其中暂存 payload 和输出。</p></div>
               </div>
               <label for="collectorMode" data-zh="采集模式" data-en="Collection mode">采集模式</label>
-              <select id="collectorMode"><option value="UserMode"{{(!config.Driver.Enabled ? " selected" : "")}}>用户态行为 / User-mode behavior</option><option value="Mock"{{(config.Driver.Enabled && config.Driver.UseMockCollector ? " selected" : "")}}>模拟 R0 / Mock R0</option><option value="Real"{{(config.Driver.Enabled && !config.Driver.UseMockCollector ? " selected" : "")}}>真实 R0 / Real R0</option></select>
+              <select id="collectorMode"><option value="UserMode"{{(collectorMode == "UserMode" ? " selected" : "")}}>用户态行为 / User-mode behavior</option><option value="Mock"{{(collectorMode == "Mock" ? " selected" : "")}}>模拟 R0 / Mock R0</option><option value="Real"{{(collectorMode == "Real" ? " selected" : "")}}>真实 R0 / Real R0</option></select>
               <p class="hint" data-zh="初次配置可选用户态行为。Mock 仅模拟驱动事件；真实 R0 要求已签名驱动、来宾证书信任与测试签名模式。" data-en="Choose user-mode behavior for first setup. Mock simulates driver events; real R0 needs a signed driver, guest certificate trust and test signing.">初次配置可选用户态行为。Mock 仅模拟驱动事件；真实 R0 要求已签名驱动、来宾证书信任与测试签名模式。</p>
               <label for="hostDriverPath" data-zh="真实 R0 驱动宿主路径" data-en="Host path to real R0 driver">真实 R0 驱动宿主路径</label><input id="hostDriverPath" value="{{Attr(config.Driver.HostDriverPath)}}" placeholder="D:\\Drivers\\KSword.Sandbox.Driver.sys">
             </section>
@@ -193,7 +199,7 @@ internal static class BackendSetupPage
 
             <section>
               <h2 data-zh="3. 只读预检" data-en="3. Read-only preflight">3. 只读预检</h2>
-               <p data-zh="预检只读取 vmrun、VMX、快照、VMware Tools 元数据和通信配置，不启动或修改虚拟机；真实 WinRM 登录会在 Live 前再次验证。" data-en="Preflight reads vmrun, VMX, snapshot, VMware Tools metadata, and transport configuration; it does not start or modify the VM. Live verifies the actual WinRM login again.">预检只读取 vmrun、VMX、快照、VMware Tools 元数据和通信配置，不启动或修改虚拟机；真实 WinRM 登录会在 Live 前再次验证。</p>
+               <p data-zh="预检只读取所选后端的管理工具、虚拟机/磁盘、干净基线和通信配置，不启动或修改虚拟机；真实来宾登录会在 Live 前再次验证。" data-en="Preflight reads the selected backend tool, VM or disk, clean baseline, and transport configuration; it does not start or modify the VM. Live verifies the actual guest login again.">预检只读取所选后端的管理工具、虚拟机/磁盘、干净基线和通信配置，不启动或修改虚拟机；真实来宾登录会在 Live 前再次验证。</p>
               <div id="preflight" class="status" data-zh="尚未检查。" data-en="Not checked yet.">尚未检查。</div>
               <div id="preflightChecks" class="checklist hidden" aria-live="polite"></div>
               <div class="actions"><button type="button" class="secondary" onclick="runPreflight()" data-zh="运行只读预检" data-en="Run read-only preflight">运行只读预检</button><button type="button" class="secondary" onclick="loadProfile()" data-zh="重新读取配置" data-en="Reload profile">重新读取配置</button></div>
@@ -204,7 +210,7 @@ internal static class BackendSetupPage
               <h2 data-zh="4. 保存配置并进入样本选择" data-en="4. Save and continue to sample selection">4. 保存配置并进入样本选择</h2>
               <p data-zh="保存会调用本机 setup profile 接口。配置文件路径仅供本机 Web Host 使用；不会推送远程仓库。保存后请重新启动 WebUI，让新配置成为运行时配置。" data-en="Save calls the local setup profile endpoint. The config path is used only by this Web Host; nothing is pushed to a remote repository. Restart the WebUI after saving so the new profile becomes active.">保存会调用本机 setup profile 接口。配置文件路径仅供本机 Web Host 使用；不会推送远程仓库。保存后请重新启动 WebUI，让新配置成为运行时配置。</p>
               <div id="saveStatus" class="status" data-zh="请先完成预检。" data-en="Run preflight first.">请先完成预检。</div>
-              <div class="actions"><button type="button" onclick="saveProfile()" data-zh="保存后端配置" data-en="Save backend configuration">保存后端配置</button><a class="button secondary" href="/" data-zh="进入样本选择" data-en="Continue to sample selection">进入样本选择</a></div>
+              <div class="actions"><button type="button" onclick="saveProfile()" data-zh="保存后端配置" data-en="Save backend configuration">保存后端配置</button><a class="button secondary" href="/" data-zh="重启后进入样本选择" data-en="Restart, then continue">重启后进入样本选择</a></div>
               <p class="footer-note" data-zh="当前配置文件：{{Attr(path)}}" data-en="Current config file: {{Attr(path)}}">当前配置文件：{{Attr(path)}}</p>
             </section>
           </main>

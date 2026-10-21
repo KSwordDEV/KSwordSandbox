@@ -2608,6 +2608,7 @@ function Select-QemuDiskMetadataAndSnapshotInteractive {
 function Select-VirtualizationProviderInteractive {
     Write-Host ''
     Write-Host "虚拟化后端 / Virtualization provider (current: $VirtualizationProvider):"
+    Write-Host '首次使用推荐 2) VMware Workstation Pro（当前优先支持）；1) Hyper-V 只用于已有 Hyper-V 环境。'
     Write-Host '  1) Hyper-V'
     Write-Host '  2) VMware Workstation Pro'
     Write-Host '  3) QEMU'

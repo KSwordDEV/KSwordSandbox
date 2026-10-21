@@ -327,9 +327,9 @@ option:
 
 ## KSword5.1 复用边界
 
-Prefer reusing protocol definitions and driver-client boundaries from
-`D:\Projects\Ksword5.1\shared\driver`, `KswordARKDriver`, and `ArkDriverClient`
-as source references. Do not copy the full source tree, generated binaries,
+Prefer reusing protocol definitions and driver-client boundaries from an
+external read-only reference checkout (`shared\driver`, `KswordARKDriver`, and
+`ArkDriverClient`) as source references. Do not copy the full source tree, generated binaries,
 certificates, private keys, signing tools, or `APIMonitor_x64` into this
 repository. The legacy CSignTool handoff remains frozen for unattended
 KSwordSandbox builds until it is explicitly re-enabled by the project owner.

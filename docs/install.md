@@ -4,7 +4,9 @@
 JSON key（如 `RecommendedActions`、`SecretValuePrinted`）保持英文，不翻译。
 
 当前安装向导和 `Status`/`CheckEnvironment` 支持 `HyperV`、`VMware`、`Qemu`；通用配置命令是
-`-UpdateVirtualizationConfig`。本页后半的 Hyper-V feature、VMConnect、PowerShell Direct 和 guest
+`-UpdateVirtualizationConfig`。**首次使用请在向导或 WebUI 中选择 `VMware`（Workstation Pro）**：
+示例配置模板保留 `HyperV` 只是为了兼容旧 profile，本机没有已建好的 Hyper-V 黄金 VM 时选它无法完成 Live。
+本页后半的 Hyper-V feature、VMConnect、PowerShell Direct 和 guest
 transport 细节仍包含 Hyper-V 专项维护说明；三种 provider 共用的 guest test-signing 入口见本页及
 [`driver-signing.md`](driver-signing.md)，VMware/QEMU 参数见 [`vmware-qemu.md`](vmware-qemu.md)。
 

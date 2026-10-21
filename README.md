@@ -46,8 +46,11 @@ JSON/HTML 报告为主线。
 - 自包含 HTML 报告渲染。
 - 仓库策略脚本阻止大文件、二进制、VM 镜像、报告、样本和 secrets 入库。
 
-虚拟化后端由本机配置的 `virtualization.provider` 选择：`HyperV`（默认）、`VMware` 或
-`Qemu`。VMware/QEMU 的 VM 路径、工具路径、WinRM 和 QEMU 设备参数见
+虚拟化后端由本机配置的 `virtualization.provider` 选择：`HyperV`、`VMware` 或
+`Qemu`。配置模板保留 `HyperV` 作为旧 profile 的兼容默认值；**首次使用请在 WebUI
+或安装器中选择 VMware Workstation Pro（`vmType=ws`）**，本仓库当前记录的端到端
+Live 验收证据来自 VMware。Hyper-V/QEMU 路径只在你已有对应环境时选择，并需要自行
+完成同等验收。VMware/QEMU 的 VM 路径、工具路径、WinRM 和 QEMU 设备参数见
 `docs/vmware-qemu.md`；默认 profile 路径必须保留在仓库外的 local config 中，WebUI/API/CLI
 也可把实际 VMware VMX 或 QEMU 基础磁盘作为单次任务覆盖值，且不会写回配置。
 VMware 的完整等价 profile 要求 Workstation Pro 和 `vmware.vmType=ws`；旧 Player profile
@@ -135,8 +138,9 @@ QEMU per-job overlay 不做原地 restore，也不需要上述变更确认；同
 
 ### 路径 C：新 VM/新环境准备路径
 
-先在所选 provider 中准备 Windows guest、guest 账号、对应 guest transport 和 clean baseline，
-再直接运行推荐安装向导；常用设置会在脚本里询问，不需要记推荐参数：
+首次使用推荐 VMware Workstation Pro（`vmType=ws`）；Hyper-V/QEMU 只在你已有对应
+环境时选择。先在所选 provider 中准备 Windows guest、guest 账号、对应 guest transport
+和 clean baseline，再直接运行推荐安装向导；常用设置会在脚本里询问，不需要记推荐参数：
 
 ```powershell
 .\install.ps1
@@ -178,7 +182,8 @@ VirusTotal（VT）key、检查环境、启动 WebUI 和查看状态。无参数�
 逐项询问 runtime root、已有 VM/checkpoint、guest 用户、guest 密码、可选 driver path、
 可选 VT key 和是否启动 WebUI。
 
-配置虚拟化环境时，Hyper-V 交互菜单会只读列出本机 VM 和所选 VM 的 checkpoint/snapshot；VMware 会从
+配置虚拟化环境时，首次使用请在 provider 菜单中选择 VMware Workstation Pro（当前优先
+支持）；Hyper-V/QEMU 只用于已有对应环境。Hyper-V 交互菜单会只读列出本机 VM 和所选 VM 的 checkpoint/snapshot；VMware 会从
 当前 VMX 与 `vmrun list` 返回的运行中 VMX 候选中选择，再用 `listSnapshots` 选择 baseline；
 QEMU 会对输入的基础磁盘执行 `qemu-img info --output=json`，自动识别格式，并在关闭 per-job
 overlay 时列出内部 snapshot。三者都支持编号选择并保存本机配置，查询失败时仍可手动输入。
@@ -421,7 +426,8 @@ Open-source MVP 发布前使用 `docs/release.md` 的发布就绪清单（readin
 
 ## Hyper-V 前提（assumptions）
 
-默认配置期望本机存在 golden VM：
+本节只在显式选择 `HyperV` 时适用；首次使用请先按 `docs/vmware-first-run.md` 走 VMware
+路径。选择 Hyper-V 时，默认配置期望本机存在 golden VM：
 
 - VM 名称：`KSwordSandbox-Win10-Golden`
 - Clean checkpoint：`Clean`
