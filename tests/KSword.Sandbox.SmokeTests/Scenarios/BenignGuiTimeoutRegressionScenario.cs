@@ -159,7 +159,7 @@ internal sealed class BenignGuiTimeoutRegressionScenario : ISmokeTestScenario
                 SectionCount = 1,
                 Sections =
                 [
-                    new PeSectionInfo
+                    new KSword.Sandbox.Abstractions.PeSectionInfo
                     {
                         Name = ".text",
                         VirtualAddress = "0x1000",
