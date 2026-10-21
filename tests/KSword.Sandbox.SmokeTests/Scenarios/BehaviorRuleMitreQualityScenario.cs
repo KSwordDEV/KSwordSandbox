@@ -543,7 +543,10 @@ internal sealed class BehaviorRuleMitreQualityScenario : ISmokeTestScenario
                 Source = "driver",
                 Data =
                 {
-                    ["imagePath"] = @"C:\Users\Public\payload.dll"
+                    ["imagePath"] = @"C:\Users\Public\payload.dll",
+                    ["imageLoadFamily"] = "user-writable-image",
+                    ["injectionCandidate"] = "true",
+                    ["pathTruncated"] = "false"
                 }
             },
             new SandboxEvent

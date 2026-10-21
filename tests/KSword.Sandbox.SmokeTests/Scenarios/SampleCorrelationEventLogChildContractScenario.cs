@@ -126,6 +126,122 @@ internal sealed class SampleCorrelationEventLogChildContractScenario : ISmokeTes
                          remoteThread.Data["behaviorCounted"] == "true",
             "Explicit remote-thread ETW evidence must remain a sample behavior candidate.");
 
+        var malwareTree = SampleCorrelationClassifier.Apply(
+            [
+                new SandboxEvent
+                {
+                    EventType = "process.start",
+                    Source = "guest",
+                    ProcessName = "sample.exe",
+                    ProcessId = 600,
+                    Path = SamplePath,
+                    CommandLine = SamplePath,
+                    Data = new(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["processImagePath"] = SamplePath
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "process.start",
+                    Source = "guest",
+                    ProcessName = "lowcvz.exe",
+                    ProcessId = 700,
+                    ParentProcessId = 600,
+                    Path = @"C:\Users\SandboxUser\AppData\Local\Temp\lowcvz.exe",
+                    CommandLine = @"C:\Users\SandboxUser\AppData\Local\Temp\lowcvz.exe",
+                    Data = new(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["processImagePath"] = @"C:\Users\SandboxUser\AppData\Local\Temp\lowcvz.exe"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "image.load",
+                    Source = "driver",
+                    ProcessName = "sample.exe",
+                    ProcessId = 600,
+                    Path = @"\Device\HarddiskVolume3\Windows\System32\kernel32.dll"
+                },
+                // Truncated driver rows keep only a path fragment, but a
+                // retained System32 hint is still reliable system-module
+                // evidence and must demote like the full path.
+                new SandboxEvent
+                {
+                    EventType = "image.load",
+                    Source = "driver",
+                    ProcessName = "sample.exe",
+                    ProcessId = 600,
+                    Path = @"\3\Windows\System32\msvcrt.dll",
+                    Data = new(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["pathTruncated"] = "true"
+                    }
+                },
+                // Dropped payload main-image self-load from a user-writable
+                // path: real behavior, carried by process-start evidence.
+                new SandboxEvent
+                {
+                    EventType = "image.load",
+                    Source = "driver",
+                    ProcessName = "lowcvz.exe",
+                    ProcessId = 700,
+                    Path = @"\Device\HarddiskVolume3\Users\SandboxUser\AppData\Local\Temp\lowcvz.exe"
+                },
+                // Second-stage dropper image directly under C:\Windows root:
+                // a real anomaly channel that must stay sample-attributed.
+                new SandboxEvent
+                {
+                    EventType = "image.load",
+                    Source = "etwLive",
+                    ProcessName = "lowcvz.exe",
+                    ProcessId = 700,
+                    Path = @"\Device\HarddiskVolume3\Windows\tdtxjtat.exe"
+                },
+                new SandboxEvent
+                {
+                    EventType = "image.load",
+                    Source = "driver",
+                    ProcessName = "lowcvz.exe",
+                    ProcessId = 700,
+                    Path = @"C:\Users\SandboxUser\AppData\Local\Temp\hook.dll",
+                    Data = new(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["imagePath"] = @"C:\Users\SandboxUser\AppData\Local\Temp\hook.dll",
+                        ["imageLoadFamily"] = "user-writable-image",
+                        ["injectionCandidate"] = "true"
+                    }
+                }
+            ],
+            SamplePath);
+
+        var systemModule = malwareTree.Single(evt => evt.EventType == "image.load" && evt.Path?.EndsWith("kernel32.dll", StringComparison.OrdinalIgnoreCase) == true);
+        SmokeAssert.True(systemModule.Data["normalBehaviorBoundary"] == "normal-runtime-module-load" &&
+                         systemModule.Data["behaviorCounted"] == "false" &&
+                         systemModule.Data["sampleCorrelation"] == "confirmed" &&
+                         systemModule.Data["notSampleBehavior"] == "true",
+            "System-directory DLL loads under a malware sample PID must stay confirmed sample evidence but leave behavior counts.");
+
+        var truncatedSystemModule = malwareTree.Single(evt => evt.EventType == "image.load" && evt.Path?.EndsWith("msvcrt.dll", StringComparison.OrdinalIgnoreCase) == true);
+        SmokeAssert.True(truncatedSystemModule.Data["normalBehaviorBoundary"] == "normal-runtime-module-load" &&
+                         truncatedSystemModule.Data["behaviorCounted"] == "false",
+            "Truncated driver image rows that retain a system-directory hint must demote to the runtime module-load baseline.");
+
+        var droppedSelfLoad = malwareTree.Single(evt => evt.EventType == "image.load" && evt.Path?.EndsWith(@"Temp\lowcvz.exe", StringComparison.OrdinalIgnoreCase) == true);
+        SmokeAssert.True(droppedSelfLoad.Data["sampleCorrelationBoundary"] == "sample-attribution-boundary" &&
+                         droppedSelfLoad.Data["behaviorCounted"] == "true",
+            "A dropped user-writable main-image self-load must remain counted sample behavior.");
+
+        var windowsRootImage = malwareTree.Single(evt => evt.EventType == "image.load" && evt.Path?.EndsWith("tdtxjtat.exe", StringComparison.OrdinalIgnoreCase) == true);
+        SmokeAssert.True(windowsRootImage.Data["sampleCorrelationBoundary"] == "sample-attribution-boundary" &&
+                         windowsRootImage.Data["behaviorCounted"] == "true",
+            "A C:\\Windows root image load must remain counted sample behavior; the system baseline never swallows root droppers.");
+
+        var injectedDll = malwareTree.Single(evt => evt.EventType == "image.load" && evt.Path?.EndsWith("hook.dll", StringComparison.OrdinalIgnoreCase) == true);
+        SmokeAssert.True(injectedDll.Data["sampleCorrelationBoundary"] == "sample-attribution-boundary" &&
+                         injectedDll.Data["behaviorCounted"] == "true",
+            "A user-writable injection-candidate DLL load must remain counted sample behavior.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,

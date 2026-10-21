@@ -1482,6 +1482,62 @@ bool ContainsWideInsensitive(std::wstring value, std::wstring fragment) {
     return value.find(fragment) != std::wstring::npos;
 }
 
+// Input: Decoded image path.
+// Processing: Checks the file extension case-insensitively so module-load
+// semantics can distinguish a DLL/module from an EXE main image without
+// touching the filesystem.
+// Return: true when the path ends with the given extension.
+bool EndsWithWideInsensitive(std::wstring value, std::wstring extension) {
+    if (value.empty() || extension.empty()) {
+        return false;
+    }
+
+    std::replace(value.begin(), value.end(), L'/', L'\\');
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](const wchar_t ch) {
+            return static_cast<wchar_t>(std::towlower(static_cast<wint_t>(ch)));
+        });
+    std::transform(
+        extension.begin(),
+        extension.end(),
+        extension.begin(),
+        [](const wchar_t ch) {
+            return static_cast<wchar_t>(std::towlower(static_cast<wint_t>(ch)));
+        });
+
+    return value.size() >= extension.size() &&
+        value.compare(value.size() - extension.size(), extension.size(), extension) == 0;
+}
+
+// Input: Decoded image path plus image event flags.
+// Processing: Decides whether an image load can be treated as an injection
+// candidate. A user-writable EXE image load is the process loading its own
+// main image (self-load), not a DLL injection; a truncated (for example
+// 8.3 short-name) path is not reliable injection evidence. Only a DLL/module
+// image from a user-writable location, or an image mapped into all processes,
+// remains an injection candidate.
+// Return: true only for DLL-style user-writable loads or all-PID mappings.
+bool ImageInjectionCandidate(
+    const std::wstring& imagePath,
+    const bool systemModeImage,
+    const bool mappedToAllPids,
+    const bool pathTruncated,
+    const std::string& imageLoadFamily) {
+    if (systemModeImage || pathTruncated) {
+        return false;
+    }
+
+    if (mappedToAllPids) {
+        return true;
+    }
+
+    return imageLoadFamily == "user-writable-image" &&
+        !EndsWithWideInsensitive(imagePath, L".exe");
+}
+
 // Input: Registry key path decoded from the public payload.
 // Processing: Labels common Windows autorun locations as persistence candidates
 // for report/storytelling evidence without treating them as a final verdict.
@@ -1576,6 +1632,15 @@ std::string ImageLoadFamily(const std::wstring& imagePath, const bool systemMode
     if (ContainsWideInsensitive(imagePath, L"\\windows\\system32\\") ||
         ContainsWideInsensitive(imagePath, L"\\windows\\syswow64\\")) {
         return "windows-system-image";
+    }
+
+    // A module directly under the C:\Windows root (not System32/SysWOW64/
+    // WinSxS) is administrator-writable and a common drop/hijack location,
+    // so it shares the user-writable family label; the injection-candidate
+    // gate above still separates DLL modules from EXE main-image self-loads.
+    if (ContainsWideInsensitive(imagePath, L"\\windows\\") &&
+        !ContainsWideInsensitive(imagePath, L"\\windows\\winsxs\\")) {
+        return "user-writable-image";
     }
 
     return imagePath.empty() ? "unknown" : "other";
@@ -3629,9 +3694,14 @@ bool AddImagePayloadData(
         (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_MAPPED_TO_ALL_PIDS) != 0;
     const std::string imageOperationName = ImageOperationName(imagePayload->Operation);
     const std::string imageLoadFamily = ImageLoadFamily(imagePath, systemModeImage);
-    const bool injectionCandidate =
-        !systemModeImage &&
-        (imageLoadFamily == "user-writable-image" || mappedToAllPids);
+    const bool pathTruncated =
+        (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_TRUNCATED) != 0;
+    const bool injectionCandidate = ImageInjectionCandidate(
+        imagePath,
+        systemModeImage,
+        mappedToAllPids,
+        pathTruncated,
+        imageLoadFamily);
 
     data->AddUtf8("typedPayloadStatus", "parsed");
     data->AddUtf8("semanticFamily", "image");

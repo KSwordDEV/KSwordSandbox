@@ -106,6 +106,9 @@ internal sealed class R0ProcessRegistryImageContractScenario : ISmokeTestScenari
         RequireContains(imageSource, "KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT", "Image path presence should be flagged.");
         RequireContains(abiHeader, "KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD", "Public ABI should define the image payload.");
         RequireContains(collectorSource, "KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD", "Collector should parse image payloads.");
+        RequireContains(collectorSource, "ImageInjectionCandidate", "Collector should gate the injection-candidate flag behind a dedicated semantic check.");
+        RequireContains(collectorSource, "KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_TRUNCATED", "Injection-candidate semantics must exclude truncated (8.3 short-name) image paths.");
+        RequireContains(collectorSource, "EndsWithWideInsensitive(imagePath, L\".exe\")", "A user-writable EXE main-image self-load must not be labelled an injection candidate.");
         RequireContains(producerDoc, "image.load", "Producer doc should name the image JSONL event.");
     }
 

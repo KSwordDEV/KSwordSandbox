@@ -1814,22 +1814,29 @@ public static class SampleCorrelationClassifier
         else if (disposition.Kind is CorrelationKind.Confirmed or CorrelationKind.Probable)
         {
             if (disposition.Kind == CorrelationKind.Confirmed &&
-                disposition.Boundary == "normal-interactive-gui-baseline")
-            {
-                data["evidenceDisposition"] = "retained-not-promoted";
-                data["sampleConclusionPromoted"] = "false";
-                data["sampleConclusionPolicy"] = "normal-interactive-gui-baseline-extra-evidence-required";
-                data["baselineSampleEvidence"] = "true";
-                data["sampleBehaviorCandidate"] = "false";
-                data["behaviorCounted"] = "false";
-                data["nonbehavior"] = "true";
-                data["notSampleBehavior"] = "true";
-                data["sampleBehaviorCandidateReason"] = "normal-interactive-gui-baseline-extra-evidence-required";
-                data["behaviorCountingPolicy"] = "normal-interactive-gui-baseline-retained-not-counted-as-suspicious-behavior";
-                data["normalBehaviorBoundary"] = disposition.Boundary;
-                data["zhBehaviorHint"] = "该事件属于 Notepad 等受信 benign preset 的交互式 GUI 基线活动：保留为样本相关证据，但需要额外文件、注册表、网络、持久化、注入或权限证据才升级为可疑结论。";
-                return;
-            }
+            TextEqualsAny(disposition.Boundary, "normal-interactive-gui-baseline", "normal-runtime-module-load"))
+        {
+            var isGuiBaseline = disposition.Boundary == "normal-interactive-gui-baseline";
+            data["evidenceDisposition"] = "retained-not-promoted";
+            data["sampleConclusionPromoted"] = "false";
+            data["sampleConclusionPolicy"] = isGuiBaseline
+                ? "normal-interactive-gui-baseline-extra-evidence-required"
+                : "normal-runtime-module-load-extra-evidence-required";
+            data["baselineSampleEvidence"] = "true";
+            data["sampleBehaviorCandidate"] = "false";
+            data["behaviorCounted"] = "false";
+            data["nonbehavior"] = "true";
+            data["notSampleBehavior"] = "true";
+            data["sampleBehaviorCandidateReason"] = disposition.Boundary;
+            data["behaviorCountingPolicy"] = isGuiBaseline
+                ? "normal-interactive-gui-baseline-retained-not-counted-as-suspicious-behavior"
+                : "normal-runtime-module-load-retained-not-counted-as-suspicious-behavior";
+            data["normalBehaviorBoundary"] = disposition.Boundary;
+            data["zhBehaviorHint"] = isGuiBaseline
+                ? "该事件属于 Notepad 等受信 benign preset 的交互式 GUI 基线活动：保留为样本相关证据，但需要额外文件、注册表、网络、持久化、注入或权限证据才升级为可疑结论。"
+                : "该事件是系统目录（System32/SysWOW64/WinSxS/Defender 等）的普通运行时模块加载：保留为样本相关证据，但不计入样本恶意行为结论；用户可写路径、注入或远程线程信号仍按样本行为归证。";
+            return;
+        }
 
             // A confirmed/probable disposition is authoritative for the
             // behavior lane. Do not retain stale producer flags here: label,
@@ -1927,7 +1934,60 @@ public static class SampleCorrelationClassifier
             return "normal-interactive-gui-baseline";
         }
 
+        if (IsNormalRuntimeModuleLoad(evt, data, context))
+        {
+            return "normal-runtime-module-load";
+        }
+
         return "sample-attribution-boundary";
+    }
+
+    // System-directory module loads were only demoted for trusted interactive
+    // GUI presets (Notepad et al.) while every sample process accumulated the
+    // same System32/SysWOW64/WinSxS DLL rows as counted sample behavior. The
+    // audit of live Emotet/Nivdort runs measured ~280 such rows per report,
+    // so the system-path module-load demotion now applies to every process.
+    // Real anomaly channels stay sample-attributed: a user-writable image
+    // (including the dropped Temp/AppData main image), an injection or
+    // remote-thread marker, a truncated path, or a non-system directory.
+    private static bool IsNormalRuntimeModuleLoad(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context)
+    {
+        if (!TextEqualsAny(evt.EventType, "image.load", "image.unload"))
+        {
+            return false;
+        }
+
+        if (HasRemoteThreadSignal(data) ||
+            IsTruthy(Value(data, "userWritableImageCandidate")) ||
+            IsTruthy(Value(data, "injectionCandidate")))
+        {
+            return false;
+        }
+
+        var imagePath = FirstNonEmpty(
+            evt.Path,
+            Value(data, "fileName"),
+            Value(data, "path"),
+            Value(data, "imagePath"));
+        if (string.IsNullOrWhiteSpace(imagePath) ||
+            LooksUserWritableOrPersistenceTarget(imagePath, context))
+        {
+            return false;
+        }
+
+        // Only pure system directories (System32/SysWOW64/WinSxS/servicing/
+        // system resources/Prefetch/Defender) demote to the runtime
+        // module-load baseline. The LooksSystemOnlyPath device-volume
+        // fallback also accepts C:\Windows root and Program Files images,
+        // which are real anomaly channels (root droppers, non-system
+        // binaries) and must stay sample-attributed. A truncated path that
+        // still carries a system-directory hint remains reliable evidence
+        // of an ordinary system module load.
+        var normalized = NormalizeSlashes(imagePath).ToLowerInvariant();
+        return SystemPathHints.Any(normalized.Contains);
     }
 
     private static bool IsNormalInteractiveGuiBaselineEvent(

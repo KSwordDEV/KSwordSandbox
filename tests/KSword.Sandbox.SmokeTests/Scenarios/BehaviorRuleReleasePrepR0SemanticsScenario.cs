@@ -110,6 +110,7 @@ internal sealed class BehaviorRuleReleasePrepR0SemanticsScenario : ISmokeTestSce
         }
 
         AssertScheduledTaskSwitchBoundary(engine);
+        AssertUserWritableImageRuleBoundary(engine);
 
         return Task.FromResult(new SmokeTestResult
         {
@@ -135,6 +136,167 @@ internal sealed class BehaviorRuleReleasePrepR0SemanticsScenario : ISmokeTestSce
         SmokeAssert.True(
             localTaskFindings.All(finding => !string.Equals(finding.RuleId, "lateral-remote-schtasks-create-or-run", StringComparison.OrdinalIgnoreCase)),
             "A local schtasks /SC switch must not satisfy the remote /S scheduled-task rule.");
+    }
+
+    // The user-writable image-load rules must not relabel a dropped EXE's
+    // own main-image self-load as DLL injection: process-start rules already
+    // carry that execution evidence, and truncated (8.3 short-name) paths
+    // are unreliable injection indicators. Both rules consume the same
+    // collector-asserted semantic fields (imageLoadFamily + injectionCandidate)
+    // plus identical truncation/EXE exclusions, so they must agree on the
+    // same evidence — including rows captured before the collector gate
+    // existed (stale injectionCandidate=true baked in). User-writable DLLs,
+    // C:\Windows root-level modules, and collector-asserted injection
+    // candidates must still fire.
+    private static void AssertUserWritableImageRuleBoundary(RuleEngine engine)
+    {
+        var selfLoadFindings = engine.Classify(
+        [
+            new SandboxEvent
+            {
+                EventType = "image.load",
+                Source = "driver",
+                ProcessName = "lowcvz.exe",
+                ProcessId = 9612,
+                Path = @"\Device\HarddiskVolume3\Users\SandboxUser\AppData\Local\Temp\lowcvz.exe",
+                Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["imagePath"] = @"\Device\HarddiskVolume3\Users\SandboxUser\AppData\Local\Temp\lowcvz.exe",
+                    ["path"] = @"\Device\HarddiskVolume3\Users\SandboxUser\AppData\Local\Temp\lowcvz.exe",
+                    ["imageLoadFamily"] = "user-writable-image",
+                    ["injectionCandidate"] = "false",
+                    ["pathTruncated"] = "false"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "image.load",
+                Source = "driver",
+                ProcessName = "lowcvz.exe",
+                ProcessId = 9612,
+                Path = @"\Local\Temp\lowcvz.exe",
+                Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["imagePath"] = @"\Local\Temp\lowcvz.exe",
+                    ["imageLoadFamily"] = "user-writable-image",
+                    ["injectionCandidate"] = "false",
+                    ["pathTruncated"] = "true"
+                }
+            },
+            // Pre-fix collector evidence (Jigsaw drpbx.exe shape): the old
+            // collector baked injectionCandidate=true onto an 8.3-truncated
+            // main-image self-load. The unified exclusions must reject it so
+            // both rules agree even on stored evidence.
+            new SandboxEvent
+            {
+                EventType = "image.load",
+                Source = "driver",
+                ProcessName = "drpbx.exe",
+                ProcessId = 4700,
+                Path = @"\AppData\Local\Drpbx\drpbx.exe",
+                Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["imagePath"] = @"\AppData\Local\Drpbx\drpbx.exe",
+                    ["imageLoadFamily"] = "user-writable-image",
+                    ["injectionCandidate"] = "true",
+                    ["pathTruncated"] = "true"
+                }
+            },
+            // Same stale semantic fields but a full EXE path: the .exe
+            // exclusion must reject it without relying on the truncation flag.
+            new SandboxEvent
+            {
+                EventType = "image.load",
+                Source = "driver",
+                ProcessName = "drpbx.exe",
+                ProcessId = 4700,
+                Path = @"\Device\HarddiskVolume3\Users\SandboxUser\AppData\Local\Drpbx\drpbx.exe",
+                Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["imagePath"] = @"\Device\HarddiskVolume3\Users\SandboxUser\AppData\Local\Drpbx\drpbx.exe",
+                    ["imageLoadFamily"] = "user-writable-image",
+                    ["injectionCandidate"] = "true",
+                    ["pathTruncated"] = "false"
+                }
+            }
+        ]);
+        SmokeAssert.True(
+            selfLoadFindings.All(finding => !string.Equals(finding.RuleId, "image-load-user-writable-dll", StringComparison.OrdinalIgnoreCase) &&
+                                            !string.Equals(finding.RuleId, "r0-semantic-user-writable-image-injection-candidate", StringComparison.OrdinalIgnoreCase)),
+            "A user-writable EXE main-image self-load (full or truncated path, corrected or stale injectionCandidate) must not be reported as a DLL injection finding by either rule.");
+
+        var retainedFindings = engine.Classify(
+        [
+            new SandboxEvent
+            {
+                EventType = "image.load",
+                Source = "driver",
+                ProcessName = "payload.exe",
+                Path = @"C:\Users\Smoke\AppData\Local\Temp\hook.dll",
+                Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["imagePath"] = @"C:\Users\Smoke\AppData\Local\Temp\hook.dll",
+                    ["imageLoadFamily"] = "user-writable-image",
+                    ["injectionCandidate"] = "true"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "image.load",
+                Source = "driver",
+                ProcessName = "payload.exe",
+                Path = @"\Device\HarddiskVolume3\Windows\rootkit.dll",
+                Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["imagePath"] = @"\Device\HarddiskVolume3\Windows\rootkit.dll",
+                    ["imageLoadFamily"] = "user-writable-image",
+                    ["injectionCandidate"] = "true"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "image.load",
+                Source = "driver",
+                ProcessName = "svchost.exe",
+                Path = @"\Device\HarddiskVolume3\Windows\System32\kernel32.dll",
+                Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["imagePath"] = @"\Device\HarddiskVolume3\Windows\System32\kernel32.dll",
+                    ["imageLoadFamily"] = "windows-system-image",
+                    ["injectionCandidate"] = "false"
+                }
+            }
+        ]);
+        var retainedRuleIds = retainedFindings.Select(finding => finding.RuleId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        SmokeAssert.True(retainedRuleIds.Contains("image-load-user-writable-dll"),
+            "A user-writable DLL load and a C:\\Windows root-level module must still match image-load-user-writable-dll.");
+        SmokeAssert.True(retainedRuleIds.Contains("r0-semantic-user-writable-image-injection-candidate"),
+            "A collector-asserted injection candidate must still match the R0 semantic injection rule.");
+        SmokeAssert.True(
+            retainedFindings.All(finding => !string.Equals(finding.RuleId, "image-load-user-writable-dll", StringComparison.OrdinalIgnoreCase) ||
+                                            finding.Evidence.All(evt => evt.Path?.Contains("System32", StringComparison.OrdinalIgnoreCase) != true)),
+            "System32 image loads must never match the user-writable DLL rule.");
+
+        // Same evidence must produce the same verdict on both rules.
+        var twinFindings = engine.Classify(
+        [
+            new SandboxEvent
+            {
+                EventType = "image.load",
+                Source = "driver",
+                ProcessName = "payload.exe",
+                Path = @"C:\Users\Smoke\AppData\Local\Temp\hook.dll",
+                Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["imagePath"] = @"C:\Users\Smoke\AppData\Local\Temp\hook.dll",
+                    ["imageLoadFamily"] = "user-writable-image",
+                    ["injectionCandidate"] = "true"
+                }
+            }
+        ]);
+        var twinRuleIds = twinFindings.Select(finding => finding.RuleId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        SmokeAssert.True(twinRuleIds.Contains("image-load-user-writable-dll") && twinRuleIds.Contains("r0-semantic-user-writable-image-injection-candidate"),
+            "image-load-user-writable-dll and r0-semantic-user-writable-image-injection-candidate must agree on the same user-writable injection evidence.");
     }
 
     private static void AssertReleasePrepRuleContract(BehaviorRule rule)

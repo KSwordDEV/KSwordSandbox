@@ -11253,8 +11253,8 @@
       "titleZh": "从用户可写路径加载 DLL 镜像",
       "severity": "high",
       "confidence": "medium",
-      "summary": "Image-load telemetry referenced a DLL or module path under Temp, AppData, ProgramData, Public, or Downloads, supporting DLL injection or hijack triage.",
-      "summaryZh": "镜像加载遥测引用了 Temp、AppData、ProgramData、Public 或 Downloads 下的 DLL/模块路径，可辅助 DLL 注入或劫持排查。",
+      "summary": "R0 semantic image telemetry reported imageLoadFamily=user-writable-image and injectionCandidate=true (user-writable DLL/module, or an administrator-writable C:\\Windows root-level module). EXE main-image self-loads and truncated (8.3 short-name) paths are excluded by the collector injection-candidate gate and by rule-level defense-in-depth, because process-start rules already carry execution evidence and truncated paths are unreliable injection indicators.",
+      "summaryZh": "R0 语义镜像遥测报告 imageLoadFamily=user-writable-image 且 injectionCandidate=true（用户可写 DLL/模块，或管理员可写的 C:\\Windows 根目录一级模块）。EXE 主映像自加载与截断（8.3 短名）路径由采集层注入候选门禁与本规则二次排除：进程启动规则已承载执行证据，截断路径不是可靠注入判据。",
       "mitreTechniqueId": "T1055.001",
       "mitreTechniqueName": "Dynamic-link library injection",
       "eventTypes": [
@@ -11263,27 +11263,31 @@
         "driver.imageLoad",
         "driver.image.load"
       ],
-      "dataContains": {
+      "allDataContains": {
+        "imageLoadFamily": [
+          "user-writable-image"
+        ],
+        "injectionCandidate": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "pathTruncated": [
+          "true"
+        ],
+        "imagePathTruncated": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
         "imagePath": [
-          "\\AppData\\",
-          "\\Temp\\",
-          "\\Users\\Public\\",
-          "\\ProgramData\\",
-          "\\Downloads\\"
+          ".exe"
         ],
         "modulePath": [
-          "\\AppData\\",
-          "\\Temp\\",
-          "\\Users\\Public\\",
-          "\\ProgramData\\",
-          "\\Downloads\\"
+          ".exe"
         ],
         "filePath": [
-          "\\AppData\\",
-          "\\Temp\\",
-          "\\Users\\Public\\",
-          "\\ProgramData\\",
-          "\\Downloads\\"
+          ".exe"
         ]
       },
       "evidenceFields": [
@@ -28422,8 +28426,8 @@
       "titleZh": "R0 语义用户可写镜像注入候选",
       "severity": "high",
       "confidence": "high",
-      "summary": "Parsed R0 image-load telemetry reported imageLoadFamily=user-writable-image and injectionCandidate=true.",
-      "summaryZh": "解析后的 R0 镜像加载遥测报告用户可写镜像注入候选；需确认加载进程、模块路径和样本链，排除采集器/系统基线后再作为注入归因。",
+      "summary": "Parsed R0 image-load telemetry reported imageLoadFamily=user-writable-image and injectionCandidate=true. EXE main-image self-loads and truncated (8.3 short-name) paths are excluded both by the collector injection-candidate gate and by the rule-level exclusions, matching the image-load-user-writable-dll verdict on the same evidence.",
+      "summaryZh": "解析后的 R0 镜像加载遥测报告用户可写镜像注入候选；需确认加载进程、模块路径和样本链，排除采集器/系统基线后再作为注入归因。EXE 主映像自加载与截断（8.3 短名）路径由采集层注入候选门禁与本规则二次排除，与 image-load-user-writable-dll 对同一证据的判定保持一致。",
       "mitreTechniqueId": "T1055.001",
       "mitreTechniqueName": "Dynamic-link library injection",
       "eventTypes": [
@@ -28439,6 +28443,14 @@
           "user-writable-image"
         ],
         "injectionCandidate": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "pathTruncated": [
+          "true"
+        ],
+        "imagePathTruncated": [
           "true"
         ]
       },
@@ -28468,6 +28480,15 @@
         "KSword.Sandbox.R0Collector.exe"
       ],
       "excludeDataContains": {
+        "imagePath": [
+          ".exe"
+        ],
+        "modulePath": [
+          ".exe"
+        ],
+        "filePath": [
+          ".exe"
+        ],
         "eventType": [
           "collection.health",
           "enrichment.virustotal.lookup",
