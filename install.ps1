@@ -2192,7 +2192,16 @@ function Test-BoundSwitchTruthy {
         [Parameter(Mandatory)][string]$Name
     )
 
-    return $BoundParameters.Contains($Name) -and [System.Convert]::ToBoolean($BoundParameters[$Name])
+    if (-not $BoundParameters.Contains($Name)) {
+        return $false
+    }
+
+    $value = $BoundParameters[$Name]
+    if ($value -is [System.Management.Automation.SwitchParameter]) {
+        return $value.IsPresent
+    }
+
+    return [System.Convert]::ToBoolean($value)
 }
 
 function Assert-InstallEntrypointContract {
@@ -4261,7 +4270,11 @@ function Get-InstallDriverServiceStatusSnapshot {
     }
 
     try {
-        $output = @(& powershell @arguments)
+        # Merge the child's stderr into the captured stream: a non-elevated
+        # `sc.exe` query is an expected condition for a status-only command, and
+        # an unhandled native-command error block before the JSON makes operators
+        # think the diagnostic itself failed.
+        $output = @(& powershell @arguments 2>&1)
         $lines = @($output | ForEach-Object { [string]$_ })
         $startIndex = -1
         $endIndex = -1
@@ -5147,7 +5160,7 @@ function Show-TestSigningGuidance {
 function Uninstall-KSwordSandboxLocal {
     if (-not $Force -and $Mode -eq 'Interactive') {
         Write-Host ''
-        Write-Host "中文提示：这会移除本机 credential 元数据 '$SecretName'；不会删除 '$RuntimeRoot' 下的运行 job 输出。 / This removes local credential metadata only."
+        Write-Host "中文提示：这会移除本机 credential 元数据 '$SecretName' 和本机 sandbox 配置（sandbox.local.json）；不会删除 '$RuntimeRoot' 下的运行 job 输出。 / This removes local credential metadata and the local sandbox config only."
         $choice = Read-MenuChoice -Prompt '继续卸载？[y/n] / Continue uninstall? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
         if ($choice -in @('n', 'N')) {
             Write-InstallInfo '已取消卸载。 / Uninstall cancelled.'
@@ -5155,17 +5168,46 @@ function Uninstall-KSwordSandboxLocal {
         }
     }
 
+    $localConfigPath = Get-LocalSandboxConfigPath
     if (-not $PSCmdlet.ShouldProcess($script:InstallStateDirectory, "Uninstall local KSwordSandbox settings and clear '$SecretName' from process/User environment")) {
-        Write-InstallInfo "预览：会移除本机安装器元数据和 '$SecretName' 的 Process/User 环境项。 / WhatIf: local installer metadata and secret env entries would be removed."
+        Write-InstallInfo "预览：会移除本机安装器元数据、'$SecretName' 的 Process/User 环境项，以及本机 sandbox 配置 '$localConfigPath'。 / WhatIf: local installer metadata, secret env entries, and the local sandbox config would be removed."
         Write-InstallInfo '运行输出目录会保留不删除。 / Runtime output folders would be left intact.'
         return
     }
 
     [Environment]::SetEnvironmentVariable($SecretName, $null, 'Process')
     [Environment]::SetEnvironmentVariable($SecretName, $null, 'User')
+    # The installer also persists the optional WebUI config path and (when
+    # configured outside the WebUI's process-only settings endpoint) the VT
+    # hash-lookup key at User scope.  Leaving either behind makes a later
+    # reinstall silently reuse the old profile/credential and violates the
+    # advertised "uninstall local settings" contract.
+    [Environment]::SetEnvironmentVariable($script:WebConfigPathEnvironmentName, $null, 'Process')
+    [Environment]::SetEnvironmentVariable($script:WebConfigPathEnvironmentName, $null, 'User')
+    [Environment]::SetEnvironmentVariable($VirusTotalSecretName, $null, 'Process')
+    [Environment]::SetEnvironmentVariable($VirusTotalSecretName, $null, 'User')
     Remove-Item -LiteralPath $script:SecretBackupPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $script:InstallStatePath -Force -ErrorAction SilentlyContinue
-    Write-InstallInfo "已移除当前 Process/User 环境 secret '$SecretName'，并删除本机 DPAPI 备份（如存在）。 / Removed local secret metadata."
+
+    # Remove the local profile written by this installer. It is local settings,
+    # not job output: keeping it behind makes a later reinstall silently reuse
+    # credentials/provider paths that the operator just uninstalled. Never
+    # delete the shipped template or a file inside the repository.
+    $localConfigRemoved = $false
+    $localConfigLeaf = if ([string]::IsNullOrWhiteSpace($localConfigPath)) { '' } else { Split-Path -Leaf $localConfigPath }
+    $localConfigUnderRepository = -not [string]::IsNullOrWhiteSpace($localConfigPath) -and
+        (Test-InstallPathUnderRoot -Path $localConfigPath -Root $PSScriptRoot)
+    if (-not [string]::Equals($localConfigLeaf, 'sandbox.example.json', [System.StringComparison]::OrdinalIgnoreCase) -and
+        -not $localConfigUnderRepository -and
+        (Test-Path -LiteralPath $localConfigPath -PathType Leaf)) {
+        Remove-Item -LiteralPath $localConfigPath -Force -ErrorAction SilentlyContinue
+        $localConfigRemoved = -not (Test-Path -LiteralPath $localConfigPath -PathType Leaf)
+    }
+
+    Write-InstallInfo "已移除当前 Process/User 环境 secret '$SecretName'、WebUI 配置路径 '$script:WebConfigPathEnvironmentName' 和可选 VT key '$VirusTotalSecretName'，并删除本机 DPAPI 备份（如存在）。 / Removed local secret, config-path, optional VT-key metadata, and DPAPI backup."
+    if ($localConfigRemoved) {
+        Write-InstallInfo "已删除本机 sandbox 配置：$localConfigPath / Local sandbox config removed."
+    }
     Write-InstallInfo '运行输出目录已保留不删除。 / Runtime output folders were left intact.'
 }
 
@@ -5535,4 +5577,12 @@ switch ($Mode) {
     'StartWebUI' {
         Invoke-KSwordSandboxWebUi
     }
+}
+
+# Status/CheckEnvironment are diagnostic commands. Their last native probe
+# (bcdedit, sc.exe, module queries) may return a non-zero exit code on a
+# non-elevated shell even when the diagnostic completed successfully. Do not
+# leak that probe exit code to the operator or a wrapper script.
+if ($Mode -in @('Status', 'CheckEnvironment')) {
+    exit 0
 }

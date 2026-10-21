@@ -3582,3 +3582,10 @@ switch ($Mode) {
         Invoke-OneShotAnalysis -EffectiveConfigPath $effectiveConfigPath -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot -State $state
     }
 }
+
+# Diagnostic commands must not inherit the exit code of the last native probe
+# (for example bcdedit on a non-elevated shell). The readiness verdict is in the
+# JSON/text output; a completed diagnostic is a successful command.
+if ($Mode -in @('Status', 'CheckEnvironment')) {
+    exit 0
+}

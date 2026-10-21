@@ -704,8 +704,9 @@ Hyper-V module 是否可用、VM/checkpoint 是否存在，以及当前 shell �
 environment 或 DPAPI backup 的单次 elevated shell。需要可重复本机设置时，使用安装器的
 password reset 模式。
 
-`Uninstall` 会移除当前 process/User environment secret，以及本机 installer metadata /
-DPAPI backup；它不会删除 `D:\Temp\KSwordSandbox` 下的 runtime job outputs。
+`Uninstall` 会移除当前 process/User environment secret、`Sandbox__ConfigPath`、可选
+`KSWORDBOX_VIRUSTOTAL_API_KEY`，以及本机 installer metadata / DPAPI backup；它不会删除
+`D:\Temp\KSwordSandbox` 下的 runtime job outputs。
 
 ## 安全边界 / Security boundary
 

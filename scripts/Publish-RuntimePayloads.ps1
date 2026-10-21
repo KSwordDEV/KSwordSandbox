@@ -130,7 +130,12 @@ function Clear-DirectorySafe {
     }
 
     Write-PublishStep "Cleaning $Name at $resolved"
-    Get-ChildItem -LiteralPath $resolved -Force | Remove-Item -Recurse -Force
+    # An empty directory yields no pipeline input, and Remove-Item then fails
+    # with "missing path operand" on a fresh publish root.
+    $items = @(Get-ChildItem -LiteralPath $resolved -Force)
+    if ($items.Count -gt 0) {
+        $items | Remove-Item -Recurse -Force
+    }
 }
 
 function Clear-PayloadDirectory {
@@ -153,7 +158,11 @@ function Clear-PayloadDirectory {
 
     if ($PSCmdlet.ShouldProcess($resolved, "Clean runtime payload directory $Name")) {
         Write-PublishStep "Cleaning runtime payload directory $Name at $resolved"
-        Get-ChildItem -LiteralPath $resolved -Force | Remove-Item -Recurse -Force
+        # Same empty-directory guard as Clear-DirectorySafe above.
+        $items = @(Get-ChildItem -LiteralPath $resolved -Force)
+        if ($items.Count -gt 0) {
+            $items | Remove-Item -Recurse -Force
+        }
     }
 }
 

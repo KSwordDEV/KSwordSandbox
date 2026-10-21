@@ -193,8 +193,13 @@ overlay 时列出内部 snapshot。三者都支持编号选择并保存本机配
 做只读预览，或用 `.\install.ps1 -Mode Change -UpdateVirtualizationConfig ...` 写入脚本化配置。
 
 安装器会把 `KSWORDBOX_GUEST_PASSWORD` 保存在当前用户环境中（仓库外），可写入
-DPAPI 保护的本地备份，并在 `D:\Temp\KSwordSandbox\config\sandbox.local.json` 写本机
+DPAPI 保护的本地备份，并在 runtime root（通常是 `D:\Temp\KSwordSandbox`；没有 D: 时是
+`%LOCALAPPDATA%\KSwordSandbox`）下的 `config\sandbox.local.json` 写本机
 sandbox config，同时为 Web/API 设置 `Sandbox__ConfigPath`。
+
+`install.ps1 -Mode Uninstall` 会清除当前 Process/User 的 guest password、
+`Sandbox__ConfigPath`、可选 VT key、install-state 和 DPAPI 备份，并删除 runtime root 下的
+`config\sandbox.local.json`；它保留 jobs/reports/pcaps 等运行输出，不会删除整个 runtime root。
 
 更新 VM 名称、checkpoint 或 guest 路径时，不要改模板，使用本地配置命令：
 

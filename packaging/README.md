@@ -84,3 +84,8 @@ excluding generated binaries, VM state, reports, samples, secrets, and signing m
 ```
 
 Readiness wrapper 会调用 repository policy、解析操作者 PowerShell scripts、校验 package manifests，并扫描常规 release path 中遗留的 `CSignTool.exe` 引用和 GUI signing fallback 指示。它还会确认 install/run/package scripts 保持所选 provider prerequisite、VM profile、guest transport、guest payload、VT key、runtime root 和 package safety diagnostics 对操作者可见。它不会启动任何 provider VM、签名 driver 或发布 artifacts。
+
+`-StageOnly` 或省略 `-RuntimePublishRoot` 的 runtime 运行只生成 layout/safety dry-run，日志中的
+`host-web`、`guest-tools`、`tools/job-tool`、`tools/postprocess` 会显示为缺失-可选；这种目录不能交付或启动。
+正式 zip 必须从仓库外 `RuntimePublishRoot` 提供全部四个目录，并显式传入
+`-RequireCompleteRuntimePayloads`；脚本会拒绝缺失/不完整/含禁止文件的 payload。
