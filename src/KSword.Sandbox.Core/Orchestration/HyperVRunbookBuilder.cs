@@ -1349,6 +1349,7 @@ public sealed class HyperVRunbookBuilder
             hostEvidence = hostOut,
             hostSample = sample.FullPath,
             sampleSha256 = sample.Sha256,
+            sampleSizeBytes = sample.SizeBytes,
             payloadRoot = config.Paths.GuestPayloadRoot,
             guestUser = NormalizeGuestScheduledTaskUserName(config.Guest.UserName),
             guestRoot,

@@ -54,31 +54,135 @@ function Get-Sha256Hex([string]$Path) {
     finally { $stream.Dispose() }
 }
 
-function Invoke-Vix([string]$Operation,[string[]]$Arguments = @(),[int[]]$AllowedExitCodes = @(0)) {
-    $output = @(& $vix $Operation $vmx @Arguments 2>&1)
-    $code = [int]$LASTEXITCODE
-    if ($code -notin $AllowedExitCodes) {
-        $detail = (($output | Out-String).Trim() -replace '[\r\n]+',' ')
-        if ($detail.Length -gt 500) { $detail = $detail.Substring(0,500) }
-        throw "VIX $Operation failed (exit $code): $detail"
+function Quote-WindowsArgument([string]$Value) {
+    $quoted=[Text.StringBuilder]::new()
+    [void]$quoted.Append('"')
+    $slashes=0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') { $slashes++; continue }
+        if ($character -eq '"') {
+            [void]$quoted.Append('\' * ($slashes * 2 + 1))
+            [void]$quoted.Append('"')
+            $slashes=0
+            continue
+        }
+        [void]$quoted.Append('\' * $slashes)
+        $slashes=0
+        [void]$quoted.Append($character)
     }
-    return $code
+    [void]$quoted.Append('\' * ($slashes * 2))
+    [void]$quoted.Append('"')
+    return $quoted.ToString()
+}
+
+function Invoke-Vix([string]$Operation,[string[]]$Arguments = @(),[int[]]$AllowedExitCodes = @(0),[int]$TimeoutSeconds = 90) {
+    if ($TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 180) { throw 'VIX timeout is outside the bounded range.' }
+    $start=[Diagnostics.ProcessStartInfo]::new($vix)
+    $start.Arguments=(@($Operation,$vmx) + $Arguments | ForEach-Object { Quote-WindowsArgument ([string]$_) }) -join ' '
+    $start.UseShellExecute=$false
+    $start.CreateNoWindow=$true
+    $start.RedirectStandardOutput=$true
+    $start.RedirectStandardError=$true
+    $process=[Diagnostics.Process]::Start($start)
+    if ($null -eq $process) { throw "VIX $Operation could not start." }
+    try {
+        $stdout=$process.StandardOutput.ReadToEndAsync()
+        $stderr=$process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { $process.Kill(); [void]$process.WaitForExit(5000) } catch {}
+            throw "VIX $Operation timed out after $TimeoutSeconds seconds."
+        }
+        if (-not [Threading.Tasks.Task]::WaitAll(@($stdout,$stderr),5000)) { throw "VIX $Operation output did not close." }
+        $code=[int]$process.ExitCode
+        if ($code -notin $AllowedExitCodes) {
+            $detail=(($stdout.Result+' '+$stderr.Result).Trim() -replace '[\r\n]+',' ')
+            if ($detail.Length -gt 500) { $detail=$detail.Substring(0,500) }
+            throw "VIX $Operation failed (exit $code): $detail"
+        }
+        return $code
+    }
+    finally { $process.Dispose() }
 }
 
 function Copy-ToGuest([string]$HostPath,[string]$GuestPath) {
     [void](Invoke-Vix 'copy-to' @($HostPath,$GuestPath))
 }
 
-function Copy-FromGuest([string]$GuestPath,[string]$HostPath,[switch]$Optional) {
+function Copy-FromGuest([string]$GuestPath,[string]$HostPath,[switch]$Optional,[int]$TimeoutSeconds = 90) {
     $parent = Split-Path -Parent $HostPath
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     $temp = $HostPath + '.vix.tmp'
     Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
-    $code = Invoke-Vix 'copy-from' @($GuestPath,$temp) @(0,3)
-    if ($code -eq 3 -and $Optional) { return $false }
-    if ($code -ne 0) { throw "Required guest file was not available: $GuestPath" }
-    Move-Item -LiteralPath $temp -Destination $HostPath -Force -ErrorAction Stop
-    return $true
+    try {
+        $code = Invoke-Vix 'copy-from' @($GuestPath,$temp) @(0,3) -TimeoutSeconds $TimeoutSeconds
+        if ($code -eq 3 -and $Optional) { return $false }
+        if ($code -ne 0) { throw "Required guest file was not available: $GuestPath" }
+        Move-Item -LiteralPath $temp -Destination $HostPath -Force -ErrorAction Stop
+        return $true
+    }
+    finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+}
+
+function Test-QuickEvidenceIdentity([string]$Path,[switch]$LaunchProof) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $file=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($file.Length -le 0 -or $file.Length -gt 4096 -or
+        ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+    try {
+        $record=Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([string]$record.jobId -ne [string]$s.jobId -or
+            -not ([string]$record.samplePath).Equals([string]$s.guestSample,[StringComparison]::OrdinalIgnoreCase) -or
+            -not ([string]$record.sampleSha256).Equals([string]$s.sampleSha256,[StringComparison]::OrdinalIgnoreCase) -or
+            [int64]$record.sampleSizeBytes -ne [int64]$s.sampleSizeBytes -or
+            [int64]$s.sampleSizeBytes -le 0) { return $false }
+        if ($LaunchProof) {
+            return [string]$record.schema -ceq 'ksword-sample-launch-proof-v1' -and
+                [string]$record.state -ceq 'started' -and
+                [int]$record.processId -gt 0 -and
+                -not [string]::IsNullOrWhiteSpace([string]$record.startedAtUtc)
+        }
+        return [string]$record.schema -ceq 'ksword-live-events-v1' -and
+            [string]$record.eventFormat -ceq 'SandboxEvent-jsonl'
+    }
+    catch { return $false }
+}
+
+function Pull-QuickEvidence {
+    $identity=Join-Path $evidence 'live-events.identity.json'
+    $proof=Join-Path $evidence 'sample-launch-proof.json'
+    $journal=Join-Path $evidence 'live-events.jsonl'
+    if (-not (Test-QuickEvidenceIdentity $identity)) {
+        $candidate=$identity+'.quick'
+        try {
+            if (Copy-FromGuest (Join-Path $guestOut 'live-events.identity.json') $candidate -Optional -TimeoutSeconds 5) {
+                if (Test-QuickEvidenceIdentity $candidate) { Move-Item -LiteralPath $candidate -Destination $identity -Force }
+            }
+        } catch {} finally { Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue }
+    }
+    if (-not (Test-QuickEvidenceIdentity $proof -LaunchProof)) {
+        $candidate=$proof+'.quick'
+        try {
+            if (Copy-FromGuest (Join-Path $guestOut 'sample-launch-proof.json') $candidate -Optional -TimeoutSeconds 5) {
+                if (Test-QuickEvidenceIdentity $candidate -LaunchProof) {
+                    Move-Item -LiteralPath $candidate -Destination $proof -Force
+                    Write-Host 'GuestOps recovered a pinned sample launch proof before the full manifest.'
+                }
+            }
+        } catch {} finally { Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue }
+    }
+    if (Test-QuickEvidenceIdentity $identity) {
+        $candidate=$journal+'.quick'
+        try {
+            if (Copy-FromGuest (Join-Path $guestOut 'live-events.jsonl') $candidate -Optional -TimeoutSeconds 5) {
+                $size=(Get-Item -LiteralPath $candidate -Force -ErrorAction Stop).Length
+                $retained=if (Test-Path -LiteralPath $journal -PathType Leaf) { (Get-Item -LiteralPath $journal).Length } else { 0L }
+                if ($size -gt $retained -and $size -le 67108864L) {
+                    Move-Item -LiteralPath $candidate -Destination $journal -Force
+                    Write-Host "GuestOps retained $size bytes of pinned live events before the full manifest."
+                }
+            }
+        } catch {} finally { Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue }
+    }
 }
 
 function Run-GuestPowerShell([string]$GuestScript,[string[]]$Arguments = @()) {
@@ -164,6 +268,8 @@ $files=@(Get-ChildItem -LiteralPath $rootPath -Recurse -File -Force -ErrorAction
             $walk = Split-Path -Parent $walk
         }
         if (-not $Final -and (Test-Path -LiteralPath $destination -PathType Leaf) -and [int64](Get-Item -LiteralPath $destination).Length -eq $length) { continue }
+        if ($relative -eq 'live-events.jsonl' -and (Test-Path -LiteralPath $destination -PathType Leaf) -and
+            [int64](Get-Item -LiteralPath $destination).Length -gt $length) { continue }
         $temp = $destination + '.vix.tmp'
         Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
         try { $code = Invoke-Vix 'copy-from' @((Join-Path $guestOut $relative),$temp) @(0,3) }
@@ -418,7 +524,16 @@ try {
     'sync' {
         $deadline=(Get-Date).AddSeconds([Math]::Max(180,[int]$s.durationSeconds+180))
         $lastError=''
+        # A destructive sample can remove VMware Tools or reset the guest
+        # while the complete manifest is being generated. Recover the flushed
+        # identity, launch proof, and growing journal first in a bounded window.
+        $quickDeadline=(Get-Date).AddSeconds([Math]::Min(20,[int]$s.durationSeconds))
         do {
+            Pull-QuickEvidence
+            Start-Sleep -Milliseconds 700
+        } while ((Get-Date) -lt $quickDeadline)
+        do {
+            Pull-QuickEvidence
             try { Pull-Evidence; $lastError=($script:lastPullErrors -join '; ') } catch { $lastError=$_.Exception.Message }
             if (Test-Path -LiteralPath (Join-Path $evidence 'agent.exit') -PathType Leaf) { break }
             Start-Sleep -Seconds 3
