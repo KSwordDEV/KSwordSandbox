@@ -22,6 +22,13 @@ struct Options {
     // Rotate high-volume JSONL before the file system/CRT write boundary.
     // Zero disables rotation for low-level diagnostics.
     unsigned long long maxOutputBytes = 256ULL * 1024ULL * 1024ULL;
+    // Cumulative across all rotated segments: once total accepted JSONL bytes
+    // reach this budget the collector finalizes the current segment, refuses
+    // to open a new one, and exits cleanly (exit 0) with an explicit
+    // r0-status sidecar instead of crashing into the redirector handle
+    // ceiling observed live on HGFS (~430MB, win32 1394). Zero disables.
+    // Overridable with --output-budget-bytes or KSWORD_R0_OUTPUT_BUDGET_BYTES.
+    unsigned long long outputBudgetBytes = 384ULL * 1024ULL * 1024ULL;
     // Keep enough guest disk for final events/summary and failure sidecars.
     unsigned long long minFreeOutputBytes = 512ULL * 1024ULL * 1024ULL;
     // Keep the live ring drain responsive during guest boot and sample launch.
@@ -36,6 +43,7 @@ struct Options {
     unsigned long enableMask = 0;
     int stressCount = 0;
     bool enableMaskSpecified = false;
+    bool outputBudgetSpecified = false;
     bool abiSelfCheck = false;
     bool diagnose = false;
     bool mockMode = false;

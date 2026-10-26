@@ -101,6 +101,33 @@ public static class SampleCorrelationClassifier
         "sgrmbroker"
     ];
 
+    // Security-service names whose state change is defense-evasion evidence
+    // even when no second runtime source repeats the service image path.
+    private static readonly string[] SecurityServiceNames =
+    [
+        "windefend",
+        "wdnisvc",
+        "sense",
+        "msmpeng",
+        "nissrv",
+        "securityhealthservice",
+        "mpssvc",
+        "wscsvc",
+        "sgrmbroker"
+    ];
+
+    // Windows feature-repair helpers are started by the OS loader when a
+    // submitted image cannot load its runtime.  AgentTesla on a guest without
+    // .NET 3.5 makes the loader spawn Fondue.exe /enable-feature:NetFx3 while
+    // the sample exits with 0x80131700; the child inherits the sample PID as
+    // parent but repairs the guest image instead of descending from malicious
+    // code, so it must not become sample behavior.
+    private static readonly string[] FeatureRepairToolNames =
+    [
+        "fondue.exe",
+        "dism.exe"
+    ];
+
     // These Windows-native commands are routinely launched by the guest
     // probes and shell setup.  A System32 image/known signed binary doing
     // local discovery is retained as evidence, but it must not become sample
@@ -278,9 +305,89 @@ public static class SampleCorrelationClassifier
 
         var data = new Dictionary<string, string>(evt.Data, StringComparer.OrdinalIgnoreCase);
         var enriched = EnrichWithKnownProcess(evt, data, context);
+        enriched = BackfillNetworkOwnerIdentity(enriched, data, context);
         var disposition = DetermineDisposition(enriched, data, context);
         ApplyDisposition(data, disposition);
+        MarkSampleChildProcess(enriched, data, context);
         return enriched with { Data = data };
+    }
+
+    /// <summary>
+    /// Marks a process-identity row whose parent PID belongs to the sample
+    /// process tree. Inputs are one normalized event, its mutable data, and
+    /// the correlation context; processing covers ETW process.start rows only.
+    /// Snapshot-derived process.new rows usually carry a childSummary instead
+    /// of a commandLine, so the guest feature-repair suppression cannot read
+    /// the command text there and would wrongly keep the marker on rows like
+    /// Fondue.exe; fail closed by leaving those rows unmarked.  The N2 rule
+    /// still lists process.new in its eventTypes so it lights up again once
+    /// snapshot rows carry the fields needed for the suppression.  Rules
+    /// consume this marker instead of re-deriving the sample PID set.
+    /// </summary>
+    private static void MarkSampleChildProcess(
+        SandboxEvent evt,
+        Dictionary<string, string> data,
+        CorrelationContext context)
+    {
+        if (!TextEqualsAny(evt.EventType, "process.start") ||
+            context.SampleProcessIds.Count == 0)
+        {
+            return;
+        }
+
+        var pid = EventProcessId(evt, data);
+        var parentPid = evt.ParentProcessId ??
+            ParsePid(Value(data, "parentProcessId")) ??
+            ParsePid(Value(data, "actorParentProcessId"));
+        if (parentPid is null ||
+            !context.SampleProcessIds.Contains(parentPid.Value) ||
+            parentPid == pid)
+        {
+            return;
+        }
+
+        if (IsGuestFeatureRepairSpawn(evt, data) ||
+            IsWerReportingProcess(evt, data))
+        {
+            return;
+        }
+
+        data["sampleChildProcess"] = "true";
+    }
+
+    /// <summary>
+    /// Recognizes the feature-repair helper the guest loader starts when a
+    /// submitted image cannot load its runtime. Inputs are one process
+    /// identity row and its data; the method returns true when the child is a
+    /// Windows feature-repair tool invoked with an OS feature switch, so the
+    /// caller leaves the sample-child marker off.
+    /// </summary>
+    private static bool IsGuestFeatureRepairSpawn(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data)
+    {
+        var name = FirstNonEmpty(
+            evt.ProcessName,
+            Value(data, "processName"),
+            Value(data, "imageName"),
+            evt.Path,
+            Value(data, "processImagePath"),
+            Value(data, "imagePath"));
+        var fileName = string.IsNullOrWhiteSpace(name)
+            ? string.Empty
+            : Path.GetFileName(name.Trim());
+        if (!TextEqualsAny(fileName, FeatureRepairToolNames))
+        {
+            return false;
+        }
+
+        var commandText = FirstNonEmpty(
+            evt.CommandLine,
+            Value(data, "commandLine"),
+            Value(data, "childSummary"),
+            Value(data, "details"));
+        return string.IsNullOrWhiteSpace(commandText) ||
+            ContainsAny(commandText, "/enable-feature:", "/caller-name:", "/online");
     }
 
     private static CorrelationDisposition DetermineDisposition(
@@ -393,6 +500,15 @@ public static class SampleCorrelationClassifier
                 NormalBehaviorBoundary(evt, data, context));
         }
 
+        // Network rows have their own owner-PID join and listener/service
+        // boundaries. Route them before the generic process-tree match so a
+        // TCP row reports the exact owner-PID verdict (and its stable marker)
+        // instead of the broader "pid-or-lineage" reason.
+        if (IsNetworkEvidence(evt))
+        {
+            return ClassifyNetworkEvidence(evt, data, context);
+        }
+
         if (MatchesSampleProcess(evt, data, context))
         {
             return CorrelationDisposition.Confirmed(
@@ -422,11 +538,6 @@ public static class SampleCorrelationClassifier
                     "path",
                     NormalBehaviorBoundary(evt, data, context));
             }
-        }
-
-        if (IsNetworkEvidence(evt))
-        {
-            return ClassifyNetworkEvidence(evt, data, context);
         }
 
         if (IsFileEvidence(evt))
@@ -583,6 +694,10 @@ public static class SampleCorrelationClassifier
 
         if (ownerPid is not null && context.SampleProcessIds.Contains(ownerPid.Value))
         {
+            // Keep the exact owner-PID verdict on the row so behavior rules
+            // can distinguish owner-attributed egress from path/lineage
+            // attribution without re-parsing reason strings.
+            data["sampleOwnerPidMatched"] = "true";
             return CorrelationDisposition.Confirmed(
                 joinedFromR0
                     ? "network-owner-pid-joined-from-r0-and-matched-sample-process-tree"
@@ -659,7 +774,8 @@ public static class SampleCorrelationClassifier
             .Select(target => (Target: target, Match: FindStaticIocMatch(target, context.StaticNetworkIndicators)))
             .FirstOrDefault(pair => !string.IsNullOrWhiteSpace(pair.Match));
         var matchedIoc = staticMatch.Match;
-        var dnsCorroborated = string.IsNullOrWhiteSpace(matchedIoc) && targets.Any(target => context.DnsCorroboratedTargets.Contains(target));
+        var staticIocMatched = !string.IsNullOrWhiteSpace(matchedIoc);
+        var dnsCorroborated = !staticIocMatched && targets.Any(target => context.DnsCorroboratedTargets.Contains(target));
         if (dnsCorroborated)
         {
             matchedIoc = "dns-answer-corroboration";
@@ -673,10 +789,31 @@ public static class SampleCorrelationClassifier
             data["pcapCorrelationStaticIoc"] = matchedIoc;
             if (!crossSourceSampleEvidence)
             {
-                data["pcapCorrelationUncertainty"] = dnsCorroborated
-                    ? "owner-pid-unavailable; lifecycle-overlap; dns-answer-corroboration-without-etw-or-r0-sample-owner"
-                    : "owner-pid-unavailable; lifecycle-overlap; static-ioc-without-etw-or-r0-sample-owner";
-                return false;
+                if (!staticIocMatched)
+                {
+                    // DNS-answer corroboration alone stays conservative: a
+                    // lifecycle DNS answer can belong to any process on the
+                    // guest, so it still requires an independent runtime join.
+                    data["pcapCorrelationUncertainty"] =
+                        "owner-pid-unavailable; lifecycle-overlap; dns-answer-corroboration-without-etw-or-r0-sample-owner";
+                    return false;
+                }
+
+                // Measured case (Azorult 2026-10-16): the sample resolved
+                // ravor.ac.ug 114 ms after start, and the exact domain also
+                // appears in the sample's own static strings. Requiring a
+                // second runtime source suppressed that self-corroborating
+                // C2 signal entirely. Keep the row probable, but disclose
+                // that only lifecycle plus static IOC support it so the rule
+                // layer can escalate without hiding the weaker attribution.
+                data["pcapCorrelationUncertainty"] =
+                    "owner-pid-unavailable; lifecycle-overlap; static-ioc-corroboration-without-cross-source";
+                disposition = CorrelationDisposition.Probable(
+                    "pcap-lifecycle-overlap-static-ioc-without-cross-source",
+                    "timestamp+staticIoc",
+                    "probable-pcap-static-ioc-boundary",
+                    true);
+                return true;
             }
 
             data["pcapCorrelationUncertainty"] = dnsCorroborated
@@ -865,7 +1002,7 @@ public static class SampleCorrelationClassifier
 
     private static CorrelationDisposition ClassifyServiceOrScheduledTaskEvidence(
         SandboxEvent evt,
-        IReadOnlyDictionary<string, string> data,
+        Dictionary<string, string> data,
         CorrelationContext context)
     {
         var target = FirstNonEmpty(
@@ -933,6 +1070,25 @@ public static class SampleCorrelationClassifier
             if (HasIndependentSampleEvidence(evt, target, context, "mutation"))
             {
                 return CorrelationDisposition.Probable("service-or-task-target-points-to-user-writable-location-with-cross-source-sample-evidence", "imagePath/taskToRun", "probable-cross-source-mutation-boundary");
+            }
+
+            // Measured case (trickbot 2026-10-16): WdNisSvc was rewritten to
+            // STOPPED under the Defender platform directory while the sample
+            // was running, and the row was dropped to unknown only because no
+            // second runtime source repeated the same image path. Keep the
+            // relaxation narrow to security-service state changes so ordinary
+            // third-party ProgramData services are not promoted by path alone.
+            if (IsSecurityServiceChange(data, persistenceSurface))
+            {
+                // Report-side visibility: without this marker the row reads as
+                // a plain probable and the reviewer cannot tell that the only
+                // support is the security-service target itself.
+                data["sampleCorrelationUncertainty"] =
+                    "security-service-state-change-without-cross-source; no-direct-sample-pid-join";
+                return CorrelationDisposition.Probable(
+                    "service-change-targets-security-service-without-cross-source",
+                    "serviceName/imagePath",
+                    "probable-defense-evasion-boundary");
             }
 
             return CorrelationDisposition.Unknown("service-or-task-target-points-to-user-writable-location-without-cross-source-evidence", "imagePath/taskToRun");
@@ -1099,6 +1255,60 @@ public static class SampleCorrelationClassifier
             ContainsAny(parentName, "WmiPrvSE", "WMIPrvSE");
     }
 
+    /// <summary>
+    /// Joins a network row's owning PID back to the process table and copies
+    /// the resulting identity onto the row's top-level ProcessId/ProcessName.
+    /// Inputs are one normalized event, its mutable data, and the correlation
+    /// context; processing only runs for network evidence and never invents a
+    /// name, so a row whose owner is not in the process table still exposes
+    /// the exact owning PID. This is the post-normalization attribution stage
+    /// used by the report and by rule-level process exclusions.
+    /// </summary>
+    private static SandboxEvent BackfillNetworkOwnerIdentity(
+        SandboxEvent evt,
+        Dictionary<string, string> data,
+        CorrelationContext context)
+    {
+        if (!IsNetworkEvidence(evt))
+        {
+            return evt;
+        }
+
+        var ownerPid = ParsePid(Value(data, "owningProcessId")) ??
+            ParsePid(Value(data, "ownerPid")) ??
+            ParsePid(Value(data, "ownerProcessId")) ??
+            ParsePid(Value(data, "processId"));
+        if (ownerPid is null)
+        {
+            return evt;
+        }
+
+        var processName = evt.ProcessName;
+        if (string.IsNullOrWhiteSpace(processName) &&
+            context.Processes.TryGetValue(ownerPid.Value, out var facts))
+        {
+            processName = string.IsNullOrWhiteSpace(facts.ImagePath)
+                ? facts.Name
+                : Path.GetFileName(facts.ImagePath);
+        }
+
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            processName = FirstNonEmpty(
+                Value(data, "ownerProcessName"),
+                Value(data, "owningProcessName"),
+                Value(data, "processName"));
+        }
+
+        // fileName is intentionally not a fallback here: it names the object a
+        // file row describes, not the process that owns a network connection.
+        return evt with
+        {
+            ProcessId = evt.ProcessId ?? ownerPid,
+            ProcessName = string.IsNullOrWhiteSpace(processName) ? null : processName
+        };
+    }
+
     private static SandboxEvent EnrichWithKnownProcess(
         SandboxEvent evt,
         Dictionary<string, string> data,
@@ -1110,17 +1320,23 @@ public static class SampleCorrelationClassifier
             return evt;
         }
 
+        var imageName = string.IsNullOrWhiteSpace(facts.ImagePath)
+            ? string.Empty
+            : Path.GetFileName(facts.ImagePath);
+        var processName = string.IsNullOrWhiteSpace(imageName) ? facts.Name : imageName;
+
         AddIfMissing(data, "actorProcessId", pid.Value.ToString(CultureInfo.InvariantCulture));
-        AddIfMissing(data, "actorProcessName", facts.Name);
+        AddIfMissing(data, "actorProcessName", processName);
         AddIfMissing(data, "actorProcessImagePath", facts.ImagePath);
         AddIfMissing(data, "actorCommandLine", facts.CommandLine);
         AddIfMissing(data, "actorParentProcessId", facts.ParentProcessId?.ToString(CultureInfo.InvariantCulture));
         AddIfMissing(data, "processImagePath", facts.ImagePath);
-        AddIfMissing(data, "processName", facts.Name);
+        AddIfMissing(data, "processName", processName);
 
         return evt with
         {
-            ProcessName = string.IsNullOrWhiteSpace(evt.ProcessName) ? facts.Name : evt.ProcessName,
+            ProcessId = evt.ProcessId ?? pid,
+            ProcessName = string.IsNullOrWhiteSpace(evt.ProcessName) ? processName : evt.ProcessName,
             ParentProcessId = evt.ParentProcessId ?? facts.ParentProcessId
         };
     }
@@ -2843,6 +3059,19 @@ public static class SampleCorrelationClassifier
         var serviceName = Value(data, "serviceName");
         return TextEqualsAny(serviceName, KnownWindowsServiceNames) ||
             (LooksSystemOnlyPath(target) && !LooksUserWritableOrPersistenceTarget(target));
+    }
+
+    /// <summary>
+    /// Identifies a service diff that targets a Windows security service.
+    /// Inputs are one event's data and its persistence target; processing
+    /// checks the service name, display name, and Defender platform path, and
+    /// the method returns true for Defender/security components only.
+    /// </summary>
+    private static bool IsSecurityServiceChange(IReadOnlyDictionary<string, string> data, string target)
+    {
+        return TextEqualsAny(Value(data, "serviceName"), SecurityServiceNames) ||
+            ContainsAny(target, @"\Windows Defender\", @"\Microsoft\Windows Defender\") ||
+            ContainsAny(Value(data, "displayName"), "Defender");
     }
 
     private static bool IsKnownWindowsTaskChange(IReadOnlyDictionary<string, string> data, string target)

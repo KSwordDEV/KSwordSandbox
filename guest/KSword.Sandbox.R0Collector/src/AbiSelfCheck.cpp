@@ -454,7 +454,7 @@ bool EmitAbiSelfCheck(EventWriter& writer, const Options& options) {
 // Return: Process exit code.
 int RunAbiSelfCheckMode(const Options& options, EventWriter& writer) {
     if (!EmitAbiSelfCheck(writer, options)) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     SandboxEventFields stoppedEvent;
@@ -494,7 +494,7 @@ int RunAbiSelfCheckMode(const Options& options, EventWriter& writer) {
     data.AddUnsigned("highWatermark", 0);
     stoppedEvent.dataJson = data.Build();
 
-    return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
+    return EmitEvent(writer, stoppedEvent) ? kExitSuccess : OutputStopExitCode(writer);
 }
 
 } // namespace KSword::Sandbox::R0Collector

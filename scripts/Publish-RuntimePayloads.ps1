@@ -8,6 +8,9 @@ and optional guest payload/toolchain switches. Processing publishes host Web,
 JobTool, and PostProcess with dotnet publish, then delegates Guest Agent and
 R0Collector staging to scripts\Prepare-GuestPayload.ps1 so the guest layout
 matches live Hyper-V expectations.
+The VMware VIX GuestOps helper is compiled with the locally installed VIX SDK
+and its offline runbook script is staged alongside it. VMware Workstation and
+the Microsoft Visual C++ runtime remain operator-host prerequisites.
 
 The output layout matches packaging/runtime-package.manifest.json:
 
@@ -15,6 +18,7 @@ The output layout matches packaging/runtime-package.manifest.json:
   guest-tools/
   tools/job-tool/
   tools/postprocess/
+  tools/vix-helper/
 
 This script is local-only. It does not run smoke tests, start or restore VMs,
 push, sign drivers, call CSignTool.exe, or copy from repository bin/obj/x64.
@@ -229,12 +233,47 @@ function Get-DirectoryFileCount {
     return @(Get-ChildItem -LiteralPath $Directory -Recurse -File -Force).Count
 }
 
+function Convert-GuestPayloadManifestToPortable {
+    param([Parameter(Mandatory)][string]$GuestToolsDirectory)
+
+    $manifestPath = Join-Path $GuestToolsDirectory 'payload-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "错误：Guest payload 清单不存在：$manifestPath"
+    }
+
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    if ([int]$manifest.payloadContractVersion -ne 2) {
+        throw "错误：不支持的 Guest payload 清单版本：$($manifest.payloadContractVersion)"
+    }
+    $requiredFiles = @($manifest.requiredHostFiles)
+    if ($requiredFiles.Count -lt 3 -or @($requiredFiles | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.relativePath) }).Count -gt 0) {
+        throw '错误：Guest payload 清单缺少可移植的 requiredHostFiles.relativePath。'
+    }
+
+    # Build-time absolute paths become invalid as soon as an operator extracts
+    # the archive elsewhere. Keep source fingerprint/commit provenance, but
+    # express every host payload path relative to this manifest's directory.
+    $manifest.payloadContractVersion = 3
+    $manifest.repositoryRoot = $null
+    $manifest.payloadRoot = '.'
+    $manifest.guestAgentDirectory = 'agent'
+    $manifest.r0CollectorDirectory = 'r0collector'
+    foreach ($entry in $requiredFiles) {
+        $entry | Add-Member -NotePropertyName path -NotePropertyValue ([string]$entry.relativePath) -Force
+    }
+    $manifest | Add-Member -NotePropertyName hostPathBase -NotePropertyValue 'payload-manifest-directory' -Force
+    $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+}
+
 try {
     $repoRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
     $publishRoot = Get-FullPathNoRequire -Path $RuntimePublishRoot
     $buildRootFull = Get-FullPathNoRequire -Path $BuildRoot
     if ($SelfContainedManaged -and $FrameworkDependentManaged) {
         throw '错误：-SelfContainedManaged 和 -FrameworkDependentManaged 不能同时指定。默认已发布 self-contained managed payload；只有明确接受目标机 .NET runtime 依赖时才使用 -FrameworkDependentManaged。'
+    }
+    if ($RuntimeIdentifier -ne 'win-x64') {
+        throw "错误：VMware VIX helper 当前只构建 x64；RuntimeIdentifier 必须为 win-x64，实际为 $RuntimeIdentifier。"
     }
     $script:ManagedSelfContained = -not [bool]$FrameworkDependentManaged
 
@@ -250,12 +289,15 @@ try {
     $guestTools = Join-Path $publishRoot 'guest-tools'
     $jobTool = Join-Path $publishRoot 'tools\job-tool'
     $postProcess = Join-Path $publishRoot 'tools\postprocess'
+    $vixHelper = Join-Path $publishRoot 'tools\vix-helper'
     $guestBuild = Join-Path $buildRootFull 'guest-tools'
+    $vixBuild = Join-Path $buildRootFull 'vix-helper'
 
-    New-Item -ItemType Directory -Path $hostWeb, $guestTools, $jobTool, $postProcess, $guestBuild -Force | Out-Null
+    New-Item -ItemType Directory -Path $hostWeb, $guestTools, $jobTool, $postProcess, $vixHelper, $guestBuild, $vixBuild -Force | Out-Null
     Clear-PayloadDirectory -Directory $hostWeb -RepoRoot $repoRoot -Name 'host-web'
     Clear-PayloadDirectory -Directory $jobTool -RepoRoot $repoRoot -Name 'tools/job-tool'
     Clear-PayloadDirectory -Directory $postProcess -RepoRoot $repoRoot -Name 'tools/postprocess'
+    Clear-PayloadDirectory -Directory $vixHelper -RepoRoot $repoRoot -Name 'tools/vix-helper'
 
     Invoke-DotNetPublish `
         -ProjectPath (Join-Path $repoRoot 'src\KSword.Sandbox.Web\KSword.Sandbox.Web.csproj') `
@@ -269,6 +311,31 @@ try {
         -ProjectPath (Join-Path $repoRoot 'tools\KSword.Sandbox.PostProcess\KSword.Sandbox.PostProcess.csproj') `
         -OutputDirectory $postProcess `
         -DisplayName 'tools/postprocess'
+
+    $vixBuildScript = Join-Path $repoRoot 'tools\KSword.Sandbox.VixProbe\build.cmd'
+    $offlineRunbook = Join-Path $repoRoot 'scripts\Invoke-VmwareOfflineRunbook.ps1'
+    if (-not (Test-Path -LiteralPath $vixBuildScript -PathType Leaf)) {
+        throw "错误：找不到 VMware VIX helper 构建脚本：$vixBuildScript"
+    }
+    if (-not (Test-Path -LiteralPath $offlineRunbook -PathType Leaf)) {
+        throw "错误：找不到 VMware 离线运行脚本：$offlineRunbook"
+    }
+    Write-PublishStep "Building tools/vix-helper with $vixBuildScript"
+    if ($PSCmdlet.ShouldProcess($vixHelper, 'Build and publish VMware VIX helper')) {
+        $previousVixOutDir = $env:VIX_OUT_DIR
+        try {
+            $env:VIX_OUT_DIR = $vixBuild
+            & $vixBuildScript
+            if ($LASTEXITCODE -ne 0) {
+                throw "错误：VMware VIX helper 构建失败，退出码 $LASTEXITCODE。请安装 VMware VIX SDK 和 Visual Studio C++ 工具链。"
+            }
+        }
+        finally {
+            $env:VIX_OUT_DIR = $previousVixOutDir
+        }
+        Copy-Item -LiteralPath (Join-Path $vixBuild 'vix_probe.exe') -Destination (Join-Path $vixHelper 'vix_probe.exe') -Force
+        Copy-Item -LiteralPath $offlineRunbook -Destination (Join-Path $vixHelper 'Invoke-VmwareOfflineRunbook.ps1') -Force
+    }
 
     if (-not $SkipGuestPayload) {
         $prepareGuest = Join-Path $repoRoot 'scripts\Prepare-GuestPayload.ps1'
@@ -307,6 +374,10 @@ try {
         Write-PublishStep 'Skipping guest-tools payload by request; runtime handoff will remain incomplete until guest-tools is supplied.'
     }
 
+    if (-not $SkipGuestPayload -and $PSCmdlet.ShouldProcess((Join-Path $guestTools 'payload-manifest.json'), 'Rewrite guest payload manifest with portable relative host paths')) {
+        Convert-GuestPayloadManifestToPortable -GuestToolsDirectory $guestTools
+    }
+
     if ($WhatIfPreference) {
         Write-PublishStep "WhatIf preview complete. No runtime payload validation was performed because publish actions were not executed."
         return
@@ -315,6 +386,8 @@ try {
     Test-AnyExpectedLeaf -Directory $hostWeb -Names @('KSword.Sandbox.Web.exe', 'KSword.Sandbox.Web.dll') -DisplayName 'host-web'
     Test-AnyExpectedLeaf -Directory $jobTool -Names @('KSword.Sandbox.JobTool.exe', 'KSword.Sandbox.JobTool.dll') -DisplayName 'tools/job-tool'
     Test-AnyExpectedLeaf -Directory $postProcess -Names @('KSword.Sandbox.PostProcess.exe', 'KSword.Sandbox.PostProcess.dll') -DisplayName 'tools/postprocess'
+    Test-AnyExpectedLeaf -Directory $vixHelper -Names @('vix_probe.exe') -DisplayName 'tools/vix-helper'
+    Test-AnyExpectedLeaf -Directory $vixHelper -Names @('Invoke-VmwareOfflineRunbook.ps1') -DisplayName 'tools/vix-helper'
     if (-not $SkipGuestPayload) {
         Test-AnyExpectedLeaf -Directory $guestTools -Names @('payload-manifest.json') -DisplayName 'guest-tools'
         Test-AnyExpectedLeaf -Directory (Join-Path $guestTools 'agent') -Names @('KSword.Sandbox.Agent.exe', 'KSword.Sandbox.Agent.dll') -DisplayName 'guest-tools/agent'
@@ -335,12 +408,13 @@ try {
         noVmMutation            = $true
         noDriverSigning         = $true
         noCSignTool             = $true
-        expectedPackageEntries  = @('host-web', 'guest-tools', 'tools/job-tool', 'tools/postprocess')
+        expectedPackageEntries  = @('host-web', 'guest-tools', 'tools/job-tool', 'tools/postprocess', 'tools/vix-helper')
         entries                 = [ordered]@{
             'host-web'          = @{ path = $hostWeb; fileCount = Get-DirectoryFileCount -Directory $hostWeb }
             'guest-tools'       = @{ path = $guestTools; fileCount = Get-DirectoryFileCount -Directory $guestTools }
             'tools/job-tool'    = @{ path = $jobTool; fileCount = Get-DirectoryFileCount -Directory $jobTool }
             'tools/postprocess' = @{ path = $postProcess; fileCount = Get-DirectoryFileCount -Directory $postProcess }
+            'tools/vix-helper'  = @{ path = $vixHelper; fileCount = Get-DirectoryFileCount -Directory $vixHelper }
         }
         nextChecks              = @(
             ".\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -RuntimePublishRoot '$publishRoot' -RequireCompleteRuntimePackage",

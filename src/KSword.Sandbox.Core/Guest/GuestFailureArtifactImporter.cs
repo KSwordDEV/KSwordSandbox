@@ -28,9 +28,11 @@ public static class GuestFailureArtifactImporter
         var root = Path.GetFullPath(guestOutputRoot);
         var statusPath = FindNewest(root, "guest-agent-run-status.json");
         var stderrPath = FindNewest(root, "agent.stderr.log");
+        var sampleStderrPath = FindNewest(root, "sample-stderr.log");
         var exitPath = FindNewest(root, "agent.exit");
         var pidPath = FindNewest(root, "agent.pid");
         var eventsPath = FindNewest(root, "events.json");
+        var launchProofPath = FindNewest(root, "sample-launch-proof.json");
         var summaryPath = FindNewest(root, "agent-summary.json");
         var preflightPath = FindNewest(root, "guest-output-preflight.json");
         // The CLR preflight is written to the host job root and copied into
@@ -40,15 +42,27 @@ public static class GuestFailureArtifactImporter
         var sampleRuntimePreflightPath = FindNewest(root, "sample-runtime-preflight.json") ??
             FindNewestParent(root, "sample-runtime-preflight.json");
         var r0FailurePath = FindNewest(root, "driver-events.jsonl.failure.json");
+        var r0StatusPath = FindNewest(root, "driver-events.jsonl.r0-status.json");
         var rows = new List<SandboxEvent>();
 
         var status = statusPath is null ? null : ReadStatus(statusPath);
         var exitText = ReadText(exitPath);
         var parsedExit = TryParseExit(exitText, out var exitCode);
         var stderr = ReadText(stderrPath);
+        // Newer guest agents redirect the sample tree's stderr into
+        // sample-stderr.log. Any agent.stderr.log line that also appears in
+        // the sample lane is sample-attributable noise (inherited-handle
+        // leaks), not an agent diagnostic; only the remainder may fail the
+        // run. Payloads without sample-stderr.log keep the legacy rule where
+        // every agent.stderr.log line counts.
+        var sampleStderr = sampleStderrPath is null ? null : ReadText(sampleStderrPath);
+        var agentDiagnosticStderr = sampleStderrPath is null
+            ? stderr
+            : RemoveLinesPresentIn(stderr, sampleStderr);
         var missing = status?.MissingArtifacts ?? [];
-        var hasAgentMarker = statusPath is not null || stderrPath is not null || exitPath is not null || pidPath is not null || summaryPath is not null;
+        var hasAgentMarker = statusPath is not null || stderrPath is not null || exitPath is not null || pidPath is not null || summaryPath is not null || launchProofPath is not null;
         var hasR0Failure = r0FailurePath is not null;
+        var hasR0Status = r0StatusPath is not null;
         var preflight = preflightPath is null ? null : ReadOutputPreflight(preflightPath);
         var preflightFailed = preflight is not null &&
             !string.Equals(preflight.State, "ready", StringComparison.OrdinalIgnoreCase);
@@ -60,9 +74,21 @@ public static class GuestFailureArtifactImporter
         // Offline fixtures and older externally-produced events.json files do
         // not necessarily carry the Agent marker set. Do not invent a missing
         // summary failure for those already-complete event streams.
-        if (!hasAgentMarker && !hasR0Failure && !preflightFailed && !sampleRuntimeFailed)
+        if (!hasAgentMarker && !hasR0Failure && !hasR0Status && !preflightFailed && !sampleRuntimeFailed)
         {
             return rows;
+        }
+
+        // Final events already contain process.start. Recover only when the
+        // guest reset before events.json was committed; this proof establishes
+        // launch, never complete collection or a malicious behavior verdict.
+        if (eventsPath is null && launchProofPath is not null)
+        {
+            var launchProof = ImportSampleLaunchProof(launchProofPath, statusPath);
+            if (launchProof is not null)
+            {
+                rows.Add(launchProof);
+            }
         }
 
         if (sampleRuntimeFailed && sampleRuntime is not null && sampleRuntimePreflightPath is not null)
@@ -131,10 +157,11 @@ public static class GuestFailureArtifactImporter
             (parsedExit && exitCode != 0) ||
             (!string.IsNullOrWhiteSpace(exitText) && !parsedExit) ||
             missing.Count > 0 ||
-            // Preserve any Agent stderr as a structured runtime diagnostic.
-            // Even when the exit marker says 0, stderr means the collector
-            // reported an issue that must remain visible to operators.
-            !string.IsNullOrWhiteSpace(stderr));
+            // Preserve any Agent stderr as a structured runtime diagnostic,
+            // but only content attributable to the agent itself: sample-tree
+            // noise captured in sample-stderr.log must not fail an otherwise
+            // healthy run (agent state=completed, exit 0, complete events).
+            !string.IsNullOrWhiteSpace(agentDiagnosticStderr));
 
         if (failed)
         {
@@ -155,6 +182,13 @@ public static class GuestFailureArtifactImporter
             };
             if (statusPath is not null) values["statusPath"] = statusPath;
             if (stderrPath is not null) values["stderrPath"] = stderrPath;
+            if (sampleStderrPath is not null)
+            {
+                values["sampleStderrPath"] = sampleStderrPath;
+                values["sampleStderrBytes"] = FileLength(sampleStderrPath).ToString(CultureInfo.InvariantCulture);
+                values["stderrSampleAttributed"] = (!string.IsNullOrWhiteSpace(stderr) &&
+                    string.IsNullOrWhiteSpace(agentDiagnosticStderr)).ToString().ToLowerInvariant();
+            }
             if (exitPath is not null) values["exitPath"] = exitPath;
             if (pidPath is not null) values["pidPath"] = pidPath;
             if (parsedExit) values["exitCode"] = exitCode.ToString(CultureInfo.InvariantCulture);
@@ -169,9 +203,10 @@ public static class GuestFailureArtifactImporter
             {
                 values["stderrBytes"] = FileLength(stderrPath).ToString(CultureInfo.InvariantCulture);
             }
-            if (!string.IsNullOrWhiteSpace(stderr))
+            var agentDiagnosticPreview = string.IsNullOrWhiteSpace(agentDiagnosticStderr) ? stderr : agentDiagnosticStderr;
+            if (!string.IsNullOrWhiteSpace(agentDiagnosticPreview))
             {
-                values["stderrPreview"] = stderr.Length > 4096 ? stderr[..4096] : stderr;
+                values["stderrPreview"] = agentDiagnosticPreview.Length > 4096 ? agentDiagnosticPreview[..4096] : agentDiagnosticPreview;
             }
             rows.Add(CreateFailureRow(
                 "agent.run.failed",
@@ -189,7 +224,192 @@ public static class GuestFailureArtifactImporter
             }
         }
 
+        if (r0StatusPath is not null)
+        {
+            var r0BudgetStop = ImportR0OutputBudgetStop(r0StatusPath);
+            if (r0BudgetStop is not null)
+            {
+                rows.Add(r0BudgetStop);
+            }
+        }
+
         return rows;
+    }
+
+    public static SandboxEvent? ImportSampleLaunchProof(string? proofPath, string? statusPath = null)
+    {
+        if (string.IsNullOrWhiteSpace(proofPath) || !File.Exists(proofPath)) return null;
+        try
+        {
+            if (new FileInfo(proofPath).Length is <= 0 or > 4096) return null;
+            using var document = JsonDocument.Parse(File.ReadAllText(proofPath), JsonOptions);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                ReadString(root, "schema") != "ksword-sample-launch-proof-v1" ||
+                ReadString(root, "state") != "started") return null;
+
+            var samplePath = ReadString(root, "samplePath");
+            var sampleSha256 = ReadString(root, "sampleSha256");
+            var jobIdText = ReadString(root, "jobId");
+            var startedText = ReadString(root, "startedAtUtc");
+            if (string.IsNullOrWhiteSpace(samplePath) || !Path.IsPathFullyQualified(samplePath) ||
+                sampleSha256 is not { Length: 64 } || !sampleSha256.All(Uri.IsHexDigit) ||
+                !Guid.TryParse(jobIdText, out var jobId) ||
+                !DateTimeOffset.TryParse(startedText, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal, out var startedAt) ||
+                !root.TryGetProperty("processId", out var pidValue) || pidValue.ValueKind != JsonValueKind.Number || !pidValue.TryGetInt32(out var pid) || pid <= 0 ||
+                !root.TryGetProperty("parentProcessId", out var parentValue) ||
+                parentValue.ValueKind != JsonValueKind.Number || !parentValue.TryGetInt32(out var parentPid) || parentPid <= 0) return null;
+
+            var expectedSha256 = ReadExpectedSampleSha256(statusPath);
+            if (expectedSha256 is not null &&
+                !string.Equals(expectedSha256, sampleSha256, StringComparison.OrdinalIgnoreCase)) return null;
+            var sampleSizeBytes = root.TryGetProperty("sampleSizeBytes", out var sizeValue) &&
+                sizeValue.ValueKind == JsonValueKind.Number && sizeValue.TryGetInt64(out var parsedSize) && parsedSize >= 0
+                    ? parsedSize.ToString(CultureInfo.InvariantCulture)
+                    : string.Empty;
+
+            return new SandboxEvent
+            {
+                EventType = "sample.launch.confirmed",
+                Timestamp = startedAt,
+                Source = "guest-agent",
+                ProcessId = pid,
+                ParentProcessId = parentPid,
+                Path = samplePath,
+                Data =
+                {
+                    ["sampleSha256"] = sampleSha256.ToUpperInvariant(),
+                    ["sampleSizeBytes"] = sampleSizeBytes,
+                    ["hostExpectedHashMatched"] = (expectedSha256 is not null).ToString().ToLowerInvariant(),
+                    ["jobId"] = jobId.ToString("D"),
+                    ["processId"] = pid.ToString(CultureInfo.InvariantCulture),
+                    ["parentProcessId"] = parentPid.ToString(CultureInfo.InvariantCulture),
+                    ["launchProofPath"] = proofPath,
+                    ["sampleExecuted"] = "true",
+                    ["launchProofRecovered"] = "true",
+                    ["captureState"] = "partial",
+                    ["collectionHealth"] = "true",
+                    ["behaviorCounted"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["notSampleBehavior"] = "true",
+                    ["sampleBehaviorCandidate"] = "false",
+                    ["zhMessage"] = "来宾 Agent 的持久化启动记录确认样本进程已启动；完整行为事件尚未回收。",
+                    ["zhHint"] = "此记录只证明进程启动，不证明文件、磁盘或网络行为，也不代表采集已完成。"
+                }
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadExpectedSampleSha256(string? statusPath)
+    {
+        if (string.IsNullOrWhiteSpace(statusPath) || !File.Exists(statusPath)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(statusPath), JsonOptions);
+            var value = ReadString(document.RootElement, "sampleSha256");
+            return value is { Length: 64 } && value.All(Uri.IsHexDigit) ? value : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Imports the collector's r0-status sidecar written by an intentional
+    /// cumulative-output-budget stop. Unlike the failure sidecar this row is
+    /// evidence of a clean stop: the collector finalized its segment, exited
+    /// with code 0, and deliberately left events beyond the budget
+    /// uncollected. The row therefore never carries failure markers and must
+    /// not be counted as an output-write failure; it exists so the report can
+    /// say "已达输出预算（N MB / M 段）" instead of degrading the job.
+    /// </summary>
+    public static SandboxEvent? ImportR0OutputBudgetStop(string? sidecarPath)
+    {
+        if (string.IsNullOrWhiteSpace(sidecarPath) || !File.Exists(sidecarPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(sidecarPath), JsonOptions);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var stopReason = ReadScalar(document.RootElement, "stopReason");
+            if (!string.Equals(stopReason, "outputBudgetReached", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["collectionHealth"] = "true",
+                ["captureState"] = "truncated",
+                ["status"] = "completed",
+                ["stopReason"] = "outputBudgetReached",
+                ["r0OutputBudgetReached"] = "true",
+                ["r0OutputTruncated"] = "true",
+                ["outputBudgetStop"] = "true",
+                ["healthRowType"] = "driver.output.budgetStop",
+                ["eventTypeAlias"] = "driver.output.budgetStop",
+                ["outputBudgetStopPath"] = sidecarPath,
+                ["outputBudgetStopRelativePath"] = Path.GetFileName(sidecarPath),
+                ["sourceComponent"] = "ksword-r0collector",
+                ["eventOrigin"] = "collector-sidecar",
+                ["producerCategory"] = "r0collector",
+                ["subjectKind"] = "collector-diagnostic",
+                ["actorRole"] = "collector-infrastructure",
+                ["subjectRole"] = "collector-diagnostic",
+                ["collectionNoise"] = "true",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["notSampleBehavior"] = "true",
+                ["sampleBehaviorCandidate"] = "false",
+                ["eventKind"] = "diagnostic",
+                ["evidenceRole"] = "collection-diagnostic",
+                ["zhMessage"] = "R0 采集已达到累计输出预算并以干净方式停止（exit 0）；预算之后的事件有意未采集，这不是输出写失败。",
+                ["zhHint"] = "该行来自独立 r0-status 侧车；请按预算字节数/段数评估截断位置，不要按 outputWriteFailure 处理。"
+            };
+
+            // Preserve every scalar sidecar field. Queue-depth aliases are
+            // deliberately NOT mapped to remainingUnread: an intentional
+            // budget boundary is not an undrained-queue failure.
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                var scalar = ScalarText(property.Value);
+                if (!string.IsNullOrWhiteSpace(scalar))
+                {
+                    data[property.Name] = scalar;
+                }
+            }
+
+            data["statusAnnotated"] = BoolText(data, "statusAnnotated") ? "true" : "false";
+            data["finalStatusAvailable"] = BoolText(data, "finalStatusAvailable") ? "true" : "false";
+            data["queueDepthAtStopKnown"] = BoolText(data, "queueDepthAtStopKnown") ? "true" : "false";
+
+            var timestamp = File.GetLastWriteTimeUtc(sidecarPath);
+            return new SandboxEvent
+            {
+                EventType = "r0collector.outputBudget",
+                Timestamp = timestamp == default ? DateTimeOffset.UtcNow : new DateTimeOffset(timestamp, TimeSpan.Zero),
+                Source = "r0collector",
+                Path = sidecarPath,
+                Data = data
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -308,6 +528,12 @@ public static class GuestFailureArtifactImporter
             if (result is null || result.Success) return [];
             var failed = result.StepResults.Where(step => !step.Success).OrderBy(step => step.StepIndex).FirstOrDefault();
             if (failed is null) return [];
+            if (result.Provider == VirtualizationProvider.VMware &&
+                failed.StepId.Equals("copy-sample", StringComparison.OrdinalIgnoreCase))
+            {
+                var protectionBlock = ImportGuestSampleReadProtectionBlock(resultPath, failed.StepIndex);
+                if (protectionBlock is not null) return [protectionBlock];
+            }
             var output = $"{failed.Title}\n{failed.Message}\n{failed.StandardOutput}\n{failed.StandardError}";
             var guestAgentFailure = failed.StepId.Equals("run-agent", StringComparison.OrdinalIgnoreCase) ||
                 failed.StepId.Equals("sync-live-output", StringComparison.OrdinalIgnoreCase) ||
@@ -351,6 +577,81 @@ public static class GuestFailureArtifactImporter
             return [];
         }
     }
+
+    private static SandboxEvent? ImportGuestSampleReadProtectionBlock(string runbookResultPath, int failedStepIndex)
+    {
+        // The offline GuestOps copy-sample step writes this exact host-side
+        // control artifact before it throws. The runbook's generic failure
+        // message does not include the guest exception, so the artifact is
+        // necessary to distinguish a protection block from a hash mismatch.
+        var jobRoot = Path.GetDirectoryName(Path.GetFullPath(runbookResultPath));
+        if (string.IsNullOrWhiteSpace(jobRoot)) return null;
+        var hashResultPath = Path.Combine(jobRoot, "vmware-guestops", "sample-hash-result.json");
+        try
+        {
+            var info = new FileInfo(hashResultPath);
+            if (!info.Exists || info.Length is <= 0 or > 16384) return null;
+            using var document = JsonDocument.Parse(File.ReadAllText(hashResultPath), JsonOptions);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !string.Equals(ReadString(root, "state"), "failed", StringComparison.OrdinalIgnoreCase)) return null;
+            var guestError = ReadString(root, "error") ?? string.Empty;
+            var nativeCode = ReadScalar(root, "nativeErrorCode") ?? string.Empty;
+            var hresult = ReadScalar(root, "hresult") ?? string.Empty;
+            if (!IsGuestProtectionReadBlock(guestError, nativeCode, hresult)) return null;
+
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["collectionHealth"] = "true",
+                ["captureState"] = "failed",
+                ["status"] = "failed",
+                ["failureType"] = "guestSampleFileReadBlocked",
+                ["sampleRuntimePreflight"] = "true",
+                ["sampleRuntimeState"] = "sample-runtime-blocked",
+                ["sampleRuntimeFailureCode"] = "sample-runtime-blocked-guest-file-read",
+                ["sampleExecuted"] = "false",
+                ["guestProtectionSource"] = "unconfirmed",
+                ["preflightPath"] = hashResultPath,
+                ["runbookResultPath"] = runbookResultPath,
+                ["failedStepId"] = "copy-sample",
+                ["failedStepIndex"] = failedStepIndex.ToString(CultureInfo.InvariantCulture),
+                ["stderrPreview"] = guestError.Length > 2048 ? guestError[..2048] : guestError,
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["notSampleBehavior"] = "true",
+                ["sampleBehaviorCandidate"] = "false",
+                ["eventKind"] = "diagnostic",
+                ["evidenceRole"] = "collection-diagnostic",
+                ["sourceComponent"] = "runbook-preflight",
+                ["failureReason"] = "guest-sample-file-read-blocked-by-protection",
+                ["zhMessage"] = "来宾拒绝读取样本文件，样本未执行，动态结果不可判定。",
+                ["zhHint"] = "检查来宾安全事件以及防病毒和文件过滤层状态；尚未确认具体拦截组件。修复来宾环境后从干净快照重跑。"
+            };
+            return new SandboxEvent
+            {
+                EventType = "sample.runtime.preflight.failed",
+                Timestamp = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero),
+                Source = "host",
+                Path = hashResultPath,
+                Data = data
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsGuestProtectionReadBlock(string message, string nativeCode, string hresult) =>
+        string.Equals(nativeCode, "225", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(hresult, "0x800700e1", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("ERROR_VIRUS_INFECTED", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("0x800700e1", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("WinError 225", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("contains a virus", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("potentially unwanted software", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("文件包含病毒", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("包含病毒或潜在的垃圾软件", StringComparison.OrdinalIgnoreCase);
 
     private static SandboxEvent CreateFailureRow(string eventType, string path, Dictionary<string, string> values, string hint)
     {
@@ -507,6 +808,43 @@ public static class GuestFailureArtifactImporter
             return new string(buffer, 0, count).Trim();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>
+    /// Removes lines from <paramref name="agentStderr"/> that also appear in the
+    /// sample-tree stderr lane. Matching is line-based and ordinal after
+    /// trimming line endings/whitespace, so sample noise that also landed in
+    /// agent.stderr.log (for example through an inherited handle) is attributed
+    /// to the sample and only genuine agent diagnostics remain.
+    /// </summary>
+    private static string? RemoveLinesPresentIn(string? agentStderr, string? sampleStderr)
+    {
+        if (string.IsNullOrWhiteSpace(agentStderr))
+        {
+            return agentStderr;
+        }
+
+        if (string.IsNullOrWhiteSpace(sampleStderr))
+        {
+            return agentStderr;
+        }
+
+        var sampleLines = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var line in sampleStderr.Split('\n'))
+        {
+            var normalized = line.Trim('\r', ' ', '\t');
+            if (normalized.Length > 0)
+            {
+                sampleLines.Add(normalized);
+            }
+        }
+
+        var kept = agentStderr
+            .Split('\n')
+            .Where(line => !sampleLines.Contains(line.Trim('\r', ' ', '\t')))
+            .ToList();
+        var result = string.Join("\n", kept).Trim();
+        return result.Length == 0 ? null : result;
     }
 
     private static long FileLength(string? path)

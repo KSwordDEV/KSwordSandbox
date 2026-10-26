@@ -221,6 +221,23 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
                 return false;
             }
             options->minFreeOutputBytes = parsed;
+        } else if (arg == L"--output-budget-bytes" || arg == L"--output-budget" ||
+                arg == L"--total-output-budget-bytes" || arg == L"--max-total-output-bytes") {
+            if (!readValue(arg, &value)) {
+                return false;
+            }
+            errno = 0;
+            wchar_t* end = nullptr;
+            const auto parsed = std::wcstoull(value.c_str(), &end, 10);
+            if (errno == ERANGE || end == value.c_str() || *end != L'\0' || parsed > (1ULL << 40)) {
+                if (error != nullptr) {
+                    *error = arg + L" must be an unsigned byte count between 0 and 1 TiB. / " +
+                        arg + L" must be between 0 and 1 TiB.";
+                }
+                return false;
+            }
+            options->outputBudgetBytes = parsed;
+            options->outputBudgetSpecified = true;
         } else if (arg == L"--poll-interval" || arg == L"--poll-interval-ms" || arg == L"--poll-ms" || arg == L"-p") {
             if (!readValue(arg, &value)) {
                 return false;
@@ -246,7 +263,11 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             if (!readValue(arg, &value)) {
                 return false;
             }
-            if (!ParseBoundedInt(value, 0, 100000, arg, &options->stressCount, error)) {
+            // The 1,000,000 ceiling exists to bound accidental invocations,
+            // while still allowing the 500k+ handle-recycle stress validation
+            // that exceeds the observed live failure point (~130k rows)
+            // several times over.
+            if (!ParseBoundedInt(value, 0, 1000000, arg, &options->stressCount, error)) {
                 return false;
             }
             if (options->stressCount > 0) {
@@ -279,6 +300,23 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
                 *error = L"Unknown argument: " + arg + L" / \u672a\u77e5\u53c2\u6570: " + arg;
             }
             return false;
+        }
+    }
+
+    if (!options->outputBudgetSpecified) {
+        // Environment fallback keeps the budget configurable for runbook
+        // layers that can only pass environment variables through to the
+        // collector process. An invalid value is ignored so a typo degrades
+        // to the compiled-in default instead of failing collection.
+        wchar_t envBuffer[64] = {};
+        const DWORD envLength = GetEnvironmentVariableW(L"KSWORD_R0_OUTPUT_BUDGET_BYTES", envBuffer, 64);
+        if (envLength > 0 && envLength < 64) {
+            errno = 0;
+            wchar_t* end = nullptr;
+            const auto parsed = std::wcstoull(envBuffer, &end, 10);
+            if (errno == 0 && end != envBuffer && *end == L'\0' && parsed <= (1ULL << 40)) {
+                options->outputBudgetBytes = parsed;
+            }
         }
     }
 
@@ -321,6 +359,7 @@ void PrintUsage(const wchar_t* programName) {
         << L"  -p, --poll-ms <ms>           Poll interval in milliseconds (default: 10) / \u8f6e\u95f4\u9694\uff08\u6beb\u79d2\uff09\n"
         << L"      --max-output-bytes <n>  Rotate JSONL before this many bytes (0 disables; default: 268435456) / JSONL output rotation limit\n"
         << L"      --min-free-output-bytes <n>  Stop before available output space falls below this reserve (default: 536870912)\n"
+        << L"      --output-budget-bytes <n>  Cumulative budget across all segments; reaching it stops cleanly with exit 0 (0 disables; default: 402653184; env KSWORD_R0_OUTPUT_BUDGET_BYTES) / 累计输出预算\n"
         << L"      --poll-interval-ms <ms>  Alias for --poll-ms / --poll-ms \u522b\u540d\n"
         << L"      --diagnose               Emit service/device/ABI/READ_EVENTS readiness diagnostics / \u53d1\u51fa\u670d\u52a1/\u8bbe\u5907/ABI/READ_EVENTS \u5c31\u7eea\u8bca\u65ad\n"
         << L"      --readiness              Alias for --diagnose / --diagnose \u522b\u540d\n"

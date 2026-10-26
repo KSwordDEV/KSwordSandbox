@@ -21,12 +21,14 @@ public sealed class RunbookPlanningStage : IAnalysisPipelineStage
     public Task ExecuteAsync(AnalysisPipelineContext context, CancellationToken cancellationToken = default)
     {
         var provider = context.Submission.Provider ?? context.Config.Virtualization.Provider;
+        var networkPolicy = context.Submission.NetworkPolicy ?? context.Config.Guest.NetworkPolicy;
         VirtualizationProviderResourceValidator.Validate(
             context.Config,
             provider,
             context.Submission.GoldenSnapshotName,
             context.Submission.MachineDefinitionPath,
-            context.Submission.QemuDiskFormat);
+            context.Submission.QemuDiskFormat,
+            networkPolicy);
         var config = ApplySubmissionOverrides(context.Config, context.Submission);
         context.Runbook = builder.Build(
             config,
@@ -44,6 +46,7 @@ public sealed class RunbookPlanningStage : IAnalysisPipelineStage
     private static SandboxConfig ApplySubmissionOverrides(SandboxConfig config, SandboxSubmission submission)
     {
         var provider = submission.Provider ?? config.Virtualization.Provider;
+        var networkPolicy = submission.NetworkPolicy ?? config.Guest.NetworkPolicy;
         return config with
         {
             Virtualization = config.Virtualization with { Provider = provider },
@@ -58,7 +61,12 @@ public sealed class RunbookPlanningStage : IAnalysisPipelineStage
                 SnapshotName = CleanOptional(submission.GoldenSnapshotName) ?? config.VMware.SnapshotName,
                 VmxPath = provider is VirtualizationProvider.VMware
                     ? CleanOptional(submission.MachineDefinitionPath) ?? config.VMware.VmxPath
-                    : config.VMware.VmxPath
+                    : config.VMware.VmxPath,
+                // Blocked VMware jobs use VMware Tools guest operations for
+                // evidence transfer without publishing a host shared folder.
+                UseHostOutputShare = provider is VirtualizationProvider.VMware && networkPolicy is SandboxNetworkPolicy.Block
+                    ? false
+                    : config.VMware.UseHostOutputShare
             },
             Qemu = config.Qemu with
             {
@@ -74,7 +82,8 @@ public sealed class RunbookPlanningStage : IAnalysisPipelineStage
             Guest = config.Guest with
             {
                 UserName = CleanOptional(submission.GuestUserName) ?? config.Guest.UserName,
-                WorkingDirectory = CleanOptional(submission.GuestWorkingDirectory) ?? config.Guest.WorkingDirectory
+                WorkingDirectory = CleanOptional(submission.GuestWorkingDirectory) ?? config.Guest.WorkingDirectory,
+                NetworkPolicy = submission.NetworkPolicy ?? config.Guest.NetworkPolicy
             },
             Paths = config.Paths with
             {

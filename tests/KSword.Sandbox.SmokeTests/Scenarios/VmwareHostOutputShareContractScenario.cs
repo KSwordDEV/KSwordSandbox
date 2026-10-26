@@ -23,7 +23,7 @@ internal sealed class VmwareHostOutputShareContractScenario : ISmokeTestScenario
         Require(models, "public bool UseHostOutputShare { get; init; }", "VMware needs an explicit opt-in for the host output share.");
         Require(models, "public string OutputShareName { get; init; } = \"KSwordOutput\";", "The share needs a stable default name.");
 
-        Require(builder, "provider is not VirtualizationProvider.VMware || !config.VMware.UseHostOutputShare", "The share must stay provider-specific and opt-in.");
+        Require(builder, "config.Guest.NetworkPolicy is SandboxNetworkPolicy.Block ||", "Blocked VMware runs must never publish a host share.");
         Require(builder, "$\"\\\\\\\\vmware-host\\\\Shared Folders\\\\{hostOutputShare.Value.Name}\"", "The guest output directory must point at the shared folder.");
         Require(builder, "\"enable-vmware-output-share\"", "The runbook must plan the host output share mapping.");
         Require(builder, "vmrun enableSharedFolders failed", "A failed shared-folder enable must fail the run loudly.");
@@ -32,7 +32,7 @@ internal sealed class VmwareHostOutputShareContractScenario : ISmokeTestScenario
         Require(builder, "Shared folder mapping '$shareName' removed", "Cleanup must drop the mapping because a snapshot revert keeps the VMX.");
         Require(builder, "live remoting sync is not required", "Live sync must not open a WinRM session when the guest already writes to the host.");
         Require(builder, "run is incomplete: status=$statusState", "A killed Guest Agent must degrade the shared-folder collection instead of discarding the run.");
-        Require(builder, "Write-Warning \\\"Guest output reached the host folder", "Incomplete shared-folder collection must stay a visible warning.");
+        Require(builder, "throw \\\"Guest output reached the host folder", "Incomplete shared-folder collection must fail the step loudly instead of a soft warning, so the runbook never reports a false success.");
         Require(builder, "collectionChannel = 'vmware-shared-folder'", "The report must be able to state which channel produced the evidence.");
 
         // The Agent serializes its output only after the sample window closes,
@@ -40,7 +40,12 @@ internal sealed class VmwareHostOutputShareContractScenario : ISmokeTestScenario
         // Win32.Emotet: a duration+30s host budget expired 0.8s before
         // agent.exit landed, so a complete run was reported incomplete.
         Require(builder, "config.Analysis.DefaultDurationSeconds + 150", "The host wait budget must cover the Agent's post-run probe and ETW decode time, not just the sample window.");
-        Require(builder, "if (-not (Test-Path -LiteralPath (Join-Path $hostOut 'agent.exit') -PathType Leaf)) { Start-Sleep -Seconds 2 }", "The artifact set must be re-read after agent.exit appears, because shared-folder writes can lag the check.");
+        Require(builder, "if (-not (Test-Path -LiteralPath (Join-Path $sharedHostOut 'agent.exit') -PathType Leaf)) { Start-Sleep -Seconds 2 }", "The staging artifact set must be re-read after agent.exit appears, because shared-folder writes can lag the check.");
+        Require(builder, "$sourceItemPath = $_.FullName;", "The per-file copy must capture the source path before the try, because a catch block rebinds $_ to the ErrorRecord and $_.FullName would be null.");
+        Require(builder, "Copy-Item -LiteralPath $sourceItemPath -Destination $dest -Force -ErrorAction Stop", "Shared-folder evidence must be copied file-by-file into the durable host output directory before report import, so one racing artifact cannot abort the whole tree.");
+        Require(builder, "catch { if (-not (Test-Path -LiteralPath $sourceItemPath -PathType Leaf)) { return }; $script:copyFailures += $rel }", "A vanished-mid-copy file is a benign race and must be skipped via the captured path; a failed copy of a non-required artifact is only a warning.");
+        Require(builder, "$missingCopies = @($requiredNames | Where-Object { (Test-Path -LiteralPath (Join-Path $sharedHostOut", "A failed copy of a required artifact must be detected against the durable copy and fail the step.");
+        Require(builder, "copyWarnings = @($copyFailures)", "Non-required per-file copy failures must surface as warnings in the status file, not abort the snapshot.");
 
         Require(facts, "\"enable-vmware-output-share\" => \"guest-prepare\"", "The new step needs a runbook phase.");
         Require(facts, "\"enable-vmware-output-share\" => \"guest-output-share\"", "The new step needs an operator-facing category.");

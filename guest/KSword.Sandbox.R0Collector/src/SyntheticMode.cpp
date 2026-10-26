@@ -1366,7 +1366,7 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
     mockEvent.dataJson = mockData.Build();
 
     if (!EmitEvent(writer, mockEvent)) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!EmitMockDriverCategoryEvent(
@@ -1382,7 +1382,7 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
                 {"processId", currentProcessIdText},
                 {"parentProcessId", currentProcessIdText}
             })) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!EmitMockDriverCategoryEvent(
@@ -1402,7 +1402,7 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
                 {"imageBase", "0x0000000180000000"},
                 {"imageSize", "1048576"}
             })) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!EmitMockDriverCategoryEvent(
@@ -1423,7 +1423,7 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
                 {"desiredAccessHex", "0x0012019F"},
                 {"disposition", "create"}
             })) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!EmitMockDriverCategoryEvent(
@@ -1445,7 +1445,7 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
                 {"ifeoPersistenceCandidate", "false"},
                 {"startupRegistryCandidate", "true"}
             })) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!EmitSyntheticSemanticSelfCheckEvents(
@@ -1454,19 +1454,19 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
             mockCommandLine,
             currentProcessId,
             currentProcessIdText)) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!EmitSyntheticStressEvents(writer, options, mockCommandLine)) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!EmitSyntheticStressSummary(writer, options)) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (options.injectJsonlNoise && !EmitSyntheticJsonlNoiseRows(writer)) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     return kExitSuccess;

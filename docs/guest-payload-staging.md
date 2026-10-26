@@ -56,16 +56,19 @@ paths consumed by the Hyper-V readiness preflight.
 ### Payload manifest freshness
 
 `payload-manifest.json` is the operator's freshness record for the staged
-Guest Agent and R0Collector payload. For contract version 2, check these fields
-before refreshing a golden checkpoint or starting a live run:
+Guest Agent and R0Collector payload. `Prepare-GuestPayload.ps1` writes version 2
+for its external build tree; `Publish-RuntimePayloads.ps1` converts the release
+copy to version 3 so it remains valid after extraction elsewhere. Check these
+fields before refreshing a golden checkpoint or starting a live run:
 
-- `payloadContractVersion`: should be `2` for the current manifest shape.
+- `payloadContractVersion`: `2` for build staging or `3` for a portable release.
 - `generatedAtUtc`: when the payload was last prepared.
 - `repositoryHead`: git commit or working tree head used during staging.
 - `sourceFingerprint`: compact hash over the guest payload source inputs.
 - `sourceLatestWriteUtc`: newest source-file timestamp included in that
   fingerprint.
-- `requiredHostFiles`: absolute staged paths that readiness expects, including
+- `requiredHostFiles`: version 2 records absolute build paths; version 3
+  records paths relative to the payload manifest directory, including
   `PayloadManifest`, `GuestAgent`, and `R0Collector`.
 - `expectedGuestAgentPath` and `expectedR0CollectorPath`: guest paths the live
   runbook validates after staging.

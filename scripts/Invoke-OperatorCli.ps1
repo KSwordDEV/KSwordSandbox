@@ -40,6 +40,7 @@ param(
     [switch]$Live,
     [switch]$NoR0Collector,
     [switch]$NoOpenVmConsole,
+    [switch]$KeepRawEvidence,
     [switch]$SkipGuestImport,
     [switch]$Json,
     [switch]$NoBuild,
@@ -351,6 +352,7 @@ switch ($Command) {
         if ($Live) { $extra += '--live' }
         if ($NoR0Collector) { $extra += '--no-r0-collector' }
         if ($NoOpenVmConsole) { $extra += '--no-open-vm-console' }
+        if ($KeepRawEvidence) { $extra += '--keep-raw-evidence' }
         if ($SkipGuestImport) { $extra += '--skip-guest-import' }
         Invoke-JobToolCommand -JobToolCommand 'execute' -ExtraArgs $extra
     }

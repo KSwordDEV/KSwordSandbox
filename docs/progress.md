@@ -1,5 +1,8 @@
 # KSwordSandbox 进度快照 / Progress snapshot
 
+> 本页的 v28 百分比是历史快照。2026-10-26 当前工作树的门禁与破坏性样本实验室状态见
+> [`current-validation-2026-10-26.md`](current-validation-2026-10-26.md)。
+
 > 中文优先。本文只做当前工程进度和发布差距的轻量快照；权威操作链路见
 > `docs/current-architecture-and-operations.md`，真实 live 历史证据见
 > `docs/webui-real-r0-e2e.md`，规则清单见 `docs/behavior-rule-matrix.md`，发布差距审计见

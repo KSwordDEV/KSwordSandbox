@@ -3,6 +3,7 @@ using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Core.Artifacts;
 using KSword.Sandbox.Core.Configuration;
 using KSword.Sandbox.Core.Execution;
+using KSword.Sandbox.Core.Orchestration;
 using System.Text.Json;
 
 internal static partial class ProgramMain
@@ -154,6 +155,16 @@ internal static partial class ProgramMain
                 $"--step-timeout-seconds ({stepTimeoutSeconds}) 不能小于 --guest-ready-timeout-seconds ({guestReadyTimeoutSeconds})；否则 guest transport 等待会被提前终止。/ Step timeout must be zero (unlimited) or at least the guest readiness timeout.");
         }
         var importGuestEvents = !GetBool(options, "skip-guest-import") && !GetBool(options, "no-import-guest-events");
+        if (live)
+        {
+            // Refuse before any VM mutation when the host drive that will
+            // absorb the evidence cannot hold the conservative estimate.
+            HostOutputCapacityGuard.EnsureCapacity(
+                Path.Combine(ResolveRuntimeRoot(options, context.Config), "jobs"),
+                duration,
+                context.Config.ArtifactCollection.CaptureEtwLiveTrace);
+        }
+
         var configuredVmName = GetConfiguredVmName(context.Config, provider);
         var configuredSnapshotName = GetConfiguredSnapshotName(context.Config, provider);
         var machineDefinitionPath = GetProviderMachineDefinitionPath(options, context.Config, provider);
@@ -179,7 +190,8 @@ internal static partial class ProgramMain
             CollectDroppedFiles = GetNullableBool(options, "collect-dropped-files"),
             CaptureScreenshots = GetNullableBool(options, "capture-screenshots"),
             CaptureMemoryDumps = GetNullableBool(options, "capture-memory-dumps"),
-            CapturePacketCapture = GetNullableBool(options, "capture-packet-capture")
+            CapturePacketCapture = GetNullableBool(options, "capture-packet-capture"),
+            KeepRawEvidence = GetNullableBool(options, "keep-raw-evidence")
         });
 
         if (job.Runbook is null)

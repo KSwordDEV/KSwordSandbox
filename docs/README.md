@@ -1,5 +1,14 @@
 # 文档地图与权威状态 / Documentation map and canonical status
 
+当前未提交工作树的构建、smoke、实验室预检与真实样本实测阻断项，见
+[`current-validation-2026-10-26.md`](current-validation-2026-10-26.md)。下文的 v28 百分比是历史发布准备快照，不能代表 2026-10-26 的新 Live 验证。
+
+本轮破坏性样本的 21 个**未下载、未实测**候选哈希见
+[`destructive-sample-catalog-2026-10-26.md`](destructive-sample-catalog-2026-10-26.md)；
+严格无网卡 VMware 克隆的运行手册缺口与 GuestOps 边界见
+[`vmware-offline-runbook-map-2026-10-26.md`](vmware-offline-runbook-map-2026-10-26.md) 和
+[`vmware-guestops-security-2026-10-26.md`](vmware-guestops-security-2026-10-26.md)。
+
 本页是当前 MVP 文档的轻量索引，用于减少文档漂移：当两个文档覆盖同一主题时，
 优先更新下方权威（canonical）文档，其他文档只保留短指针或历史说明。
 

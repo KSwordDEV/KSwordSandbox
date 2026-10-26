@@ -220,10 +220,15 @@ internal sealed class LocalHostReadinessProbe
     private async Task<LocalVirtualizationReadinessContract> ProbeVMwareAsync(CancellationToken cancellationToken)
     {
         var guestRemoting = ResolveGuestRemoting(VirtualizationProvider.VMware);
+        var offlineGuestOps = config.Guest.NetworkPolicy is SandboxNetworkPolicy.Block;
+        var guestTransport = offlineGuestOps ? "VmwareGuestOps" : "PowerShellRemoting";
         var vmrunPath = ResolveExecutable(config.VMware.VmrunPath);
         var vmxFact = FileFact(config.VMware.VmxPath);
         var toolFact = ExecutableFact(config.VMware.VmrunPath, vmrunPath);
-        var unusedTool = new LocalPathFactContract(null, false, true, "not-required", "not-required");
+        var vixPath = offlineGuestOps ? ResolveExecutable(config.VMware.VixHelperPath) : null;
+        var secondaryTool = offlineGuestOps
+            ? ExecutableFact(config.VMware.VixHelperPath, vixPath)
+            : new LocalPathFactContract(null, false, true, "not-required", "not-required");
         var snapshotName = config.VMware.SnapshotName?.Trim() ?? string.Empty;
         var vmName = config.VMware.VmName?.Trim() ?? string.Empty;
 
@@ -233,9 +238,9 @@ internal sealed class LocalHostReadinessProbe
                 VirtualizationProvider.VMware,
                 vmName,
                 snapshotName,
-                "PowerShellRemoting",
+                guestTransport,
                 toolFact,
-                unusedTool,
+                secondaryTool,
                 vmxFact,
                 "VMWARE_WORKSTATION_PRO_REQUIRED",
                 "Full VMware parity requires Workstation Pro with vmware.vmType=ws. VMware Player profiles must be migrated to Workstation Pro before Live execution.");
@@ -251,36 +256,62 @@ internal sealed class LocalHostReadinessProbe
                 VirtualizationProvider.VMware,
                 vmName,
                 snapshotName,
-                "PowerShellRemoting",
+                guestTransport,
                 toolFact,
-                unusedTool,
+                secondaryTool,
                 vmxFact,
                 code,
                 message);
         }
-        var remotingError = GuestRemotingConfigurationError(VirtualizationProvider.VMware, guestRemoting);
+        if (offlineGuestOps)
+        {
+            var offlineScript = Path.Combine(Path.GetDirectoryName(config.VMware.VixHelperPath) ?? string.Empty, "Invoke-VmwareOfflineRunbook.ps1");
+            if (vixPath is null || !File.Exists(offlineScript))
+            {
+                return ProviderFailure(VirtualizationProvider.VMware, vmName, snapshotName,
+                    guestTransport, toolFact, secondaryTool, vmxFact,
+                    "VMWARE_GUESTOPS_PACKAGE_MISSING",
+                    "VMware Block requires the packaged VIX helper and Invoke-VmwareOfflineRunbook.ps1 beside it; rerun /setup or republish the runtime package.");
+            }
+            var isolationError = VmwareBlockIsolationDiagnostic(config.VMware.VmxPath);
+            if (isolationError is not null)
+            {
+                return ProviderFailure(VirtualizationProvider.VMware, vmName, snapshotName,
+                    guestTransport, toolFact, secondaryTool, vmxFact,
+                    "VMWARE_BLOCK_ISOLATION_INVALID", isolationError);
+            }
+            var guestOps = await RunProcessAsync(vixPath, ["status", config.VMware.VmxPath], cancellationToken).ConfigureAwait(false);
+            if (!guestOps.Success)
+            {
+                return ProviderFailure(VirtualizationProvider.VMware, vmName, snapshotName,
+                    guestTransport, toolFact, secondaryTool, vmxFact,
+                    guestOps.TimedOut ? "VMWARE_GUESTOPS_QUERY_TIMEOUT" : "VMWARE_GUESTOPS_RUNTIME_UNAVAILABLE",
+                    $"Packaged VIX helper could not read the VM. Verify VMware Workstation VIX runtime and Microsoft VC++ x64 runtime. {guestOps.Diagnostic}");
+            }
+        }
+        var remotingError = offlineGuestOps ? null : GuestRemotingConfigurationError(VirtualizationProvider.VMware, guestRemoting);
         if (remotingError is not null)
         {
             return ProviderFailure(
                 VirtualizationProvider.VMware,
                 vmName,
                 snapshotName,
-                "PowerShellRemoting",
+                guestTransport,
                 toolFact,
-                unusedTool,
+                secondaryTool,
                 vmxFact,
                 "GUEST_REMOTING_CONFIGURATION_INVALID",
                 remotingError);
         }
-        if (!IsGuestRemotingSecure(guestRemoting))
+        if (!offlineGuestOps && !IsGuestRemotingSecure(guestRemoting))
         {
             return ProviderFailure(
                 VirtualizationProvider.VMware,
                 vmName,
                 snapshotName,
-                "PowerShellRemoting",
+                guestTransport,
                 toolFact,
-                unusedTool,
+                secondaryTool,
                 vmxFact,
                 "GUEST_REMOTING_INSECURE",
                 GuestRemotingSecurityDiagnostic(guestRemoting));
@@ -296,9 +327,9 @@ internal sealed class LocalHostReadinessProbe
                 VirtualizationProvider.VMware,
                 vmName,
                 snapshotName,
-                "PowerShellRemoting",
+                guestTransport,
                 toolFact,
-                unusedTool,
+                secondaryTool,
                 vmxFact,
                 snapshots.TimedOut ? "VMWARE_QUERY_TIMEOUT" : "VMWARE_SNAPSHOT_QUERY_FAILED",
                 snapshots.Diagnostic);
@@ -341,18 +372,18 @@ internal sealed class LocalHostReadinessProbe
             SnapshotName: selectedSnapshot,
             SnapshotSource: snapshotExists ? "detected-config-match" : "not-found",
             SnapshotExists: snapshotExists,
-            GuestTransport: "PowerShellRemoting",
-            GuestAddressMode: guestRemoting.AddressMode.ToString(),
-            GuestAddress: guestRemoting.Address,
-            GuestAddressSource: GuestAddressSource(guestRemoting),
-            GuestEndpointReady: GuestEndpointReady(VirtualizationProvider.VMware, guestRemoting),
-            GuestPort: guestRemoting.Port,
-            GuestUseSsl: guestRemoting.UseSsl,
-            GuestAuthentication: guestRemoting.Authentication,
-            GuestSkipCertificateChecks: guestRemoting.SkipCertificateChecks,
+            GuestTransport: guestTransport,
+            GuestAddressMode: offlineGuestOps ? "VixGuestOps" : guestRemoting.AddressMode.ToString(),
+            GuestAddress: offlineGuestOps ? null : guestRemoting.Address,
+            GuestAddressSource: offlineGuestOps ? "vmware-tools-guest-operations" : GuestAddressSource(guestRemoting),
+            GuestEndpointReady: offlineGuestOps || GuestEndpointReady(VirtualizationProvider.VMware, guestRemoting),
+            GuestPort: offlineGuestOps ? 0 : guestRemoting.Port,
+            GuestUseSsl: !offlineGuestOps && guestRemoting.UseSsl,
+            GuestAuthentication: offlineGuestOps ? "VIX" : guestRemoting.Authentication,
+            GuestSkipCertificateChecks: !offlineGuestOps && guestRemoting.SkipCertificateChecks,
             GuestTransportSecure: true,
             PrimaryTool: toolFact,
-            SecondaryTool: unusedTool,
+            SecondaryTool: secondaryTool,
             MachineDefinition: vmxFact,
             VmCandidates: [candidate],
             DiagnosticCode: snapshotExists && running.Success
@@ -363,7 +394,10 @@ internal sealed class LocalHostReadinessProbe
                         ? "VMWARE_LIST_FAILED"
                         : "VMWARE_SNAPSHOT_NOT_FOUND",
             DiagnosticMessage: snapshotExists
-                ? running.Success ? "VMware vmrun, VMX, and configured snapshot were detected." : running.Diagnostic
+                ? running.Success ? offlineGuestOps
+                    ? "VMware vmrun, VMX, isolated snapshot and packaged VIX GuestOps were detected read-only. Guest login will be checked after startup."
+                    : "VMware vmrun, VMX, and configured snapshot were detected."
+                    : running.Diagnostic
                 : $"Configured VMware snapshot '{snapshotName}' was not found.");
     }
 
@@ -862,6 +896,7 @@ internal sealed class LocalHostReadinessProbe
         string message)
     {
         var guestRemoting = ResolveGuestRemoting(provider);
+        var offlineGuestOps = provider is VirtualizationProvider.VMware && guestTransport == "VmwareGuestOps";
         var accessDenied = IsProviderAccessDenied(message);
         return new LocalVirtualizationReadinessContract(
             Provider: provider,
@@ -878,15 +913,15 @@ internal sealed class LocalHostReadinessProbe
             SnapshotSource: "not-probed",
             SnapshotExists: false,
             GuestTransport: guestTransport,
-            GuestAddressMode: guestRemoting.AddressMode.ToString(),
-            GuestAddress: guestRemoting.Address,
-            GuestAddressSource: GuestAddressSource(guestRemoting),
-            GuestEndpointReady: GuestEndpointReady(provider, guestRemoting),
-            GuestPort: guestRemoting.Port,
-            GuestUseSsl: guestRemoting.UseSsl,
-            GuestAuthentication: guestRemoting.Authentication,
-            GuestSkipCertificateChecks: guestRemoting.SkipCertificateChecks,
-            GuestTransportSecure: IsGuestRemotingSecure(guestRemoting),
+            GuestAddressMode: offlineGuestOps ? "VixGuestOps" : guestRemoting.AddressMode.ToString(),
+            GuestAddress: offlineGuestOps ? null : guestRemoting.Address,
+            GuestAddressSource: offlineGuestOps ? "vmware-tools-guest-operations" : GuestAddressSource(guestRemoting),
+            GuestEndpointReady: !offlineGuestOps && GuestEndpointReady(provider, guestRemoting),
+            GuestPort: offlineGuestOps ? 0 : guestRemoting.Port,
+            GuestUseSsl: !offlineGuestOps && guestRemoting.UseSsl,
+            GuestAuthentication: offlineGuestOps ? "VIX" : guestRemoting.Authentication,
+            GuestSkipCertificateChecks: !offlineGuestOps && guestRemoting.SkipCertificateChecks,
+            GuestTransportSecure: offlineGuestOps || IsGuestRemotingSecure(guestRemoting),
             PrimaryTool: primaryTool,
             SecondaryTool: secondaryTool,
             MachineDefinition: machineDefinition,
@@ -1002,6 +1037,45 @@ internal sealed class LocalHostReadinessProbe
                 !string.IsNullOrWhiteSpace(remoting.Address),
             _ => true
         };
+
+    private static string? VmwareBlockIsolationDiagnostic(string vmxPath)
+    {
+        try
+        {
+            var lines = File.ReadAllLines(vmxPath);
+            foreach (var line in lines)
+            {
+                if (System.Text.RegularExpressions.Regex.IsMatch(line,
+                    "(?i)^\\s*(ethernet\\d+|sharedFolder\\d+|usb|ehci|usb_xhci|serial\\d+|parallel\\d+|sound|floppy\\d+|ide1:0)\\.present\\s*=\\s*\"?TRUE\"?\\s*$"))
+                {
+                    return "VMware Block requires a VMX with no NIC, HGFS shared folder or unnecessary peripheral device.";
+                }
+                if (System.Text.RegularExpressions.Regex.IsMatch(line,
+                    "(?i)^\\s*sharedFolder\\.maxNum\\s*=\\s*\"?[1-9]\\d*\"?\\s*$"))
+                {
+                    return "VMware Block requires sharedFolder.maxNum=0 in the VMX.";
+                }
+            }
+            foreach (var key in new[]
+                     {
+                         "isolation.tools.copy.disable",
+                         "isolation.tools.paste.disable",
+                         "isolation.tools.dnd.disable"
+                     })
+            {
+                if (!lines.Any(line => System.Text.RegularExpressions.Regex.IsMatch(line,
+                        "(?i)^\\s*" + System.Text.RegularExpressions.Regex.Escape(key) + "\\s*=\\s*\"?TRUE\"?\\s*$")))
+                {
+                    return $"VMware Block requires {key}=TRUE in the VMX.";
+                }
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return $"VMware Block VMX isolation could not be read: {SafeDiagnostic(ex.Message)}";
+        }
+    }
 
     private static string GuestAddressSource(GuestRemotingConfig remoting) => remoting.AddressMode switch
     {

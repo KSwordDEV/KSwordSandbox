@@ -197,6 +197,7 @@ internal sealed class SyntheticEndToEndSmokeScenario : ISmokeTestScenario
         RequireContains(decodedGuestAgentCommand, "--memory-dump", "Runbook should pass memory-dump collection into the encoded guest command.");
         RequireContains(decodedGuestAgentCommand, "--driver-events", "Runbook should pass driver JSONL output into the encoded guest command.");
         RequireContains(decodedGuestAgentCommand, "--r0-mock", "Runbook should use mock R0 collection in the encoded guest command.");
+        RequireContains(decodedGuestAgentCommand, "--network-policy 'block'", "Runbook should request the default guest-internal network block in the encoded guest command.");
         SmokeAssert.True(File.Exists(planned.JsonReportPath), "Planning should write report.json.");
         SmokeAssert.True(File.Exists(planned.HtmlReportPath), "Planning should write compatibility report.html.");
         SmokeAssert.True(File.Exists(planned.HtmlReportZhPath), "Planning should write report.zh.html.");

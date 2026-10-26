@@ -200,6 +200,22 @@ internal sealed class BackendProfileStore
         }
         if (request.Provider == VirtualizationProvider.VMware)
         {
+            var guestWorkingPath = request.GuestWorkingDirectory.Trim().Replace('/', '\\').TrimEnd('\\');
+            if (guestWorkingPath.Length < 4 || guestWorkingPath[1] != ':' || guestWorkingPath[2] != '\\' ||
+                !char.IsLetter(guestWorkingPath[0]) ||
+                guestWorkingPath.Split('\\', StringSplitOptions.RemoveEmptyEntries).Skip(1).Any(segment =>
+                    segment is "." or ".." ||
+                    segment.Equals("Windows", StringComparison.OrdinalIgnoreCase) ||
+                    segment.Equals("Users", StringComparison.OrdinalIgnoreCase) ||
+                    segment.Equals("Program Files", StringComparison.OrdinalIgnoreCase) ||
+                    segment.Equals("Program Files (x86)", StringComparison.OrdinalIgnoreCase) ||
+                    segment.Equals("ProgramData", StringComparison.OrdinalIgnoreCase) ||
+                    segment.Equals("Recovery", StringComparison.OrdinalIgnoreCase) ||
+                    segment.Equals("System Volume Information", StringComparison.OrdinalIgnoreCase) ||
+                    segment.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ArgumentException("VMware guest working folder must be a dedicated local folder outside system and user profile trees / VMware 来宾工作目录必须是系统及用户目录之外的专用本地目录。");
+            }
             if (string.IsNullOrWhiteSpace(request.VmName))
             {
                 throw new ArgumentException("VMware VM name is required.", nameof(request));

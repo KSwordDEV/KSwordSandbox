@@ -24,6 +24,8 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         var frameworkDoc = ReadRepositoryText(context, "docs", "guest-agent-framework.md");
         var artifactsDoc = ReadRepositoryText(context, "docs", "artifacts.md");
         var programText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Program.cs");
+        var importerText = ReadRepositoryText(context, "src", "KSword.Sandbox.Core", "Guest", "GuestFailureArtifactImporter.cs");
+        var executorText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Execution", "ProcessSampleExecutor.cs");
         var driverReader = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Output", "DriverJsonLinesReader.cs");
         var phaseText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Collection", "ProbePhase.cs");
         var guestWriterText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Output", "GuestArtifactWriter.cs");
@@ -326,6 +328,25 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("nonbehavior", StringComparison.Ordinal), "Dropped-file artifact/summary/manifest events must be marked as non-behavior evidence.");
 
         SmokeAssert.True(programText.Contains("new ProcessTreeProbe()", StringComparison.Ordinal), "Agent pipeline must include ProcessTreeProbe.");
+
+        // Sample-tree stderr isolation contract: the sample must never inherit
+        // the agent diagnostic stderr lane (agent.stderr.log is the lane the
+        // host failure importer judges on). Both sample launch paths — the
+        // primary CollectAsync launch and the framework ProcessSampleExecutor —
+        // must redirect sample stderr away from the agent lane.
+        SmokeAssert.True(programText.Contains("SampleStandardErrorFileName", StringComparison.Ordinal) &&
+                         programText.Contains("\"sample-stderr.log\"", StringComparison.Ordinal) &&
+                         programText.Contains("RedirectStandardError = true", StringComparison.Ordinal) &&
+                         programText.Contains("DrainSampleStandardErrorTaskAsync", StringComparison.Ordinal),
+            "Guest Agent must redirect the sample tree's stderr into sample-stderr.log and drain it with a bounded wait before artifacts are finalized.");
+        SmokeAssert.True(executorText.Contains("RedirectStandardError = true", StringComparison.Ordinal) &&
+                         executorText.Contains("Stream.Null", StringComparison.Ordinal),
+            "ProcessSampleExecutor must keep sample-tree stderr out of the agent diagnostic lane even though it has no output directory.");
+        SmokeAssert.True(importerText.Contains("\"sample-stderr.log\"", StringComparison.Ordinal) &&
+                         importerText.Contains("RemoveLinesPresentIn", StringComparison.Ordinal) &&
+                         importerText.Contains("agentDiagnosticStderr", StringComparison.Ordinal) &&
+                         importerText.Contains("stderrSampleAttributed", StringComparison.Ordinal),
+            "Host failure importer must attribute agent.stderr.log lines that also appear in sample-stderr.log to the sample so noise cannot fail a healthy run.");
         SmokeAssert.True(programText.Contains("new FileDiffProbe()", StringComparison.Ordinal), "Agent pipeline must include FileDiffProbe.");
         SmokeAssert.True(programText.Contains("new TcpConnectionDiffProbe()", StringComparison.Ordinal), "Agent pipeline must include TcpConnectionDiffProbe.");
         SmokeAssert.True(programText.Contains("new PacketCaptureProbe()", StringComparison.Ordinal), "Agent pipeline must include PacketCaptureProbe.");
@@ -393,6 +414,27 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(guestAgentDoc.Contains("deeperDescendantCoverageState", StringComparison.Ordinal), "Guest agent doc must document deeper descendant memory dump coverage state.");
         SmokeAssert.True(guestAgentDoc.Contains("nonbehavior=true", StringComparison.Ordinal), "Guest agent doc must document non-behavior flags for semantic artifacts.");
         SmokeAssert.True(guestAgentDoc.Contains("--packet-capture", StringComparison.Ordinal), "Guest agent doc must document packet capture CLI.");
+        SmokeAssert.True(guestAgentDoc.Contains("--network-policy", StringComparison.Ordinal), "Guest agent doc must document the guest-internal network policy CLI.");
+        SmokeAssert.True(guestAgentDoc.Contains("networkPolicy.apply_failed", StringComparison.Ordinal), "Guest agent doc must document fail-closed network policy enforcement.");
+
+        // Violent blocking contract: the primary block must disable the NIC
+        // device itself (Disable-NetAdapter, with an equivalent PnP device
+        // disable as fallback) so a sample tampering with the Windows
+        // Firewall cannot restore connectivity; firewall rules are only the
+        // second layer.
+        var guardText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Execution", "GuestNetworkPolicyGuard.cs");
+        SmokeAssert.True(
+            guardText.Contains("Disable-NetAdapter", StringComparison.Ordinal) &&
+            guardText.Contains("Disable-PnpDevice", StringComparison.Ordinal),
+            "Network policy block steps must disable the NIC device via Disable-NetAdapter with an equivalent PnP device disable fallback.");
+        SmokeAssert.True(
+            guardText.Contains("InterfaceGuid", StringComparison.Ordinal) &&
+            guardText.Contains("PnPDeviceID", StringComparison.Ordinal),
+            "Network policy guard must snapshot adapter Name/InterfaceGuid/PnPDeviceID so restore can target the same device.");
+        SmokeAssert.True(
+            guardText.Contains("GuestNetworkPolicyException", StringComparison.Ordinal) &&
+            guardText.Contains("Enable-NetAdapter", StringComparison.Ordinal),
+            "Network policy guard must restore adapters in cleanup and fail closed on apply errors.");
         SmokeAssert.True(guestAgentDoc.Contains("packet_capture.captured", StringComparison.Ordinal), "Guest agent doc must document captured packet events.");
         SmokeAssert.True(guestAgentDoc.Contains("pktmon", StringComparison.OrdinalIgnoreCase), "Guest agent doc must document pktmon capture.");
         SmokeAssert.True(guestAgentDoc.Contains("off by default", StringComparison.OrdinalIgnoreCase), "Guest agent doc must document memory dumps as opt-in.");

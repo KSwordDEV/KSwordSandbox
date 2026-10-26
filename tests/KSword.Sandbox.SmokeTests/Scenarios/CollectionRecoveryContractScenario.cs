@@ -16,6 +16,7 @@ internal sealed class CollectionRecoveryContractScenario : ISmokeTestScenario
         cancellationToken.ThrowIfCancellationRequested();
         var executor = Read(context, Path.Combine("src", "KSword.Sandbox.Core", "Execution", "PowerShellRunbookExecutor.cs"));
         var builder = Read(context, Path.Combine("src", "KSword.Sandbox.Core", "Orchestration", "HyperVRunbookBuilder.cs"));
+        var agent = Read(context, Path.Combine("guest", "KSword.Sandbox.Agent", "Program.cs"));
 
         Require(executor, "ShouldAttemptVmwareRecoveryStep", "Collection recovery must stay behind an explicit policy.");
         Require(executor, "runbook.Provider is not VirtualizationProvider.VMware", "Collection recovery must stay scoped to the VMware live path.");
@@ -43,11 +44,19 @@ internal sealed class CollectionRecoveryContractScenario : ISmokeTestScenario
         SmokeAssert.True(collectIndex > 0, "The runbook must plan a final guest output collection step.");
         SmokeAssert.True(stopIndex > collectIndex, "Final collection must be planned before the snapshot revert.");
 
+        // A sample may leave a worker alive after its root process exits. The
+        // Agent must not reopen the guest network while the host is still
+        // collecting evidence and has not stopped the VM.
+        SmokeAssert.True(!agent.Contains("await networkPolicyGuard.RestoreAsync(events)", StringComparison.Ordinal),
+            "The Agent must not restore Block networking before VM shutdown.");
+        Require(agent, "networkPolicy.retained_until_vm_stop",
+            "The Agent must disclose that Block remains active through final collection.");
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = "A failed live sync still attempts the final guest collection before the snapshot revert, and the recovery diagnostic stays explicit."
+            Message = "Final guest collection precedes VM shutdown, and the Agent keeps Block networking in place until that shutdown."
         });
     }
 

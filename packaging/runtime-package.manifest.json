@@ -538,6 +538,14 @@
       "required": false,
       "handoffRequired": true,
       "note": "Expected external publish output for KSword.Sandbox.PostProcess."
+    },
+    {
+      "sourceType": "runtimePublish",
+      "source": "tools/vix-helper",
+      "target": "tools/vix-helper",
+      "required": false,
+      "handoffRequired": true,
+      "note": "Expected external VMware GuestOps helper and offline runbook script. The operator host still needs VMware Workstation and the Microsoft Visual C++ runtime."
     }
   ],
   "excludePatterns": [
@@ -762,7 +770,7 @@
     "components": [
       {
         "id": "runtime-publish-root",
-        "handoffGate": "external RuntimePublishRoot; host-web, guest-tools, tools/job-tool, tools/postprocess; no repository bin/obj/x64 fallback",
+        "handoffGate": "external RuntimePublishRoot; host-web, guest-tools, tools/job-tool, tools/postprocess, tools/vix-helper; no repository bin/obj/x64 fallback",
         "appliesTo": "runtime"
       },
       {

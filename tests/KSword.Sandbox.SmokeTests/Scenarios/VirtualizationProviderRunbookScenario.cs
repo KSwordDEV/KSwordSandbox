@@ -32,6 +32,40 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         SmokeAssert.True(hyperV.LaunchContext == "interactive-desktop", "Hyper-V runbooks should persist the interactive desktop launch context.");
         SmokeAssert.True(hyperV.FallbackWarning?.Contains("S4U", StringComparison.OrdinalIgnoreCase) == true, "Hyper-V runbooks should persist the S4U fallback warning.");
         RequireStepContains(hyperV, "restore-golden", "Restore-VMSnapshot");
+        RequireStepContains(hyperV, "restore-checkpoint-after-run", "Restore-VMSnapshot");
+        var blockedHyperVConfig = baseConfig with
+        {
+            Guest = baseConfig.Guest with { NetworkPolicy = SandboxNetworkPolicy.Block },
+            HyperV = baseConfig.HyperV with { SwitchName = "UntrustedExternalSwitch" }
+        };
+        var blockedHyperV = builder.Build(blockedHyperVConfig, jobId, sample);
+        var isolateIndex = blockedHyperV.Steps.ToList().FindIndex(step => step.Id == "isolate-hyperv-network");
+        var startIndex = blockedHyperV.Steps.ToList().FindIndex(step => step.Id == "start-golden");
+        SmokeAssert.True(isolateIndex >= 0 && isolateIndex < startIndex,
+            "Hyper-V Block must disconnect host-side switch access before starting the analysis VM.");
+        RequireStepContains(blockedHyperV, "isolate-hyperv-network", "Disconnect-VMNetworkAdapter");
+        RequireStepContains(blockedHyperV, "isolate-hyperv-network", "[bool]$_.Connected");
+        RequireStepContains(blockedHyperV, "isolate-hyperv-network", "$remaining.Count -ne 0");
+        SmokeAssert.True(blockedHyperV.Steps.ToList().FindIndex(step => step.Id == "stop-vm") <
+            blockedHyperV.Steps.ToList().FindIndex(step => step.Id == "restore-checkpoint-after-run"),
+            "Hyper-V must stop the VM before the clean checkpoint reattaches its original network.");
+        var blockedTemporaryHyperV = builder.Build(blockedHyperVConfig with
+        {
+            HyperV = blockedHyperVConfig.HyperV with
+            {
+                UseDifferencingDisk = true,
+                BaseVhdxPath = @"D:\VMs\KSword-HyperV\base.vhdx"
+            }
+        }, jobId, sample);
+        SmokeAssert.True(!RequireStep(blockedTemporaryHyperV, "create-temp-vm").PowerShell.Contains("-SwitchName", StringComparison.Ordinal),
+            "Temporary Hyper-V Block VMs must be created without a host switch attachment.");
+        SmokeAssert.True(blockedTemporaryHyperV.Steps.ToList().FindIndex(step => step.Id == "isolate-hyperv-network") <
+            blockedTemporaryHyperV.Steps.ToList().FindIndex(step => step.Id == "start-temp-vm"),
+            "Temporary Hyper-V Block VMs must verify isolation before startup.");
+        SmokeAssert.True(
+            RequireStep(hyperV, "restore-checkpoint-after-run").PowerShell.Contains("GoldenSnapshotName", StringComparison.Ordinal) ||
+            RequireStep(hyperV, "restore-checkpoint-after-run").PowerShell.Contains("'Clean'", StringComparison.Ordinal),
+            "Hyper-V golden VM runbooks must restore the clean checkpoint during cleanup.");
         RequireAnyStepContains(hyperV, "New-PSSession -VMName");
         RequireProviderResourceFailure(
             baseConfig,
@@ -158,6 +192,38 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
         RequireAnyStepContains(vmwareTools, "New-PSSession -ComputerName $guestRemotingAddress");
         RequireAnyStepContains(vmwareTools, "New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck");
         RequireAnyStepContains(vmwareTools, "-UseSSL");
+
+        var blockedVmware = builder.Build(vmwareConfig with
+        {
+            Guest = vmwareConfig.Guest with { NetworkPolicy = SandboxNetworkPolicy.Block },
+            VMware = vmwareConfig.VMware with { UseHostOutputShare = true }
+        }, jobId, sample);
+        SmokeAssert.True(
+            blockedVmware.Steps.All(step => step.Id != "enable-vmware-output-share"),
+            "Blocked VMware runs must not expose a host directory even when a share was explicitly configured.");
+        SmokeAssert.True(
+            blockedVmware.Steps.ToList().FindIndex(step => step.Id == "vmware-offline-prelaunch-gate") <
+            blockedVmware.Steps.ToList().FindIndex(step => step.Id == "restore-vm-snapshot"),
+            "Unsupported offline options and missing GuestOps resources must fail before VM mutation.");
+        RequireStepContains(blockedVmware, "check-vmware", "requires every virtual NIC to be absent");
+        RequireStepContains(blockedVmware, "check-vmware", "refuses guest-visible host shared folders");
+        RequireStepContains(blockedVmware, "vmware-offline-prelaunch-gate", "driver.enabled=false");
+        RequireStepContains(blockedVmware, "vmware-offline-prelaunch-gate", "Invoke-VmwareOfflineRunbook.ps1");
+        RequireStepContains(blockedVmware, "wait-guest-operations", "-Mode 'ready'");
+        RequireStepContains(blockedVmware, "stage-guest-payload", "-Mode 'stage'");
+        RequireStepContains(blockedVmware, "copy-sample", "-Mode 'copy-sample'");
+        RequireStepContains(blockedVmware, "prepare-guest-output", "-Mode 'prepare-output'");
+        RequireStepContains(blockedVmware, "check-sample-runtime", "-Mode 'runtime-preflight'");
+        RequireStepContains(blockedVmware, "run-agent", "-Mode 'launch'");
+        RequireStepContains(blockedVmware, "sync-live-output", "-Mode 'sync'");
+        RequireStepContains(blockedVmware, "collect-output", "-Mode 'verify'");
+        SmokeAssert.True(
+            blockedVmware.Steps.All(step => !step.PowerShell.Contains("New-PSSession", StringComparison.Ordinal) &&
+                                            !step.PowerShell.Contains("-gp", StringComparison.Ordinal)),
+            "Blocked VMware runbook must use neither WinRM nor plaintext vmrun guest-password arguments.");
+        SmokeAssert.True(
+            blockedVmware.Steps.All(step => step.Id != "wait-guest-remoting" && step.Id != "enable-vmware-output-share"),
+            "Blocked VMware runbook must not plan remoting or host shared-folder steps.");
 
         var qemuConfig = CreateBaseConfig() with
         {
@@ -556,7 +622,8 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
                 provider,
                 baselineName,
                 machineDefinitionPath,
-                qemuDiskFormat);
+                qemuDiskFormat,
+                SandboxNetworkPolicy.Allow);
             throw new InvalidOperationException($"Expected {provider} resource validation to fail.");
         }
         catch (ArgumentException ex)
@@ -599,6 +666,7 @@ internal sealed class VirtualizationProviderRunbookScenario : ISmokeTestScenario
             UserName = "SandboxUser",
             PasswordSecretName = "KSWORDBOX_GUEST_PASSWORD",
             WorkingDirectory = @"C:\KSwordSandbox",
+            NetworkPolicy = SandboxNetworkPolicy.Allow,
             PowerShellRemotingAddress = address,
             PowerShellRemotingAuthentication = "Negotiate"
         };

@@ -1063,6 +1063,81 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
             persistenceBounded.DynamicActionOmittedCount == 0,
             "Explicitly attributed persistence create/delete rows must remain complete beyond the environment quota.");
 
+        // PCAP-decoded DNS rows carry the static-IOC correlation chain that
+        // c2-static-ioc-corroborated-egress consumes. Endpoint identity
+        // legitimately fills the first whitelist slots, so both provenance
+        // modes (host-pcap and guest-artifact) must keep the correlation keys
+        // beyond the default per-event data-pair bound.
+        foreach (var importMode in new[] { "host-pcap", "guest-artifact" })
+        {
+            var pcapDns = new SandboxEvent
+            {
+                EventType = "dns.query",
+                Timestamp = timestamp.AddSeconds(70),
+                Source = "host",
+                Path = "ravor.ac.ug",
+                Data =
+                {
+                    ["collectionName"] = "packet-captures",
+                    ["importMode"] = importMode,
+                    ["sourceArtifactRelativePath"] = "guest/packet-captures/pktmon-20261016-212127-731.pcapng",
+                    ["sourceArtifactSha256"] = new string('a', 64),
+                    ["sourceArtifactSizeBytes"] = "20480",
+                    ["pcapSourceArtifactRelativePath"] = "guest/packet-captures/pktmon-20261016-212127-731.pcapng",
+                    ["pcapDownloadSelector"] = "guest/packet-captures/pktmon-20261016-212127-731.pcapng",
+                    ["behaviorCounted"] = "true",
+                    ["sampleBehaviorCandidate"] = "true",
+                    ["sampleCorrelation"] = "probable",
+                    ["sampleCorrelationStatus"] = "correlated",
+                    ["sampleCorrelationReason"] = "pcap-target-matches-static-ioc-within-sample-lifecycle",
+                    ["sampleCorrelationUncertainty"] = "static-ioc-corroboration-without-cross-source",
+                    ["sampleOwnerPidMatched"] = "true",
+                    ["sampleChildProcess"] = "false",
+                    ["sourceIp"] = "192.168.172.130",
+                    ["sourcePort"] = "49715",
+                    ["sourceAddress"] = "192.168.172.130",
+                    ["sourceEndpoint"] = "192.168.172.130:49715",
+                    ["localAddress"] = "192.168.172.130",
+                    ["localPort"] = "49715",
+                    ["destinationIp"] = "45.61.136.10",
+                    ["destinationPort"] = "53",
+                    ["destinationAddress"] = "45.61.136.10",
+                    ["destinationEndpoint"] = "45.61.136.10:53",
+                    ["pcapCorrelationAttempted"] = "true",
+                    ["pcapCorrelationWindowMatched"] = "true",
+                    ["pcapCorrelationWindowStartUtc"] = "2026-10-16T21:21:28.0000000Z",
+                    ["pcapCorrelationWindowEndUtc"] = "2026-10-16T21:21:35.0000000Z",
+                    ["pcapCorrelationStaticIocMatched"] = "true",
+                    ["pcapCorrelationStaticIoc"] = "ravor.ac.ug",
+                    ["queryName"] = "ravor.ac.ug",
+                    ["noise-filler"] = new string('y', 64)
+                }
+            };
+            var pcapResult = ReportEventSampler.SampleForReport([pcapDns]);
+            var sampledDns = pcapResult.Events.First(evt => string.Equals(evt.EventType, "dns.query", StringComparison.OrdinalIgnoreCase));
+            SmokeAssert.True(sampledDns.Data.TryGetValue("pcapCorrelationStaticIoc", out var staticIoc) &&
+                string.Equals(staticIoc, "ravor.ac.ug", StringComparison.Ordinal),
+                $"dns.query with importMode={importMode} must retain pcapCorrelationStaticIoc for the C2 evidence chain.");
+            SmokeAssert.True(sampledDns.Data.TryGetValue("pcapCorrelationStaticIocMatched", out var staticIocMatched) &&
+                string.Equals(staticIocMatched, "true", StringComparison.Ordinal),
+                $"dns.query with importMode={importMode} must retain pcapCorrelationStaticIocMatched.");
+            SmokeAssert.True(sampledDns.Data.TryGetValue("pcapCorrelationWindowMatched", out var windowMatched) &&
+                string.Equals(windowMatched, "true", StringComparison.Ordinal),
+                $"dns.query with importMode={importMode} must retain pcapCorrelationWindowMatched.");
+            SmokeAssert.True(sampledDns.Data.TryGetValue("queryName", out var queryName) &&
+                string.Equals(queryName, "ravor.ac.ug", StringComparison.Ordinal),
+                $"dns.query with importMode={importMode} must retain the query name.");
+            SmokeAssert.True(sampledDns.Data.TryGetValue("sampleCorrelationUncertainty", out var uncertainty) &&
+                string.Equals(uncertainty, "static-ioc-corroboration-without-cross-source", StringComparison.Ordinal),
+                $"dns.query with importMode={importMode} must retain sampleCorrelationUncertainty.");
+            SmokeAssert.True(sampledDns.Data.TryGetValue("sampleOwnerPidMatched", out var ownerPidMatched) &&
+                string.Equals(ownerPidMatched, "true", StringComparison.Ordinal),
+                $"dns.query with importMode={importMode} must retain sampleOwnerPidMatched.");
+            SmokeAssert.True(sampledDns.Data.TryGetValue("sampleChildProcess", out var childProcess) &&
+                string.Equals(childProcess, "false", StringComparison.Ordinal),
+                $"dns.query with importMode={importMode} must retain sampleChildProcess.");
+        }
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,

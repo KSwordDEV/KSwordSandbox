@@ -25,7 +25,12 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
             // and works for native helpers such as cmd.exe/whoami.exe.
             UseShellExecute = false,
             CreateNoWindow = false,
-            WindowStyle = ProcessWindowStyle.Normal
+            WindowStyle = ProcessWindowStyle.Normal,
+            // Never let the sample tree inherit the agent's stderr handle: the
+            // host failure importer judges on the agent diagnostic lane. This
+            // executor has no output directory, so discard the stream instead
+            // of persisting a sample-stderr.log artifact.
+            RedirectStandardError = true
         };
 
         Process? startedProcess;
@@ -56,6 +61,10 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
             });
             return new SampleExecutionResult { Started = false, Events = events };
         }
+
+        // Drain the discarded stderr pipe concurrently so a chatty sample tree
+        // can never block on a full pipe buffer.
+        var discardStderrTask = DiscardSampleStandardErrorAsync(process);
 
         events.Add(new SandboxEvent
         {
@@ -124,6 +133,10 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
             Data = { ["exitCode"] = SafeExitCode(process) }
         });
 
+        // A detached grandchild can hold the inherited pipe open; bound the
+        // final drain so exit reporting is never blocked.
+        await Task.WhenAny(discardStderrTask, Task.Delay(TimeSpan.FromSeconds(5)));
+
         return new SampleExecutionResult
         {
             Started = true,
@@ -131,6 +144,23 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
             ExitCode = exited ? SafeExitCodeValue(process) : null,
             Events = events
         };
+    }
+
+    /// <summary>
+    /// Copies the sample tree's redirected stderr into the null stream so it
+    /// can never contaminate the agent diagnostic lane that the host failure
+    /// importer judges on. Faults are swallowed: this lane is discard-only.
+    /// </summary>
+    private static async Task DiscardSampleStandardErrorAsync(Process process)
+    {
+        try
+        {
+            await process.StandardError.BaseStream.CopyToAsync(Stream.Null).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Discard-only diagnostic lane; exit reporting must not fail here.
+        }
     }
 
     /// <summary>

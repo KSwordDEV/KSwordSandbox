@@ -462,11 +462,11 @@ internal static class RunbookProgressFacts
         return stepId switch
         {
             "check-hyperv" or "check-golden-vm" or "check-vmware" or "check-qemu" or
-                "check-r0-driver-config" or "check-guest-credential" => "preflight",
+                "check-r0-driver-config" or "check-guest-credential" or "vmware-offline-prelaunch-gate" => "preflight",
             "make-vm-root" or "make-diff-disk" or "make-overlay-disk" or "create-temp-vm" or
                 "stop-golden" or "stop-vm-before-restore" or "restore-golden" or "restore-vm-snapshot" or
                 "enable-guest-service" or "start-temp-vm" or "start-golden" or "start-vm" or
-                "open-vm-desktop" or "wait-powershell-direct" or "wait-guest-remoting" => "vm-prepare",
+                "open-vm-desktop" or "wait-powershell-direct" or "wait-guest-remoting" or "wait-guest-operations" => "vm-prepare",
             "stage-guest-payload" or "copy-sample" or "make-host-output" or "record-artifact-policy" or "prepare-guest-output" => "guest-prepare",
             "enable-vmware-output-share" => "guest-prepare",
             "check-r0-driver-guest-readiness" or "install-driver-service" => "r0-driver",
@@ -483,6 +483,8 @@ internal static class RunbookProgressFacts
             "check-hyperv" or "check-golden-vm" or "check-vmware" or "check-qemu" => "host-readiness",
             "check-r0-driver-config" or "check-r0-driver-guest-readiness" => "driver-readiness",
             "check-guest-credential" => "credential",
+            "vmware-offline-prelaunch-gate" => "offline-guestops",
+            "wait-guest-operations" => "offline-guestops",
             "make-vm-root" or "make-diff-disk" or "make-overlay-disk" or "create-temp-vm" or
                 "stop-golden" or "stop-vm-before-restore" or "restore-golden" or "restore-vm-snapshot" or
                 "start-temp-vm" or "start-golden" or "start-vm" => "virtualization-vm",
@@ -513,6 +515,8 @@ internal static class RunbookProgressFacts
             "check-r0-driver-config" => "确认 driver.hostDriverPath 指向已构建并测试签名的 .sys；如只验证流程，可启用 mock R0。",
             "check-r0-driver-guest-readiness" => "确认来宾已暂存 .sys，Authenticode 签名可验证，并已重启进入 test-signing；该只读检查不会自动签名或修改 BCD。",
             "check-guest-credential" => "确认来宾密码环境变量在 Process/User/Machine 作用域可见，且用户名与 VM 内账号一致。",
+            "vmware-offline-prelaunch-gate" => "VMware Block 当前支持用户态 GuestOps 路线；请在 /setup 选择 UserMode、关闭 disableDefenderForLab，并确认发布包 VIX helper、离线脚本、Agent payload 与样本哈希齐全。",
+            "wait-guest-operations" => "确认 VMware Tools 已在隔离来宾运行、专用来宾凭据可用，且 VIX/VC++ x64 运行时已安装；该通道不需要 WinRM 或来宾网卡。",
             "stop-golden" or "stop-vm-before-restore" or "restore-golden" or "restore-vm-snapshot" or "start-temp-vm" or "start-golden" or "start-vm" => "检查当前 provider 管理工具、VM 状态、干净基线和本机路径是否可用；QEMU overlay 模式还应检查临时磁盘目录和启动参数。",
             "open-vm-desktop" => "确认 VMConnect/RDP、VMware GUI 或 QEMU display 能在当前交互用户会话中显示；无人值守才显式启用 headless/NoOpenVmConsole。",
             "wait-powershell-direct" => "确认 VM 已启动、Guest Service Interface 已启用、来宾账号密码正确，并等待系统完成登录初始化。",

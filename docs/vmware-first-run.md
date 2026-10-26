@@ -1,99 +1,55 @@
-# VMware 首次运行手册 / VMware first-run runbook
+# VMware 首次运行：默认隔离路线
 
-本文把工作拆成**来宾层**和**宿主层**。先完成来宾层，再在主机 WebUI 保存配置；这样空白 Windows 10 VM 能按步骤产出第一份报告。全文以 VMware Workstation Pro（`vmrun.exe`、`vmType=ws`）为例。
+本页对应当前发布包的 `/setup` → 样本选择 → Live 流程。默认网络策略是
+`Block`，首轮选择 **UserMode**。WebUI 在每次任务中自动恢复干净快照、通过
+VMware Tools GuestOps 传输与启动、回收证据、关机并再次恢复快照。
+发布包端到端无害 Live 尚需验收；只读预检和手工探针不能代替该结果。
 
-> **这是当前发行版优先支持、且有端到端 Live 验收记录的路径。** 示例配置中的
-> `virtualization.provider = HyperV` 只是旧 profile 的兼容默认值；首次使用请在
-> WebUI 的“选择后端”中选 **VMware Workstation Pro**。Hyper-V/QEMU 路径需要你自己
-> 准备对应环境并按同等标准验收。
+## 1. 准备可丢弃的 Windows 10 VM
 
-## 交付给用户的最短步骤 / Minimum handoff
+1. 使用 VMware Workstation Pro 创建 Windows 10 x64 虚拟机，安装 VMware Tools。
+   来宾中不要放个人数据。
+2. 在来宾管理员 PowerShell 中运行 `/setup` 提供的
+   `Bootstrap-VMwareGuest.ps1`，创建专用 `SandboxUser` 管理员账户并设置密码。
+   脚本还会配置 WinRM HTTPS，供显式 `Allow` 旧路线使用；默认 `Block`
+   路线通过 VIX 登录，不依赖 WinRM。密码不要放入命令行、报告或 Git。
+3. 关机后移除或禁用所有虚拟网卡，关闭 HGFS 共享、USB、声卡、串口、软驱、
+   剪贴板复制粘贴和拖放。VMX 中至少要有
+   `isolation.tools.copy.disable=TRUE`、`paste.disable=TRUE`、
+   `dnd.disable=TRUE`，且 `sharedFolder.maxNum=0`。
+4. 在**关机且隔离配置已经生效**后创建唯一干净快照，并记下名称。快照名称
+   不能代替对当前 VMX 隔离状态的检查。建议先在独立克隆上验收，不将原始 VM
+   直接用于破坏性样本。
 
-1. 关机状态把 VM 网卡设为 **NAT**；可以在 VMX 中确认 `ethernet0.connectionType = "nat"`。命令行只需检查主机网络：`vmrun -T ws listHostNetworks`，看到 `vmnet8` 类型为 `nat` 即可。
-2. 启动 Windows 10，安装 VMware Tools，然后在来宾管理员 PowerShell 执行 `Bootstrap-VMwareGuest.ps1`，设置 `SandboxUser` 和 WinRM HTTPS。
-3. 关机并创建一个 powered-off 快照，名称记为 `Clean`（或把实际名称填进 WebUI）。
-4. 双击 `Start-KSwordSandbox.cmd`，在 `/setup` 填 VMX、快照、`vmrun.exe`、用户名和密码，运行只读预检并保存。`vmrun.exe` 默认不在 PATH 中；要么填完整路径（例如 `C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe`），要么先把 Workstation 安装目录加入 PATH。预检报 `VMWARE_VMRUN_MISSING` 就是这一步没填对。
-5. 首轮选择 Notepad、MSPaint、Calculator，关闭真实 R0 采集，策略选择“每个样本结束后停止并还原 Clean”，确认三份 HTML 报告后再启用 R0。
+## 2. 在 `/setup` 保存发布包配置
 
-本项目不要求用户配置 NAT 端口转发；宿主通过 VMware Tools 获取来宾地址后直接访问 WinRM 5986。只有主机无法直达来宾时，才额外使用 `vmrun setPortForwarding vmnet8 tcp <host-port> <guest-ip> 5986`。
+1. 启动 `Start-KSwordSandbox.cmd`，选择 VMware Workstation Pro，填写本机
+   `.vmx` 完整路径、干净快照名称、`vmrun.exe` 路径、来宾用户名与工作目录。
+2. 采集模式选 **UserMode**，保存专用来宾密码到页面的本机 secret 入口。
+   VMware `Block` 的 R0 和 `disableDefenderForLab` 特殊路线目前会在 VM
+   启动前被明确拒绝；它们需要单独实现与验收。
+3. 点击只读预检。它检查 `vmrun`、VMX、快照、VMX 隔离键、随包的 VIX helper
+   与离线脚本，并对 VIX runtime 做只读状态查询。没有启动或登录来宾，
+   因此还不能证明凭据、VMware Tools 或 S4U 启动成功。
+4. 修复红项后保存并重启 WebUI。发布包将 `vix_probe.exe` 与
+   `Invoke-VmwareOfflineRunbook.ps1` 放在 `tools/vix-helper`；
+   `vmware.vixHelperPath` 默认解析到该位置。缺少 VMware Workstation VIX
+   runtime 或 Microsoft VC++ x64 runtime 时，预检会给出 GuestOps 错误。
 
-## 0. 先看边界 / Boundaries
+默认 `Block` 路线**不需要 NAT、来宾 IP、WinRM 端口或宿主共享文件夹**。
+显式 `Allow` 路线仍使用既有 WinRM 配置，需单独评估其网络和共享边界。
 
-- 来宾 VM 必须是可丢弃的 Windows 10，样本执行可能改变系统；不要放个人数据。
-- 发行包和运行时配置都在 Sandbox 自己的目录/仓库外。
-- **Host readiness 不是 guest connectivity**：宿主可以找到 `vmrun`、VMX、快照并通过 SLAT 检查，但这不代表来宾已开机、WinRM 已监听、凭据正确或 Tools 已报告 IP。两者必须分别通过。
-- 第一轮建议使用 `-NoR0Collector`（或 WebUI 中关闭真实 R0 采集）验证 VMware 开机、传输、任务编排和 HTML 报告链路。真实 R0 需要驱动文件、测试签名/测试模式和隔离环境，不能因为 WinRM 预检通过就宣称可用。
+## 3. 用无害样本验收 Live
 
-## 1. 来宾层：从空白 VM 到 Clean 基线 / Guest layer
+先提交本项目的 `KSword.Sandbox.HarmlessSample.exe`，确认运行记录中存在：
 
-### 1.1 创建并安装
+- `wait-guest-operations` 已通过，Agent 以 S4U 最高权限任务启动；
+- 来宾 `networkPolicy.applied` 早于样本 `process.start`；
+- `events.json`、`agent-summary.json`、`agent.exit` 和原始产物已逐文件回收；
+- 同一 job 下生成 `report.json` 与中文 `report.zh.html`；
+- VM 最终关机并恢复干净快照，VMX 仍无网卡、HGFS 和外设通道。
 
-1. 在 VMware Workstation Pro 创建 Windows 10 x64 VM，磁盘和内存按主机余量分配；使用可重装的实验 VM。
-2. 安装 VMware Tools，重启一次。确认 VMware 菜单 **VM > Settings > Options > VMware Tools** 显示运行；Tools 用于宿主在每次恢复后发现来宾 IPv4。
-3. 网络选 **NAT**（推荐首次运行，主机能访问来宾；无需把来宾暴露到局域网）。如果实验室策略要求桥接或 Host-only，也可以使用，但必须保证主机到来宾 TCP 5986 可达；不要把网络模式当成 WinRM 已配置的证据。
-4. 建立一个本地管理员账户，或稍后让 bootstrap 创建 `SandboxUser`。完成 Windows Update/重启后，关闭不需要的共享。
-
-### 1.2 运行一次来宾 bootstrap
-
-以 VM 内的管理员 PowerShell 打开仓库/发行包中脚本，执行：
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\Bootstrap-VMwareGuest.ps1
-```
-
-脚本会隐藏读取 `SandboxUser` 密码，创建或更新本地账号，将其加入 Administrators，启用 WinRM 服务，复用或创建本机自签 HTTPS 证书，建立 WinRM HTTPS listener 和 TCP 5986 防火墙规则，并创建 `C:\KSwordSandbox`。脚本不额外强制长度或字符集，只要求密码非空并符合 Windows 本机策略；密码不会写入命令行、日志或配置文件。
-
-已有正确账户而不想轮换密码时：
-
-```powershell
-.\scripts\Bootstrap-VMwareGuest.ps1 -SkipPasswordSet
-```
-
-常用参数：`-GuestUserName analyst`、`-WorkingDirectory D:\KSwordSandbox`、`-Port 5986`。脚本可重复运行；若端口改变，会重建本脚本管理的防火墙规则和 HTTPS listener。完成后记录它显示的 IPv4、端口和证书指纹，但不要记录密码。
-
-从主机验证端口（只读）：
-
-```powershell
-Test-NetConnection <guest-ip> -Port 5986
-```
-
-端口不通时，先检查 VM 网络模式、Windows 防火墙、WinRM 服务和 Tools 报告的 IP；不要直接修改主机 TrustedHosts 来掩盖问题。自签证书在 Sandbox 配置中使用 `skipCertificateChecks=true`，生产证书则应关闭该选项并确保名称匹配。
-
-### 1.3 做成可回滚基线
-
-1. 在来宾中把 `C:\KSwordSandbox` 留作 payload 工作目录，确认没有个人文件。
-2. 关机，不要保持暂停或挂起状态。
-3. VMware 中创建 powered-off snapshot，名称固定为 `Clean`（或在 WebUI 中填入实际名称）。
-4. 以后每个样本都从该快照开始；失败、超时或用户中止时，编排器应停止 VM 并回滚到该快照。若 VMware 报告锁定/consolidation，先在 VMware UI 处理完再重试。
-
-## 2. 宿主层：WebUI 配置与只读预检 / Host layer
-
-1. 双击发行包根目录的 `Start-KSwordSandbox.cmd`，浏览器打开本机 WebUI（默认 `http://127.0.0.1:18080`）。
-2. 首次设置选择 **VMware Workstation**，填写：`vmrun.exe` 路径、VMX 路径、VM 显示名、`Clean` 快照名、来宾用户名、WinRM HTTPS 端口；通信模式选 **VMwareTools**，证书检查按上文选择。宿主密码只放进 `KSWORDBOX_GUEST_PASSWORD` 或页面支持的本地 secret 入口，不提交到 Git。
-3. 先点击**只读预检**，确认宿主侧的 `vmrun`、VMX、快照、主机加速、通信配置和 staged payload 路径。预检不会启动 VM、通过 VMware Tools 查询运行中来宾地址，也不会尝试 TCP 5986 或 WinRM 登录；这些来宾连通性检查会在 Live 启动阶段再次验证。预检不能关机、还原或修改 VM。
-4. 修复所有红项后保存配置；重新启动 WebUI 让运行时配置生效。保存后再次预检，确认使用的 VMX 和快照确实是可丢弃基线。
-
-## 3. 三样本 Live 验收 / Three-sample live acceptance
-
-选三个无害样本（例如 Notepad、MSPaint、Calculator），在样本选择页依次加入。首轮勾选 `NoR0Collector`，运行策略选“每个样本完成后停止并还原 Clean”。每个任务应观察到：
-
-1. provider 从 Clean 快照恢复并启动 VM；
-2. Tools 返回当前来宾 IP，主机通过 WinRM HTTPS 登录；
-3. payload 和样本进入 `C:\KSwordSandbox`；
-4. Guest Agent 执行样本，采集 JSONL/artifacts；
-5. 生成 HTML report；
-6. hard stop 后还原/关机，下一样本仍从 Clean 开始。
-
-三份 HTML 报告应保存到运行时 jobs 目录，并在 WebUI 任务详情中可打开。报告若只有 DryRun/PlanOnly 标志，不能算 Live 验收；必须看到真实 provider、来宾端点和采集步骤。
-
-## 4. 失败处理与回滚 / Failure and rollback
-
-- **预检失败**：不启动 VM。按失败项修复来宾或路径后重新预检。
-- **启动/Tools/IP 失败**：停止任务，确认 VM 没有锁，重新从 `Clean` 恢复；不要继续传样本。
-- **WinRM 失败**：在来宾检查 `Get-Service WinRM`、`winrm enumerate winrm/config/Listener`、`Get-NetFirewallRule -Name KSwordSandbox-WinRM-HTTPS`，再从主机 `Test-NetConnection`。凭据失败时重新运行 bootstrap 轮换密码，避免把密码写进命令行。
-- **样本或采集失败**：保存任务日志和报告路径；停止 VM 并回滚 `Clean`。必要时丢弃并重建 VM，不要把失败来宾继续当基线。
-- **快照/锁失败**：退出占用 VMX 的 VMware UI/进程，等待 consolidation 完成；确认 powered-off 后再重试。WebUI 的失败状态必须保留原因。
-- **真实 R0 失败**：先保持 `-NoR0Collector` 完成三样本链路；只有驱动、测试签名和隔离环境准备好后，才单独打开 R0 做验证。
-
-完成三样本 Live 后，再将规则编辑器中的行为规则导入/保存，并重复一个样本确认规则变更出现在 HTML 报告中。
+若 GuestOps、Tools 或 Agent 失败，报告必须显示采集不完整，原始已回收证据
+应保留；不要把缺失事件解释为样本没有行为。只有无害闭环和回滚均通过，才
+能进入真实样本批次。真实样本只允许在已核验隔离的虚拟机来宾中执行，
+严禁在实体机执行。

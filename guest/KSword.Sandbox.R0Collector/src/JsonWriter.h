@@ -400,7 +400,7 @@ class EventWriter {
 public:
     ~EventWriter() { Flush(); }
 
-    bool Open(const std::wstring& outputPath, std::wstring* error, unsigned long long maxOutputBytes = 0, unsigned long long minFreeOutputBytes = 0);
+    bool Open(const std::wstring& outputPath, std::wstring* error, unsigned long long maxOutputBytes = 0, unsigned long long minFreeOutputBytes = 0, unsigned long long outputBudgetBytes = 0);
     bool WriteLine(const std::string& line);
     // Writes a bounded group of already serialized JSONL rows with fewer
     // stream-buffer calls than one WriteLine per event.  Each row still goes
@@ -416,6 +416,24 @@ public:
         bool finalStatusAvailable,
         bool queueDepthAtStopKnown,
         unsigned long long queueDepthAtStop);
+
+    // Records the result of the best-effort final GET_STATUS issued after an
+    // intentional output-budget stop. The status sidecar is rewritten so the
+    // clean-stop evidence carries the authoritative remaining queue depth.
+    void AnnotateBudgetStopStatus(
+        bool finalStatusAvailable,
+        bool queueDepthAtStopKnown,
+        unsigned long long queueDepthAtStop);
+
+    // True once the cumulative output budget was reached: the current segment
+    // has been finalized and closed, no new segment will be opened, and every
+    // further write is refused without recording a failure.
+    bool BudgetReached() const { return budgetReached_; }
+
+    unsigned long long TotalBytesWritten() const { return totalOutputBytes_; }
+
+    // Closed rotated parts plus the finalized canonical segment.
+    unsigned long long SegmentsWritten() const { return rotatedSegmentCount_ + 1; }
 
     bool HasFailure() const { return failure_.failed; }
     bool FailureStatusAnnotated() const { return failure_.statusAnnotated; }
@@ -452,12 +470,21 @@ private:
     std::string BuildFailureDiagnosticJson() const;
     bool OpenSegment(std::wstring* error);
     bool Rotate(std::wstring* error);
+    bool RecycleOutputHandle(std::wstring* error);
+    bool EnsureHandleWithinRecycleBudget();
     bool HasOutputSpace(unsigned long long lineBytes);
     void RecordSpaceFailure(unsigned long long availableBytes, unsigned long long requiredBytes);
+    // Flushes and closes the active segment, then persists the independent
+    // r0-status sidecar. Sets budgetReached_ so every later write is refused
+    // without touching the failure state: a budget stop is a clean stop, not
+    // an output-write failure.
+    void EnterBudgetStop();
+    void WriteBudgetStatus() const;
 
     std::wstring outputPath_;
     std::wstring currentOutputPath_;
     std::wstring failurePath_;
+    std::wstring statusPath_;
     std::ofstream file_;
     std::vector<char> fileBuffer_;
     std::ostream* stream_ = nullptr;
@@ -465,13 +492,43 @@ private:
     FailureState failure_;
     unsigned long long maxOutputBytes_ = 0;
     unsigned long long minFreeOutputBytes_ = 0;
+    unsigned long long outputBudgetBytes_ = 0;
+    unsigned long long totalOutputBytes_ = 0;
+    bool budgetReached_ = false;
+    bool budgetStopStatusAnnotated_ = false;
+    bool budgetStopFinalStatusAvailable_ = false;
+    bool budgetStopQueueDepthKnown_ = false;
+    unsigned long long budgetStopQueueDepth_ = 0;
     unsigned long long currentOutputBytes_ = 0;
     unsigned long long lastSpaceCheckBytes_ = 0;
+    unsigned long long bytesSinceHandleOpen_ = 0;
+    unsigned long long linesSinceHandleOpen_ = 0;
     unsigned long long outputSegmentIndex_ = 0;
     unsigned long long rotatedSegmentCount_ = 0;
     static constexpr size_t kFlushInterval = 8192;
     static constexpr size_t kFileBufferBytes = 4U * 1024U * 1024U;
+    // Proactive handle rebuild: HGFS/UNC redirectors exhaust their
+    // per-process handle budget when one handle stays open across a whole
+    // high-volume collection (observed live as win32 1394 errno 22), so the
+    // sink is closed and reopened in append mode well inside that budget.
+    static constexpr unsigned long long kHandleRecycleBytes = 32ULL * 1024ULL * 1024ULL;
+    static constexpr unsigned long long kHandleRecycleLines = 50000ULL;
+    static constexpr unsigned long long kLocalSpaceProbeBytes = 1ULL * 1024ULL * 1024ULL;
+    static constexpr unsigned long long kRemoteSpaceProbeBytes = 32ULL * 1024ULL * 1024ULL;
 };
+
+// Input: Event sink after a refused write.
+// Processing: Maps a refused write to the clean budget-stop exit code when
+// the cumulative output budget was reached, or to the runtime-failure exit
+// code for a real output failure. Keeps the no-device modes (mock, ABI
+// self-check, readiness) consistent with the live drain path handled by
+// RuntimeFailureAfterOutputWrite, so an intentional budget boundary is never
+// reported as a collector failure.
+// Return: kExitSuccess for an intentional budget stop; kExitRuntimeFailure
+// otherwise.
+inline int OutputStopExitCode(const EventWriter& writer) {
+    return writer.BudgetReached() ? kExitSuccess : kExitRuntimeFailure;
+}
 
 bool EmitEvent(EventWriter& writer, const SandboxEventFields& fields);
 void EmitFallbackEventToStderr(const SandboxEventFields& fields);

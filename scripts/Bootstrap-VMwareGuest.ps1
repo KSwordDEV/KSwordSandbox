@@ -195,8 +195,49 @@ function Ensure-FirewallRule {
 }
 
 function Ensure-WorkingDirectory {
+    if ([string]::IsNullOrWhiteSpace($WorkingDirectory) -or $WorkingDirectory -notmatch '^[A-Za-z]:\\') {
+        throw '来宾工作目录必须是本地磁盘上的绝对路径。 / Guest working directory must be an absolute local drive path.'
+    }
+    $full = [IO.Path]::GetFullPath($WorkingDirectory).TrimEnd('\')
+    $drive = [IO.Path]::GetPathRoot($full)
+    if ($full.Equals($drive.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
+        throw '来宾工作目录不能是磁盘根目录。 / Guest working directory cannot be a drive root.'
+    }
+    $relative = $full.Substring($drive.Length)
+    if (@($relative.Split('\') | Where-Object { $_ -match '^(?i:Windows|Users|Program Files(?: \(x86\))?|ProgramData|Recovery|System Volume Information|\$Recycle\.Bin)$' }).Count -gt 0) {
+        throw '来宾工作目录不能位于系统目录或用户目录中。 / Guest working directory cannot be inside a system or user profile tree.'
+    }
+    $walk = $full
+    while ($true) {
+        if (Test-Path -LiteralPath $walk) {
+            if (((Get-Item -LiteralPath $walk -Force -ErrorAction Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw '来宾工作目录含有重解析点。 / Guest working directory contains a reparse point.'
+            }
+        }
+        if ($walk.Equals($drive.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase) -or $walk.Equals($drive, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $walk = Split-Path -Parent $walk
+        if ([string]::IsNullOrWhiteSpace($walk)) { throw 'Guest working directory ancestry could not be verified.' }
+    }
+    $marker = Join-Path $full '.ksword-sandbox-guest-root'
+    if (-not $full.Equals('C:\KSwordSandbox', [StringComparison]::OrdinalIgnoreCase) -and
+        -not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+        foreach ($reserved in @('incoming', 'out', 'agent')) {
+            if (Test-Path -LiteralPath (Join-Path $full $reserved)) {
+                throw "Custom guest working directory already contains '$reserved'; choose an empty directory or a previously bootstrapped KSwordSandbox directory."
+            }
+        }
+    }
     if (-not (Test-Path -LiteralPath $WorkingDirectory -PathType Container)) {
         New-Item -Path $WorkingDirectory -ItemType Directory -Force | Out-Null
+    }
+    if (Test-Path -LiteralPath $marker) {
+        if (((Get-Item -LiteralPath $marker -Force -ErrorAction Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            (Get-Content -LiteralPath $marker -Raw -ErrorAction Stop).Trim() -ne 'KSwordSandbox guest working directory v1') {
+            throw 'Guest working directory marker is invalid.'
+        }
+    }
+    else {
+        [IO.File]::WriteAllText($marker, "KSwordSandbox guest working directory v1`n", [Text.UTF8Encoding]::new($false))
     }
     Write-Bilingual -Chinese "工作目录已就绪：$WorkingDirectory" -English "Working directory is ready: $WorkingDirectory"
 }

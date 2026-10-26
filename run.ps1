@@ -81,6 +81,13 @@ param(
     # display enabled. Use this switch only for headless automation.
     [switch]$NoOpenVmConsole,
 
+    # Retain every raw host-side intermediate (decoded ETW XML, raw ETL/pktmon
+    # traces, rotated R0 JSONL segments) after the report is generated. By
+    # default those oversized intermediates are swept once events are
+    # classified into report.json; enable this for incident response only,
+    # because each live job otherwise leaves hundreds of MB per run behind.
+    [switch]$KeepRawEvidence,
+
     [switch]$PlanOnly,
 
     [switch]$NoBuild,
@@ -3402,6 +3409,10 @@ function Invoke-OneShotAnalysis {
     }
     if ($NoOpenVmConsole) {
         $arguments += '--no-open-vm-console'
+    }
+    if ($KeepRawEvidence) {
+        $arguments += '--keep-raw-evidence'
+        Write-RunInfo 'KeepRawEvidence: 已启用；报告生成后保留全部原始中间证据（每任务可能额外占用数百 MB）。/ KeepRawEvidence enabled; all raw intermediates are retained after reporting.'
     }
 
     $toolInvocation = Invoke-RunJobToolCaptured -Target $jobToolTarget -Arguments $arguments

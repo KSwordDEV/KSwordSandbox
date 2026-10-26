@@ -68,6 +68,20 @@ driver/process/image/file/registry/network producer；draft handle-access 位保
 在 Windows 中启用后，Agent 会在样本执行前后使用 `pktmon`，并把 trace 转为
 PCAPNG。缺少工具或权限不足会记录为非致命 `packet_capture.*` 事件，不会让整次分析失败。
 
+网络策略默认阻断，可用 `--network-policy allow` 显式放行：
+
+```text
+[--network-policy block|allow]
+```
+
+省略时按 `block` 处理。阻断在客户机内分两层实现：主阻断为设备层禁用网卡
+（`Disable-NetAdapter`，失败时降级为等价 PnP 设备禁用），样本即使改动防火墙
+也无法恢复连通；第二层才是 `netsh advfirewall` 入向/出向 block 规则（KSword
+前缀命名，分析窗口结束后删除）。不修改 VMware/Hyper-V/QEMU 网络配置；样本的
+连接尝试仍会被各遥测通道记录。阻断无法生效时记录 `networkPolicy.apply_failed`
+并以非零退出（fail-closed），样本不会在无保护状态下运行；恢复失败只记录
+`networkPolicy.restore_failed` 警告。详见 docs/network-policy.md。
+
 短命进程、线程和镜像边沿可通过以下开关启用真实 Kernel ETW 原始追踪：
 
 ```text
@@ -96,7 +110,8 @@ root 启动时间前 5 秒的行也会被排除，避免 PID 复用污染。旧�
 主要 JSON 和证据输出写到 `--out` 下：
 
 - `events.json` - guest 内采集到的有序 `SandboxEvent` 事件。
-- `agent-summary.json` - 运行摘要，包含 sample path、event count 和生成时间。
+- `sample-launch-proof.json` - `Process.Start` 返回后立即以 `Flush(true)` 写入的最小启动记录，包含任务 ID、样本路径、启动前 SHA-256/字节数、PID 和启动时间。来宾突然重启导致 `events.json` 缺失时，宿主仅据此标记“已确认启动／采集不完整”；它不证明具体破坏行为，也不构成完整报告。
+- `agent-summary.json` - 运行摘要，`sampleSha256` 与 `sampleSizeBytes` 优先保留已核验的启动前身份，即使样本在运行中自删除；`sampleIdentitySource` 和 `samplePresentAtSummary` 明确来源及结束时文件状态。还包括 sample path、event count 和生成时间。
 - `screenshots/*.bmp` - 显式传入 `--screenshot` 且 guest session 有可捕获桌面时的可选截图。
 - `memory-dumps/*.dmp` - 显式传入 `--memory-dump` / `--memory-dumps` 时的
   `MiniDumpNormal` 进程转储；Agent 会先捕获 root process，再在结束阶段扫 root/child 进程树。

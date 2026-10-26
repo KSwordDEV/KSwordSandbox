@@ -6,6 +6,7 @@ using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using KSword.Sandbox.Agent.Collection;
+using KSword.Sandbox.Agent.Execution;
 using KSword.Sandbox.Agent.Output;
 using KSword.Sandbox.Abstractions;
 
@@ -39,6 +40,15 @@ internal static class AgentProgram
 
     private const string R0CollectorStandardErrorFileName = "r0collector.stderr.log";
 
+    /// <summary>
+    /// Dedicated stderr lane for the sample process tree. The runbook redirects
+    /// the agent's own stderr into agent.stderr.log, which the host failure
+    /// importer treats as agent-authored diagnostics; without this lane the
+    /// sample and its grandchildren inherit that handle and their noise (for
+    /// example NET STOP / taskkill output) would be misread as an agent failure.
+    /// </summary>
+    private const string SampleStandardErrorFileName = "sample-stderr.log";
+
     private const string DroppedFilesArtifactDirectoryName = "dropped-files";
 
     private const string DroppedFileReasonTaxonomy = "guest-artifact.dropped-file.reason.v1";
@@ -61,6 +71,14 @@ internal static class AgentProgram
     internal const int DefaultR0CollectorMaxOutputBytes = 64 * 1024 * 1024;
 
     internal const int DefaultR0CollectorMinFreeOutputBytes = 128 * 1024 * 1024;
+
+    // Cumulative budget across all rotated segments. The collector finalizes
+    // the current segment and exits cleanly (exit 0 + r0-status sidecar) once
+    // total accepted JSONL bytes reach this value, instead of crashing into
+    // the shared-folder redirector handle ceiling observed live on HGFS
+    // (~430MB, win32 1394). 384MB == six 64MB rotation segments, matching the
+    // largest volume proven to complete end-to-end in live runs.
+    internal const int DefaultR0CollectorOutputBudgetBytes = 384 * 1024 * 1024;
 
     // Timed collection continues draining already queued kernel records after
     // the sample window; this bounded grace period is operator-configurable.
@@ -89,7 +107,18 @@ internal static class AgentProgram
             var options = AgentOptions.Parse(args);
             Directory.CreateDirectory(options.OutputDirectory);
             var events = await CollectAsync(options);
-            return WriteArtifacts(options, events) ? 0 : 1;
+            if (!WriteArtifacts(options, events))
+            {
+                return 1;
+            }
+
+            // Fail-closed surfacing: a requested guest network block that
+            // could not be enforced must not be reported as a successful run
+            // even though the evidence artifacts were written.
+            return events.Any(e =>
+                string.Equals(e.EventType, GuestNetworkPolicyGuard.ApplyFailedEventType, StringComparison.OrdinalIgnoreCase))
+                ? 1
+                : 0;
         }
         catch (Exception ex)
         {
@@ -119,6 +148,7 @@ internal static class AgentProgram
                 Data =
                 {
                     ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+                    ["networkPolicy"] = options.NetworkPolicy.ToString(),
                     ["captureScreenshots"] = options.CaptureScreenshots.ToString(),
                     ["screenshotPhases"] = options.ScreenshotOptions.FormatStages(),
                     ["screenshotCount"] = options.ScreenshotOptions.CaptureCount.ToString(CultureInfo.InvariantCulture),
@@ -144,8 +174,20 @@ internal static class AgentProgram
         string? executionProcessName = null;
         DateTime? executionProcessStartTimeUtc = null;
         var executionCommandLine = options.SamplePath;
+        var networkPolicyGuard = new GuestNetworkPolicyGuard(options.NetworkPolicy);
+        Task? sampleStderrDrainTask = null;
         try
         {
+            // Enforce the selected in-guest network policy before the sample
+            // starts. A failure here is fail-closed: the guard records
+            // networkPolicy.apply_failed and throws, so the sample never runs
+            // unprotected and the host sees a non-zero agent exit.
+            await networkPolicyGuard.ApplyAsync(events);
+
+            // Hash the exact guest bytes before launch. The launch proof below
+            // can then be flushed immediately after CreateProcess succeeds.
+            var launchSampleIdentity = SampleLaunchProofWriter.ComputeSampleIdentity(options.SamplePath);
+
             var startInfo = new ProcessStartInfo
             {
                 FileName = options.SamplePath,
@@ -155,10 +197,38 @@ internal static class AgentProgram
                 // and gives the agent a real process handle for start/exit rows.
                 UseShellExecute = false,
                 CreateNoWindow = false,
-                WindowStyle = ProcessWindowStyle.Normal
+                WindowStyle = ProcessWindowStyle.Normal,
+                // The runbook points this agent's own stderr at
+                // agent.stderr.log; redirect the sample tree's stderr into
+                // sample-stderr.log so grandchild noise (NET STOP, taskkill,
+                // ...) never contaminates the agent diagnostic lane the host
+                // failure importer judges on. The pipe write end is inherited
+                // by sample children, so their output lands in the same
+                // sample-stderr.log file.
+                RedirectStandardError = true
             };
 
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start sample process.");
+            SampleLaunchProofWriter.Write(
+                options.OutputDirectory,
+                options.JobId,
+                options.SamplePath,
+                launchSampleIdentity,
+                process.Id,
+                Environment.ProcessId,
+                DateTimeOffset.UtcNow);
+            var sampleStderrPath = Path.Combine(options.OutputDirectory, SampleStandardErrorFileName);
+            var sampleStderrFile = OpenR0CollectorDiagnosticFile(sampleStderrPath);
+            try
+            {
+                sampleStderrDrainTask = CopyR0CollectorDiagnosticStreamAsync(process.StandardError.BaseStream, sampleStderrFile);
+            }
+            catch
+            {
+                sampleStderrFile.Dispose();
+                throw;
+            }
+
             executionProcessId = process.Id;
             executionParentProcessId = Environment.ProcessId;
             executionProcessName = SafeProcessName(process);
@@ -356,15 +426,58 @@ internal static class AgentProgram
                 options.SamplePath,
                 executionCommandLine,
                 executionProcessStartTimeUtc);
-            var eventType = string.Equals(executionStage, "start", StringComparison.OrdinalIgnoreCase)
-                ? "process.start_failed"
-                : "process.execution_failed";
-            events.Add(CreateSampleExecutionFailureEvent(eventType, options.SamplePath, executionProcessId, executionStage, ex));
+            if (ex is GuestNetworkPolicyException)
+            {
+                // Fail-closed path: the guard already recorded
+                // networkPolicy.apply_failed and the sample was never
+                // started, so no process.* failure row may be fabricated.
+            }
+            else
+            {
+                var eventType = string.Equals(executionStage, "start", StringComparison.OrdinalIgnoreCase)
+                    ? "process.start_failed"
+                    : "process.execution_failed";
+                events.Add(CreateSampleExecutionFailureEvent(eventType, options.SamplePath, executionProcessId, executionStage, ex));
+            }
+
             events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterRun, diagnosticContext));
         }
         finally
         {
             await StopR0CollectorAsync(r0Collector, events);
+            if (options.NetworkPolicy is SandboxNetworkPolicy.Block)
+            {
+                // The root sample can exit while a child, scheduled task, or
+                // injected process keeps running. Re-enabling the guest NIC
+                // here would give that process a network window during final
+                // evidence collection. The runbook hard-stops and reverts the
+                // disposable VM after collection; keep both blocking layers
+                // in place until that host-side boundary.
+                var policyApplied = events.Any(e =>
+                    string.Equals(e.EventType, GuestNetworkPolicyGuard.AppliedEventType, StringComparison.OrdinalIgnoreCase));
+                events.Add(new SandboxEvent
+                {
+                    EventType = "networkPolicy.retained_until_vm_stop",
+                    Source = "guest",
+                    Path = options.SamplePath,
+                    Data =
+                    {
+                        ["policy"] = "Block",
+                        ["initialApplySucceeded"] = policyApplied ? "true" : "false",
+                        ["releaseBoundary"] = "host-vm-stop-and-baseline-restore",
+                        ["behaviorCounted"] = "false",
+                        ["nonbehavior"] = "true",
+                        ["collectionNoise"] = "true",
+                        ["zhMessage"] = policyApplied
+                            ? "样本退出后继续保持客户机网络阻断，直到宿主机关机并还原虚拟机基线。"
+                            : "客户机阻断未完整生效；保持已应用的部分阻断，直到宿主机关机并还原虚拟机基线。"
+                    }
+                });
+            }
+            // Finalize the sample-stderr.log lane before artifacts/summary are
+            // written. A detached grandchild can keep the inherited pipe write
+            // end open; bound the wait so artifact finalization never blocks.
+            await DrainSampleStandardErrorTaskAsync(sampleStderrDrainTask);
         }
 
         // The R0 writer emits an independent failure sidecar when the JSONL
@@ -723,6 +836,8 @@ internal static class AgentProgram
             startInfo.ArgumentList.Add(options.R0CollectorMaxOutputBytes.ToString(CultureInfo.InvariantCulture));
             startInfo.ArgumentList.Add("--min-free-output-bytes");
             startInfo.ArgumentList.Add(options.R0CollectorMinFreeOutputBytes.ToString(CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("--output-budget-bytes");
+            startInfo.ArgumentList.Add(options.R0CollectorOutputBudgetBytes.ToString(CultureInfo.InvariantCulture));
             startInfo.ArgumentList.Add("--driver-event-sample-stride");
             startInfo.ArgumentList.Add(options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture));
             if (options.R0CollectorEnableMask is uint enableMask)
@@ -907,13 +1022,15 @@ internal static class AgentProgram
             }
             else
             {
+                var budgetStopStatus = TryReadR0BudgetStopStatus(collector.DriverEventsPath);
                 events.Add(CreateR0CollectorExitedEvent(
                     collector,
                     processId,
                     exitCode,
                     forcedStop,
                     diagnosticDrainStatus,
-                    jsonLinesDrainStatus));
+                    jsonLinesDrainStatus,
+                    budgetStopStatus));
             }
 
             collector.Process.Dispose();
@@ -937,14 +1054,66 @@ internal static class AgentProgram
     }
 
     /// <summary>
-    /// Copies one redirected sidecar stream to its diagnostic file and closes
-    /// the destination when the process pipe reaches EOF.
+    /// Recreate the diagnostic destination handle after this many bytes so a
+    /// shared-folder redirector never keeps one handle open across the whole
+    /// collection window. 8 MiB is far below the sidecar sizes seen in live
+    /// runs while keeping the reopen rate negligible.
+    /// </summary>
+    private const long R0DiagnosticHandleRecycleBytes = 8L * 1024 * 1024;
+
+    /// <summary>
+    /// Copies one redirected sidecar stream to its diagnostic file, closing
+    /// and re-opening the destination handle every
+    /// <see cref="R0DiagnosticHandleRecycleBytes"/> so no single handle lives
+    /// for the whole collection window on a shared-folder redirector. The
+    /// current handle is registered with GuestWriteHandlePolicy so failure
+    /// sidecar writers can force-close it before their own write.
     /// </summary>
     private static async Task CopyR0CollectorDiagnosticStreamAsync(Stream source, FileStream destination)
     {
-        await using var diagnosticFile = destination;
-        await source.CopyToAsync(diagnosticFile);
-        await diagnosticFile.FlushAsync();
+        var buffer = new byte[64 * 1024];
+        var bytesSinceRecycle = 0L;
+        var current = destination;
+        GuestWriteHandlePolicy.RegisterDiagnosticHandle(current);
+        try
+        {
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer, CancellationToken.None).ConfigureAwait(false);
+                if (read <= 0)
+                {
+                    break;
+                }
+
+                await current.WriteAsync(buffer, 0, read, CancellationToken.None).ConfigureAwait(false);
+                bytesSinceRecycle += read;
+                if (bytesSinceRecycle < R0DiagnosticHandleRecycleBytes)
+                {
+                    continue;
+                }
+
+                var path = current.Name;
+                await current.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+                GuestWriteHandlePolicy.UnregisterDiagnosticHandle(current);
+                current.Dispose();
+                current = new FileStream(
+                    path,
+                    FileMode.Append,
+                    FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete,
+                    bufferSize: 4096,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                GuestWriteHandlePolicy.RegisterDiagnosticHandle(current);
+                bytesSinceRecycle = 0;
+            }
+
+            await current.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            GuestWriteHandlePolicy.UnregisterDiagnosticHandle(current);
+            current.Dispose();
+        }
     }
 
     /// <summary>
@@ -991,6 +1160,34 @@ internal static class AgentProgram
         var stdoutStatus = await DrainR0CollectorDiagnosticTaskAsync("stdout", collector.StandardOutputTask);
         var stderrStatus = await DrainR0CollectorDiagnosticTaskAsync("stderr", collector.StandardErrorTask);
         return $"{stdoutStatus};{stderrStatus}";
+    }
+
+    /// <summary>
+    /// Bounded drain for the sample-tree stderr copy task. Sample grandchildren
+    /// inherit the redirected pipe's write end, so EOF can wait on a detached
+    /// child; the bounded window keeps artifact finalization unblocked and the
+    /// abandoned copy task dies with the agent process exit.
+    /// </summary>
+    private static async Task DrainSampleStandardErrorTaskAsync(Task? sampleStderrDrainTask)
+    {
+        if (sampleStderrDrainTask is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var completedTask = await Task.WhenAny(sampleStderrDrainTask, Task.Delay(R0CollectorDiagnosticDrainTimeout));
+            if (completedTask == sampleStderrDrainTask)
+            {
+                await sampleStderrDrainTask;
+            }
+        }
+        catch
+        {
+            // Sample-stderr capture is diagnostic-only; never let a drain fault
+            // mask the collected events or abort artifact finalization.
+        }
     }
 
     /// <summary>
@@ -1111,6 +1308,7 @@ internal static class AgentProgram
                 ["r0MaxReadBatches"] = options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture),
                 ["r0MaxOutputBytes"] = options.R0CollectorMaxOutputBytes.ToString(CultureInfo.InvariantCulture),
                 ["r0MinFreeOutputBytes"] = options.R0CollectorMinFreeOutputBytes.ToString(CultureInfo.InvariantCulture),
+                ["r0OutputBudgetBytes"] = options.R0CollectorOutputBudgetBytes.ToString(CultureInfo.InvariantCulture),
                 ["r0DrainGraceMs"] = options.R0CollectorDrainGraceMs.ToString(CultureInfo.InvariantCulture),
                 ["r0DriverEventSampleStride"] = options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture),
                 ["r0EnableMask"] = options.R0CollectorEnableMask is uint enableMask ? $"0x{enableMask:X8}" : string.Empty,
@@ -1143,7 +1341,8 @@ internal static class AgentProgram
         string exitCode,
         bool forcedStop,
         string diagnosticDrainStatus,
-        string jsonLinesDrainStatus)
+        string jsonLinesDrainStatus,
+        IReadOnlyDictionary<string, string>? budgetStopStatus = null)
     {
         var evt = new SandboxEvent
         {
@@ -1170,6 +1369,23 @@ internal static class AgentProgram
                 ["zhHint"] = "请使用 artifactRelativePath 下载 driver-events JSONL；stdoutRelativePath/stderrRelativePath 可用于诊断 sidecar 输出。"
             }
         };
+        if (budgetStopStatus is not null)
+        {
+            // A budget stop is a clean, intentional truncation: keep the exit
+            // code at 0 but make the truncation boundary explicit so the host
+            // never has to infer it from a missing r0collector.stopped row.
+            evt.Data["stopReason"] = budgetStopStatus.TryGetValue("stopReason", out var stopReason) ? stopReason : "outputBudgetReached";
+            evt.Data["r0OutputTruncated"] = "true";
+            evt.Data["captureState"] = "truncated";
+            foreach (var key in new[] { "budgetBytes", "bytesWritten", "segmentsWritten", "queueDepthAtStopKnown", "queueDepthAtStop" })
+            {
+                if (budgetStopStatus.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+                {
+                    evt.Data[key] = value;
+                }
+            }
+            evt.Data["zhBudgetHint"] = "R0 采集已达到累计输出预算，sidecar 以干净方式停止；预算之后的事件有意未采集，不属于输出写失败。";
+        }
         AddR0ArtifactReferenceData(
             evt,
             InferR0OutputDirectory(collector),
@@ -1177,6 +1393,62 @@ internal static class AgentProgram
             collector.StandardOutputPath,
             collector.StandardErrorPath);
         return evt;
+    }
+
+    /// <summary>
+    /// Reads the collector's r0-status sidecar next to the driver JSONL when
+    /// the run stopped at the cumulative output budget. Returns the scalar
+    /// fields for a stopReason=outputBudgetReached document, or null when the
+    /// sidecar is absent or describes anything else.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string>? TryReadR0BudgetStopStatus(string? driverEventsPath)
+    {
+        if (string.IsNullOrWhiteSpace(driverEventsPath))
+        {
+            return null;
+        }
+
+        var statusPath = driverEventsPath + ".r0-status.json";
+        try
+        {
+            if (!File.Exists(statusPath))
+            {
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(
+                File.ReadAllText(statusPath),
+                new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("stopReason", out var stopReason) ||
+                !string.Equals(stopReason.GetString(), "outputBudgetReached", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                var scalar = property.Value.ValueKind switch
+                {
+                    JsonValueKind.String => property.Value.GetString(),
+                    JsonValueKind.Number => property.Value.GetRawText(),
+                    JsonValueKind.True => "true",
+                    JsonValueKind.False => "false",
+                    _ => null
+                };
+                if (!string.IsNullOrWhiteSpace(scalar))
+                {
+                    values[property.Name] = scalar;
+                }
+            }
+
+            return values;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -1574,6 +1846,8 @@ internal static class AgentProgram
             options.R0CollectorMaxOutputBytes.ToString(CultureInfo.InvariantCulture),
             "--min-free-output-bytes",
             options.R0CollectorMinFreeOutputBytes.ToString(CultureInfo.InvariantCulture),
+            "--output-budget-bytes",
+            options.R0CollectorOutputBudgetBytes.ToString(CultureInfo.InvariantCulture),
             "--driver-event-sample-stride",
             options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture)
         };
@@ -2206,11 +2480,12 @@ internal static class AgentProgram
 
         try
         {
-            var freeBytes = TryGetAvailableFreeBytes(options.OutputDirectory);
             var requiredBytes = EstimateEventOutputBytes(events.Count);
-            if (freeBytes is long available && available < requiredBytes)
+            var space = OutputSpaceProbe.Query(options.OutputDirectory, requiredBytes);
+            if (OutputSpaceProbe.HasMeasuredFreeBytes(space) &&
+                space.AvailableFreeBytes is long available && available < requiredBytes)
             {
-                WriteGuestOutputCapacityDiagnostic(options.OutputDirectory, "events.json", available, requiredBytes, events.Count);
+                WriteGuestOutputCapacityDiagnostic(options.OutputDirectory, "events.json", space, requiredBytes, events.Count);
                 return false;
             }
             artifactWriter.WriteEvents(options.OutputDirectory, events);
@@ -2223,7 +2498,7 @@ internal static class AgentProgram
 
         try
         {
-            artifactWriter.WriteSummary(options.OutputDirectory, options.SamplePath, events.Count);
+            artifactWriter.WriteSummary(options.OutputDirectory, options.SamplePath, events.Count, options.JobId);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
@@ -2243,8 +2518,12 @@ internal static class AgentProgram
         return estimated + 8L * 1024 * 1024;
     }
 
-    private static void WriteGuestOutputCapacityDiagnostic(string outputDirectory, string artifactName, long availableBytes, long requiredBytes, int eventCount)
+    private static void WriteGuestOutputCapacityDiagnostic(string outputDirectory, string artifactName, OutputSpaceProbe.Result space, long requiredBytes, int eventCount)
     {
+        // Handle exhaustion is the usual reason this diagnostic exists at
+        // all: release any long-lived sidecar handles first so the tiny
+        // failure sidecar gets the full write-handle budget.
+        GuestWriteHandlePolicy.ForceCloseDiagnosticHandles();
         var path = Path.Combine(outputDirectory, artifactName + ".failure.json");
         try
         {
@@ -2254,25 +2533,37 @@ internal static class AgentProgram
                 artifact = artifactName,
                 captureState = "failed",
                 failureType = "outputSpaceInsufficient",
-                availableFreeBytes = availableBytes,
+                spaceCheckAvailable = space.SpaceCheckAvailable,
+                spaceCheckMethod = space.Method,
+                spaceCheckError = space.Error,
+                availableFreeBytes = space.AvailableFreeBytes,
                 requiredFreeBytesEstimate = requiredBytes,
                 eventCount,
                 zhMessage = $"来宾输出盘空间不足，已停止写入 {artifactName}，报告必须按部分采集处理。",
                 zhHint = "保留原始 R0 JSONL 与该诊断；请清理来宾输出盘后重试。"
             };
-            File.WriteAllText(path, JsonSerializer.Serialize(payload, JsonOptions));
+            ResilientFile.WriteAllTextWithRetry(path, JsonSerializer.Serialize(payload, JsonOptions));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
-            Console.Error.WriteLine($"guest-output-space-failure artifact={artifactName} available={availableBytes} required={requiredBytes} message={ex.Message}");
+            Console.Error.WriteLine($"guest-output-space-failure artifact={artifactName} available={space.AvailableFreeBytes} required={requiredBytes} message={ex.Message}");
         }
     }
 
     private static void WriteGuestOutputFailureDiagnostic(string outputDirectory, string artifactName, Exception exception)
     {
+        // Same handle-release contract as the capacity diagnostic: the
+        // sidecar that explains the write failure must itself be writable on
+        // a handle-exhausted output root.
+        GuestWriteHandlePolicy.ForceCloseDiagnosticHandles();
         var path = Path.Combine(outputDirectory, artifactName + ".failure.json");
         try
         {
+            // Record the space-probe outcome actually obtained for this output
+            // root.  UNC/HGFS roots previously produced spaceCheckAvailable
+            // false with zeroed byte counts; the method/error fields below
+            // keep either outcome interpretable for the host report.
+            var space = OutputSpaceProbe.Query(outputDirectory, 0);
             var payload = new
             {
                 schema = "ksword.sandbox.guest.output-failure",
@@ -2281,30 +2572,20 @@ internal static class AgentProgram
                 failureType = exception is UnauthorizedAccessException ? "accessDenied" : "outputWriteFailure",
                 exceptionType = exception.GetType().FullName ?? exception.GetType().Name,
                 message = exception.Message,
-                availableFreeBytes = TryGetAvailableFreeBytes(outputDirectory),
+                spaceCheckAvailable = space.SpaceCheckAvailable,
+                spaceCheckMethod = space.Method,
+                spaceCheckError = space.Error,
+                availableFreeBytes = space.AvailableFreeBytes,
                 zhMessage = $"来宾 {artifactName} 写入失败，报告必须按部分采集处理。",
                 zhHint = "请检查来宾输出盘剩余空间；原始 driver-events 分片和失败诊断仍应保留。"
             };
-            File.WriteAllText(path, JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            ResilientFile.WriteAllTextWithRetry(path, JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         }
         catch
         {
             // A full disk can also reject the tiny diagnostic. Preserve the
             // failure on stderr so the host-side runbook still records it.
             Console.Error.WriteLine($"guest-output-failure artifact={artifactName} type={exception.GetType().Name} message={exception.Message}");
-        }
-    }
-
-    private static long? TryGetAvailableFreeBytes(string outputDirectory)
-    {
-        try
-        {
-            var root = Path.GetPathRoot(Path.GetFullPath(outputDirectory));
-            return string.IsNullOrWhiteSpace(root) ? null : new DriveInfo(root).AvailableFreeSpace;
-        }
-        catch
-        {
-            return null;
         }
     }
 
@@ -3428,9 +3709,12 @@ internal static class AgentProgram
     private static void CopyFileSharedRead(string sourcePath, string destinationPath)
     {
         using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var destination = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        source.CopyTo(destination);
-        destination.Flush(flushToDisk: true);
+        using (GuestWriteHandlePolicy.AcquireWriteHandle())
+        using (var destination = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            source.CopyTo(destination);
+            destination.Flush(flushToDisk: true);
+        }
     }
 
     private static string DroppedFileCandidateType(SandboxEvent sourceEvent)
@@ -4088,6 +4372,14 @@ internal sealed record AgentOptions
 
     public int R0CollectorMinFreeOutputBytes { get; init; } = AgentProgram.DefaultR0CollectorMinFreeOutputBytes;
 
+    /// <summary>
+    /// Cumulative budget across all rotated segments forwarded to
+    /// R0Collector. When the budget is reached the collector stops cleanly
+    /// (exit 0) and records an explicit r0-status sidecar instead of failing
+    /// into the shared-folder redirector handle ceiling. Zero disables.
+    /// </summary>
+    public int R0CollectorOutputBudgetBytes { get; init; } = AgentProgram.DefaultR0CollectorOutputBudgetBytes;
+
     public int R0CollectorDrainGraceMs { get; init; } = AgentProgram.DefaultR0CollectorDrainGraceMs;
 
     public int R0CollectorDriverEventSampleStride { get; init; } = AgentProgram.DefaultR0CollectorDriverEventSampleStride;
@@ -4112,13 +4404,22 @@ internal sealed record AgentOptions
     public bool CaptureEtwLiveTrace { get; init; }
 
     /// <summary>
+    /// In-guest network policy for this run. Block is the default when the
+    /// switch is absent so a direct/legacy invocation never silently leaves
+    /// the guest network reachable. Enforcement is guest-internal (Windows
+    /// Firewall); no hypervisor network setting is touched.
+    /// </summary>
+    public SandboxNetworkPolicy NetworkPolicy { get; init; } = SandboxNetworkPolicy.Block;
+
+    /// <summary>
     /// Parses command-line switches for the guest agent.
     /// Inputs are string arguments, processing consumes --sample, --out,
     /// --duration, --job-id, --driver-events, optional R0Collector sidecar switches, and
     /// boolean --r0-mock/--screenshot/--collect-dropped-files/--memory-dump,
     /// optional --screenshot-phases/--screenshot-count, plus opt-in
     /// --packet-capture/--pcap network capture and --etw-live kernel trace
-    /// flags without breaking existing
+    /// flags, and the optional --network-policy block|allow guest-internal
+    /// network policy (default block) without breaking existing
     /// value switches; the method returns
     /// validated and normalized options.
     /// </summary>
@@ -4195,6 +4496,7 @@ internal sealed record AgentOptions
         var r0MaxReadBatches = ParseBoundedOption(values, 0, 1_000_000, AgentProgram.DefaultR0CollectorMaxReadBatches, "r0-max-read-batches", "driver-max-read-batches");
         var r0MaxOutputBytes = ParseBoundedOption(values, 0, 512 * 1024 * 1024, AgentProgram.DefaultR0CollectorMaxOutputBytes, "max-output-bytes", "r0-max-output-bytes", "r0-output-max-bytes", "driver-max-output-bytes");
         var r0MinFreeOutputBytes = ParseBoundedOption(values, 0, 512 * 1024 * 1024, AgentProgram.DefaultR0CollectorMinFreeOutputBytes, "min-free-output-bytes", "r0-min-free-output-bytes", "output-free-reserve-bytes", "driver-min-free-output-bytes");
+        var r0OutputBudgetBytes = ParseBoundedOption(values, 0, int.MaxValue, AgentProgram.DefaultR0CollectorOutputBudgetBytes, "output-budget-bytes", "r0-output-budget-bytes", "r0-total-output-budget-bytes", "driver-output-budget-bytes");
         var r0DrainGraceMs = ParseBoundedOption(values, 0, 600_000, AgentProgram.DefaultR0CollectorDrainGraceMs, "r0-drain-grace-ms", "driver-drain-grace-ms");
         var r0DriverEventSampleStride = ParseBoundedOption(values, 1, 1_000_000, AgentProgram.DefaultR0CollectorDriverEventSampleStride, "r0-driver-event-sample-stride", "driver-event-sample-stride", "r0-event-sample-stride");
         uint? r0EnableMask = null;
@@ -4211,6 +4513,8 @@ internal sealed record AgentOptions
             FirstValue(values, "screenshot-phases", "screenshot-stages", "screenshots-phases", "screenshots-stages"),
             FirstValue(values, "screenshot-count", "screenshots-count"));
 
+        var networkPolicy = ParseNetworkPolicy(FirstValue(values, "network-policy"));
+
         return new AgentOptions
         {
             SamplePath = Path.GetFullPath(samplePath),
@@ -4225,6 +4529,7 @@ internal sealed record AgentOptions
             R0CollectorMaxReadBatches = r0MaxReadBatches,
             R0CollectorMaxOutputBytes = r0MaxOutputBytes,
             R0CollectorMinFreeOutputBytes = r0MinFreeOutputBytes,
+            R0CollectorOutputBudgetBytes = r0OutputBudgetBytes,
             R0CollectorDrainGraceMs = r0DrainGraceMs,
             R0CollectorDriverEventSampleStride = r0DriverEventSampleStride,
             R0CollectorEnableMask = r0EnableMask,
@@ -4233,8 +4538,36 @@ internal sealed record AgentOptions
             CollectDroppedFiles = flags.Contains("collect-dropped-files") || flags.Contains("dropped-files"),
             CaptureMemoryDump = flags.Contains("memory-dump") || flags.Contains("memory-dumps"),
             CapturePacketCapture = flags.Contains("packet-capture") || flags.Contains("pcap") || flags.Contains("network-capture"),
-            CaptureEtwLiveTrace = flags.Contains("etw-live") || flags.Contains("etw") || flags.Contains("kernel-etw") || flags.Contains("capture-etw")
+            CaptureEtwLiveTrace = flags.Contains("etw-live") || flags.Contains("etw") || flags.Contains("kernel-etw") || flags.Contains("capture-etw"),
+            NetworkPolicy = networkPolicy
         };
+    }
+
+    /// <summary>
+    /// Parses the --network-policy value switch. Inputs are the raw switch
+    /// text; processing accepts only block/allow (case-insensitive) and
+    /// defaults to block when the switch is absent; the method returns the
+    /// policy. Unknown values throw instead of silently falling back, because
+    /// a typo must never downgrade a requested block into an allow.
+    /// </summary>
+    private static SandboxNetworkPolicy ParseNetworkPolicy(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return SandboxNetworkPolicy.Block;
+        }
+
+        if (string.Equals(raw, "block", StringComparison.OrdinalIgnoreCase))
+        {
+            return SandboxNetworkPolicy.Block;
+        }
+
+        if (string.Equals(raw, "allow", StringComparison.OrdinalIgnoreCase))
+        {
+            return SandboxNetworkPolicy.Allow;
+        }
+
+        throw new ArgumentException("--network-policy must be 'block' or 'allow'. / --network-policy 只能是 'block' 或 'allow'。", nameof(raw));
     }
 
     /// <summary>

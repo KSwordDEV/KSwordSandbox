@@ -11,4 +11,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Smoke-test scenarios exercise the resilient guest writer internals
+         (retry/reopen and the UNC space probe) directly. -->
+    <InternalsVisibleTo Include="KSword.Sandbox.SmokeTests" />
+  </ItemGroup>
+
 </Project>

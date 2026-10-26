@@ -1,38 +1,33 @@
 # 首次启动 WebUI 流程
 
-发行包用户的入口是根目录 `Start-KSwordSandbox.cmd`。脚本固定工作目录，使用当前 Windows PowerShell 启动 `run.ps1 -Mode StartWebUI`，并只对这个子进程使用 `ExecutionPolicy Bypass`。
+发行包入口是根目录 `Start-KSwordSandbox.cmd`。它使用当前 Windows PowerShell 启动 `run.ps1 -Mode StartWebUI`。首次设置和只读预检不会启动或还原虚拟机。
 
-> **首次使用请选 VMware Workstation Pro。** `config/sandbox.example.json` 里的
-> `virtualization.provider = HyperV` 只是为旧 profile 保留的兼容默认值，不代表推荐路径；
-> 本项目当前记录的端到端 Live 验收证据来自 VMware。Hyper-V/QEMU 只在你已经有对应
-> 环境时选择，并按同等标准自行验收。VMware 的完整来宾/宿主准备清单见
-> `docs/vmware-first-run.md`。
+> **首次使用优先选择 VMware Workstation Pro。** `config/sandbox.example.json` 的 `HyperV` 值只是旧 profile 的兼容默认。当前默认网络策略是 `Block`，破坏性样本只能在隔离虚拟机中执行，实体机严禁运行。final6 发布包已通过无网卡、无宿主共享的无害校准 Live；真实样本尚无动态成功记录。
 
-## 用户路径
+## 目标路线与当前状态
 
-1. 双击启动脚本。没有仓库外 `sandbox.local.json` 时，`run.ps1` 直接启动首次设置 WebUI，不要求先运行控制台安装向导，也不会启动或修改虚拟机。
-2. WebUI 进入 `/setup`，用户选择后端。VMware 路径填写 VMX、snapshot、`vmrun.exe` 和 VM 显示名；默认通信方式是 VMware Tools 自动发现地址，再用 WinRM HTTPS 连接来宾。Hyper-V 路径填写黄金 VM 和 checkpoint，使用 PowerShell Direct，不需要 WinRM；QEMU 路径填写基础磁盘、`qemu-system`/`qemu-img` 和磁盘格式，默认使用 per-job overlay 与 provider-managed user NAT，再通过 WinRM HTTPS 连接来宾。页面中的字段会随 provider 切换，下面的 VMware 前置条件只适用于 VMware Workstation Pro。
-3. 点击只读预检。页面把当前表单提交到 `/api/setup/preview`；服务端用临时 profile 调用与 `/api/host/readiness?refresh=true&provider=<selected-provider>` 相同的只读探针，显示管理工具、虚拟机/磁盘、干净基线、主机加速、来宾端点和 payload 状态。预检不执行 `start`、`stop`、`revertToSnapshot`，也不会验证真实来宾登录；WinRM 登录会在 VMware/QEMU Live 启动前再次检查。
-4. 保存后端。配置写入 runtime root 下的 `config\sandbox.local.json`，密码仍只从 `KSWORDBOX_GUEST_PASSWORD` 读取；页面提示重新启动 WebUI，使新配置成为运行时配置。
-5. 重新启动后进入 `/` 样本选择界面。上传 `.exe` 使用 `/api/files/upload/start`，后台 runbook 按所选 provider 的顺序恢复或创建隔离基线、开机、部署 payload、运行样本、回收事件、生成报告并清理虚拟机。
-6. 规则维护从导航进入 `/rules`。页面以卡片编辑规则，支持新增、删除、校验、导入导出和保存；保存后的规则会写回配置的规则文件，并立即用于后续任务。
+目标是：用户在已安装 Windows 的 VM 中运行一次来宾 PowerShell 引导，在宿主选择 VMX，产品核验/建立干净基线，此后自动部署、运行、回收证据、生成中文报告并回滚。VMware `Block` 任务在样本运行前应没有虚拟网卡、没有 HGFS 宿主共享，宿主通过 VMware Tools/VIX GuestOps 操作来宾，不依赖 WinRM 地址。
 
-## VMware 前置条件
+**用户态无害闭环已经通过，首次准备仍需人工操作。** WebUI 已有复制完整 [`Bootstrap-VMwareGuest.ps1`](../scripts/Bootstrap-VMwareGuest.ps1) 的按钮、下载脚本、填写 VMX/快照/`vmrun.exe` 和只读预检；脚本创建管理员账户并配置 WinRM HTTPS，供显式 `Allow` 旧路线使用。默认 VMware `Block` 的正式 runbook 已使用 VIX GuestOps 部署、启动和回收，无需来宾 IP、WinRM 或 HGFS。WebUI 的 VMX 仍是文本框，快照仍需手工创建，保存后仍需重启 WebUI，因此“粘贴脚本、选择 VM 后全自动”还没有完成。
 
-当前产品不会替用户创建 Windows 10 VM、安装 VMware Tools、创建快照或配置 WinRM HTTPS。发行包向导负责发现和验证这些前置条件；用户需要先准备可丢弃的 Windows 10 guest、`SandboxUser`、WinRM HTTPS、防火墙和 powered-off clean snapshot。VMware 只支持 Workstation Pro 的 `vmType=ws` profile。
+final6 发布包通过 WebUI 一键上传无害校准样本，作业 `6f6f6147-efa4-47b3-ba03-bdc1ad014d08` 的报告为 `Completed`、威胁等级“高风险”，GuestOps 同步 `completed`、退出码 0、`copyErrors=[]`，VM 已关机回滚。该结果证明当前配置下的用户态发布包无害闭环可用；“高风险”只描述该无害校准样本的报告结果。R0 驱动在当前 VM 中缺失，覆盖仍为部分；真实样本尚未动态成功。final3/4 的 VIX 20004 是 Windows PowerShell 5.1 解析清单根数组时把 13 个文件名拼为一个路径的发布产品缺陷，现已修复并由 final6 同步结果复验。final5 对齐 WebUI 的 30 MB 与 200 MB 上传限制，修复已包含在 final6。详见[部署路线审计](product-vs-lab-deployment-audit-2026-10-26.md)和[GuestOps 错误诊断](vix-20004-diagnosis-2026-10-26.md)。
 
-### 空白 VMware 主机的准备顺序 / Blank VMware host checklist
+## 当前 WebUI 用户路径
 
-如果手上只有 VMware Workstation Pro 和安装介质，先在 VMware 中完成一次性准备；WebUI 不会替你创建或修改来宾：
+1. 双击 `Start-KSwordSandbox.cmd`。缺少仓库外 `sandbox.local.json` 时进入 `/setup`；此时不修改 VM。
+2. 选择后端。VMware 表单目前要求手工填写 VMX、已有干净快照名、`vmrun.exe` 路径、显示名和来宾账号。Hyper-V 使用 PowerShell Direct；QEMU 使用配置的 NAT/WinRM 路线。仅 VMware 默认 `Block` 的目标通道是无网卡 GuestOps。
+3. 点击只读预检。`/api/setup/preview` 检查宿主工具、VMX、已有快照、隔离配置、VIX helper 和配置字段；不会启动 VM、登录来宾、证明 GuestOps 或验证样本报告。预检结果只表示**宿主配置**是否可保存。
+4. 另行在本机保存来宾密码 secret。当前 `/api/setup/guest-secret` 将其写入 Web Host 进程和当前用户环境；默认 `Block` 通过进程内 VIX 登录，避免 `vmrun -gp` 命令行暴露。
+5. 保存 profile 到 runtime root 的 `config\sandbox.local.json`，重启 WebUI 后进入样本选择。PlanOnly 可检查计划；默认 VMware 用户态 `Block` 已在 final6 包通过一键上传无害校准样本的 Live。R0 与 Defender 特殊配置仍会在开机前拒绝，真实样本要逐个验收。
+6. 规则维护从 `/rules` 进入；保存后的规则用于后续任务。规则变更要用真实执行证据校准，不能以公开沙箱情报代替本机观测。
 
-1. 创建 Windows 10 x64 VM，给它分配可用磁盘、网络和至少 4 GB 内存；安装 VMware Tools，并确认 Tools 服务在 Windows 中运行。
-2. 在来宾中创建本地管理员 `SandboxUser`，设置不会过期的密码。以管理员 PowerShell 执行 `Enable-PSRemoting -Force`，将 WinRM 设置为自动启动，并创建 WinRM HTTPS listener 和入站防火墙规则（默认端口 `5986`）。自动地址模式要求 HTTPS；自签名证书可在向导中保留“跳过证书校验”。
-3. 把来宾工作目录 `C:\KSwordSandbox` 留给 Guest Agent。不要在该目录放入需要保留的文件，因为每次分析都会重新部署 payload，并在清理阶段移除任务目录。
-4. 关机，在 VMware Workstation 中创建名为 `Clean`（或你在向导中填写的名称）的 powered-off snapshot。这个快照必须是样本运行前的干净基线；不要在样本已经运行后覆盖它。
-5. 双击 `Start-KSwordSandbox.cmd`，填写 VMX、snapshot、`vmrun.exe`（Workstation Pro 安装目录中的 `vmrun.exe`）和 VM 显示名。来宾地址留空表示用 VMware Tools 自动发现；只有固定地址且确认可达时才选择 Configured。
-6. 先保存来宾密码 secret，再运行只读预检。预检通过至少应看到 `VMWARE_QUERY_OK`、VMX 存在、目标 snapshot 存在和安全的 WinRM 配置；预检不会开机或恢复快照。任何 `VMWARE_*` 查询失败、缺少 snapshot、缺少 payload 或缺少 secret 都应先修复后再 Live。
-7. 保存 profile 后重新启动 WebUI。首次页面保存到 runtime root 下的 `config\sandbox.local.json`（仓库外，但仍在 runtime root 内），当前进程不会热加载它；重启后才会进入样本选择并准备 guest payload。首次 Live 会按“恢复 Clean → 开机 → 传样本/采集 → 生成报告 → 停止 VM → 按策略恢复 Clean”的顺序执行。
+## VMware `Block` 首次准备与验收门槛
 
-如果没有 Workstation Pro、VMware Tools、WinRM HTTPS 或可用的 powered-off Clean snapshot，只能使用 WebUI 的配置/PlanOnly 检查，不能声称 Live 分析已经准备完成。
+以下列出目标发布路线以及尚需完成的验收。final6 的一次无害闭环已满足其中的用户态核心运行环节，不能推出全部首次设置和 R0 已自动完成。
 
-VM、快照、样本、payload、报告、驱动和密钥都留在仓库外。Sandbox 继续使用自身的 `KSwordSandboxDriver` ABI，不复制或替换其他项目的驱动。
+1. 用户提供可丢弃的 Windows VM，安装 VMware Tools，在 VM 内以管理员身份运行产品提供的来宾引导 PowerShell。引导结果应机器可读，并与宿主保存的专用来宾凭据配对。当前脚本还会配置 WinRM；离线 `Block` 不得把 WinRM 当成样本阶段控制通道。
+2. 宿主选择该 VMX 后识别 Workstation Pro、Tools 和来宾身份；产品创建或确认 powered-off 干净基线，并验证关闭 NIC、HGFS、USB、剪贴板、拖放、打印等宿主交互通道。原机若仍用于普通任务，应先制作专用克隆；不能只凭快照名含“NetIsolated”推断隔离。
+3. 先以固定哈希的无害样本跑完整 Live：从基线启动、VIX 部署与来宾 SHA-256 复核、管理员权限 Agent 启动、网络阻断事件、原始证据回收、项目原生 `report.zh.html`、停机回滚以及再次启动后探针消失。final6 已完成 WebUI 一键上传后的无害作业、同步、报告和关机回滚；仍需固化原始证据与回滚后重启探针消失的记录，并在干净宿主/VM 复验。[无害离线探针](vmware-isolated-benign-probe.md)仍用于开发验证。
+4. 再以不同机制的已核验样本逐个在隔离 VM 中实测。每份报告记录 job ID、样本哈希、VM/快照、实际启动证明、采集缺口和回滚结果。R0 驱动未安装或未签名时只声明用户态覆盖，不把缺失事件解释成样本没有行为。
+
+[VMware 首次运行手册](vmware-first-run.md)现已描述默认零网卡 GuestOps 路线，但仍需要手工准备 VM 和干净快照。final6 的无害成功不能替代真实样本动态验收或证明 R0 完整覆盖。VM、样本、payload、报告、驱动和密钥均留在仓库外。

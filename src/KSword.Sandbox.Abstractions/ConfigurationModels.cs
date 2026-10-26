@@ -14,6 +14,28 @@ public enum VirtualizationProvider
 }
 
 /// <summary>
+/// Selects the in-guest network enforcement applied while a sample runs.
+/// Block is the default so an unconfigured or legacy job never silently
+/// leaves the guest able to reach the network. Enforcement is implemented
+/// inside the guest (Windows Firewall) and is never delegated to VMware,
+/// Hyper-V, or QEMU network configuration.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SandboxNetworkPolicy>))]
+public enum SandboxNetworkPolicy
+{
+    /// <summary>
+    /// Blocks outbound and inbound traffic inside the guest for the analysis
+    /// window. Connection attempts are still recorded by the telemetry lanes.
+    /// </summary>
+    Block,
+
+    /// <summary>
+    /// Leaves the guest network untouched for this job.
+    /// </summary>
+    Allow
+}
+
+/// <summary>
 /// Resolves the Windows guest endpoint used by VMware and QEMU runbooks.
 /// Configured preserves explicit DNS/IP behavior, VMwareTools discovers the
 /// restored guest IP through vmrun, and QemuUserNat uses a provider-owned
@@ -110,6 +132,12 @@ public sealed record VMwareConfig
     public string SnapshotName { get; init; } = "Clean";
 
     public string VmrunPath { get; init; } = "vmrun.exe";
+
+    /// <summary>
+    /// Host-side VIX GuestOps helper used by network-isolated VMware jobs.
+    /// When empty, the config loader searches the portable runtime package.
+    /// </summary>
+    public string VixHelperPath { get; init; } = string.Empty;
 
     public string VmType { get; init; } = "ws";
 
@@ -233,6 +261,14 @@ public sealed record GuestConfig
     public int PowerShellRemotingPort { get; init; }
 
     public bool PowerShellRemotingSkipCertificateChecks { get; init; }
+
+    /// <summary>
+    /// Default in-guest network policy for analysis runs. The default is
+    /// <see cref="SandboxNetworkPolicy.Block"/>; a per-job submission may
+    /// override it. Enforcement lives inside the guest and never mutates
+    /// VMware/Hyper-V/QEMU network configuration.
+    /// </summary>
+    public SandboxNetworkPolicy NetworkPolicy { get; init; } = SandboxNetworkPolicy.Block;
 }
 
 /// <summary>
@@ -275,6 +311,15 @@ public sealed record ArtifactCollectionConfig
     /// tracerpt XML decode; the lane remains disabled by default.
     /// </summary>
     public bool CaptureEtwLiveTrace { get; init; }
+
+    /// <summary>
+    /// Retention switch for oversized host-side intermediate evidence
+    /// (decoded ETW XML, raw ETL/pktmon traces, rotated R0 JSONL segments)
+    /// after the events have been classified into report.json. False (the
+    /// default) sweeps those intermediates once the report is finalized;
+    /// true keeps every raw byte for incident response.
+    /// </summary>
+    public bool KeepRawEvidence { get; init; }
 }
 
 /// <summary>
@@ -340,6 +385,16 @@ public sealed record DriverConfig
     /// reserve while preserving the native collector's standalone default.
     /// </summary>
     public int R0CollectorMinFreeOutputBytes { get; init; } = 128 * 1024 * 1024;
+
+    /// <summary>
+    /// Cumulative budget across all rotated R0 segments. Once total accepted
+    /// JSONL bytes reach this value the collector finalizes the current
+    /// segment and stops cleanly (exit 0 plus an explicit r0-status sidecar)
+    /// instead of exhausting the shared-folder redirector handle budget
+    /// observed live on HGFS (~430MB, win32 1394). 384MB equals six 64MB
+    /// rotation segments. Zero disables the budget.
+    /// </summary>
+    public int R0CollectorOutputBudgetBytes { get; init; } = 384 * 1024 * 1024;
 
     public bool UseMockCollector { get; init; }
 }

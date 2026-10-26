@@ -7,10 +7,12 @@ using KSword.Sandbox.Core.Artifacts;
 using KSword.Sandbox.Core.Execution;
 using KSword.Sandbox.Core.Files;
 using KSword.Sandbox.Core.Jobs;
+using KSword.Sandbox.Core.Orchestration;
 using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Web.Contracts;
 using KSword.Sandbox.Web.Dashboard;
 using KSword.Sandbox.Web.Infrastructure;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,6 +21,15 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 var repositoryRoot = ResolveRepositoryRoot(builder.Environment.ContentRootPath);
 var configPath = builder.Configuration["Sandbox:ConfigPath"] ?? Path.Combine("config", "sandbox.example.json");
 var config = SandboxConfigLoader.Load(configPath, repositoryRoot);
+const long maxSupportedUploadBytes = 1024L * 1024 * 1024;
+const long multipartOverheadBytes = 8L * 1024 * 1024;
+if (config.Analysis.MaxSampleBytes < 1 || config.Analysis.MaxSampleBytes > maxSupportedUploadBytes)
+{
+    throw new InvalidOperationException($"analysis.maxSampleBytes must be between 1 and {maxSupportedUploadBytes} bytes for WebUI uploads.");
+}
+var uploadRequestBodyLimit = checked(config.Analysis.MaxSampleBytes + multipartOverheadBytes);
+builder.Services.Configure<FormOptions>(options =>
+    options.MultipartBodyLengthLimit = uploadRequestBodyLimit);
 var resolvedConfigPath = Path.GetFullPath(configPath, repositoryRoot);
 var configuredRuntimeRoot = Path.GetFullPath(config.Paths.RuntimeRoot, repositoryRoot);
 var configuredRuntimeDrive = Path.GetPathRoot(configuredRuntimeRoot);
@@ -425,6 +436,7 @@ app.MapPost("/api/files/upload", async (HttpRequest request, SandboxConfig curre
 {
     try
     {
+        SetUploadRequestBodyLimit(request, uploadRequestBodyLimit);
         var form = await request.ReadFormAsync();
         var candidate = await SaveUploadedExecutableAsync(form, currentConfig);
         return Results.Ok(candidate);
@@ -444,6 +456,7 @@ app.MapPost("/api/files/upload/start", async Task<IResult> (HttpRequest request,
 {
     try
     {
+        SetUploadRequestBodyLimit(request, uploadRequestBodyLimit);
         var form = await request.ReadFormAsync();
         var candidate = await SaveUploadedExecutableAsync(form, currentConfig);
         var submission = BuildSubmissionFromUploadForm(candidate, form, currentConfig);
@@ -1514,7 +1527,8 @@ static object? BuildSafeWebJobSnapshot(AnalysisJob? job)
                 job.Submission.CollectDroppedFiles,
                 job.Submission.CaptureScreenshots,
                 job.Submission.CaptureMemoryDumps,
-                job.Submission.CapturePacketCapture
+                job.Submission.CapturePacketCapture,
+                NetworkPolicy = job.Submission.NetworkPolicy?.ToString()
             },
             Runbook = job.Runbook is null
                 ? null
@@ -1858,6 +1872,30 @@ static IResult? TryPrepareRunbookExecution(
     UpdateRunbookProgress(service, progressStore, initialSnapshot);
 
     var guestReadyTimeoutSeconds = job.Submission.GuestReadyTimeoutSeconds ?? currentConfig.Analysis.GuestReadyTimeoutSeconds;
+
+    if (request.Live && !string.IsNullOrWhiteSpace(currentConfig.Paths.RuntimeRoot))
+    {
+        // Refuse before any VM mutation when the host drive holding the job
+        // output cannot absorb the conservative evidence estimate.
+        try
+        {
+            HostOutputCapacityGuard.EnsureCapacity(
+                Path.Combine(currentConfig.Paths.RuntimeRoot, "jobs"),
+                job.Submission.DurationUnlimited ? null : job.Submission.DurationSeconds,
+                currentConfig.ArtifactCollection.CaptureEtwLiveTrace);
+        }
+        catch (ArgumentException ex)
+        {
+            var capacitySnapshot = progressStore.Fail(job.Runbook, mode, ex.Message);
+            UpdateRunbookProgress(service, progressStore, capacitySnapshot);
+            return Results.BadRequest(new
+            {
+                error = ex.Message,
+                provider = job.Runbook.Provider
+            });
+        }
+    }
+
     if (request.Live && !request.DurationUnlimited && request.StepTimeoutSeconds > 0 &&
         request.StepTimeoutSeconds < guestReadyTimeoutSeconds)
     {
@@ -2358,7 +2396,9 @@ static SandboxSubmission BuildSubmissionFromUploadForm(ExecutableCandidate candi
         CollectDroppedFiles = ReadFormBoolNullable(form, "collectDroppedFiles"),
         CaptureScreenshots = ReadFormBoolNullable(form, "captureScreenshots"),
         CaptureMemoryDumps = ReadFormBoolNullable(form, "captureMemoryDumps"),
-        CapturePacketCapture = ReadFormBoolNullable(form, "capturePacketCapture")
+        CapturePacketCapture = ReadFormBoolNullable(form, "capturePacketCapture"),
+        KeepRawEvidence = ReadFormBoolNullable(form, "keepRawEvidence"),
+        NetworkPolicy = ReadFormNetworkPolicy(form)
     };
 }
 
@@ -2406,6 +2446,23 @@ static VirtualizationProvider? ReadFormVirtualizationProvider(IFormCollection fo
     throw new ArgumentException($"Unsupported virtualization provider '{value}'. Expected HyperV, VMware, or Qemu.");
 }
 
+static SandboxNetworkPolicy? ReadFormNetworkPolicy(IFormCollection form)
+{
+    var value = ReadFormString(form, "networkPolicy");
+    if (value is null)
+    {
+        return null;
+    }
+
+    if (Enum.TryParse<SandboxNetworkPolicy>(value, ignoreCase: true, out var policy) &&
+        Enum.IsDefined(policy))
+    {
+        return policy;
+    }
+
+    throw new ArgumentException($"Unsupported network policy '{value}'. Expected Block or Allow.");
+}
+
 static int ReadFormInt(IFormCollection form, string key, int fallback, int min, int max)
 {
     if (form.TryGetValue(key, out var values) &&
@@ -2445,6 +2502,20 @@ static bool? ParseFormBool(string? value)
         "0" or "false" or "no" or "off" => false,
         _ => null
     };
+}
+
+/// <summary>
+/// Raises Kestrel's default 30 MiB request limit only for executable upload
+/// endpoints. The configured file cap remains authoritative; the extra bytes
+/// cover multipart headers and small form fields.
+/// </summary>
+static void SetUploadRequestBodyLimit(HttpRequest request, long requestBodyLimit)
+{
+    var feature = request.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+    if (feature is { IsReadOnly: false })
+    {
+        feature.MaxRequestBodySize = requestBodyLimit;
+    }
 }
 
 /// <summary>

@@ -71,7 +71,63 @@ internal sealed class AgentFailureEtwFallbackScenario : ISmokeTestScenario
 
         var failures = GuestFailureArtifactImporter.Import(root);
         SmokeAssert.True(failures.Any(evt => evt.EventType == "agent.run.failed"), "Agent status/stderr/exit must produce a structured failure row.");
-        var preflightFailure = failures.Single(evt => evt.EventType == "guest.output.preflight.failed");
+
+        // Sample-tree stderr isolation: newer guest agents redirect sample
+        // stderr into sample-stderr.log. Noise that only appears in the sample
+        // lane (or leaked into agent.stderr.log but is also captured in the
+        // sample lane) must not fail an otherwise healthy run, while genuine
+        // agent diagnostics and legacy payloads without sample-stderr.log keep
+        // failing. This reproduces the thanos 1ccb3e1d live misjudgment where
+        // ~40 inherited-handle "服务名无效" NET STOP lines in agent.stderr.log
+        // failed a run whose agent had state=completed, exit 0, and a full
+        // events.json import.
+        var noiseLines = string.Concat(Enumerable.Repeat("服务名无效。\r\n", 40)) + "taskkill /F /PID 4242: 成功。\r\n";
+        string CreateHealthyGuestFixture(string name, bool withSampleLane, bool withAgentDiagnostic)
+        {
+            var fixtureRoot = Path.Combine(context.RuntimeRoot, "agent-failure-etw", name);
+            Directory.CreateDirectory(fixtureRoot);
+            File.WriteAllText(Path.Combine(fixtureRoot, "guest-agent-run-status.json"), JsonSerializer.Serialize(new
+            {
+                state = "completed",
+                exitCode = 0,
+                stdoutBytes = 0,
+                stderrBytes = noiseLines.Length
+            }));
+            File.WriteAllText(Path.Combine(fixtureRoot, "agent.exit"), "0\r\n");
+            File.WriteAllText(Path.Combine(fixtureRoot, "events.json"), "[]");
+            File.WriteAllText(Path.Combine(fixtureRoot, "agent-summary.json"), JsonSerializer.Serialize(new { eventCount = 0 }));
+            File.WriteAllText(Path.Combine(fixtureRoot, "agent.stderr.log"), noiseLines);
+            if (withSampleLane)
+            {
+                File.WriteAllText(Path.Combine(fixtureRoot, "sample-stderr.log"), noiseLines);
+            }
+
+            if (withAgentDiagnostic)
+            {
+                File.AppendAllText(Path.Combine(fixtureRoot, "agent.stderr.log"), "guest-output-failure artifact=events.json type=IOException\r\n");
+            }
+
+            return fixtureRoot;
+        }
+
+        var isolatedNoiseRoot = CreateHealthyGuestFixture("guest-noise-isolated", withSampleLane: true, withAgentDiagnostic: false);
+        var isolatedNoise = GuestFailureArtifactImporter.Import(isolatedNoiseRoot);
+        SmokeAssert.True(isolatedNoise.All(evt => evt.EventType != "agent.run.failed"),
+            "Sample-tree stderr noise captured in sample-stderr.log must not fail a completed agent run with exit 0 and complete artifacts.");
+
+        var leakedNoiseRoot = CreateHealthyGuestFixture("guest-noise-leaked", withSampleLane: true, withAgentDiagnostic: true);
+        var leakedNoise = GuestFailureArtifactImporter.Import(leakedNoiseRoot);
+        var leakedRow = leakedNoise.SingleOrDefault(evt => evt.EventType == "agent.run.failed");
+        SmokeAssert.True(leakedRow is not null, "A genuine agent diagnostic alongside sample noise must still fail the run.");
+        SmokeAssert.True(leakedRow!.Data["stderrSampleAttributed"] == "false" && leakedRow.Data["stderrPreview"].Contains("guest-output-failure", StringComparison.Ordinal),
+            "The failure preview must attribute stderr to the agent diagnostic line, not the sample noise lines.");
+        SmokeAssert.True(!leakedRow.Data["stderrPreview"].Contains("服务名无效", StringComparison.Ordinal),
+            "Sample-attributable lines must be filtered out of the agent stderr preview.");
+
+        var legacyNoiseRoot = CreateHealthyGuestFixture("guest-noise-legacy", withSampleLane: false, withAgentDiagnostic: false);
+        var legacyNoise = GuestFailureArtifactImporter.Import(legacyNoiseRoot);
+        SmokeAssert.True(legacyNoise.Any(evt => evt.EventType == "agent.run.failed"),
+            "Legacy payloads without sample-stderr.log must keep the backward-compatible rule where non-empty agent stderr fails the run.");        var preflightFailure = failures.Single(evt => evt.EventType == "guest.output.preflight.failed");
         SmokeAssert.True(preflightFailure.Data["outputSpacePreflightFailure"] == "true", "Low guest output space must remain a distinct collection-health failure.");
         SmokeAssert.True(preflightFailure.Data["availableFreeBytes"] == "0" && preflightFailure.Data["requiredFreeBytes"] == "134217728", "Output preflight must preserve measured and required free-space diagnostics.");
         var sampleRuntimeFailure = failures.Single(evt => evt.EventType == "sample.runtime.preflight.failed");

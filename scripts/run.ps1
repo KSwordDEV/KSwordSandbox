@@ -61,6 +61,8 @@ param(
 
     [switch]$NoR0Collector,
 
+    [switch]$KeepRawEvidence,
+
     [switch]$NoOpenVmConsole,
 
     [switch]$PlanOnly,

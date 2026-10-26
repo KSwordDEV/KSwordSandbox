@@ -698,6 +698,7 @@ function Get-RuntimePublishEntryDiagnostics {
         'guest-tools' = @('payload-manifest.json', 'agent/KSword.Sandbox.Agent.exe|agent/KSword.Sandbox.Agent.dll', 'r0collector/KSword.Sandbox.R0Collector.exe')
         'tools/job-tool' = @('KSword.Sandbox.JobTool.exe|KSword.Sandbox.JobTool.dll')
         'tools/postprocess' = @('KSword.Sandbox.PostProcess.exe|KSword.Sandbox.PostProcess.dll')
+        'tools/vix-helper' = @('vix_probe.exe', 'Invoke-VmwareOfflineRunbook.ps1')
     }
     $forbiddenRuntimePublishExtensions = @('.pdb', '.sys', '.pcap', '.pcapng', '.dmp', '.mdmp', '.vhd', '.vhdx', '.avhd', '.avhdx', '.pfx', '.pem', '.key', '.dpapi', '.jsonl', '.sqlite', '.db', '.zip')
     $forbiddenRuntimePublishNames = @('sandbox.local.json', 'install-state.json', 'guest-password.dpapi', '.env', 'CSignTool.exe', 'AuthenticodeVariantGUI.exe', 'signtool.exe')
@@ -1544,7 +1545,7 @@ function Get-PackageGapAuditSnapshot {
             missingCount = if ($null -eq $runtimeSummary) { $null } else { [int]$runtimeSummary.missingCount }
             incompleteCount = if ($null -eq $runtimeSummary) { $null } else { [int]$runtimeSummary.incompleteCount }
             summary = $runtimeSummary
-            expectedSources = @('host-web', 'guest-tools', 'tools/job-tool', 'tools/postprocess')
+            expectedSources = @('host-web', 'guest-tools', 'tools/job-tool', 'tools/postprocess', 'tools/vix-helper')
             remediationZh = '完整 runtime handoff 必须传入仓库外 RuntimePublishRoot 和 -RequireCompleteRuntimePayloads，并确认 missingCount/incompleteCount 均为 0；不要从仓库 bin/obj/x64 兜底复制。'
             nextActionsZh = @($script:operatorDiagnostics.runtimeHandoffMissingNextActionsZh)
         }

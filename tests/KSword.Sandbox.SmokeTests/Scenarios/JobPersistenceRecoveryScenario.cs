@@ -187,7 +187,11 @@ internal sealed class JobPersistenceRecoveryScenario : ISmokeTestScenario
             DisplayName = Path.GetFileName(samplePath),
             DurationSeconds = 5,
             DryRun = true,
-            Provider = VirtualizationProvider.Qemu
+            Provider = VirtualizationProvider.Qemu,
+            // QEMU guest collection rides the guest network (localhost WinRM
+            // forwarding), so device-level blocking is refused; this scenario
+            // is not about the policy itself and must opt into Allow.
+            NetworkPolicy = SandboxNetworkPolicy.Allow
         });
         var runbook = planned.Runbook ?? throw new InvalidOperationException("QEMU plan should include a runbook.");
         var executed = service.SaveRunbookExecutionResult(planned.JobId, new SandboxRunbookExecutionResult

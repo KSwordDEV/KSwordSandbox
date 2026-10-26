@@ -87,7 +87,7 @@ internal sealed class SampleLaunchRefusalReportContractScenario : ISmokeTestScen
         SmokeAssert.True(spaceReported is not null, "An output-space refusal must stay visible as failure evidence.");
         SmokeAssert.True(DataEquals(spaceReported!, "preflightState", "insufficient-space"),
             "The output-space refusal must preserve its measured state.");
-        SmokeAssert.True(DataEquals(spaceReported, "requiredFreeBytes", "134217728"),
+        SmokeAssert.True(DataEquals(spaceReported!, "requiredFreeBytes", "134217728"),
             "The output-space refusal must preserve the required free-space budget.");
 
         // A clean run must be unaffected: the extra pair budget is scoped to

@@ -97,9 +97,11 @@ internal sealed class GuestArtifactWriter
         // samples to exhaust guest memory/disk before the report could be
         // finalized. A streaming serializer keeps the original event list
         // authoritative while making IO failures observable to the caller.
-        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
-        JsonSerializer.Serialize(stream, events, JsonOptions);
-        stream.Flush(true);
+        // Shared-folder output roots (HGFS/UNC) can fail mid-stream with
+        // handle-exhaustion class errors, so the resilient wrapper reopens a
+        // fresh handle and restarts the whole serialization; a partial
+        // events.json is never published because the file lands by rename.
+        ResilientFile.WriteStreamWithRetry(path, stream => JsonSerializer.Serialize(stream, events, JsonOptions));
         return path;
     }
 
@@ -108,20 +110,22 @@ internal sealed class GuestArtifactWriter
     /// Inputs are output directory, sample path, and event count; processing
     /// serializes summary metadata; the method returns the file path.
     /// </summary>
-    public string WriteSummary(string outputDirectory, string samplePath, int eventCount)
+    public string WriteSummary(string outputDirectory, string samplePath, int eventCount, Guid jobId)
     {
         Directory.CreateDirectory(outputDirectory);
         var path = Path.Combine(outputDirectory, "agent-summary.json");
-        string? sampleSha256 = null;
-        long? sampleSizeBytes = null;
+        string? summaryTimeSha256 = null;
+        long? summaryTimeSizeBytes = null;
+        var samplePresentAtSummary = false;
         try
         {
             var info = new FileInfo(samplePath);
             if (info.Exists)
             {
+                samplePresentAtSummary = true;
                 using var stream = info.OpenRead();
-                sampleSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
-                sampleSizeBytes = info.Length;
+                summaryTimeSizeBytes = stream.Length;
+                summaryTimeSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
@@ -130,11 +134,26 @@ internal sealed class GuestArtifactWriter
             // will report an explicit mismatch if a later source disagrees.
         }
 
-        File.WriteAllText(path, JsonSerializer.Serialize(new
+        var hasPrelaunchIdentity = SampleLaunchProofWriter.TryReadIdentity(
+            outputDirectory, jobId, samplePath, out var prelaunchIdentity);
+        var sampleSha256 = hasPrelaunchIdentity
+            ? prelaunchIdentity.Sha256.ToLowerInvariant()
+            : summaryTimeSha256;
+        long? sampleSizeBytes = hasPrelaunchIdentity
+            ? prelaunchIdentity.SizeBytes
+            : summaryTimeSizeBytes;
+
+        ResilientFile.WriteAllTextWithRetry(path, JsonSerializer.Serialize(new
         {
             sample = samplePath,
             sampleSha256,
             sampleSizeBytes,
+            sampleIdentitySource = hasPrelaunchIdentity ? "prelaunch-verified" : "summary-time",
+            samplePresentAtSummary,
+            sampleSha256AtSummary = summaryTimeSha256,
+            sampleSizeBytesAtSummary = summaryTimeSizeBytes,
+            sampleChangedAfterLaunch = hasPrelaunchIdentity && summaryTimeSha256 is not null &&
+                !string.Equals(summaryTimeSha256, sampleSha256, StringComparison.OrdinalIgnoreCase),
             eventCount,
             generatedAt = DateTimeOffset.UtcNow
         }, JsonOptions));
@@ -214,7 +233,7 @@ internal sealed class GuestArtifactWriter
             Artifacts = descriptors
         };
 
-        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, ManifestJsonOptions));
+        ResilientFile.WriteAllTextWithRetry(manifestPath, JsonSerializer.Serialize(manifest, ManifestJsonOptions));
         return new GuestArtifactManifestWriteResult(manifestPath, descriptors.Count, collections.Count);
     }
 

@@ -98,6 +98,7 @@ public sealed class RuleEngine
         // fallback for one-shot enumerables.
         var eventList = events as IReadOnlyList<SandboxEvent> ?? events.ToList();
         var nativeUtilityStaticPaths = FindNativeUtilityStaticPaths(eventList);
+        var sampleAttribution = BuildSampleAttribution(eventList);
         var ruleList = ruleSet.Rules;
         var ruleStates = ruleList.Select(static rule => new RuleMatchState(rule)).ToArray();
         var exactRuleIndices = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
@@ -146,7 +147,8 @@ public sealed class RuleEngine
             foreach (var ruleIndex in candidateRuleIndices)
             {
                 var state = ruleStates[ruleIndex];
-                if (!IsEligibleForRule(state.Rule, evt) || !Matches(state.Rule, evt))
+                if (!IsEligibleForRule(state.Rule, evt, sampleAttribution) ||
+                    !Matches(state.Rule, evt, sampleAttribution))
                 {
                     continue;
                 }
@@ -335,7 +337,10 @@ public sealed class RuleEngine
     /// command-line, data-key, regex, numeric-range, existence, and all-of
     /// predicates; the method returns true on match.
     /// </summary>
-    private static bool Matches(BehaviorRule rule, SandboxEvent evt)
+    private static bool Matches(
+        BehaviorRule rule,
+        SandboxEvent evt,
+        SampleAttribution sampleAttribution)
     {
         if (rule.EventTypes.Count > 0 && !MatchesEventType(rule.EventTypes, evt.EventType))
         {
@@ -432,7 +437,8 @@ public sealed class RuleEngine
             return false;
         }
 
-        if (rule.ExcludeProcessNames.Count > 0 && MatchesProcessName(evt, rule.ExcludeProcessNames))
+        if (rule.ExcludeProcessNames.Count > 0 &&
+            MatchesProcessName(evt, rule.ExcludeProcessNames, sampleAttribution))
         {
             return false;
         }
@@ -469,7 +475,10 @@ public sealed class RuleEngine
     /// identity; the method returns true when the rule is allowed to inspect
     /// the event.
     /// </summary>
-    private static bool IsEligibleForRule(BehaviorRule rule, SandboxEvent evt)
+    private static bool IsEligibleForRule(
+        BehaviorRule rule,
+        SandboxEvent evt,
+        SampleAttribution sampleAttribution)
     {
         // A raw process.new row is only useful to the generic process-new
         // finding when sample correlation has explicitly promoted it. Live
@@ -494,7 +503,7 @@ public sealed class RuleEngine
             return true;
         }
 
-        return !IsNonBehaviorOrSelfNoiseEvent(evt);
+        return !IsNonBehaviorOrSelfNoiseEvent(evt, sampleAttribution);
     }
 
     /// <summary>
@@ -603,7 +612,9 @@ public sealed class RuleEngine
         return false;
     }
 
-    private static bool IsNonBehaviorOrSelfNoiseEvent(SandboxEvent evt)
+    private static bool IsNonBehaviorOrSelfNoiseEvent(
+        SandboxEvent evt,
+        SampleAttribution sampleAttribution)
     {
         if (EventDataBoolFalse(evt, "behaviorCounted", "behavior_counted", "countsAsBehavior", "countedAsBehavior") ||
             EventDataBoolFalse(evt, "sampleBehaviorCandidate", "sample_behavior_candidate", "sampleBehavior", "sample_behavior", "isSampleBehavior", "is_sample_behavior") ||
@@ -715,7 +726,10 @@ public sealed class RuleEngine
             return true;
         }
 
-        if (MatchesProcessName(evt, ["KSword.Sandbox.Agent.exe", "KSword.Sandbox.R0Collector.exe"]))
+        if (MatchesProcessName(
+                evt,
+                ["KSword.Sandbox.Agent.exe", "KSword.Sandbox.R0Collector.exe"],
+                sampleAttribution))
         {
             return true;
         }
@@ -1114,14 +1128,24 @@ public sealed class RuleEngine
 
     /// <summary>
     /// Checks the normalized process name plus common image-name metadata.
-    /// Inputs are one event and excluded names, processing compares exact base
-    /// names with or without .exe suffix, and the method returns true on match.
+    /// Inputs are one event, excluded names, and the sample attribution
+    /// derived from the same event stream; processing compares exact base
+    /// names with or without .exe suffix, and treats a row owned by a
+    /// sample-attributed PID as that sample process. The method returns true
+    /// on match.
     /// </summary>
-    private static bool MatchesProcessName(SandboxEvent evt, IEnumerable<string> candidates)
+    private static bool MatchesProcessName(
+        SandboxEvent evt,
+        IEnumerable<string> candidates,
+        SampleAttribution sampleAttribution)
     {
         var names = new List<string?>();
         names.Add(evt.ProcessName);
-        foreach (var key in new[] { "processName", "imageName", "toolhelpImageName", "fileName", "name" })
+
+        // fileName is deliberately not a process-name source: it names the
+        // file a row describes (for example the dropped payload), not the
+        // process that produced the row.
+        foreach (var key in new[] { "processName", "imageName", "toolhelpImageName", "name" })
         {
             if (evt.Data.TryGetValue(key, out var value))
             {
@@ -1129,10 +1153,91 @@ public sealed class RuleEngine
             }
         }
 
+        if (sampleAttribution.SampleProcessIds.Count > 0 &&
+            TryGetOwnerProcessId(evt, out var ownerPid) &&
+            sampleAttribution.SampleProcessIds.Contains(ownerPid))
+        {
+            // R0/guest network and file rows can carry only an owning PID.
+            // When the correlation stage already attributed that PID to the
+            // submitted sample, compare the sample identity instead of
+            // leaving the row anonymous.
+            names.AddRange(sampleAttribution.SampleProcessNames);
+        }
+
         return names
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Any(name => candidates.Any(candidate => SameProcessName(name!, candidate)));
     }
+
+    private static bool TryGetOwnerProcessId(SandboxEvent evt, out int processId)
+    {
+        foreach (var key in new[] { "owningProcessId", "ownerPid", "ownerProcessId", "processId", "actorProcessId" })
+        {
+            if (evt.Data.TryGetValue(key, out var value) &&
+                int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) &&
+                parsed > 0)
+            {
+                processId = parsed;
+                return true;
+            }
+        }
+
+        if (evt.ProcessId is > 0)
+        {
+            processId = evt.ProcessId.Value;
+            return true;
+        }
+
+        processId = 0;
+        return false;
+    }
+
+    /// <summary>
+    /// Derives the sample process identity from the correlation metadata
+    /// already present on the event stream. Inputs are normalized events;
+    /// processing keeps only process rows the classifier explicitly marked
+    /// confirmed or probable, and the method returns their PIDs and image
+    /// names without creating any process-wide state.
+    /// </summary>
+    private static SampleAttribution BuildSampleAttribution(IReadOnlyList<SandboxEvent> events)
+    {
+        var samplePids = new HashSet<int>();
+        var sampleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var evt in events)
+        {
+            if (!string.Equals(evt.EventType, "process.new", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(evt.EventType, "process.tree", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!HasConfirmedOrProbableSampleCorrelation(evt))
+            {
+                continue;
+            }
+
+            if (evt.ProcessId is > 0)
+            {
+                samplePids.Add(evt.ProcessId.Value);
+            }
+            else if (TryGetOwnerProcessId(evt, out var ownerPid))
+            {
+                samplePids.Add(ownerPid);
+            }
+
+            if (!string.IsNullOrWhiteSpace(evt.ProcessName))
+            {
+                sampleNames.Add(evt.ProcessName);
+            }
+        }
+
+        return new SampleAttribution(samplePids, sampleNames);
+    }
+
+    private sealed record SampleAttribution(
+        IReadOnlySet<int> SampleProcessIds,
+        IReadOnlySet<string> SampleProcessNames);
 
     private static bool SameProcessName(string value, string candidate)
     {

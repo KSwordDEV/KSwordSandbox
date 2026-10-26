@@ -22,6 +22,9 @@ int RuntimeFailureAfterOutputWrite(
     const UniqueHandle& device,
     const Options& options,
     EventWriter& writer) {
+    if (writer.BudgetReached()) {
+        return FinishBudgetStop(device, options, writer);
+    }
     if (writer.HasFailure() && !writer.FailureStatusAnnotated() && device.IsValid()) {
         unsigned long long queueDepthAtStop = 0;
         bool finalStatusAvailable = false;
@@ -41,6 +44,36 @@ int RuntimeFailureAfterOutputWrite(
             queueDepthAtStop);
     }
     return kExitRuntimeFailure;
+}
+
+// Input: a live driver handle, collector options, and an EventWriter whose
+// cumulative output budget was just reached (the JSONL sink is finalized and
+// closed, and no failure state was recorded).
+// Processing: Issues one best-effort final GET_STATUS so the clean-stop
+// sidecar still carries the authoritative remaining queue depth at the
+// budget boundary; the status row itself cannot be written because the sink
+// is intentionally closed.
+// Return: kExitSuccess; a budget stop is a clean stop, not a failure.
+int FinishBudgetStop(
+    const UniqueHandle& device,
+    const Options& options,
+    EventWriter& writer) {
+    if (device.IsValid()) {
+        unsigned long long queueDepthAtStop = 0;
+        bool finalStatusAvailable = false;
+        (void)EmitDriverStatus(
+            device,
+            options,
+            writer,
+            &queueDepthAtStop,
+            &finalStatusAvailable,
+            true);
+        writer.AnnotateBudgetStopStatus(
+            finalStatusAvailable,
+            finalStatusAvailable,
+            queueDepthAtStop);
+    }
+    return kExitSuccess;
 }
 
 // Input: Collector options used for this run.
@@ -67,6 +100,7 @@ std::string BuildConfigData(const Options& options) {
     data.AddWide("outputPath", options.outputPath);
     data.AddUnsigned("maxOutputBytes", options.maxOutputBytes);
     data.AddUnsigned("minFreeOutputBytes", options.minFreeOutputBytes);
+    data.AddUnsigned("outputBudgetBytes", options.outputBudgetBytes);
     data.AddSigned("durationSeconds", options.durationSeconds);
     data.AddSigned("drainGraceMs", options.drainGraceMs);
     data.AddSigned("pollIntervalMs", options.pollIntervalMs);
@@ -747,7 +781,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
 
     EventWriter writer;
     std::wstring outputError;
-    if (!writer.Open(options.outputPath, &outputError, options.maxOutputBytes, options.minFreeOutputBytes)) {
+    if (!writer.Open(options.outputPath, &outputError, options.maxOutputBytes, options.minFreeOutputBytes, options.outputBudgetBytes)) {
         SandboxEventFields outputEvent;
         outputEvent.eventType = "r0collector.outputUnavailable";
         outputEvent.path = options.outputPath;
@@ -783,7 +817,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
         }
 
         if (!EmitCollectorHeartbeat(writer, options, "syntheticComplete", 0, 0, 0, 0, 0, 0)) {
-            return kExitRuntimeFailure;
+            return writer.BudgetReached() ? kExitSuccess : kExitRuntimeFailure;
         }
 
         SandboxEventFields stoppedEvent;
@@ -830,7 +864,10 @@ int RunCollector(int argc, wchar_t* argv[]) {
         stoppedData.AddBool("backpressureObserved", false);
         stoppedData.AddUnsigned("highWatermark", 0);
         stoppedEvent.dataJson = stoppedData.Build();
-        return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
+        if (!EmitEvent(writer, stoppedEvent)) {
+            return writer.BudgetReached() ? kExitSuccess : kExitRuntimeFailure;
+        }
+        return kExitSuccess;
     }
 
     DWORD openError = ERROR_SUCCESS;

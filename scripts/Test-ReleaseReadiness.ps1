@@ -1259,7 +1259,7 @@ function Test-RuntimePublishCompleteness {
             -Title 'Runtime publish completeness / runtime payload 完整性' `
             -Status Failed `
             -Message 'Runtime manifest does not declare runtimePublish entries.' `
-            -Remediation @('Declare host-web, guest-tools, tools/job-tool, and tools/postprocess runtimePublish entries.')
+            -Remediation @('Declare host-web, guest-tools, tools/job-tool, tools/postprocess, and tools/vix-helper runtimePublish entries.')
         return
     }
 
@@ -1271,13 +1271,15 @@ function Test-RuntimePublishCompleteness {
         'guest-tools' = @('payload-manifest.json', 'agent/KSword.Sandbox.Agent.exe|agent/KSword.Sandbox.Agent.dll', 'r0collector/KSword.Sandbox.R0Collector.exe')
         'tools/job-tool' = @('KSword.Sandbox.JobTool.exe|KSword.Sandbox.JobTool.dll')
         'tools/postprocess' = @('KSword.Sandbox.PostProcess.exe|KSword.Sandbox.PostProcess.dll')
+        'tools/vix-helper' = @('vix_probe.exe', 'Invoke-VmwareOfflineRunbook.ps1')
     }
     $forbiddenRuntimePublishExtensions = @('.pdb', '.sys', '.pcap', '.pcapng', '.dmp', '.mdmp', '.vhd', '.vhdx', '.avhd', '.avhdx', '.pfx', '.pem', '.key', '.dpapi', '.jsonl', '.sqlite', '.db', '.zip')
     $forbiddenRuntimePublishNames = @('sandbox.local.json', 'install-state.json', 'guest-password.dpapi', '.env', 'CSignTool.exe', 'AuthenticodeVariantGUI.exe', 'signtool.exe')
     $operatorHints = @(
         'Runtime payload completeness is a handoff gate only when -RuntimePublishRoot and -RequireCompleteRuntimePackage are supplied.',
-        'Expected external payload folders: host-web, guest-tools, tools/job-tool, tools/postprocess.',
-        'Expected payload leaves include host-web KSword.Sandbox.Web exe/dll, guest payload manifest plus Agent/R0Collector, JobTool exe/dll, and PostProcess exe/dll; missing leaves are diagnostics for incomplete publish output.',
+        'Expected external payload folders: host-web, guest-tools, tools/job-tool, tools/postprocess, tools/vix-helper.',
+        'Expected payload leaves include host-web KSword.Sandbox.Web exe/dll, guest payload manifest plus Agent/R0Collector, JobTool exe/dll, PostProcess exe/dll, and VMware VIX helper exe plus offline runbook script; missing leaves are diagnostics for incomplete publish output.',
+        'VMware GuestOps runtime is not fully portable: the target host needs VMware Workstation and Microsoft Visual C++ 2015-2022 x64 runtime. The VMware VIX SDK is needed only to build vix_probe.exe and is not redistributed.',
         'Read-only environment hints: run .\scripts\install.ps1 -Mode CheckEnvironment and .\scripts\run.ps1 -Mode CheckEnvironment for selected-provider prerequisites, VM profile, guest transport, guest payload freshness, and optional VT key status.',
         'This readiness script does not build payloads, copy from repository bin/obj/x64, start/restore/stop VMs, sign drivers, or generate fresh live evidence.'
     )

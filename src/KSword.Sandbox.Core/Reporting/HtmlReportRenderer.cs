@@ -1398,7 +1398,11 @@ details[open]>summary:before{content:'–'}
         html.AppendLine("<h1>KSword Sandbox Report</h1>");
         html.AppendLine($"<p class=\"muted\">Job {E(report.JobId.ToString())} generated at {E(report.GeneratedAt.ToString("u"))}</p>");
         html.AppendLine($"<p class=\"cover-verdict\"><span class=\"badge badge-{E(verdict.Css)} triage-verdict\">{E(triageVerdict)}</span> <span class=\"badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</span></p>");
-        if (HasExecutionBlockedVerdict(report))
+        if (HasLaunchOnlyCollectionFailure(report))
+        {
+            html.AppendLine("<div class=\"failure-note execution-failure-banner\" role=\"alert\"><strong>Sample launch confirmed / behavior collection failed</strong><span>The verified launch record proves only that the sample process started. Runtime behavior was not recovered, so this report makes no behavior verdict.</span></div>");
+        }
+        else if (HasExecutionBlockedVerdict(report))
         {
             // Keep the execution outcome visible in the cover. A failed or
             // early sample process must never look like a quiet, clean run
@@ -1483,6 +1487,11 @@ details[open]>summary:before{content:'–'}
         if (detailedLabel is "Critical risk" or "High risk")
         {
             return "Threat";
+        }
+
+        if (detailedLabel is "Launch confirmed / collection failed")
+        {
+            return "No behavior verdict";
         }
 
         if (detailedLabel is "Suspicious" or "Execution blocked / runtime indeterminate" or
@@ -1727,9 +1736,17 @@ details[open]>summary:before{content:'–'}
                 : "Collection completeness requires review; a zero lostCount alone does not prove that every record was drained.";
             html.AppendLine($"<div class=\"section-note\"><strong>R0 driver coverage.</strong> Raw/report rows by class (raw/report): {E(driverClassSummary)}. Collector loss markers: {E(loss.ToString(CultureInfo.InvariantCulture))}; lost count: {E(lostCount.ToString(CultureInfo.InvariantCulture))}/{E(processed.ToString(CultureInfo.InvariantCulture))} processed ({E(lossRate)}); backpressure markers: {E(backpressure.ToString(CultureInfo.InvariantCulture))}; queue depth/remaining unread: {E(queueDepth.ToString(CultureInfo.InvariantCulture))}/{E(remainingUnread.ToString(CultureInfo.InvariantCulture))}; suppressed events: {E(eventsSuppressed.ToString(CultureInfo.InvariantCulture))} (expected-disabled={E(expectedSuppressed.ToString(CultureInfo.InvariantCulture))}, unexpected={E(unexpectedSuppressed.ToString(CultureInfo.InvariantCulture))}, unsupported={E(unsupportedProducer.ToString(CultureInfo.InvariantCulture))}); drain deadline/batch-limit stops: {E(deadlineStop.ToString(CultureInfo.InvariantCulture))}/{E(batchLimitStop.ToString(CultureInfo.InvariantCulture))}; quality warnings: {E(qualityWarnings.ToString(CultureInfo.InvariantCulture))}. {E(completeness)} Complete raw R0 evidence is available through the indexed driver JSONL stream and all rotated segments.</div>");
         }
-        if (HasExecutionBlockedVerdict(report))
+        if (HasLaunchOnlyCollectionFailure(report))
+        {
+            html.AppendLine("<div class=\"section-note failure-note\"><strong>Launch-only evidence:</strong> a durable guest record confirms the submitted sample process started. Behavior events and final Agent output were not recovered; no destructive action or maliciousness is concluded from this record alone.</div>");
+        }
+        else if (HasExecutionBlockedVerdict(report))
         {
             html.AppendLine("<div class=\"section-note failure-note\"><strong>Execution boundary:</strong> sample execution was blocked or ended before complete runtime behavior, so the runtime verdict is indeterminate. Static findings remain static-only evidence and do not establish execution.</div>");
+            if (HasGuestSampleReadProtectionBlock(report))
+            {
+                html.AppendLine("<div class=\"section-note failure-note\"><strong>Guest file read blocked:</strong> the guest refused to read the staged sample as a virus or potentially unwanted program. The sample was not executed. Inspect guest security events and antivirus or file-filter health; the blocking component is unconfirmed.</div>");
+            }
             if (HasNetFx3MissingExit(report))
             {
                 html.AppendLine("<div class=\"section-note failure-note\"><strong>Root cause (0x80131700):</strong> .NET Framework 3.5 is missing; the child process Fondue.exe /enable-feature:NetFx3 failed. Preinstall NetFx3 in the clean guest baseline, then rerun the sample.</div>");
@@ -12364,6 +12381,11 @@ details[open]>summary:before{content:'–'}
     /// </summary>
     private static (string Label, string Css) DetermineVerdict(AnalysisReport report)
     {
+        if (HasLaunchOnlyCollectionFailure(report))
+        {
+            return ("Launch confirmed / collection failed", "medium");
+        }
+
         if (HasExecutionBlockedVerdict(report))
         {
             return ("Execution blocked / runtime indeterminate", "high");
@@ -12449,6 +12471,19 @@ details[open]>summary:before{content:'–'}
     }
 
     /// <summary>
+    /// A durable launch marker proves process creation, but is deliberately not
+    /// behavior evidence. Only a failed report with no substantive runtime
+    /// behavior or behavior findings receives the launch-only cover.
+    /// </summary>
+    private static bool HasLaunchOnlyCollectionFailure(AnalysisReport report)
+    {
+        return report.Status == AnalysisStatus.Failed &&
+            report.Events.Any(evt => string.Equals(evt.EventType, "sample.launch.confirmed", StringComparison.OrdinalIgnoreCase)) &&
+            !HasCompleteSampleBehavior(report) &&
+            !PrimaryBehaviorFindings(report).Any();
+    }
+
+    /// <summary>
     /// Determines whether an event records a failed sample launch. Inputs are
     /// normalized events; processing recognizes the guest sample start failure
     /// contract (including WinError 225/antivirus interception diagnostics);
@@ -12456,8 +12491,17 @@ details[open]>summary:before{content:'–'}
     /// </summary>
     private static bool IsSampleStartBlockedEvent(SandboxEvent evt)
     {
-        return string.Equals(evt.EventType, "process.start_failed", StringComparison.OrdinalIgnoreCase);
+        return TextEqualsAny(evt.EventType,
+            "process.start_failed",
+            "sample.runtime.preflight.failed",
+            "guest.output.preflight.failed");
     }
+
+    private static bool HasGuestSampleReadProtectionBlock(AnalysisReport report) =>
+        report.Events.Any(evt =>
+            string.Equals(evt.EventType, "sample.runtime.preflight.failed", StringComparison.OrdinalIgnoreCase) &&
+            evt.Data.TryGetValue("sampleRuntimeFailureCode", out var code) &&
+            string.Equals(code, "sample-runtime-blocked-guest-file-read", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Determines whether the report contains runtime behavior beyond launch,
@@ -14947,6 +14991,12 @@ details[open]>summary:before{content:'–'}
         ("<p class=\"muted\">Job ", "<p class=\"muted\">作业 "),
         (" generated at ", " 生成于 "),
         ("Analysis failed", "分析失败"),
+        ("Launch confirmed / collection failed", "启动已证/采集失败"),
+        ("No behavior verdict", "行为不可判定"),
+        ("Sample launch confirmed / behavior collection failed", "样本启动已证/行为采集失败"),
+        ("The verified launch record proves only that the sample process started. Runtime behavior was not recovered, so this report makes no behavior verdict.", "经过校验的启动记录只证明样本进程已启动。运行期行为未回收，因此本报告不作行为判定。"),
+        ("Launch-only evidence:", "仅有启动证据："),
+        ("a durable guest record confirms the submitted sample process started. Behavior events and final Agent output were not recovered; no destructive action or maliciousness is concluded from this record alone.", "来宾持久记录确认提交的样本进程已启动，但行为事件和 Agent 最终输出未回收；仅凭此记录不能判定破坏动作或恶意性。"),
         ("Execution blocked / runtime indeterminate", "执行被阻断/运行期不可判定"),
         ("Sample execution failed / runtime indeterminate", "样本执行失败/运行期不可判定"),
         ("Sample execution failed or ended before complete runtime behavior. This is an execution outcome, not a maliciousness verdict.", "样本执行失败或在产生完整运行期行为前结束。这是执行结果，不是恶意性判定。"),
@@ -15104,6 +15154,8 @@ details[open]>summary:before{content:'–'}
         ("Execution boundary", "执行边界"),
         ("sample execution was blocked or ended before complete runtime behavior, so the runtime verdict is indeterminate.", "样本执行被阻断或在产生完整运行期行为前结束，因此运行期不可判定。"),
         ("Static findings remain static-only evidence and do not establish execution.", "静态命中仍是未验证证据，不能证明样本实际执行。"),
+        ("Guest file read blocked", "来宾文件读取被阻断"),
+        ("the guest refused to read the staged sample as a virus or potentially unwanted program. The sample was not executed. Inspect guest security events and antivirus or file-filter health; the blocking component is unconfirmed.", "来宾将暂存样本识别为病毒或潜在有害程序并拒绝读取；样本未执行。请检查来宾安全事件及防病毒或文件过滤层状态；目前尚未确认具体拦截组件。"),
         ("Failure reasons", "失败原因"),
         ("Observed execution / no behavior-rule hit", "已观察执行/未命中行为规则"),
         ("Evidence unavailable / runtime indeterminate", "运行证据不可用/运行期不可判定"),

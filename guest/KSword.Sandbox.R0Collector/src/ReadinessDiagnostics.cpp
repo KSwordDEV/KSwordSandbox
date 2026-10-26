@@ -1143,7 +1143,7 @@ int RunReadinessDiagnoseMode(const Options& options, EventWriter& writer) {
     ReadinessSummary summary;
 
     if (!ProbeServiceReadiness(writer, options, &summary)) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     DWORD openError = ERROR_SUCCESS;
@@ -1153,7 +1153,7 @@ int RunReadinessDiagnoseMode(const Options& options, EventWriter& writer) {
         RecordProbe(&summary, "openDevice", code, "error", "blocked");
         if (!EmitDeviceUnavailableDiagnostic(writer, options, openError, "openDevice") ||
             !EmitReadinessSummary(writer, options, summary)) {
-            return kExitRuntimeFailure;
+            return OutputStopExitCode(writer);
         }
         return kExitDeviceUnavailable;
     }
@@ -1170,7 +1170,7 @@ int RunReadinessDiagnoseMode(const Options& options, EventWriter& writer) {
             "ready",
             L"Control device opened successfully; continue with ABI and READ_EVENTS probes.",
             &openExtra)) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     SandboxEventFields openedEvent;
@@ -1215,39 +1215,39 @@ int RunReadinessDiagnoseMode(const Options& options, EventWriter& writer) {
     openedData.AddUnsigned("highWatermark", 0);
     openedEvent.dataJson = openedData.Build();
     if (!EmitEvent(writer, openedEvent)) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!EmitDriverHealth(device, options, writer)) {
         RecordProbe(&summary, "abiNegotiation", "health_ioctl_failed", "error", "blocked");
         EmitReadinessSummary(writer, options, summary);
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!ProbeCapabilitiesReadiness(device, writer, options, &summary)) {
         EmitReadinessSummary(writer, options, summary);
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!EmitDriverStatus(device, options, writer)) {
         RecordProbe(&summary, "abiNegotiation", "status_ioctl_failed", "error", "blocked");
         EmitReadinessSummary(writer, options, summary);
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!EmitDriverNetworkStatus(device, options, writer)) {
         RecordProbe(&summary, "abiNegotiation", "network_status_emit_failed", "error", "blocked");
         EmitReadinessSummary(writer, options, summary);
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!ProbeReadEventsReadiness(writer, options, &summary)) {
         EmitReadinessSummary(writer, options, summary);
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     if (!EmitReadinessSummary(writer, options, summary)) {
-        return kExitRuntimeFailure;
+        return OutputStopExitCode(writer);
     }
 
     return summary.blocked ? kExitRuntimeFailure : kExitSuccess;

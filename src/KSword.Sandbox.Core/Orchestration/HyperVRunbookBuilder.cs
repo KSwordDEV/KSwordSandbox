@@ -25,12 +25,15 @@ public sealed class HyperVRunbookBuilder
         var guestRoot = config.Guest.WorkingDirectory.TrimEnd('\\');
         var guestSample = $"{guestRoot}\\incoming\\{sample.FileName}";
         var hostOut = Path.Combine(config.Paths.RuntimeRoot, "jobs", jobId.ToString("N"), "guest");
+        var vmwareOffline = provider is VirtualizationProvider.VMware &&
+            config.Guest.NetworkPolicy is SandboxNetworkPolicy.Block;
+        var offlineSettingsPath = Path.Combine(config.Paths.RuntimeRoot, "jobs", jobId.ToString("N"), "vmware-guestops", "settings.json");
 
         // A VMware shared folder makes the host output folder the guest's
         // output directory, so the Guest Agent writes evidence straight to the
         // host. Real samples frequently kill the WinRM listener, and a
         // remoting-only run then produces nothing after the sample executed.
-        var hostOutputShare = ResolveHostOutputShare(config, provider);
+        var hostOutputShare = ResolveHostOutputShare(config, provider, hostOut);
         var guestOut = hostOutputShare is null
             ? $"{guestRoot}\\out\\{jobId:N}"
             : $"\\\\vmware-host\\Shared Folders\\{hostOutputShare.Value.Name}";
@@ -52,7 +55,16 @@ public sealed class HyperVRunbookBuilder
 
                 break;
             case VirtualizationProvider.VMware:
-                AddVMwareRestoreAndStartSteps(steps, config);
+                if (vmwareOffline)
+                {
+                    steps.Add(Step(
+                        "vmware-offline-prelaunch-gate",
+                        "Verify the isolated VMware user-mode GuestOps route",
+                        BuildVmwareOfflineCapabilityGate(config, jobId, sample, guestRoot, guestSample, guestOut, hostOut, offlineSettingsPath),
+                        requiresElevation: false,
+                        mutatesVmState: false));
+                }
+                AddVMwareRestoreAndStartSteps(steps, config, vmwareOffline ? offlineSettingsPath : null);
                 break;
             case VirtualizationProvider.Qemu:
                 AddQemuRestoreAndStartSteps(steps, config, targetVmName, jobId);
@@ -61,7 +73,14 @@ public sealed class HyperVRunbookBuilder
                 throw new ArgumentOutOfRangeException(nameof(config), provider, "Unsupported virtualization provider.");
         }
 
-        AddGuestExecutionSteps(steps, config, provider, targetVmName, jobId, sample, guestSample, guestOut, hostOut, hostOutputShare);
+        if (vmwareOffline)
+        {
+            AddVmwareOfflineGuestExecutionSteps(steps, config, hostOut, offlineSettingsPath);
+        }
+        else
+        {
+            AddGuestExecutionSteps(steps, config, provider, targetVmName, jobId, sample, guestSample, guestOut, hostOut, hostOutputShare);
+        }
         AddCleanupSteps(steps, config, provider, usesTemporaryVm, targetVmName, jobId, hostOutputShare);
 
         if (provider is not VirtualizationProvider.HyperV)
@@ -91,10 +110,12 @@ public sealed class HyperVRunbookBuilder
             QemuDiskFormat = provider is VirtualizationProvider.Qemu ? config.Qemu.DiskFormat : null,
             LiveExecutionLeasePath = Path.Combine(config.Paths.RuntimeRoot, "locks", "live-execution.lock"),
             UsesTemporaryVm = usesTemporaryVm,
-            LaunchContext = config.Driver.UseMockCollector
+            LaunchContext = vmwareOffline
+                ? "s4u-highest-guestops"
+                : config.Driver.UseMockCollector
                 ? "remoting-session"
                 : "interactive-desktop",
-            FallbackWarning = config.Driver.UseMockCollector
+            FallbackWarning = vmwareOffline || config.Driver.UseMockCollector
                 ? null
                 : "Interactive desktop unavailable; Guest Agent will use an S4U scheduled task fallback.",
             Steps = steps
@@ -248,6 +269,16 @@ public sealed class HyperVRunbookBuilder
             ValidateQemuProviderArguments(config.Qemu.AdditionalArguments, config.Qemu.GuestRemoting.AddressMode);
         }
 
+        // A VMware Block job starts with no guest NIC and uses authenticated
+        // VIX GuestOps throughout. Its saved WinRM profile is irrelevant and
+        // must not block planning because a disabled HTTPS endpoint is the
+        // expected state of this isolated guest.
+        if (provider is VirtualizationProvider.VMware &&
+            config.Guest.NetworkPolicy is SandboxNetworkPolicy.Block)
+        {
+            return;
+        }
+
         var guestRemoting = ResolveGuestRemotingConfig(config, provider);
         if (provider is VirtualizationProvider.VMware &&
             guestRemoting.AddressMode is not (GuestRemotingAddressMode.Configured or GuestRemotingAddressMode.VMwareTools))
@@ -360,6 +391,24 @@ public sealed class HyperVRunbookBuilder
         });
     }
 
+    private static string BuildVmwareBlockIsolationCheck(SandboxConfig config)
+    {
+        if (config.Guest.NetworkPolicy is not SandboxNetworkPolicy.Block)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(" ", new[]
+        {
+            "$vmxLines = @(Get-Content -LiteralPath $vmxPath -ErrorAction Stop);",
+            "if ($vmxLines | Where-Object { $_ -match '(?i)^\\s*ethernet\\d+\\.present\\s*=\\s*\"?TRUE\"?\\s*$' }) { throw 'Blocked VMware analysis requires every virtual NIC to be absent in the VMX before launch.' };",
+            "if ($vmxLines | Where-Object { $_ -match '(?i)^\\s*sharedFolder\\d+\\.present\\s*=\\s*\"?TRUE\"?\\s*$' }) { throw 'Blocked VMware analysis refuses guest-visible host shared folders.' };",
+            "if ($vmxLines | Where-Object { $_ -match '(?i)^\\s*sharedFolder\\.maxNum\\s*=\\s*\"?[1-9]\\d*\"?\\s*$' }) { throw 'Blocked VMware analysis requires sharedFolder.maxNum=0 in the VMX.' };",
+            "if ($vmxLines | Where-Object { $_ -match '(?i)^\\s*(usb|ehci|usb_xhci|sound|serial\\d+|parallel\\d+|floppy\\d+)\\.present\\s*=\\s*\"?TRUE\"?\\s*$' }) { throw 'Blocked VMware analysis refuses USB, sound, serial, parallel or floppy devices.' };",
+            "foreach ($isolationKey in @('isolation.tools.copy.disable','isolation.tools.paste.disable','isolation.tools.dnd.disable')) { if (-not ($vmxLines | Where-Object { $_ -match ('(?i)^\\s*' + [regex]::Escape($isolationKey) + '\\s*=\\s*\"?TRUE\"?\\s*$') })) { throw \"Blocked VMware analysis requires $isolationKey=TRUE in the VMX.\" } };"
+        });
+    }
+
     private static string BuildVMwarePrerequisiteCommand(SandboxConfig config)
     {
         return string.Join(" ", new[]
@@ -371,6 +420,7 @@ public sealed class HyperVRunbookBuilder
             $"$vmType = {Q(config.VMware.VmType)};",
             "if (-not (Test-Path -LiteralPath $vmxPath -PathType Leaf)) { throw \"VMware VMX file was not found: $vmxPath\" };",
             "$vmxPath = (Resolve-Path -LiteralPath $vmxPath).ProviderPath;",
+            BuildVmwareBlockIsolationCheck(config),
             "$snapshotOutput = @(& $vmrun -T $vmType listSnapshots $vmxPath 2>&1);",
             "$snapshotExitCode = $LASTEXITCODE;",
             "if ($snapshotExitCode -ne 0) { throw \"vmrun listSnapshots failed with exit code $snapshotExitCode. $($snapshotOutput -join ' ')\" };",
@@ -379,7 +429,7 @@ public sealed class HyperVRunbookBuilder
         });
     }
 
-    private static void AddVMwareRestoreAndStartSteps(List<SandboxRunbookStep> steps, SandboxConfig config)
+    private static void AddVMwareRestoreAndStartSteps(List<SandboxRunbookStep> steps, SandboxConfig config, string? offlineSettingsPath)
     {
         var preamble = string.Join(" ", new[]
         {
@@ -410,12 +460,14 @@ public sealed class HyperVRunbookBuilder
             "$restoreOutput = @(& $vmrun -T $vmType revertToSnapshot $vmxPath $snapshotName 2>&1);",
             "$restoreExitCode = $LASTEXITCODE;",
             "if ($restoreExitCode -ne 0) { throw \"vmrun revertToSnapshot failed with exit code $restoreExitCode. $($restoreOutput -join ' ')\" };",
+            BuildVmwareBlockIsolationCheck(config),
             "Write-Host \"VMware snapshot '$snapshotName' restored.\";"
         });
         var startMode = config.VMware.Headless ? "nogui" : "gui";
         var startCommand = string.Join(" ", new[]
         {
             preamble,
+            BuildVmwareBlockIsolationCheck(config),
             // Workstation returns "-1 Unknown error" when the Workstation UI
             // is still tearing down after the hard stop in the previous step,
             // so start has to be attempted a few times before it is fatal.
@@ -447,8 +499,15 @@ public sealed class HyperVRunbookBuilder
         {
             steps.Add(Step("open-vm-desktop", "Verify interactive VMware console window", BuildVMwareConsoleVerificationCommand(config), mutatesVmState: false));
         }
-        steps.Add(Step("wait-guest-remoting", "Wait for PowerShell remoting in VMware guest", BuildWaitGuestSessionCommand(config, VirtualizationProvider.VMware, config.VMware.VmName), mutatesVmState: false));
-        if (config.VMware.DisableDefenderForLab)
+        if (offlineSettingsPath is not null)
+        {
+            steps.Add(Step("wait-guest-operations", "Wait for authenticated VMware Tools guest operations", BuildVmwareOfflineStepCommand(config, offlineSettingsPath, "ready"), mutatesVmState: false));
+        }
+        else
+        {
+            steps.Add(Step("wait-guest-remoting", "Wait for PowerShell remoting in VMware guest", BuildWaitGuestSessionCommand(config, VirtualizationProvider.VMware, config.VMware.VmName), mutatesVmState: false));
+        }
+        if (config.VMware.DisableDefenderForLab && offlineSettingsPath is null)
         {
             steps.Add(Step("disable-defender-lab", "Disable Defender blocking for disposable VMware lab", BuildDisableDefenderForLabCommand(config, config.VMware.VmName)));
         }
@@ -959,12 +1018,21 @@ public sealed class HyperVRunbookBuilder
     {
         var vmRoot = Path.Combine(config.Paths.RuntimeRoot, "vms", jobId.ToString("N"));
         var diffDisk = Path.Combine(vmRoot, $"{targetVmName}.vhdx");
-        var switchPart = string.IsNullOrWhiteSpace(config.HyperV.SwitchName) ? string.Empty : $" -SwitchName {Q(config.HyperV.SwitchName)}";
+        // A Block job must not attach the disposable VM to a host switch.
+        // Guest-side NIC disable alone can be undone by a privileged sample.
+        var switchPart = config.Guest.NetworkPolicy is SandboxNetworkPolicy.Block ||
+            string.IsNullOrWhiteSpace(config.HyperV.SwitchName)
+            ? string.Empty
+            : $" -SwitchName {Q(config.HyperV.SwitchName)}";
 
         steps.Add(Step("make-vm-root", "Create temporary VM folder", $"New-Item -ItemType Directory -Force -Path {Q(vmRoot)} | Out-Null"));
         steps.Add(Step("make-diff-disk", "Create differencing disk", $"New-VHD -Path {Q(diffDisk)} -ParentPath {Q(config.HyperV.BaseVhdxPath!)} -Differencing | Out-Null"));
         steps.Add(Step("create-temp-vm", "Create temporary analysis VM", $"New-VM -Name {Q(targetVmName)} -Generation 2 -MemoryStartupBytes {config.HyperV.MemoryStartupBytes} -VHDPath {Q(diffDisk)}{switchPart} | Out-Null"));
         steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", BuildEnableGuestServiceCommand(targetVmName)));
+        if (config.Guest.NetworkPolicy is SandboxNetworkPolicy.Block)
+        {
+            steps.Add(Step("isolate-hyperv-network", "Disconnect Hyper-V guest adapters before sample execution", BuildDisconnectHyperVNetworkCommand(targetVmName)));
+        }
         steps.Add(Step("start-temp-vm", "Start temporary analysis VM and wait for Running", BuildStartVmAndWaitCommand(targetVmName)));
         AddOpenInteractiveDesktopStep(steps, config, targetVmName);
         steps.Add(Step("wait-powershell-direct", "Wait for PowerShell Direct in guest", BuildWaitGuestSessionCommand(config, VirtualizationProvider.HyperV, targetVmName), mutatesVmState: false));
@@ -977,12 +1045,59 @@ public sealed class HyperVRunbookBuilder
     /// </summary>
     private static void AddCheckpointRestoreSteps(List<SandboxRunbookStep> steps, SandboxConfig config)
     {
-        steps.Add(Step("stop-golden", "Stop golden VM before restore", $"Stop-VM -Name {Q(config.HyperV.GoldenVmName)} -TurnOff -Force -ErrorAction SilentlyContinue"));
-        steps.Add(Step("restore-golden", "Restore clean checkpoint", $"Restore-VMSnapshot -VMName {Q(config.HyperV.GoldenVmName)} -Name {Q(config.HyperV.GoldenSnapshotName)} -Confirm:$false"));
+        steps.Add(Step("stop-golden", "Stop golden VM before restore", BuildStopHyperVVmAndWaitCommand(config.HyperV.GoldenVmName)));
+        steps.Add(Step("restore-golden", "Restore clean checkpoint", BuildRestoreHyperVSnapshotCommand(config.HyperV.GoldenVmName, config.HyperV.GoldenSnapshotName)));
         steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", BuildEnableGuestServiceCommand(config.HyperV.GoldenVmName)));
+        if (config.Guest.NetworkPolicy is SandboxNetworkPolicy.Block)
+        {
+            steps.Add(Step("isolate-hyperv-network", "Disconnect Hyper-V guest adapters before sample execution", BuildDisconnectHyperVNetworkCommand(config.HyperV.GoldenVmName)));
+        }
         steps.Add(Step("start-golden", "Start restored golden VM and wait for Running", BuildStartVmAndWaitCommand(config.HyperV.GoldenVmName)));
         AddOpenInteractiveDesktopStep(steps, config, config.HyperV.GoldenVmName);
         steps.Add(Step("wait-powershell-direct", "Wait for PowerShell Direct in guest", BuildWaitGuestSessionCommand(config, VirtualizationProvider.HyperV, config.HyperV.GoldenVmName), mutatesVmState: false));
+    }
+
+    /// <summary>
+    /// Disconnects every attached Hyper-V adapter while the analysis VM is
+    /// stopped, then re-queries the VM switch associations. PowerShell Direct
+    /// and the Guest Service Interface use VMBus and remain available.
+    /// Snapshot restore after VM shutdown recovers the original attachment.
+    /// </summary>
+    private static string BuildDisconnectHyperVNetworkCommand(string vmName)
+    {
+        return string.Join(" ", new[]
+        {
+            $"$vmName = {Q(vmName)};",
+            "if ((Get-VM -Name $vmName -ErrorAction Stop).State.ToString() -ne 'Off') { throw \"Hyper-V Block policy refused to modify VM '$vmName' while it is running.\" };",
+            "$attached = @(Get-VMNetworkAdapter -VMName $vmName -ErrorAction Stop | Where-Object { [bool]$_.Connected -or -not [string]::IsNullOrWhiteSpace([string]$_.SwitchName) });",
+            "foreach ($adapter in $attached) { Disconnect-VMNetworkAdapter -VMNetworkAdapter $adapter -ErrorAction Stop };",
+            "$remaining = @(Get-VMNetworkAdapter -VMName $vmName -ErrorAction Stop | Where-Object { [bool]$_.Connected -or -not [string]::IsNullOrWhiteSpace([string]$_.SwitchName) });",
+            "if ($remaining.Count -ne 0) { throw \"Hyper-V Block policy refused VM start: $($remaining.Count) adapter(s) remain connected to a virtual network.\" };",
+            "Write-Host \"Hyper-V Block policy verified: VM '$vmName' has no connected adapters.\";"
+        });
+    }
+
+    private static string BuildStopHyperVVmAndWaitCommand(string vmName)
+    {
+        return string.Join(" ", new[]
+        {
+            $"$vmName = {Q(vmName)};",
+            "$vm = Get-VM -Name $vmName -ErrorAction Stop;",
+            "if ($vm.State.ToString() -ne 'Off') { Stop-VM -Name $vmName -TurnOff -Force -ErrorAction Stop };",
+            "$deadline = (Get-Date).AddSeconds(60);",
+            "do { $vm = Get-VM -Name $vmName -ErrorAction Stop; if ($vm.State.ToString() -eq 'Off') { break }; Start-Sleep -Seconds 1 } while ((Get-Date) -lt $deadline);",
+            "if ($vm.State.ToString() -ne 'Off') { throw \"Hyper-V VM '$vmName' did not reach Off state within 60 seconds.\" };"
+        });
+    }
+
+    private static string BuildRestoreHyperVSnapshotCommand(string vmName, string snapshotName)
+    {
+        return string.Join(" ", new[]
+        {
+            $"$vmName = {Q(vmName)};",
+            "if ((Get-VM -Name $vmName -ErrorAction Stop).State.ToString() -ne 'Off') { throw \"Hyper-V snapshot restore refused while VM '$vmName' is running.\" };",
+            $"Restore-VMSnapshot -VMName $vmName -Name {Q(snapshotName)} -Confirm:$false -ErrorAction Stop;"
+        });
     }
 
     /// <summary>
@@ -1114,9 +1229,16 @@ public sealed class HyperVRunbookBuilder
     /// sandbox config and provider; processing returns a share name plus host
     /// folder only for VMware live runs that opted in, and null otherwise.
     /// </summary>
-    private static (string Name, string HostPath)? ResolveHostOutputShare(SandboxConfig config, VirtualizationProvider provider)
+    private static (string Name, string HostPath)? ResolveHostOutputShare(
+        SandboxConfig config,
+        VirtualizationProvider provider,
+        string hostOut)
     {
-        if (provider is not VirtualizationProvider.VMware || !config.VMware.UseHostOutputShare)
+        // Blocked-network runs must never publish a guest-writable host path.
+        // VMware Tools guest operations copy evidence out of the VM instead.
+        if (provider is not VirtualizationProvider.VMware ||
+            config.Guest.NetworkPolicy is SandboxNetworkPolicy.Block ||
+            !config.VMware.UseHostOutputShare)
         {
             return null;
         }
@@ -1127,7 +1249,14 @@ public sealed class HyperVRunbookBuilder
             throw new InvalidOperationException("vmware.useHostOutputShare requires a non-empty vmware.outputShareName.");
         }
 
-        return (name, string.Empty);
+        // Keep the guest-writable VMware shared-folder staging area separate
+        // from the durable host evidence directory.  A sample running as a
+        // guest administrator can modify/delete anything exposed through HGFS;
+        // mapping the durable job folder directly made host evidence mutable
+        // until cleanup.  The host copies the staging tree into hostOut only
+        // after the agent has finished, then the mapping is removed.
+        var stagingPath = Path.Combine(hostOut, ".shared-folder-staging");
+        return (name, stagingPath);
     }
 
     /// <summary>
@@ -1146,7 +1275,11 @@ public sealed class HyperVRunbookBuilder
             "if (Test-Path -LiteralPath $vmxPath -PathType Leaf) { $vmxPath = (Resolve-Path -LiteralPath $vmxPath).ProviderPath };",
             $"$vmType = {Q(config.VMware.VmType)};",
             $"$shareName = {Q(shareName)};",
-            "$hostOut = (Resolve-Path -LiteralPath " + Q(hostOut) + " -ErrorAction Stop).ProviderPath;",
+            "$hostOut = [IO.Path]::GetFullPath(" + Q(hostOut) + "); New-Item -ItemType Directory -Force -Path $hostOut | Out-Null;",
+            // The shared folder is a guest-writable staging root.  Clear any
+            // leftovers before mapping it so a new run never imports files
+            // produced by an earlier job.
+            "Get-ChildItem -LiteralPath $hostOut -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction Stop;",
             // A snapshot revert restores the guest disk, not the VMX, so a
             // mapping from an earlier job survives into this one. Re-adding it
             // keeps the guest pointed at the current job folder instead of a
@@ -1193,6 +1326,99 @@ public sealed class HyperVRunbookBuilder
         });
     }
 
+    private static string BuildVmwareOfflineCapabilityGate(
+        SandboxConfig config,
+        Guid jobId,
+        SampleIdentity sample,
+        string guestRoot,
+        string guestSample,
+        string guestOut,
+        string hostOut,
+        string settingsPath)
+    {
+        var control = Path.GetDirectoryName(settingsPath)!;
+        var agentPath = $"{guestRoot}\\agent\\{config.Guest.AgentExecutableName}";
+        var agentExitPath = $"{guestOut}\\agent.exit";
+        var driverEventsPath = $"{guestOut}\\driver-events.jsonl";
+        var settings = new
+        {
+            jobId = jobId.ToString("D"),
+            vmxPath = config.VMware.VmxPath,
+            vixHelperPath = config.VMware.VixHelperPath,
+            hostControl = control,
+            hostEvidence = hostOut,
+            hostSample = sample.FullPath,
+            sampleSha256 = sample.Sha256,
+            payloadRoot = config.Paths.GuestPayloadRoot,
+            guestUser = NormalizeGuestScheduledTaskUserName(config.Guest.UserName),
+            guestRoot,
+            guestPublic = "C:\\Users\\Public",
+            guestOutput = guestOut,
+            guestSample,
+            agentExecutableName = config.Guest.AgentExecutableName,
+            agentInvocation = BuildGuestAgentInvocation(config, jobId, agentPath, guestSample, guestOut, driverEventsPath, agentExitPath),
+            durationSeconds = config.Analysis.DefaultDurationSeconds
+        };
+        var settingsJson = System.Text.Json.JsonSerializer.Serialize(settings);
+        var encodedSettings = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(settingsJson));
+        var scriptPath = Path.Combine(Path.GetDirectoryName(config.VMware.VixHelperPath) ?? string.Empty, "Invoke-VmwareOfflineRunbook.ps1");
+        return string.Join(" ", new[]
+        {
+            config.Driver.Enabled
+                ? "throw 'VMware Block GuestOps currently supports UserMode only. Set driver.enabled=false in the saved backend profile before live execution.';"
+                : string.Empty,
+            config.VMware.DisableDefenderForLab
+                ? "throw 'VMware Block GuestOps does not yet support disableDefenderForLab. Disable this option in the saved backend profile before live execution.';"
+                : string.Empty,
+            config.Analysis.DurationUnlimited || config.Analysis.DefaultDurationSeconds <= 0
+                ? "throw 'VMware Block GuestOps currently requires a bounded positive analysis duration.';"
+                : string.Empty,
+            $"$vixHelper = {Q(config.VMware.VixHelperPath)}; $guestOpsScript = {Q(scriptPath)};",
+            "if ([string]::IsNullOrWhiteSpace($vixHelper) -or -not (Test-Path -LiteralPath $vixHelper -PathType Leaf)) { throw 'Packaged VMware VIX helper was not found; run /setup and publish the guest tools.' };",
+            "if (-not (Test-Path -LiteralPath $guestOpsScript -PathType Leaf)) { throw 'Packaged VMware offline runbook script was not found beside the VIX helper.' };",
+            $"$agentPayload = Join-Path {Q(config.Paths.GuestPayloadRoot)} 'agent\\{config.Guest.AgentExecutableName}';",
+            "if (-not (Test-Path -LiteralPath $agentPayload -PathType Leaf)) { throw 'Published Guest Agent payload is missing; complete /setup before live execution.' };",
+            $"$samplePath = {Q(sample.FullPath)}; if (-not (Test-Path -LiteralPath $samplePath -PathType Leaf)) {{ throw 'Submitted sample is missing before VMware launch.' }};",
+            "$sampleStream = [IO.File]::OpenRead($samplePath); try { $sampleSha = [Security.Cryptography.SHA256]::Create(); try { $sampleHash = ([BitConverter]::ToString($sampleSha.ComputeHash($sampleStream))).Replace('-', '') } finally { $sampleSha.Dispose() } } finally { $sampleStream.Dispose() };",
+            $"if (-not $sampleHash.Equals({Q(sample.Sha256)}, [StringComparison]::OrdinalIgnoreCase)) {{ throw 'Submitted sample hash changed before VMware launch.' }};",
+            $"$settingsPath = {Q(settingsPath)}; New-Item -ItemType Directory -Force -Path (Split-Path -Parent $settingsPath), {Q(hostOut)} | Out-Null;",
+            $"[IO.File]::WriteAllBytes($settingsPath, [Convert]::FromBase64String({Q(encodedSettings)}));",
+            "Write-Host 'VMware offline GuestOps user-mode resources are ready; VM state has not changed.';"
+        });
+    }
+
+    private static string BuildVmwareOfflineStepCommand(SandboxConfig config, string settingsPath, string mode)
+    {
+        var scriptPath = Path.Combine(Path.GetDirectoryName(config.VMware.VixHelperPath) ?? string.Empty, "Invoke-VmwareOfflineRunbook.ps1");
+        return string.Join(" ", new[]
+        {
+            BuildGuestCredentialPreamble(config),
+            "$env:KSWORDBOX_GUEST_PASSWORD = $guestCredential.GetNetworkCredential().Password;",
+            $"$env:KSWORDBOX_GUEST_USER = {Q(NormalizeGuestScheduledTaskUserName(config.Guest.UserName))};",
+            "try {",
+            $"& {Q(scriptPath)} -Mode {Q(mode)} -SettingsPath {Q(settingsPath)};",
+            "} finally { [Environment]::SetEnvironmentVariable('KSWORDBOX_GUEST_PASSWORD', $null, 'Process'); [Environment]::SetEnvironmentVariable('KSWORDBOX_GUEST_USER', $null, 'Process'); $guestCredential = $null };"
+        });
+    }
+
+    private static void AddVmwareOfflineGuestExecutionSteps(
+        List<SandboxRunbookStep> steps,
+        SandboxConfig config,
+        string hostOut,
+        string settingsPath)
+    {
+        steps.Add(Step("stage-guest-payload", "Stage verified Guest Agent through VMware GuestOps", BuildVmwareOfflineStepCommand(config, settingsPath, "stage")));
+        steps.Add(Step("copy-sample", "Copy and verify submitted sample through VMware GuestOps", BuildVmwareOfflineStepCommand(config, settingsPath, "copy-sample")));
+        steps.Add(Step("make-host-output", "Create durable host evidence directory", $"New-Item -ItemType Directory -Force -Path {Q(hostOut)} | Out-Null", mutatesVmState: false));
+        steps.Add(Step("record-artifact-policy", "Record artifact collection policy", BuildRecordArtifactCollectionPolicyCommand(config, hostOut), requiresElevation: false, mutatesVmState: false));
+        steps.Add(Step("prepare-guest-output", "Prepare isolated guest output and read-only driver inventory", BuildVmwareOfflineStepCommand(config, settingsPath, "prepare-output")));
+        steps.Add(Step("record-driver-collection-disabled", "Record disabled R0 collection diagnostic", BuildDriverCollectionDisabledDiagnosticCommand(config, hostOut), requiresElevation: false, mutatesVmState: false));
+        steps.Add(Step("check-sample-runtime", "Check sample CLR and guest .NET Framework compatibility", BuildVmwareOfflineStepCommand(config, settingsPath, "runtime-preflight"), requiresElevation: false, mutatesVmState: false));
+        steps.Add(Step("run-agent", "Launch Guest Agent in an elevated S4U task", BuildVmwareOfflineStepCommand(config, settingsPath, "launch")));
+        steps.Add(Step("sync-live-output", "Collect raw guest evidence with VMware GuestOps", BuildVmwareOfflineStepCommand(config, settingsPath, "sync")));
+        steps.Add(Step("collect-output", "Verify Guest Agent exit and collected evidence", BuildVmwareOfflineStepCommand(config, settingsPath, "verify"), mutatesVmState: false));
+    }
+
     private static void AddGuestExecutionSteps(
         List<SandboxRunbookStep> steps,
         SandboxConfig config,
@@ -1222,7 +1448,7 @@ public sealed class HyperVRunbookBuilder
             steps.Add(Step(
                 "enable-vmware-output-share",
                 "Map the host output folder into the guest as a shared folder",
-                BuildEnableHostOutputShareCommand(config, hostOut, share.Name),
+                 BuildEnableHostOutputShareCommand(config, share.HostPath, share.Name),
                 requiresElevation: false,
                 mutatesVmState: false));
         }
@@ -1266,8 +1492,17 @@ public sealed class HyperVRunbookBuilder
         }
 
         steps.Add(Step("run-agent", "Start guest collector and sample on the interactive desktop", BuildStartGuestAgentCommand(config, provider, targetVmName, jobId, guestRoot, agentPath, guestSample, guestOut, driverEventsPath, agentPidPath, agentExitPath, agentTaskName)));
-        steps.Add(Step("sync-live-output", "Live-sync guest events while sample runs", BuildLiveOutputSyncCommand(config, provider, targetVmName, guestOut, hostOut, agentPidPath, agentExitPath, agentTaskName, writesDirectlyToHost: hostOutputShare is not null)));
-        steps.Add(Step("collect-output", "Collect final guest JSON output", BuildCollectOutputCommand(config, provider, targetVmName, guestOut, hostOut, writesDirectlyToHost: hostOutputShare is not null)));
+        var sharedHostOut = hostOutputShare?.HostPath;
+        var usesVmwareGuestOps = provider is VirtualizationProvider.VMware &&
+            config.Guest.NetworkPolicy is SandboxNetworkPolicy.Block;
+        steps.Add(Step("sync-live-output", "Live-sync guest events while sample runs",
+            usesVmwareGuestOps
+                ? BuildVmwareGuestOpsLiveSyncCommand(config, guestOut, hostOut)
+                : BuildLiveOutputSyncCommand(config, provider, targetVmName, guestOut, hostOut, agentPidPath, agentExitPath, agentTaskName, writesDirectlyToHost: hostOutputShare is not null, directHostOut: sharedHostOut)));
+        steps.Add(Step("collect-output", "Collect final guest JSON output",
+            usesVmwareGuestOps
+                ? BuildVmwareGuestOpsCollectCommand(config, hostOut)
+                : BuildCollectOutputCommand(config, provider, targetVmName, guestOut, hostOut, writesDirectlyToHost: hostOutputShare is not null, directHostOut: sharedHostOut)));
     }
 
     /// <summary>
@@ -1666,7 +1901,7 @@ public sealed class HyperVRunbookBuilder
             // parts, ETL/PCAP captures, and artifact trees behind.  Remove
             // every known output lane before launching the Agent so old data
             // can never be mistaken for this run's evidence.
-            $"Invoke-Command -Session $session -ScriptBlock {{ param($root) New-Item -ItemType Directory -Force -Path $root | Out-Null; $patterns = @('events.json','events.json.failure.json','driver-events.jsonl','driver-events.part-*.jsonl','*.jsonl','*.etl','*.etl.zip','*.pcap','*.pcapng','*.dmp','*.bmp','*.png','*.jpg','*.jpeg','agent.pid','agent.pid.tmp.*','agent.exit','agent.exit.tmp.*','agent.stdout.log','agent.stdout.log.tmp.*','agent.stderr.log','agent.stderr.log.tmp.*','guest-agent-run-status.json','agent-summary.json','guest-output-preflight.json'); foreach ($pattern in $patterns) {{ Get-ChildItem -LiteralPath $root -Filter $pattern -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue }}; foreach ($directoryName in @('artifacts','screenshots','memory-dumps','packet-captures','etl','pcap')) {{ $directory = Join-Path $root $directoryName; if (Test-Path -LiteralPath $directory -PathType Container) {{ Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue }} }} }} -ArgumentList {Q(guestOut)} -ErrorAction Stop;",
+            $"Invoke-Command -Session $session -ScriptBlock {{ param($root) New-Item -ItemType Directory -Force -Path $root | Out-Null; $patterns = @('events.json','events.json.failure.json','driver-events.jsonl','driver-events.part-*.jsonl','*.jsonl','*.etl','*.etl.zip','*.pcap','*.pcapng','*.dmp','*.bmp','*.png','*.jpg','*.jpeg','agent.pid','agent.pid.tmp.*','agent.exit','agent.exit.tmp.*','agent.stdout.log','agent.stdout.log.tmp.*','agent.stderr.log','agent.stderr.log.tmp.*','guest-agent-run-status.json','agent-summary.json','sample-launch-proof.json','guest-output-preflight.json'); foreach ($pattern in $patterns) {{ Get-ChildItem -LiteralPath $root -Filter $pattern -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue }}; foreach ($directoryName in @('artifacts','screenshots','memory-dumps','packet-captures','etl','pcap')) {{ $directory = Join-Path $root $directoryName; if (Test-Path -LiteralPath $directory -PathType Container) {{ Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue }} }} }} -ArgumentList {Q(guestOut)} -ErrorAction Stop;",
             "}",
             "finally { if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue } }"
         });
@@ -1983,11 +2218,13 @@ public sealed class HyperVRunbookBuilder
         };
         arguments.AddRange(BuildArtifactCollectionAgentArguments(config));
         arguments.AddRange(BuildDriverAgentArguments(config, driverEventsPath));
+        arguments.AddRange(BuildNetworkPolicyAgentArguments(config));
 
         var guestOutputDirectory = Path.GetDirectoryName(agentExitPath) ?? guestOut;
         var agentStdoutPath = Path.Combine(guestOutputDirectory, "agent.stdout.log").Replace('/', '\\');
         var agentStderrPath = Path.Combine(guestOutputDirectory, "agent.stderr.log").Replace('/', '\\');
         var agentEventsPath = Path.Combine(guestOutputDirectory, "events.json").Replace('/', '\\');
+        var agentSummaryPath = Path.Combine(guestOutputDirectory, "agent-summary.json").Replace('/', '\\');
         var stableRuntimePath = Path.Combine(Path.GetDirectoryName(agentPath) ?? string.Empty, "KSword.Sandbox.Agent.stable.runtimeconfig.json").Replace('/', '\\');
         var stableDepsPath = Path.Combine(Path.GetDirectoryName(agentPath) ?? string.Empty, "KSword.Sandbox.Agent.stable.deps.json").Replace('/', '\\');
         var stableAgentExePath = Path.Combine(Path.GetDirectoryName(agentPath) ?? string.Empty, "KSword.Sandbox.AgentStable.exe").Replace('/', '\\');
@@ -2001,7 +2238,13 @@ public sealed class HyperVRunbookBuilder
             // from importing zero-filled or partially written markers.
             $"$stdoutTemp = {Q(agentStdoutPath)} + '.tmp.' + [string]$PID; $stderrTemp = {Q(agentStderrPath)} + '.tmp.' + [string]$PID; $exitTemp = {Q(agentExitPath)} + '.tmp.' + [string]$PID; Remove-Item -LiteralPath $stdoutTemp,$stderrTemp,$exitTemp -Force -ErrorAction SilentlyContinue;",
             $"$exitCode = 1; try {{ {executableInvocation} 1> $stdoutTemp 2> $stderrTemp; $exitCode = if ($global:LASTEXITCODE -is [int]) {{ [int]$global:LASTEXITCODE }} else {{ 1 }} }} catch {{ $_ | Out-File -LiteralPath $stderrTemp -Encoding utf8; $exitCode = 1 }}",
-            $"if ($exitCode -eq 0 -and -not (Test-Path -LiteralPath {Q(agentEventsPath)} -PathType Leaf)) {{ 'Guest Agent exited 0 but did not write events.json.' | Add-Content -LiteralPath $stderrTemp -Encoding utf8; $exitCode = 1 }}",
+            // agent.exit is written by this wrapper itself right below, so the
+            // two artifacts that can genuinely be missing are events.json and
+            // agent-summary.json.  A zero exit must never coexist with a
+            // missing required artifact, otherwise the host sees a fake
+            // success while the report importer has no summary to read.
+            $"$agentSummaryPath = {Q(agentSummaryPath)};",
+            $"$missingAgentArtifacts = @(); if (-not (Test-Path -LiteralPath {Q(agentEventsPath)} -PathType Leaf)) {{ $missingAgentArtifacts += 'events.json' }}; if (-not (Test-Path -LiteralPath $agentSummaryPath -PathType Leaf)) {{ $missingAgentArtifacts += 'agent-summary.json' }}; if ($missingAgentArtifacts.Count -gt 0) {{ ('Guest Agent required artifacts missing after exit: ' + ($missingAgentArtifacts -join ',')) | Add-Content -LiteralPath $stderrTemp -Encoding utf8; $exitCode = 1 }}",
             $"if (-not (Test-Path -LiteralPath $stdoutTemp -PathType Leaf)) {{ [IO.File]::WriteAllText($stdoutTemp, [string]::Empty, [Text.Encoding]::UTF8) }}; if (-not (Test-Path -LiteralPath $stderrTemp -PathType Leaf)) {{ [IO.File]::WriteAllText($stderrTemp, [string]::Empty, [Text.Encoding]::UTF8) }};",
             $"Move-Item -LiteralPath $stdoutTemp -Destination {Q(agentStdoutPath)} -Force; Move-Item -LiteralPath $stderrTemp -Destination {Q(agentStderrPath)} -Force; [IO.File]::WriteAllText($exitTemp, [string]$exitCode, [Text.Encoding]::ASCII); Move-Item -LiteralPath $exitTemp -Destination {Q(agentExitPath)} -Force;",
             "exit $exitCode"
@@ -2046,6 +2289,19 @@ public sealed class HyperVRunbookBuilder
     }
 
     /// <summary>
+    /// Builds the Guest Agent argument that selects the in-guest network
+    /// policy. Inputs are typed sandbox config; processing forwards the
+    /// policy verbatim (block is the default) so the Guest Agent can enforce
+    /// it with the guest firewall instead of hypervisor network settings;
+    /// the method returns PowerShell-safe CLI tokens.
+    /// </summary>
+    private static List<string> BuildNetworkPolicyAgentArguments(SandboxConfig config)
+    {
+        var policy = config.Guest.NetworkPolicy == SandboxNetworkPolicy.Allow ? "allow" : "block";
+        return ["--network-policy", Q(policy)];
+    }
+
+    /// <summary>
     /// Builds optional Guest Agent arguments for R0Collector integration.
     /// Inputs are typed sandbox config and the job-specific driver JSONL path;
     /// processing forwards collector path, device name, and optional mock flag;
@@ -2081,7 +2337,12 @@ public sealed class HyperVRunbookBuilder
             "--max-output-bytes",
             config.Driver.R0CollectorMaxOutputBytes.ToString(CultureInfo.InvariantCulture),
             "--min-free-output-bytes",
-            config.Driver.R0CollectorMinFreeOutputBytes.ToString(CultureInfo.InvariantCulture)
+            config.Driver.R0CollectorMinFreeOutputBytes.ToString(CultureInfo.InvariantCulture),
+            // Cumulative budget: the collector stops cleanly (exit 0 +
+            // r0-status sidecar) at this total instead of failing into the
+            // shared-folder redirector handle ceiling seen live on HGFS.
+            "--output-budget-bytes",
+            config.Driver.R0CollectorOutputBudgetBytes.ToString(CultureInfo.InvariantCulture)
         };
 
         if (config.Driver.UseMockCollector)
@@ -2099,6 +2360,107 @@ public sealed class HyperVRunbookBuilder
     /// guest PID, validates the agent exit marker, and returns a PowerShell
     /// command string.
     /// </summary>
+    private static string BuildVmwareGuestOpsLiveSyncCommand(SandboxConfig config, string guestOut, string hostOut)
+    {
+        var manifestGuestPath = $"{guestOut.TrimEnd('\\')}\\guestops-manifest.json";
+        var scriptGuestPath = $"{guestOut.TrimEnd('\\')}\\guestops-manifest.ps1";
+        var waitSeconds = Math.Max(120, config.Analysis.DefaultDurationSeconds + 150);
+        var guestManifestScript = string.Join(" ", new[]
+        {
+            "$ErrorActionPreference = 'Stop';",
+            $"$root = [IO.Path]::GetFullPath({Q(guestOut)}).TrimEnd('\\');",
+            $"$manifestPath = {Q(manifestGuestPath)};",
+            "if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw 'Guest output directory is missing' };",
+            $"$scriptPath = {Q(scriptGuestPath)};",
+            "$files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction Stop | Where-Object { $_.FullName -ne $manifestPath -and $_.FullName -ne $scriptPath } | ForEach-Object { [pscustomobject]@{ relativePath = $_.FullName.Substring($root.Length).TrimStart('\\'); length = [int64]$_.Length } });",
+            "$json = ConvertTo-Json -InputObject $files -Depth 3 -Compress;",
+            "[IO.File]::WriteAllText($manifestPath, $json, [Text.UTF8Encoding]::new($false));"
+        });
+
+        // The VM is network-disconnected before the sample runs. VMware Tools
+        // guest operations use a host-controlled, one-file-at-a-time pull and
+        // never expose any host directory to a potentially hostile guest.
+        return string.Join(" ", new[]
+        {
+            BuildGuestCredentialPreamble(config),
+            BuildNativeToolResolution("vmrun", config.VMware.VmrunPath, "VMware vmrun"),
+            $"$vmxPath = (Resolve-Path -LiteralPath {Q(config.VMware.VmxPath)}).ProviderPath;",
+            $"$vmType = {Q(config.VMware.VmType)};",
+            $"$guestUserName = {Q(NormalizeGuestScheduledTaskUserName(config.Guest.UserName))};",
+            "$guestOpsArgs = @('-T', $vmType, '-gu', $guestUserName, '-gp', $guestCredential.GetNetworkCredential().Password);",
+            $"$guestOut = {Q(guestOut)}; $hostOut = [IO.Path]::GetFullPath({Q(hostOut)});",
+            $"$manifestGuestPath = {Q(manifestGuestPath)};",
+            $"$scriptGuestPath = {Q(scriptGuestPath)};",
+            $"$guestManifestScript = {Q(guestManifestScript)};",
+            "$scriptHostPath = Join-Path $hostOut '.guestops-manifest.ps1';",
+            "$manifestHostPath = Join-Path $hostOut '.guestops-manifest.json';",
+            "$hostRootPrefix = $hostOut.TrimEnd('\\') + '\\';",
+            $"$deadline = (Get-Date).AddSeconds({waitSeconds});",
+            "$copyWarnings = New-Object 'System.Collections.Generic.List[string]';",
+            "New-Item -ItemType Directory -Force -Path $hostOut | Out-Null;",
+            "if (((Get-Item -LiteralPath $hostOut -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Host evidence directory must not be a reparse point.' };",
+            "[IO.File]::WriteAllText($scriptHostPath, $guestManifestScript, [Text.UTF8Encoding]::new($false));",
+            "do {",
+            "  & $vmrun @guestOpsArgs CopyFileFromHostToGuest $vmxPath $scriptHostPath $scriptGuestPath 2>&1 | Out-Null;",
+            "  if ($LASTEXITCODE -ne 0) { Write-Warning 'VMware Tools guest manifest script copy failed; retrying.'; Start-Sleep -Seconds 3; continue };",
+            "  & $vmrun @guestOpsArgs runProgramInGuest $vmxPath 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' '-NoProfile' '-ExecutionPolicy' 'Bypass' '-File' $scriptGuestPath 2>&1 | Out-Null;",
+            "  if ($LASTEXITCODE -ne 0) { Write-Warning 'VMware Tools guest manifest refresh failed; retrying.'; Start-Sleep -Seconds 3; continue };",
+            "  Remove-Item -LiteralPath $manifestHostPath -Force -ErrorAction SilentlyContinue;",
+            "  & $vmrun @guestOpsArgs CopyFileFromGuestToHost $vmxPath $manifestGuestPath $manifestHostPath 2>&1 | Out-Null;",
+            "  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $manifestHostPath -PathType Leaf)) { Write-Warning 'VMware Tools guest manifest copy failed; retrying.'; Start-Sleep -Seconds 3; continue };",
+            "  try { $entries = @(Get-Content -LiteralPath $manifestHostPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop) } catch { Write-Warning 'VMware Tools guest manifest was invalid; retrying.'; Start-Sleep -Seconds 3; continue };",
+            "  if ($entries.Count -gt 20000) { throw 'Guest manifest exceeds the 20000-file collection limit.' };",
+            "  $declaredBytes = 0L; foreach ($entry in $entries) { $declaredBytes += [int64]$entry.length; if ([int64]$entry.length -gt 17179869184L) { throw 'Guest manifest contains a file larger than the 16 GiB collection limit.' } };",
+            "  if ($declaredBytes -gt 68719476736L) { throw 'Guest manifest exceeds the 64 GiB collection limit.' };",
+            "  $agentFinished = @($entries | Where-Object { $_.relativePath -ceq 'agent.exit' }).Count -gt 0;",
+            "  foreach ($entry in $entries) {",
+            "    $relative = [string]$entry.relativePath; $expectedLength = [int64]$entry.length;",
+            "    if ([string]::IsNullOrWhiteSpace($relative) -or $relative.Contains('/') -or $relative.Contains(':') -or [IO.Path]::IsPathRooted($relative) -or @($relative.Split('\\') | Where-Object { $_ -eq '..' -or $_ -eq '.' -or $_ -eq '' }).Count -gt 0 -or $expectedLength -lt 0) { throw \"Untrusted guest manifest path or length was rejected: $relative\" };",
+            "    $hostTarget = [IO.Path]::GetFullPath((Join-Path $hostOut $relative));",
+            "    if (-not $hostTarget.StartsWith($hostRootPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw \"Guest manifest path escaped the job output root: $relative\" };",
+            "    if (-not $agentFinished -and (Test-Path -LiteralPath $hostTarget -PathType Leaf) -and [int64](Get-Item -LiteralPath $hostTarget).Length -eq $expectedLength) { continue };",
+            "    $hostParent = Split-Path -Parent $hostTarget; New-Item -ItemType Directory -Force -Path $hostParent | Out-Null;",
+            "    $walk = $hostParent; while ($walk.StartsWith($hostRootPrefix, [StringComparison]::OrdinalIgnoreCase)) { if (((Get-Item -LiteralPath $walk -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw \"Host evidence path contains a reparse point: $walk\" }; $walk = Split-Path -Parent $walk };",
+            "    $hostTemp = $hostTarget + '.vmcopy.tmp'; Remove-Item -LiteralPath $hostTemp -Force -ErrorAction SilentlyContinue;",
+            "    $guestSource = Join-Path $guestOut $relative;",
+            "    & $vmrun @guestOpsArgs CopyFileFromGuestToHost $vmxPath $guestSource $hostTemp 2>&1 | Out-Null;",
+            "    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $hostTemp -PathType Leaf) -or [int64](Get-Item -LiteralPath $hostTemp).Length -ne $expectedLength) { Remove-Item -LiteralPath $hostTemp -Force -ErrorAction SilentlyContinue; $copyWarnings.Add($relative); continue };",
+            "    Move-Item -LiteralPath $hostTemp -Destination $hostTarget -Force -ErrorAction Stop;",
+            "  };",
+            "  if ($agentFinished) { break };",
+            "  Start-Sleep -Seconds 3;",
+            "} while ((Get-Date) -lt $deadline);",
+            "$copyWarnings | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $hostOut 'guestops-copy-warnings.json') -Encoding UTF8;",
+            "if (-not $agentFinished) { Write-Warning 'Guest Agent exit marker was not observed before the VMware Tools collection deadline; partial evidence was retained for collect-output.' };",
+            "$guestOpsArgs = $null; $guestCredential = $null; $global:LASTEXITCODE = 0;"
+        });
+    }
+
+    private static string BuildVmwareGuestOpsCollectCommand(SandboxConfig config, string hostOut)
+    {
+        return string.Join(" ", new[]
+        {
+            BuildClearGuestSecretEnvironment(config),
+            $"$hostOut = {Q(hostOut)};",
+            "$requiredNames = @('events.json', 'agent-summary.json', 'agent.pid', 'agent.exit');",
+            "$missingNames = @($requiredNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $hostOut ([string]$_)) -PathType Leaf) });",
+            "$exitPath = Join-Path $hostOut 'agent.exit';",
+            "$exitBytes = if (Test-Path -LiteralPath $exitPath -PathType Leaf) { [IO.File]::ReadAllBytes($exitPath) } else { [byte[]]@() };",
+            "$zeroByteCount = @($exitBytes | Where-Object { $_ -eq 0 }).Count;",
+            "$exitText = if ($exitBytes.Length -gt 0) { [Text.Encoding]::ASCII.GetString($exitBytes).Trim([char]0, [char]9, [char]10, [char]13, [char]32) } else { '' };",
+            "$exitCode = 0; $exitIsInteger = [int]::TryParse($exitText, [ref]$exitCode);",
+            "$copyWarningPath = Join-Path $hostOut 'guestops-copy-warnings.json';",
+            "$copyWarnings = if (Test-Path -LiteralPath $copyWarningPath -PathType Leaf) { @(Get-Content -LiteralPath $copyWarningPath -Raw | ConvertFrom-Json) } else { @() };",
+            BuildR0OutputFailureInspectionScript("@($hostOut)"),
+            "$statusState = if ($missingNames.Count -gt 0) { 'incomplete-output' } elseif ($zeroByteCount -gt 0 -and $zeroByteCount -eq $exitBytes.Length) { 'invalid-zero-filled-marker' } elseif (-not $exitIsInteger) { 'invalid-exit-marker' } elseif ($exitCode -ne 0) { 'agent-failed' } else { 'completed' };",
+            "$stdoutPath = Join-Path $hostOut 'agent.stdout.log'; $stderrPath = Join-Path $hostOut 'agent.stderr.log';",
+            "$status = [ordered]@{ state = $statusState; exitCode = if ($exitIsInteger) { $exitCode } else { $null }; exitText = $exitText; exitByteLength = $exitBytes.Length; exitZeroByteCount = $zeroByteCount; missingArtifacts = @($missingNames); copyWarnings = @($copyWarnings); stdoutBytes = if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) { [int64](Get-Item -LiteralPath $stdoutPath).Length } else { 0 }; stderrBytes = if (Test-Path -LiteralPath $stderrPath -PathType Leaf) { [int64](Get-Item -LiteralPath $stderrPath).Length } else { 0 }; collectionChannel = 'vmware-guest-operations'; collectionHealth = if ($r0FailureSummary) { 'degraded-output-write-failure' } else { 'ok' }; r0OutputFailureDetected = [bool]$r0FailureSummary; r0OutputFailureSummary = $r0FailureSummary; r0OutputFailure = $r0FailureObject; capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o') };",
+            "$status | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $hostOut 'guest-agent-run-status.json') -Encoding UTF8;",
+            "if ($statusState -ne 'completed') { throw \"VMware Tools guest evidence is incomplete: status=$statusState, missing=$($missingNames -join ','), exit=$exitText. Raw diagnostics: $stdoutPath; $stderrPath; $exitPath\" };",
+            "Write-Host \"Guest output collected through VMware Tools guest operations under $hostOut.\";"
+        });
+    }
+
     private static string BuildLiveOutputSyncCommand(
         SandboxConfig config,
         VirtualizationProvider provider,
@@ -2108,7 +2470,8 @@ public sealed class HyperVRunbookBuilder
         string agentPidPath,
         string agentExitPath,
         string agentTaskName,
-        bool writesDirectlyToHost = false)
+        bool writesDirectlyToHost = false,
+        string? directHostOut = null)
     {
         var hasSyncDeadline = !config.Analysis.DurationUnlimited && config.Analysis.DefaultDurationSeconds > 0;
         var drainGraceSeconds = config.Driver.Enabled
@@ -2126,7 +2489,7 @@ public sealed class HyperVRunbookBuilder
             // not open a WinRM session: a sample that takes the listener down
             // would otherwise turn a completed run into a failed one.
             writesDirectlyToHost
-                ? $"if (Test-Path -LiteralPath (Join-Path {Q(hostOut)} 'agent.pid') -PathType Leaf) {{ Write-Host 'Guest output is written directly into the host folder through the shared folder mapping; live remoting sync is not required.'; return }} else {{ Write-Host 'Shared folder output markers are not visible on the host yet; falling back to the remoting sync.' }};"
+                ? $"if (Test-Path -LiteralPath (Join-Path {Q(directHostOut ?? hostOut)} 'agent.pid') -PathType Leaf) {{ Write-Host 'Guest output is written into the isolated VMware shared-folder staging directory; live remoting sync is not required.'; return }} else {{ Write-Host 'Shared folder staging markers are not visible on the host yet; falling back to the remoting sync.' }};"
                 : string.Empty,
             "$session = $null;",
             BuildGuestSessionAssignment(config, provider, targetVmName),
@@ -2225,11 +2588,12 @@ public sealed class HyperVRunbookBuilder
         string targetVmName,
         string guestOut,
         string hostOut,
-        bool writesDirectlyToHost = false)
+        bool writesDirectlyToHost = false,
+        string? directHostOut = null)
     {
         if (writesDirectlyToHost)
         {
-            return BuildCollectOutputFromHostShareCommand(config, hostOut);
+            return BuildCollectOutputFromHostShareCommand(config, hostOut, directHostOut ?? hostOut);
         }
 
         var command = string.Join(" ", new[]
@@ -2244,7 +2608,8 @@ public sealed class HyperVRunbookBuilder
             $"$hostOut = {Q(hostOut)};",
             "$requiredNames = @('events.json', 'agent-summary.json', 'agent.pid', 'agent.exit');",
             "$hostOutputReady = @($requiredNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $hostOut $_) -PathType Leaf) }).Count -eq 0;",
-            "if ($hostOutputReady) { $exitPath = Join-Path $hostOut 'agent.exit'; $exitText = (Get-Content -LiteralPath $exitPath -Raw -ErrorAction SilentlyContinue).Trim(); $exitCode = 0; if (-not [int]::TryParse($exitText, [ref]$exitCode)) { throw \"Guest Agent output is already synchronized but agent.exit is invalid: $exitPath\" }; if ($exitCode -ne 0) { throw \"Guest Agent output is already synchronized but exited with code $exitCode.\" }; $statusPath = Join-Path $hostOut 'guest-agent-run-status.json'; $status = [ordered]@{ state = 'completed'; exitCode = $exitCode; exitText = $exitText; exitByteLength = [int64](Get-Item -LiteralPath $exitPath).Length; exitZeroByteCount = 0; missingArtifacts = @(); stdoutBytes = if (Test-Path -LiteralPath (Join-Path $hostOut 'agent.stdout.log') -PathType Leaf) { [int64](Get-Item -LiteralPath (Join-Path $hostOut 'agent.stdout.log')).Length } else { 0 }; stderrBytes = if (Test-Path -LiteralPath (Join-Path $hostOut 'agent.stderr.log') -PathType Leaf) { [int64](Get-Item -LiteralPath (Join-Path $hostOut 'agent.stderr.log')).Length } else { 0 }; capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }; $status | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $statusPath -Encoding UTF8; Write-Host \"Final guest output was already synchronized by live output sync under $hostOut.\"; return; }",
+            BuildR0OutputFailureInspectionScript("@($hostOut)"),
+            "if ($hostOutputReady) { $exitPath = Join-Path $hostOut 'agent.exit'; $exitText = (Get-Content -LiteralPath $exitPath -Raw -ErrorAction SilentlyContinue).Trim(); $exitCode = 0; if (-not [int]::TryParse($exitText, [ref]$exitCode)) { throw \"Guest Agent output is already synchronized but agent.exit is invalid: $exitPath\" }; if ($exitCode -ne 0) { throw \"Guest Agent output is already synchronized but exited with code $exitCode.\" }; $statusPath = Join-Path $hostOut 'guest-agent-run-status.json'; $status = [ordered]@{ state = 'completed'; exitCode = $exitCode; exitText = $exitText; exitByteLength = [int64](Get-Item -LiteralPath $exitPath).Length; exitZeroByteCount = 0; missingArtifacts = @(); stdoutBytes = if (Test-Path -LiteralPath (Join-Path $hostOut 'agent.stdout.log') -PathType Leaf) { [int64](Get-Item -LiteralPath (Join-Path $hostOut 'agent.stdout.log')).Length } else { 0 }; stderrBytes = if (Test-Path -LiteralPath (Join-Path $hostOut 'agent.stderr.log') -PathType Leaf) { [int64](Get-Item -LiteralPath (Join-Path $hostOut 'agent.stderr.log')).Length } else { 0 }; collectionHealth = if ($r0FailureSummary) { 'degraded-output-write-failure' } else { 'ok' }; r0OutputFailureDetected = [bool]$r0FailureSummary; r0OutputFailureSummary = $r0FailureSummary; r0OutputFailure = $r0FailureObject; capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }; $status | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $statusPath -Encoding UTF8; Write-Host \"Final guest output was already synchronized by live output sync under $hostOut.\"; return; }",
             BuildGuestSessionAssignment(config, provider, targetVmName),
             "try {",
             $"$guestOut = {Q(guestOut)};",
@@ -2256,12 +2621,13 @@ public sealed class HyperVRunbookBuilder
             "$requiredNames = @('events.json', 'agent-summary.json', 'agent.pid', 'agent.exit');",
             "$missingNames = @($requiredNames | ForEach-Object { $candidate = [string]$_; if (@(Get-ChildItem -LiteralPath $hostOut -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $candidate }).Count -eq 0) { $candidate } });",
             "$exitLocalPath = Join-Path $hostOut 'agent.exit'; $exitBytes = if (Test-Path -LiteralPath $exitLocalPath -PathType Leaf) { [IO.File]::ReadAllBytes($exitLocalPath) } else { [byte[]]@() };",
+            BuildR0OutputFailureInspectionScript("@($hostOut)"),
             "$zeroByteCount = @($exitBytes | Where-Object { $_ -eq 0 }).Count; $exitHex = if ($exitBytes.Length -gt 0) { [BitConverter]::ToString($exitBytes) } else { '' }; $exitRawText = if ($exitBytes.Length -gt 0) { [Text.Encoding]::ASCII.GetString($exitBytes) } else { '' }; $exitText = $exitRawText.Trim([char]0, [char]9, [char]10, [char]13, [char]32); $parsedExitCode = 0; $exitIsInteger = [int]::TryParse($exitText, [ref]$parsedExitCode);",
             "$stdoutLocalPath = Join-Path $hostOut 'agent.stdout.log'; $stderrLocalPath = Join-Path $hostOut 'agent.stderr.log'; $stdoutBytes = if (Test-Path -LiteralPath $stdoutLocalPath -PathType Leaf) { (Get-Item -LiteralPath $stdoutLocalPath).Length } else { 0 }; $stderrBytes = if (Test-Path -LiteralPath $stderrLocalPath -PathType Leaf) { (Get-Item -LiteralPath $stderrLocalPath).Length } else { 0 };",
             "$statusState = if ($zeroByteCount -gt 0 -and $zeroByteCount -eq $exitBytes.Length -and $exitBytes.Length -gt 0) { 'invalid-zero-filled-marker' } elseif (-not $exitIsInteger) { 'invalid-exit-marker' } elseif ($parsedExitCode -ne 0) { 'agent-failed' } elseif ($missingNames.Count -gt 0) { 'incomplete-output' } else { 'completed' };",
-            "$status = [ordered]@{ state = $statusState; exitCode = if ($exitIsInteger) { $parsedExitCode } else { $null }; exitText = $exitText; exitByteLength = $exitBytes.Length; exitZeroByteCount = $zeroByteCount; exitHex = $exitHex; missingArtifacts = @($missingNames); stdoutBytes = $stdoutBytes; stderrBytes = $stderrBytes; capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }; $status | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $hostOut 'guest-agent-run-status.json') -Encoding UTF8;",
-            "Write-Host \"Final guest output collected under $hostGuestOut. Guest Agent status=$statusState, exit=$exitText, missing=$($missingNames -join ',').\";",
-            "if ($missingNames.Count -gt 0 -or -not $exitIsInteger -or $parsedExitCode -ne 0) { throw \"Guest Agent output collected but run failed: status=$statusState, exit=$exitText, missing=$($missingNames -join ','). Raw diagnostics: $stdoutLocalPath; $stderrLocalPath; $exitLocalPath\" }",
+            "$status = [ordered]@{ state = $statusState; exitCode = if ($exitIsInteger) { $parsedExitCode } else { $null }; exitText = $exitText; exitByteLength = $exitBytes.Length; exitZeroByteCount = $zeroByteCount; exitHex = $exitHex; missingArtifacts = @($missingNames); stdoutBytes = $stdoutBytes; stderrBytes = $stderrBytes; collectionHealth = if ($r0FailureSummary) { 'degraded-output-write-failure' } else { 'ok' }; r0OutputFailureDetected = [bool]$r0FailureSummary; r0OutputFailureSummary = $r0FailureSummary; r0OutputFailure = $r0FailureObject; capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }; $status | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $hostOut 'guest-agent-run-status.json') -Encoding UTF8;",
+            "Write-Host \"Final guest output collected under $hostGuestOut. Guest Agent status=$statusState, exit=$exitText, missing=$($missingNames -join ','), r0Failure=$r0FailureSummary.\";",
+            "if ($missingNames.Count -gt 0 -or -not $exitIsInteger -or $parsedExitCode -ne 0) { throw \"Guest Agent output collected but run failed: status=$statusState, exit=$exitText, missing=$($missingNames -join ','). R0 output failure: $(if ($r0FailureSummary) { $r0FailureSummary } else { 'none' }). Raw diagnostics: $stdoutLocalPath; $stderrLocalPath; $exitLocalPath\" }",
             "}",
             "finally { if ($session) { try { Remove-PSSession $session -ErrorAction Stop } catch { Write-Warning \"Guest PowerShell session cleanup failed after final output collection; primary step status is preserved: $($_.Exception.Message)\" } } }"
         });
@@ -2277,7 +2643,10 @@ public sealed class HyperVRunbookBuilder
     /// took the WinRM listener down must not be able to invalidate evidence
     /// that already reached the host.
     /// </summary>
-    private static string BuildCollectOutputFromHostShareCommand(SandboxConfig config, string hostOut)
+    private static string BuildCollectOutputFromHostShareCommand(
+        SandboxConfig config,
+        string hostOut,
+        string sharedHostOut)
     {
         // The Guest Agent runs the sample for the requested duration and only
         // then serializes events.json, agent-summary.json and agent.exit. Its
@@ -2293,12 +2662,12 @@ public sealed class HyperVRunbookBuilder
         return string.Join(" ", new[]
         {
             BuildClearGuestSecretEnvironment(config),
-            $"$hostOut = {Q(hostOut)};",
+            $"$hostOut = {Q(hostOut)}; $sharedHostOut = {Q(sharedHostOut)};",
             "New-Item -ItemType Directory -Force -Path $hostOut | Out-Null;",
             "$requiredNames = @('events.json', 'agent-summary.json', 'agent.pid', 'agent.exit');",
             $"$deadline = (Get-Date).AddSeconds({waitSeconds});",
             "do {",
-            "$missingNames = @($requiredNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $hostOut ([string]$_)) -PathType Leaf) });",
+            "$missingNames = @($requiredNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $sharedHostOut ([string]$_)) -PathType Leaf) });",
             "if ($missingNames.Count -eq 0) { break };",
             "if ((Get-Date) -ge $deadline) { break };",
             "Start-Sleep -Seconds 3;",
@@ -2307,28 +2676,78 @@ public sealed class HyperVRunbookBuilder
             // run finished. Re-read the artifact set once after it appears:
             // a shared-folder write can lag the check by a fraction of a second,
             // and the files may land in a different order across the share.
-            "if (-not (Test-Path -LiteralPath (Join-Path $hostOut 'agent.exit') -PathType Leaf)) { Start-Sleep -Seconds 2 };",
-            "$missingNames = @($requiredNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $hostOut ([string]$_)) -PathType Leaf) });",
+            "if (-not (Test-Path -LiteralPath (Join-Path $sharedHostOut 'agent.exit') -PathType Leaf)) { Start-Sleep -Seconds 2 };",
+            "$missingNames = @($requiredNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $sharedHostOut ([string]$_)) -PathType Leaf) });",
+            // Snapshot the guest-writable staging tree into the durable host
+            // evidence directory before writing status.  After this point the
+            // guest can no longer mutate the copy consumed by report import.
+            // Copy file-by-file: a single locked or delete-on-close racing
+            // artifact (measured: dropped-file duplicate *.2.exe on
+            // Win32.Nivdort) must not abort the whole tree.  A file that
+            // vanished mid-copy is a benign guest-side race; a failed copy of
+            // a non-required artifact is a warning; only a failed copy of a
+            // required artifact fails the step below.
+            "$copyFailures = @();",
+            "Get-ChildItem -LiteralPath $sharedHostOut -Recurse -Force | ForEach-Object {",
+            "  $rel = $_.FullName.Substring($sharedHostOut.Length).TrimStart('\\');",
+            "  $dest = Join-Path $hostOut $rel;",
+            "  if ($_.PSIsContainer) { New-Item -ItemType Directory -Force -Path $dest | Out-Null; return };",
+            // Capture the source path before the try: a catch block rebinds $_
+            // to the ErrorRecord, so $_.FullName inside catch is null and would
+            // itself throw a parameter-binding error under the fail-fast
+            // wrapper (measured on Win32.Nivdort: the racing *.2.exe duplicate
+            // made the whole collect step fail with a null-LiteralPath error).
+            "  $sourceItemPath = $_.FullName;",
+            "  try { Copy-Item -LiteralPath $sourceItemPath -Destination $dest -Force -ErrorAction Stop }",
+            "  catch { if (-not (Test-Path -LiteralPath $sourceItemPath -PathType Leaf)) { return }; $script:copyFailures += $rel }",
+            "};",
+            "$missingCopies = @($requiredNames | Where-Object { (Test-Path -LiteralPath (Join-Path $sharedHostOut ([string]$_)) -PathType Leaf) -and -not (Test-Path -LiteralPath (Join-Path $hostOut ([string]$_)) -PathType Leaf) });",
+            // Import the R0Collector output-failure sidecar when it exists so
+            // the step failure and the status file carry the real write-failure
+            // evidence (failureType/win32Error/lineNumber) instead of a bare
+            // incomplete-output state.
+            BuildR0OutputFailureInspectionScript("@($hostOut, $sharedHostOut)"),
             "$exitLocalPath = Join-Path $hostOut 'agent.exit'; $exitBytes = if (Test-Path -LiteralPath $exitLocalPath -PathType Leaf) { [IO.File]::ReadAllBytes($exitLocalPath) } else { [byte[]]@() };",
             "$zeroByteCount = @($exitBytes | Where-Object { $_ -eq 0 }).Count; $exitRawText = if ($exitBytes.Length -gt 0) { [Text.Encoding]::ASCII.GetString($exitBytes) } else { '' }; $exitText = $exitRawText.Trim([char]0, [char]9, [char]10, [char]13, [char]32); $parsedExitCode = 0; $exitIsInteger = [int]::TryParse($exitText, [ref]$parsedExitCode);",
             "$stdoutLocalPath = Join-Path $hostOut 'agent.stdout.log'; $stderrLocalPath = Join-Path $hostOut 'agent.stderr.log'; $stdoutBytes = if (Test-Path -LiteralPath $stdoutLocalPath -PathType Leaf) { (Get-Item -LiteralPath $stdoutLocalPath).Length } else { 0 }; $stderrBytes = if (Test-Path -LiteralPath $stderrLocalPath -PathType Leaf) { (Get-Item -LiteralPath $stderrLocalPath).Length } else { 0 };",
-            "$statusState = if ($missingNames.Count -gt 0) { 'incomplete-output' } elseif ($zeroByteCount -gt 0 -and $zeroByteCount -eq $exitBytes.Length -and $exitBytes.Length -gt 0) { 'invalid-zero-filled-marker' } elseif (-not $exitIsInteger) { 'invalid-exit-marker' } elseif ($parsedExitCode -ne 0) { 'agent-failed' } else { 'completed' };",
-            "$status = [ordered]@{ state = $statusState; exitCode = if ($exitIsInteger) { $parsedExitCode } else { $null }; exitText = $exitText; exitByteLength = $exitBytes.Length; exitZeroByteCount = $zeroByteCount; missingArtifacts = @($missingNames); stdoutBytes = $stdoutBytes; stderrBytes = $stderrBytes; collectionChannel = 'vmware-shared-folder'; capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o') };",
+            "$statusState = if ($missingNames.Count -gt 0 -or $missingCopies.Count -gt 0) { 'incomplete-output' } elseif ($zeroByteCount -gt 0 -and $zeroByteCount -eq $exitBytes.Length -and $exitBytes.Length -gt 0) { 'invalid-zero-filled-marker' } elseif (-not $exitIsInteger) { 'invalid-exit-marker' } elseif ($parsedExitCode -ne 0) { 'agent-failed' } else { 'completed' };",
+            "$status = [ordered]@{ state = $statusState; exitCode = if ($exitIsInteger) { $parsedExitCode } else { $null }; exitText = $exitText; exitByteLength = $exitBytes.Length; exitZeroByteCount = $zeroByteCount; missingArtifacts = @($missingNames); copyWarnings = @($copyFailures); copyMissing = @($missingCopies); stdoutBytes = $stdoutBytes; stderrBytes = $stderrBytes; collectionChannel = 'vmware-shared-folder'; collectionHealth = if ($r0FailureSummary) { 'degraded-output-write-failure' } else { 'ok' }; r0OutputFailureDetected = [bool]$r0FailureSummary; r0OutputFailureSummary = $r0FailureSummary; r0OutputFailure = $r0FailureObject; capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o') };",
             "$status | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $hostOut 'guest-agent-run-status.json') -Encoding UTF8;",
-"Write-Host \"Guest output was written directly into the host folder through the shared folder mapping. Guest Agent status=$statusState, exit=$exitText, missing=$($missingNames -join ',').\";",
+            "Write-Host \"Guest output was written directly into the host folder through the shared folder mapping. Guest Agent status=$statusState, exit=$exitText, missing=$($missingNames -join ','), copiesMissing=$($missingCopies -join ','), copyWarnings=$($copyFailures.Count), r0Failure=$r0FailureSummary.\";",
             // A sample that terminates the Guest Agent leaves partial evidence
             // behind: the ETW trace, the packet capture and the status file
-            // are written by independent producers and are already on the
-            // host. Throwing here would discard all of it, because the next
-            // step reverts the snapshot. Report the incomplete state instead
-            // and let the importer degrade to what actually survived.
-            "if ($missingNames.Count -gt 0 -or -not $exitIsInteger -or $parsedExitCode -ne 0) { Write-Warning \"Guest output reached the host folder through the shared folder but the run is incomplete: status=$statusState, exit=$exitText, missing=$($missingNames -join ','). Raw diagnostics: $stdoutLocalPath; $stderrLocalPath; $exitLocalPath\" }",
+            // are written by independent producers and are already copied to
+            // the durable host folder above.  The step must still fail so the
+            // runbook record never shows 22/22 exit 0 for an incomplete run;
+            // the thrown message carries the R0 sidecar evidence so the first
+            // failure line is actionable.
+            "if ($missingNames.Count -gt 0 -or $missingCopies.Count -gt 0 -or -not $exitIsInteger -or $parsedExitCode -ne 0) { throw \"Guest output reached the host folder through the shared folder but the run is incomplete: status=$statusState, exit=$exitText, missing=$($missingNames -join ','), copiesMissing=$($missingCopies -join ','). R0 output failure: $(if ($r0FailureSummary) { $r0FailureSummary } else { 'none' }). Raw diagnostics: $stdoutLocalPath; $stderrLocalPath; $exitLocalPath\" }",
             "$global:LASTEXITCODE = 0;"
         });
     }
-    /// Inputs are mode and target VM, processing appends stop/remove commands,
-    /// and the method returns no value.
+
+    /// <summary>
+    /// Builds the PowerShell fragment that imports the R0Collector
+    /// output-failure sidecar when it survived collection.  Inputs are a
+    /// PowerShell array expression of directories to inspect; processing
+    /// defines $r0FailureSummary (one-line evidence) and $r0FailureObject (the
+    /// parsed sidecar) as empty/null when the sidecar is absent, so status JSON
+    /// stays valid without the failure.
     /// </summary>
+    private static string BuildR0OutputFailureInspectionScript(string rootsExpression)
+    {
+        return "$r0FailureSummary = ''; $r0FailureObject = $null; " +
+            $"foreach ($r0FailureRoot in {rootsExpression}) {{ " +
+            "$r0FailurePath = Join-Path $r0FailureRoot 'driver-events.jsonl.failure.json'; " +
+            "if (Test-Path -LiteralPath $r0FailurePath -PathType Leaf) { " +
+            "try { $r0FailureObject = Get-Content -LiteralPath $r0FailurePath -Raw -ErrorAction Stop | ConvertFrom-Json } catch { $r0FailureObject = $null }; " +
+            "if ($null -ne $r0FailureObject) { " +
+            "$r0FailureSummary = 'failureType=' + $r0FailureObject.failureType + ' win32Error=' + $r0FailureObject.win32Error + ' errno=' + $r0FailureObject.errno + ' lineNumber=' + $r0FailureObject.lineNumber + ' bytesAttempted=' + $r0FailureObject.bytesAttempted + ' rotatedSegmentCount=' + $r0FailureObject.rotatedSegmentCount + ' collectorExitCode=' + $r0FailureObject.exitCode; " +
+            "break } } }";
+    }
+
+    /// <summary>
+    /// Adds steps that stop the analysis VM, restore the clean baseline, and
     private static void AddCleanupSteps(
         List<SandboxRunbookStep> steps,
         SandboxConfig config,
@@ -2340,10 +2759,21 @@ public sealed class HyperVRunbookBuilder
     {
         if (provider is VirtualizationProvider.HyperV)
         {
-            steps.Add(Step("stop-vm", "Stop analysis VM", $"Stop-VM -Name {Q(targetVmName)} -TurnOff -Force"));
+            steps.Add(Step("stop-vm", "Stop analysis VM", BuildStopHyperVVmAndWaitCommand(targetVmName)));
             if (usesTemporaryVm)
             {
                 steps.Add(Step("remove-temp-vm", "Remove temporary VM registration", $"Remove-VM -Name {Q(targetVmName)} -Force"));
+            }
+            else
+            {
+                // The golden VM is restored before launch, but sample activity
+                // mutates its current differencing state.  Always restore the
+                // clean checkpoint after collection so a failed/canceled run
+                // cannot leave persistence or host artifacts in the baseline.
+                steps.Add(Step(
+                    "restore-checkpoint-after-run",
+                    "Restore clean Hyper-V checkpoint after run",
+                    BuildRestoreHyperVSnapshotCommand(config.HyperV.GoldenVmName, config.HyperV.GoldenSnapshotName)));
             }
 
             return;

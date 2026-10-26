@@ -173,6 +173,8 @@ public static class SandboxConfigLoader
             VmxPath = ExpandOptionalPath(config.VMware.VmxPath, repositoryRoot) ?? string.Empty,
             SnapshotName = (config.VMware.SnapshotName ?? string.Empty).Trim(),
             VmrunPath = ExpandCommandPath(config.VMware.VmrunPath, repositoryRoot),
+            VixHelperPath = ExpandOptionalPath(config.VMware.VixHelperPath, repositoryRoot)
+                ?? FindBundledVixHelper(repositoryRoot) ?? string.Empty,
             VmType = (config.VMware.VmType ?? string.Empty).Trim().ToLowerInvariant(),
             GuestRemoting = NormalizeGuestRemoting(
                 config.VMware.GuestRemoting ?? new GuestRemotingConfig
@@ -294,6 +296,26 @@ public static class SandboxConfigLoader
         {
             Path.Combine(repositoryRoot, "driver", "KSword.Sandbox.Driver", "x64", "Release", "KSword.Sandbox.Driver.sys"),
             Path.Combine(repositoryRoot, "driver", "KSword.Sandbox.Driver", "x64", "Debug", "KSword.Sandbox.Driver.sys")
+        };
+
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    /// <summary>
+    /// Resolves the VIX helper from supported portable package layouts. A
+    /// missing helper stays missing so VMware Block fails before VM startup.
+    /// </summary>
+    private static string? FindBundledVixHelper(string repositoryRoot)
+    {
+        var baseDirectory = Path.GetFullPath(AppContext.BaseDirectory);
+        var candidates = new[]
+        {
+            Path.Combine(baseDirectory, "vix_probe.exe"),
+            Path.Combine(baseDirectory, "tools", "vix-helper", "vix_probe.exe"),
+            Path.GetFullPath(Path.Combine(baseDirectory, "..", "tools", "vix-helper", "vix_probe.exe")),
+            Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", "tools", "vix-helper", "vix_probe.exe")),
+            Path.GetFullPath(Path.Combine(baseDirectory, "..", "vix-helper", "vix_probe.exe")),
+            Path.Combine(repositoryRoot, "tools", "vix-helper", "vix_probe.exe")
         };
 
         return candidates.FirstOrDefault(File.Exists);

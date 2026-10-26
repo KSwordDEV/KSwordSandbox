@@ -9,6 +9,10 @@ Hyper-V、VMware、QEMU 安装/运行流程。新后端的详细配置和 Window
 
 ## 当前 MVP 状态（current MVP status）
 
+2026-10-26 当前未提交工作树的验证结果、网络恢复和原始证据保留修复，以及指定 VMware
+实验室的破坏性样本实测阻断项，见 [`current-validation-2026-10-26.md`](current-validation-2026-10-26.md)。
+历史 Live 记录不能代替本轮新 job ID。
+
 当前最小可用链路已经围绕本地 WebUI/API 和准备好的 Windows 10 golden VM 成形，宿主 provider 可选 Hyper-V、VMware Workstation Pro（`vmType=ws`）或 QEMU WHPX：
 
 1. 操作者在 WebUI/API 中选择或本地上传 `.exe`，文件保存在仓库外 runtime root。

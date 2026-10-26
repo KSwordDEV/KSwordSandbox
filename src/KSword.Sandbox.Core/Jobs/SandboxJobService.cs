@@ -208,7 +208,8 @@ public sealed partial class SandboxJobService
             provider,
             normalizedSubmission.GoldenSnapshotName,
             normalizedSubmission.MachineDefinitionPath,
-            normalizedSubmission.QemuDiskFormat);
+            normalizedSubmission.QemuDiskFormat,
+            normalizedSubmission.NetworkPolicy ?? config.Guest.NetworkPolicy);
         var jobId = Guid.NewGuid();
         var jobRoot = GetJobRoot(jobId);
         Directory.CreateDirectory(jobRoot);
@@ -549,7 +550,8 @@ public sealed partial class SandboxJobService
                 provider,
                 normalizedSubmission.GoldenSnapshotName,
                 normalizedSubmission.MachineDefinitionPath,
-                normalizedSubmission.QemuDiskFormat);
+                normalizedSubmission.QemuDiskFormat,
+                normalizedSubmission.NetworkPolicy ?? config.Guest.NetworkPolicy);
         }
 
         var jobRoot = GetJobRoot(jobId);
@@ -1059,6 +1061,11 @@ public sealed partial class SandboxJobService
     {
         var sample = job.Sample ?? throw new InvalidOperationException("Job does not have sample metadata.");
         var runbook = job.Runbook ?? throw new InvalidOperationException("Job does not have a runbook.");
+        // Captured before ReleaseTransientReportBuffers clears the list: the
+        // evidence sweep must not run for a regeneration that imported no
+        // guest events at all (a failed import keeps raw files for
+        // forensics).
+        var importedGuestEventCount = guestEvents.Count;
         var jobRoot = GetJobRoot(job.JobId);
         Directory.CreateDirectory(jobRoot);
 
@@ -1087,7 +1094,8 @@ public sealed partial class SandboxJobService
         var artifactIndex = artifactIndexBuilder.Build(job.JobId, jobRoot);
         events.AddRange(BuildHostArtifactImportEvents(jobConfig.ArtifactCollection, jobRoot, guestEventsPath, artifactIndex, events));
 
-        var fullEvents = SampleCorrelationClassifier.Apply(events.OrderBy(evt => evt.Timestamp), sample.FullPath);
+        var fullEvents = RansomwareFilePairClassifier.Apply(
+            SampleCorrelationClassifier.Apply(events.OrderBy(evt => evt.Timestamp), sample.FullPath));
         var rawFindings = ruleEngine.Classify(fullEvents);
         var findings = ReportEventSampler.SanitizeFindings(rawFindings);
         var driverEventPaths = importSummary?.DriverPaths ?? [];
@@ -1152,6 +1160,22 @@ public sealed partial class SandboxJobService
         }
 
         WriteHtmlReports(jobRoot, report, jobConfig.ArtifactCollection);
+
+        // Classification is complete, but report.json contains only sampled
+        // events. Record candidate host intermediates while retaining their
+        // raw bytes for later import and audit. A regeneration that imported
+        // no guest events does not need a new retention manifest.
+        if (importedGuestEventCount > 0)
+        {
+            var slimming = HostIntermediateEvidenceSweeper.Sweep(
+                jobRoot,
+                job.Submission.KeepRawEvidence ?? jobConfig.ArtifactCollection.KeepRawEvidence,
+                job.JobId);
+            messages = AppendMessage(
+                messages,
+                $"已保留原始 R0/ETL 证据供重新导入；report.json 仅包含采样事件。保留清单见 {Path.GetFileName(slimming.ManifestPath)}。/ " +
+                $"Raw R0/ETL evidence was retained for re-import; report.json contains sampled events only. See {Path.GetFileName(slimming.ManifestPath)}.");
+        }
 
         return job with
         {
@@ -1393,6 +1417,7 @@ public sealed partial class SandboxJobService
         // the sample had never run.
         var failureMarker = SafeEnumerateFiles(guestRoot, path =>
                 string.Equals(Path.GetFileName(path), "guest-agent-run-status.json", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetFileName(path), "sample-launch-proof.json", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(Path.GetFileName(path), "agent.stderr.log", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(Path.GetFileName(path), "agent.exit", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(Path.GetFileName(path), "sample-runtime-preflight.json", StringComparison.OrdinalIgnoreCase) ||
@@ -2503,6 +2528,7 @@ public sealed partial class SandboxJobService
     private SandboxConfig BuildJobConfig(SandboxSubmission submission, int duration)
     {
         var provider = submission.Provider ?? config.Virtualization.Provider;
+        var networkPolicy = submission.NetworkPolicy ?? config.Guest.NetworkPolicy;
         return config with
         {
             Virtualization = config.Virtualization with { Provider = provider },
@@ -2517,7 +2543,12 @@ public sealed partial class SandboxJobService
                 SnapshotName = submission.GoldenSnapshotName ?? config.VMware.SnapshotName,
                 VmxPath = provider is VirtualizationProvider.VMware
                     ? submission.MachineDefinitionPath ?? config.VMware.VmxPath
-                    : config.VMware.VmxPath
+                    : config.VMware.VmxPath,
+                // Blocked VMware jobs use VMware Tools guest operations for
+                // evidence transfer without publishing a host shared folder.
+                UseHostOutputShare = provider is VirtualizationProvider.VMware && networkPolicy is SandboxNetworkPolicy.Block
+                    ? false
+                    : config.VMware.UseHostOutputShare
             },
             Qemu = config.Qemu with
             {
@@ -2533,7 +2564,8 @@ public sealed partial class SandboxJobService
             Guest = config.Guest with
             {
                 UserName = submission.GuestUserName ?? config.Guest.UserName,
-                WorkingDirectory = submission.GuestWorkingDirectory ?? config.Guest.WorkingDirectory
+                WorkingDirectory = submission.GuestWorkingDirectory ?? config.Guest.WorkingDirectory,
+                NetworkPolicy = submission.NetworkPolicy ?? config.Guest.NetworkPolicy
             },
             Paths = config.Paths with
             {

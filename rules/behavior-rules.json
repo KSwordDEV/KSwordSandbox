@@ -215,6 +215,10 @@
         ".vbs",
         ".hta"
       ],
+      "excludePathContains": [
+        "__PSScriptPolicyTest_",
+        "\\CLR_v4.0\\UsageLogs\\"
+      ],
       "tags": [
         "filesystem",
         "executable-drop"
@@ -299,11 +303,20 @@
       "severity": "medium",
       "summary": "The guest agent observed a new TCP connection after sample execution.",
       "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“观察到出站 TCP 活动”；请结合进程、端点、协议字段和样本上下文复核。",
-      "mitreTechniqueId": "T1105",
-      "mitreTechniqueName": "Ingress Tool Transfer",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Application Layer Protocol: Web Protocols",
       "eventTypes": [
         "network.tcp"
       ],
+      "dataEquals": {
+        "sampleCorrelation": [
+          "confirmed",
+          "probable"
+        ],
+        "sampleOwnerPidMatched": [
+          "true"
+        ]
+      },
       "tags": [
         "network"
       ]
@@ -1087,27 +1100,16 @@
       "title": "Temp/AppData or executable file drop",
       "titleZh": "临时目录或用户目录投放可执行文件",
       "severity": "medium",
-      "summary": "A file write targeted Temp/AppData or used an executable, library, driver, or script extension; the current rule schema treats path fragments as OR conditions.",
-      "summaryZh": "文件遥测显示在 Temp、AppData 等用户可写位置投放可执行或脚本文件；请结合进程树、文件来源和后续执行证据复核。",
+      "summary": "A file write targeted Temp/AppData and used an executable, library, driver, or script extension; both the directory and the extension must match.",
+      "summaryZh": "文件遥测显示在 Temp、AppData 等用户可写位置投放可执行或脚本文件；目录与扩展名必须同时命中，请结合进程树、文件来源和后续执行证据复核。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
         "file.created",
         "file.modified"
       ],
-      "containsPath": [
-        "\\Temp\\",
-        "\\AppData\\",
-        "%TEMP%",
-        "%APPDATA%",
-        ".exe",
-        ".dll",
-        ".sys",
-        ".ps1",
-        ".vbs",
-        ".hta",
-        ".bat",
-        ".cmd"
+      "pathRegex": [
+        "(?:\\\\Temp\\\\|\\\\AppData\\\\|%TEMP%|%APPDATA%).*\\.(?:exe|dll|sys|ps1|vbs|hta|bat|cmd)$"
       ],
       "tags": [
         "filesystem",
@@ -1121,6 +1123,8 @@
       ],
       "excludePathContains": [
         "\\KSwordSandbox\\",
+        "__PSScriptPolicyTest_",
+        "\\CLR_v4.0\\UsageLogs\\",
         "\\Windows\\System32\\config\\SOFTWARE",
         "\\Windows\\System32\\config\\SYSTEM",
         "\\Windows\\System32\\config\\SECURITY",
@@ -3023,6 +3027,10 @@
         "filesystem",
         "file-drop",
         "script"
+      ],
+      "excludePathContains": [
+        "__PSScriptPolicyTest_",
+        "\\CLR_v4.0\\UsageLogs\\"
       ]
     },
     {
@@ -3030,8 +3038,8 @@
       "title": "System directory executable write",
       "titleZh": "System 目录 executable 写入",
       "severity": "medium",
-      "summary": "A file write touched Windows system directories or executable-like extensions; inspect evidence to distinguish benign installers from payload placement.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“System 目录 executable 写入”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summary": "A file write targeted Windows System32 and used an executable, library, or driver extension; both the directory and the extension must match.",
+      "summaryZh": "文件遥测显示写入 Windows System32 且扩展名为可执行文件、库或驱动；目录与扩展名必须同时命中，请结合进程和样本上下文复核。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
@@ -3040,10 +3048,10 @@
       ],
       "containsPath": [
         "\\Windows\\System32\\",
-        "\\Windows\\SysWOW64\\",
-        ".exe",
-        ".dll",
-        ".sys"
+        "\\Windows\\SysWOW64\\"
+      ],
+      "pathRegex": [
+        "\\.(?:exe|dll|sys)$"
       ],
       "tags": [
         "filesystem",
@@ -3057,6 +3065,8 @@
       ],
       "excludePathContains": [
         "\\KSwordSandbox\\",
+        "__PSScriptPolicyTest_",
+        "\\CLR_v4.0\\UsageLogs\\",
         "\\Windows\\System32\\config\\SOFTWARE",
         "\\Windows\\System32\\config\\SYSTEM",
         "\\Windows\\System32\\config\\SECURITY",
@@ -4054,6 +4064,10 @@
         "filesystem",
         "download",
         "stage"
+      ],
+      "excludePathContains": [
+        "__PSScriptPolicyTest_",
+        "\\CLR_v4.0\\UsageLogs\\"
       ]
     },
     {
@@ -10511,6 +10525,7 @@
           "\\ProgramData\\",
           "\\Downloads\\",
           "%APPDATA%",
+          "%LOCALAPPDATA%",
           "%TEMP%",
           "%PUBLIC%"
         ],
@@ -10519,14 +10534,16 @@
           "\\Temp\\",
           "\\Users\\Public\\",
           "\\ProgramData\\",
-          "\\Downloads\\"
+          "\\Downloads\\",
+          "%LOCALAPPDATA%"
         ],
         "details": [
           "\\AppData\\",
           "\\Temp\\",
           "\\Users\\Public\\",
           "\\ProgramData\\",
-          "\\Downloads\\"
+          "\\Downloads\\",
+          "%LOCALAPPDATA%"
         ]
       },
       "evidenceFields": [
@@ -12852,6 +12869,8 @@
         "RESTORE_FILES",
         "DECRYPT_INSTRUCTIONS",
         "HOW_TO_DECRYPT",
+        "HOW_TO_DECYPHER",
+        "HOW_TO_DECIPHER",
         "HELP_DECRYPT",
         "FILES_ENCRYPTED",
         "YOUR_FILES",
@@ -37714,6 +37733,156 @@
       "dataEquals": {"featureCluster": ["process-injection"]},
       "evidenceFields": ["eventType", "path", "data.featureCluster", "data.evidenceCount", "data.signals", "data.runtimeCorrelationRequired"],
       "tags": ["static", "capability", "process-injection", "triage"]
+    },
+    {
+      "id": "c2-static-ioc-corroborated-egress",
+      "title": "C2 egress matches a static sample indicator",
+      "titleZh": "外联目标命中样本静态 IOC",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A DNS or TCP egress row inside the sample lifecycle targeted an endpoint that exactly matches a network indicator extracted from the submitted sample. This joins the sample's own strings to the observed destination instead of leaving the flow ownerless.",
+      "summaryZh": "样本生命周期内出现 DNS 或 TCP 外联，且目标与样本静态字符串中提取的网络 IOC 精确一致；该规则把样本自身字符串与观测到的目标直接关联，而不是把连接留作无主证据。",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "Application Layer Protocol: DNS",
+      "eventTypes": [
+        "dns.query",
+        "network.tcp",
+        "pcap.dns",
+        "pcap.flow"
+      ],
+      "allDataEquals": {
+        "pcapCorrelationStaticIocMatched": ["true"],
+        "pcapCorrelationDnsCorroborated": ["false"],
+        "sampleCorrelation": ["probable", "confirmed"]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.pcapCorrelationStaticIoc",
+        "data.sampleCorrelation",
+        "data.sampleCorrelationReason",
+        "data.remote",
+        "data.remoteAddress",
+        "data.remotePort"
+      ],
+      "tags": [
+        "network",
+        "c2",
+        "dns",
+        "static-ioc",
+        "high-signal"
+      ]
+    },
+    {
+      "id": "sample-child-process-spawned",
+      "title": "Child process spawned by the sample process tree",
+      "titleZh": "样本进程树启动子进程",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A process identity row was created with a parent PID that the correlation stage attributed to the submitted sample's process tree.",
+      "summaryZh": "进程身份事件显示其父 PID 属于样本进程树；该事件由相关阶段归因，而不是仅凭进程名猜测。",
+      "mitreTechniqueId": "T1106",
+      "mitreTechniqueName": "Native API",
+      "eventTypes": [
+        "process.new",
+        "process.start"
+      ],
+      "allDataEquals": {
+        "sampleChildProcess": ["true"]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "path",
+        "commandLine"
+      ],
+      "tags": [
+        "process",
+        "lineage",
+        "execution"
+      ]
+    },
+    {
+      "id": "outbound-connection-attempt-blocked",
+      "title": "Outbound connection attempt left in SYN-SENT",
+      "titleZh": "出站连接尝试停留在 SYN-SENT",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A TCP connection owned by a sample-attributed PID remained in SYN-SENT, showing an egress attempt that did not complete a handshake during the capture window.",
+      "summaryZh": "由样本进程 PID 持有的 TCP 连接停留在 SYN-SENT，表明在采集窗口内发起了未完成握手的出站连接尝试。",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Application Layer Protocol: Web Protocols",
+      "eventTypes": [
+        "network.tcp"
+      ],
+      "allDataEquals": {
+        "state": ["SynSent"],
+        "sampleOwnerPidMatched": ["true"]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "data.owningProcessId",
+        "data.connection",
+        "data.remoteAddress",
+        "data.remotePort",
+        "data.state"
+      ],
+      "tags": [
+        "network",
+        "egress",
+        "c2-attempt"
+      ]
+    },
+    {
+      "id": "browser-credential-store-path-observed",
+      "title": "Browser credential store path observed",
+      "titleZh": "观察到浏览器凭据存储路径",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A file row referenced a browser credential or session database path such as Login Data, Cookies, Web Data, key4.db, or logins.json. The rule is path-only and does not require a matching process name.",
+      "summaryZh": "文件事件引用了浏览器凭据或会话数据库路径（Login Data、Cookies、Web Data、key4.db、logins.json 等）；该规则仅按路径匹配，不依赖进程名。",
+      "mitreTechniqueId": "T1555.003",
+      "mitreTechniqueName": "Credentials from Web Browsers",
+      "eventTypes": [
+        "file.open",
+        "file.read",
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "containsPath": [
+        "\\Login Data",
+        "\\Login Data For Account",
+        "\\Cookies",
+        "\\Web Data",
+        "\\Local State",
+        "\\key4.db",
+        "\\logins.json",
+        "\\cookies.sqlite",
+        "\\places.sqlite"
+      ],
+      "excludePathContains": [
+        "\\KSwordSandbox\\",
+        "__PSScriptPolicyTest_",
+        "\\CLR_v4.0\\UsageLogs\\"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "path",
+        "data.operationName"
+      ],
+      "tags": [
+        "credential-access",
+        "browser",
+        "password-store",
+        "path-only"
+      ]
     }
   ]
 }

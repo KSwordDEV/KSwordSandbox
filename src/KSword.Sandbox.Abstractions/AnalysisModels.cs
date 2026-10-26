@@ -92,6 +92,22 @@ public sealed record SandboxSubmission
     public bool? CaptureMemoryDumps { get; init; }
 
     public bool? CapturePacketCapture { get; init; }
+
+    /// <summary>
+    /// Optional per-job override for host-side raw-evidence retention. Null
+    /// means "use the resolved host configuration"; true keeps decoded ETW
+    /// XML, raw ETL/pktmon traces, and rotated R0 JSONL segments after the
+    /// report is finalized, false sweeps them (the default behavior).
+    /// </summary>
+    public bool? KeepRawEvidence { get; init; }
+
+    /// <summary>
+    /// Optional per-job override for the in-guest network policy. Null
+    /// deliberately means "use the resolved host configuration" so old API
+    /// clients keep the configured default (block) instead of silently
+    /// allowing guest network access.
+    /// </summary>
+    public SandboxNetworkPolicy? NetworkPolicy { get; init; }
 }
 
 /// <summary>
@@ -296,6 +312,23 @@ public sealed record CollectionHealthSummary
     /// Number of R0 output-write failure diagnostics or exit-70 failures.
     /// </summary>
     public int DriverOutputWriteFailureRows { get; init; }
+
+    /// <summary>
+    /// True when the collector stopped cleanly at its cumulative output
+    /// budget (exit 0 + r0-status sidecar). This is an intentional
+    /// truncation, not an output-write failure, and must not degrade
+    /// collection health by itself.
+    /// </summary>
+    public bool R0OutputBudgetReached { get; init; }
+
+    /// <summary>Configured cumulative R0 output budget in bytes.</summary>
+    public long R0OutputBudgetBytes { get; init; }
+
+    /// <summary>Total R0 JSONL bytes accepted before the budget stopped collection.</summary>
+    public long R0OutputBudgetBytesWritten { get; init; }
+
+    /// <summary>Closed rotated parts plus the finalized canonical segment.</summary>
+    public int R0OutputBudgetSegments { get; init; }
 
     /// <summary>
     /// Number of driver health rows that report a drain deadline stop.

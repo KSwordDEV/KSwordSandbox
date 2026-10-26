@@ -219,6 +219,7 @@ public static class ReportEventSampler
         "sampleRuntimeState",
         "sampleRuntimeFailureCode",
         "sampleExecuted",
+        "guestProtectionSource",
         "sampleFileName",
         "guestSamplePresent",
         "managedClrDetected",
@@ -278,6 +279,9 @@ public static class ReportEventSampler
         "sampleCorrelation",
         "sampleCorrelationStatus",
         "sampleCorrelationReason",
+        "sampleCorrelationUncertainty",
+        "sampleOwnerPidMatched",
+        "sampleChildProcess",
         // Endpoint identity is the primary user-facing value for PCAP rows.
         // Keep it before correlation/diagnostic metadata so the bounded data
         // payload cannot hide the remote IP/port behind policy fields.
@@ -2633,7 +2637,12 @@ public static class ReportEventSampler
         }
 
         var prioritySeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var maxPairs = IsR0ReportEvent(evt) || IsReportSamplingMarkerEvent(evt) || IsSampleLaunchRefusalEvent(evt)
+        // Packet-capture rows keep the same elevated budget as collector and
+        // marker rows: endpoint identity legitimately fills the first slots of
+        // the PCAP whitelist, and the static-IOC correlation chain behind it
+        // (pcapCorrelationStaticIoc* / pcapCorrelationWindowMatched) must
+        // survive the default 24-pair bound or the C2 evidence link is lost.
+        var maxPairs = IsR0ReportEvent(evt) || IsReportSamplingMarkerEvent(evt) || IsSampleLaunchRefusalEvent(evt) || IsPcapImportReportEvent(evt)
             ? Math.Max(options.MaxEventDataPairs, 40)
             : options.MaxEventDataPairs;
         foreach (var key in BuildPriorityDataKeys(evt))
@@ -2682,6 +2691,32 @@ public static class ReportEventSampler
         (evt.EventType ?? string.Empty).StartsWith("image.", StringComparison.OrdinalIgnoreCase) ||
         (evt.EventType ?? string.Empty).StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns whether a row was decoded from packet-capture evidence, either
+    /// a host-side PCAP (host-pcap / pcap-artifact) or a guest-collected PCAP
+    /// artifact (guest-artifact / guest-artifact-aggregate). DNS/flow rows from
+    /// those sources carry the static-IOC correlation chain
+    /// (pcapCorrelationStaticIoc* / pcapCorrelationWindowMatched), which is the
+    /// only in-report evidence for c2-static-ioc-corroborated-egress, so both
+    /// provenance modes must receive the PCAP retention treatment.
+    /// </summary>
+    private static bool IsPcapImportReportEvent(SandboxEvent evt)
+    {
+        if ((evt.EventType ?? string.Empty).StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
+            TextEqualsAny(DataValue(evt.Data, "sourceArtifactKind"), "PacketCapture") ||
+            TextEqualsAny(DataValue(evt.Data, "evidenceRole"), "packet-capture"))
+        {
+            return true;
+        }
+
+        return TextEqualsAny(
+            DataValue(evt.Data, "importMode"),
+            "host-pcap",
+            "pcap-artifact",
+            "guest-artifact",
+            "guest-artifact-aggregate");
+    }
 
     /// <summary>
     /// A refused sample launch is a single terminal diagnostic whose verdict is
@@ -2830,9 +2865,7 @@ public static class ReportEventSampler
             }
         }
 
-        if ((evt.EventType ?? string.Empty).StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
-            TextEqualsAny(DataValue(evt.Data, "sourceArtifactKind"), "PacketCapture") ||
-            TextEqualsAny(DataValue(evt.Data, "evidenceRole"), "packet-capture"))
+        if (IsPcapImportReportEvent(evt))
         {
             foreach (var key in PcapImportPriorityDataKeys)
             {

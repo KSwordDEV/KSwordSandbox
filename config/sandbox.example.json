@@ -1,5 +1,6 @@
 {
   "virtualization": {
+    "_note": "HyperV is kept for backward compatibility with existing profiles. First-time users should select VMware Workstation Pro in the WebUI or installer; see docs/vmware-first-run.md. Hyper-V/QEMU require an environment you already operate and validate yourself.",
     "provider": "HyperV"
   },
   "hyperV": {
@@ -20,6 +21,7 @@
     "vmxPath": "",
     "snapshotName": "Clean",
     "vmrunPath": "vmrun.exe",
+    "vixHelperPath": "",
     "vmType": "ws",
     "headless": false,
     "guestRemoting": {
@@ -62,7 +64,8 @@
     "powerShellRemotingAuthentication": "Negotiate",
     "powerShellRemotingUseSsl": false,
     "powerShellRemotingPort": 0,
-    "powerShellRemotingSkipCertificateChecks": false
+    "powerShellRemotingSkipCertificateChecks": false,
+    "networkPolicy": "Block"
   },
   "analysis": {
     "defaultDurationSeconds": 30,
@@ -75,7 +78,7 @@
     "captureScreenshots": false,
     "captureMemoryDumps": false,
     "capturePacketCapture": false,
-    "_keepRawEvidenceNote": "Default false: after the report is generated, the host sweeps oversized intermediates (decoded ETW XML, raw ETL/pktmon traces, rotated R0 JSONL segments) because each live job otherwise leaves hundreds of MB behind. Set true (or use run.ps1 -KeepRawEvidence / the WebUI switch) to retain every raw byte for incident response.",
+    "_keepRawEvidenceNote": "Default false: the host records cleanup candidates, but currently retains replay-critical raw R0 JSONL, ETL/pktmon traces and decoded files so reports can be rebuilt. Set true (or use run.ps1 -KeepRawEvidence / the WebUI switch) to request full raw evidence retention; lossless archival is future work.",
     "keepRawEvidence": false
   },
   "paths": {
@@ -94,6 +97,7 @@
     "devicePath": "\\\\.\\KSwordSandboxDriver",
     "r0CollectorMaxOutputBytes": 67108864,
     "r0CollectorMinFreeOutputBytes": 134217728,
+    "r0CollectorOutputBudgetBytes": 402653184,
     "useMockCollector": false
   }
 }

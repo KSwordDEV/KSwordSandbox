@@ -18,12 +18,14 @@ namespace KSword::Sandbox::R0Collector {
 // sidecar.  The sidecar is deliberately separate from the JSONL stream so a
 // disk-full or interrupted write can still leave structured evidence.
 // Return: true when the primary sink is ready.
-bool EventWriter::Open(const std::wstring& outputPath, std::wstring* error, const unsigned long long maxOutputBytes, const unsigned long long minFreeOutputBytes) {
+bool EventWriter::Open(const std::wstring& outputPath, std::wstring* error, const unsigned long long maxOutputBytes, const unsigned long long minFreeOutputBytes, const unsigned long long outputBudgetBytes) {
     outputPath_ = outputPath;
     currentOutputPath_ = outputPath;
     failurePath_ = outputPath == L"-" ? std::wstring{} : outputPath + L".failure.json";
+    statusPath_ = outputPath == L"-" ? std::wstring{} : outputPath + L".r0-status.json";
     maxOutputBytes_ = maxOutputBytes;
     minFreeOutputBytes_ = minFreeOutputBytes;
+    outputBudgetBytes_ = outputBudgetBytes;
     std::ios::sync_with_stdio(false);
     if (outputPath == L"-") {
         stream_ = &std::cout;
@@ -48,8 +50,80 @@ bool EventWriter::OpenSegment(std::wstring* error) {
     }
     currentOutputBytes_ = 0;
     lastSpaceCheckBytes_ = 0;
+    bytesSinceHandleOpen_ = 0;
+    linesSinceHandleOpen_ = 0;
     stream_ = &file_;
     return true;
+}
+
+// Input: none; uses the current canonical output file.
+// Processing: Flushes, closes, and reopens the JSONL sink in append mode on
+// the same path. This is NOT a rotation: the file keeps its name, no rename
+// happens, and segment/rotation accounting is untouched. HGFS/UNC
+// redirectors exhaust their per-process handle budget when one handle stays
+// open across a whole high-volume collection (observed live as win32 1394
+// ERROR_NO_MORE_USER_HANDLES / errno 22 with the stream alive), so the
+// handle is proactively rebuilt every kHandleRecycleBytes/kHandleRecycleLines
+// well before the redirector budget can accumulate pressure.
+// Return: true when the rebuilt handle is writable.
+bool EventWriter::RecycleOutputHandle(std::wstring* error) {
+    if (stream_ == nullptr || outputPath_ == L"-") {
+        return true;
+    }
+
+    if (!Flush()) {
+        return false;
+    }
+
+    file_.close();
+    if (file_.fail()) {
+        RecordFailure("recycle", "JSONL handle-recycle close failed.");
+        return false;
+    }
+
+    file_.rdbuf()->pubsetbuf(fileBuffer_.data(), static_cast<std::streamsize>(fileBuffer_.size()));
+    errno = 0;
+    file_.open(std::filesystem::path(currentOutputPath_), std::ios::out | std::ios::binary | std::ios::app);
+    if (!file_.is_open()) {
+        if (error != nullptr) {
+            *error = L"Unable to reopen output JSONL file during handle recycle: " + currentOutputPath_ +
+                L" / \u53e5\u67c4\u91cd\u5efa\u65f6\u65e0\u6cd5\u91cd\u65b0\u6253\u5f00\u8f93\u51fa JSONL \u6587\u4ef6\uff1a" + currentOutputPath_;
+        }
+        RecordFailure("recycle", "Unable to reopen output JSONL file during handle recycle.");
+        return false;
+    }
+
+    bytesSinceHandleOpen_ = 0;
+    linesSinceHandleOpen_ = 0;
+    stream_ = &file_;
+    return true;
+}
+
+bool EventWriter::EnsureHandleWithinRecycleBudget() {
+    if (stream_ == nullptr || outputPath_ == L"-") {
+        return true;
+    }
+
+    if (bytesSinceHandleOpen_ < kHandleRecycleBytes && linesSinceHandleOpen_ < kHandleRecycleLines) {
+        return true;
+    }
+
+    std::wstring recycleError;
+    return RecycleOutputHandle(&recycleError);
+}
+
+// Input: one output path.
+// Processing: Classifies paths that go through a network redirector (UNC
+// generally, VMware HGFS specifically). These targets carry a per-process
+// handle budget and a round-trip cost per metadata call, which drives the
+// wider space-probe interval and the proactive handle recycle.
+// Return: true for remote/redirected output paths.
+static bool IsRemoteOutputPath(const std::wstring& path) {
+    if (path.size() >= 2 && path[0] == L'\\' && path[1] == L'\\') {
+        return true;
+    }
+
+    return path.find(L"vmware-host") != std::wstring::npos;
 }
 
 bool EventWriter::HasOutputSpace(const unsigned long long lineBytes) {
@@ -57,9 +131,15 @@ bool EventWriter::HasOutputSpace(const unsigned long long lineBytes) {
         return true;
     }
 
-    // Re-check at most once per MiB; this keeps high-volume collection cheap
-    // while bounding growth beyond the reserve to one buffered chunk.
-    if (currentOutputBytes_ != 0 && currentOutputBytes_ - lastSpaceCheckBytes_ < 1ULL * 1024ULL * 1024ULL) {
+    // Re-check free space at bounded intervals; this keeps high-volume
+    // collection cheap while bounding growth beyond the reserve to one
+    // probe interval. UNC/HGFS redirectors turn every space() call into a
+    // host round-trip that itself burns handle budget, so remote outputs
+    // probe 32x less often; the reserve still absorbs the larger interval.
+    const unsigned long long probeInterval = IsRemoteOutputPath(outputPath_)
+        ? kRemoteSpaceProbeBytes
+        : kLocalSpaceProbeBytes;
+    if (currentOutputBytes_ != 0 && currentOutputBytes_ - lastSpaceCheckBytes_ < probeInterval) {
         return true;
     }
 
@@ -135,6 +215,9 @@ bool EventWriter::Rotate(std::wstring* error) {
 // the exact write/flush context if the stream enters fail/bad state.
 // Return: true only while the sink remains writable.
 bool EventWriter::WriteLine(const std::string& line) {
+    if (budgetReached_) {
+        return false;
+    }
     if (stream_ == nullptr || failure_.failed) {
         if (!failure_.failed) {
             RecordFailure("write", "JSONL output stream is not open.");
@@ -146,6 +229,14 @@ bool EventWriter::WriteLine(const std::string& line) {
     ++failure_.lineNumber;
     failure_.lineBytes = static_cast<unsigned long long>(line.size()) + 1ULL;
     failure_.bytesAttempted += failure_.lineBytes;
+    // The cumulative budget is checked before the disk reserve so an
+    // intentional budget boundary is reported as a clean stop even when the
+    // volume is also close to its reserve.
+    if (outputBudgetBytes_ > 0 &&
+        totalOutputBytes_ + failure_.lineBytes > outputBudgetBytes_) {
+        EnterBudgetStop();
+        return false;
+    }
     if (!HasOutputSpace(failure_.lineBytes)) {
         return false;
     }
@@ -155,6 +246,9 @@ bool EventWriter::WriteLine(const std::string& line) {
         if (!Rotate(&rotateError)) {
             return false;
         }
+    }
+    if (!EnsureHandleWithinRecycleBudget()) {
+        return false;
     }
     errno = 0;
     (*stream_) << line << '\n';
@@ -170,6 +264,9 @@ bool EventWriter::WriteLine(const std::string& line) {
 
     failure_.bytesAccepted += failure_.lineBytes;
     currentOutputBytes_ += failure_.lineBytes;
+    totalOutputBytes_ += failure_.lineBytes;
+    bytesSinceHandleOpen_ += failure_.lineBytes;
+    ++linesSinceHandleOpen_;
     return true;
 }
 
@@ -185,6 +282,9 @@ bool EventWriter::WriteLines(const std::vector<std::string>& lines, size_t* acce
     }
     if (lines.empty()) {
         return true;
+    }
+    if (budgetReached_) {
+        return false;
     }
     if (stream_ == nullptr || failure_.failed) {
         if (!failure_.failed) {
@@ -225,6 +325,9 @@ bool EventWriter::WriteLines(const std::vector<std::string>& lines, size_t* acce
         }
         failure_.bytesAccepted += acceptedChunkBytes;
         currentOutputBytes_ += acceptedChunkBytes;
+        totalOutputBytes_ += acceptedChunkBytes;
+        bytesSinceHandleOpen_ += acceptedChunkBytes;
+        linesSinceHandleOpen_ += acceptedChunkLines;
         if (acceptedLines != nullptr) {
             *acceptedLines += acceptedChunkLines;
         }
@@ -236,6 +339,20 @@ bool EventWriter::WriteLines(const std::vector<std::string>& lines, size_t* acce
         ++failure_.lineNumber;
         failure_.lineBytes = static_cast<unsigned long long>(line.size()) + 1ULL;
         failure_.bytesAttempted += failure_.lineBytes;
+        // The pending chunk is bounded and already passed the budget gate
+        // row by row, so commit it before the clean budget stop; only the
+        // row that crosses the budget is refused.
+        if (outputBudgetBytes_ > 0 &&
+            totalOutputBytes_ + chunkBytes + failure_.lineBytes > outputBudgetBytes_) {
+            if (!flushChunk()) {
+                return false;
+            }
+            EnterBudgetStop();
+            return false;
+        }
+        if (!EnsureHandleWithinRecycleBudget()) {
+            return false;
+        }
         // The pending chunk is bounded to 1 MiB and is not reflected in
         // currentOutputBytes_ until it is committed.  Probe free space once
         // per chunk; probing for every row would turn a high-rate drain into
@@ -304,6 +421,63 @@ void EventWriter::AnnotateFailureStatus(
     failure_.queueDepthAtStopKnown = queueDepthAtStopKnown;
     failure_.queueDepthAtStop = queueDepthAtStop;
     WriteFailureDiagnostic();
+}
+
+void EventWriter::EnterBudgetStop() {
+    if (budgetReached_) {
+        return;
+    }
+
+    budgetReached_ = true;
+    if (stream_ != nullptr && outputPath_ != L"-") {
+        // Best-effort finalize: flush whatever the segment buffer still
+        // holds, then close it. The canonical path intentionally keeps its
+        // name (no rotation) because no new segment will be opened.
+        (void)Flush();
+        file_.close();
+    }
+
+    stream_ = nullptr;
+    WriteBudgetStatus();
+}
+
+void EventWriter::AnnotateBudgetStopStatus(
+    const bool finalStatusAvailable,
+    const bool queueDepthAtStopKnown,
+    const unsigned long long queueDepthAtStop) {
+    if (!budgetReached_) {
+        return;
+    }
+
+    budgetStopStatusAnnotated_ = true;
+    budgetStopFinalStatusAvailable_ = finalStatusAvailable;
+    budgetStopQueueDepthKnown_ = queueDepthAtStopKnown;
+    budgetStopQueueDepth_ = queueDepthAtStop;
+    WriteBudgetStatus();
+}
+
+void EventWriter::WriteBudgetStatus() const {
+    if (statusPath_.empty()) {
+        return;
+    }
+
+    std::string json = "{\"schema\":\"ksword.sandbox.r0.status\",\"stopReason\":\"outputBudgetReached\"";
+    json += ",\"outputPath\":" + JsonStringFromWide(outputPath_);
+    json += ",\"budgetBytes\":" + std::to_string(outputBudgetBytes_);
+    json += ",\"bytesWritten\":" + std::to_string(totalOutputBytes_);
+    json += ",\"segmentsWritten\":" + std::to_string(rotatedSegmentCount_ + 1);
+    json += ",\"rotatedSegmentCount\":" + std::to_string(rotatedSegmentCount_);
+    json += ",\"statusAnnotated\":" + std::string(budgetStopStatusAnnotated_ ? "true" : "false");
+    json += ",\"finalStatusAvailable\":" + std::string(budgetStopFinalStatusAvailable_ ? "true" : "false");
+    json += ",\"queueDepthAtStopKnown\":" + std::string(budgetStopQueueDepthKnown_ ? "true" : "false");
+    json += ",\"queueDepthAtStop\":" + std::to_string(budgetStopQueueDepth_);
+    json += ",\"captureState\":\"truncated\"";
+    json += ",\"exitCode\":0}";
+    std::ofstream status(std::filesystem::path(statusPath_), std::ios::out | std::ios::binary | std::ios::trunc);
+    if (status.is_open()) {
+        status << json << '\n';
+        status.flush();
+    }
 }
 
 void EventWriter::RecordFailure(const char* stage, const std::string& message) {

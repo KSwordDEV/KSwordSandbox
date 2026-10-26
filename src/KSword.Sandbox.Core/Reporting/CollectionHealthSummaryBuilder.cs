@@ -106,6 +106,8 @@ public static class CollectionHealthSummaryBuilder
             : FirstUnsigned(finalRemainingRow, DriverRemainingUnreadKeys);
         var malformedRows = raw.Count(IsMalformedDriverRow);
         var outputWriteFailureRows = raw.Count(IsOutputWriteFailureRow);
+        var r0OutputBudgetRows = raw.Where(IsR0OutputBudgetRow).ToList();
+        var r0OutputBudgetRow = r0OutputBudgetRows.LastOrDefault();
         var runbookFallbackRows = raw.Where(IsRunbookFallbackWarning).ToList();
         var runbookFallbackWarning = runbookFallbackRows
             .Select(evt => Value(evt, "fallbackWarning"))
@@ -132,6 +134,7 @@ public static class CollectionHealthSummaryBuilder
             driverLossRows,
             malformedRows,
             outputWriteFailureRows,
+            r0OutputBudgetRows.Count,
             etwFailureRows,
             pcapFailureRows,
             agentFailureRows,
@@ -152,6 +155,7 @@ public static class CollectionHealthSummaryBuilder
                 driverLossRows.Count,
                 malformedRows,
                 outputWriteFailureRows,
+                r0OutputBudgetRows.Count,
                 etwFailureRows,
                 pcapFailureRows,
                 agentFailureRows,
@@ -179,6 +183,10 @@ public static class CollectionHealthSummaryBuilder
             DriverQueueDepthAtStopKnown = driverQueueDepthAtStopKnown,
             DriverMalformedRows = malformedRows,
             DriverOutputWriteFailureRows = outputWriteFailureRows,
+            R0OutputBudgetReached = r0OutputBudgetRow is not null,
+            R0OutputBudgetBytes = r0OutputBudgetRow is null ? 0L : (long)FirstUnsigned(r0OutputBudgetRow, ["budgetBytes"]),
+            R0OutputBudgetBytesWritten = r0OutputBudgetRow is null ? 0L : (long)FirstUnsigned(r0OutputBudgetRow, ["bytesWritten"]),
+            R0OutputBudgetSegments = r0OutputBudgetRow is null ? 0 : ToMetricInt(FirstUnsigned(r0OutputBudgetRow, ["segmentsWritten"])),
             DriverDrainStoppedAtDeadlineRows = driverHealthRows.Count(IsDrainStoppedAtDeadline),
             DriverEventsSuppressed = ToMetricInt(MaxDataUnsigned(driverHealthRows, DriverSuppressedKeys)),
             DriverExpectedSuppressedRows = expectedSuppressedRows,
@@ -229,6 +237,10 @@ public static class CollectionHealthSummaryBuilder
         metrics["collectionHealth.driver.queueDepthAtStopUnknown"] = summary.DriverQueueDepthAtStopKnown ? 0 : 1;
         metrics["collectionHealth.driver.malformedRows"] = summary.DriverMalformedRows;
         metrics["collectionHealth.driver.outputWriteFailureRows"] = summary.DriverOutputWriteFailureRows;
+        metrics["collectionHealth.driver.outputBudgetReached"] = summary.R0OutputBudgetReached ? 1 : 0;
+        metrics["collectionHealth.driver.outputBudgetBytes"] = ToMetricInt((ulong)Math.Max(0L, summary.R0OutputBudgetBytes));
+        metrics["collectionHealth.driver.outputBudgetBytesWritten"] = ToMetricInt((ulong)Math.Max(0L, summary.R0OutputBudgetBytesWritten));
+        metrics["collectionHealth.driver.outputBudgetSegments"] = summary.R0OutputBudgetSegments;
         metrics["collectionHealth.driver.drainStoppedAtDeadlineRows"] = summary.DriverDrainStoppedAtDeadlineRows;
         metrics["collectionHealth.driver.eventsSuppressed"] = summary.DriverEventsSuppressed;
         metrics["collectionHealth.driver.expectedSuppressedRows"] = summary.DriverExpectedSuppressedRows;
@@ -276,6 +288,10 @@ public static class CollectionHealthSummaryBuilder
         metrics["events.collectionHealth.driver.queueDepthAtStopUnknown"] = summary.DriverQueueDepthAtStopKnown ? 0 : 1;
         metrics["events.collectionHealth.driver.malformedRows"] = summary.DriverMalformedRows;
         metrics["events.collectionHealth.driver.outputWriteFailureRows"] = summary.DriverOutputWriteFailureRows;
+        metrics["events.collectionHealth.driver.outputBudgetReached"] = summary.R0OutputBudgetReached ? 1 : 0;
+        metrics["events.collectionHealth.driver.outputBudgetBytes"] = ToMetricInt((ulong)Math.Max(0L, summary.R0OutputBudgetBytes));
+        metrics["events.collectionHealth.driver.outputBudgetBytesWritten"] = ToMetricInt((ulong)Math.Max(0L, summary.R0OutputBudgetBytesWritten));
+        metrics["events.collectionHealth.driver.outputBudgetSegments"] = summary.R0OutputBudgetSegments;
         metrics["events.collectionHealth.driver.drainStoppedAtDeadlineRows"] = summary.DriverDrainStoppedAtDeadlineRows;
         metrics["events.collectionHealth.driver.eventsSuppressed"] = summary.DriverEventsSuppressed;
         metrics["events.collectionHealth.driver.expectedSuppressedRows"] = summary.DriverExpectedSuppressedRows;
@@ -711,6 +727,16 @@ public static class CollectionHealthSummaryBuilder
              (exitCode == "70" || exitCode.Equals("0x46", StringComparison.OrdinalIgnoreCase)));
     }
 
+    /// <summary>
+    /// Identifies a clean cumulative-output-budget stop (exit 0 + r0-status
+    /// sidecar). This is intentionally disjoint from
+    /// <see cref="IsOutputWriteFailureRow"/>: a budget stop is an explicit,
+    /// configured truncation and must never be counted as an output failure.
+    /// </summary>
+    private static bool IsR0OutputBudgetRow(SandboxEvent evt) =>
+        string.Equals(evt.EventType, "r0collector.outputBudget", StringComparison.OrdinalIgnoreCase) ||
+        BoolTrue(evt, "r0OutputBudgetReached");
+
     private static bool HasExplicitRemainingUnread(SandboxEvent evt)
     {
         if (BoolTrue(evt, "queueDepthAtStopUnknown"))
@@ -956,6 +982,7 @@ public static class CollectionHealthSummaryBuilder
         int driverLossRows,
         int malformedRows,
         int outputWriteFailureRows,
+        int r0OutputBudgetRows,
         int etwFailureRows,
         int pcapFailureRows,
         int agentFailureRows,
@@ -970,11 +997,17 @@ public static class CollectionHealthSummaryBuilder
         }
 
         var primaryGap = driverHealthRows == 0 ||
-            !queueDepthAtStopKnown ||
-            remainingUnread > 0 ||
             driverLossRows > 0 ||
             malformedRows > 0 ||
             outputWriteFailureRows > 0;
+        if (r0OutputBudgetRows == 0)
+        {
+            // A clean budget stop intentionally ends collection at a
+            // configured boundary, so the absence of a final queue snapshot
+            // (or a remaining tail) is expected and must not by itself mark
+            // the run partial.
+            primaryGap |= !queueDepthAtStopKnown || remainingUnread > 0;
+        }
         primaryGap |= processTreeUnavailableRows > 0;
         if (primaryGap)
         {
@@ -994,6 +1027,7 @@ public static class CollectionHealthSummaryBuilder
         IReadOnlyCollection<SandboxEvent> driverLossRows,
         int malformedRows,
         int outputWriteFailureRows,
+        int r0OutputBudgetRows,
         int etwFailureRows,
         int pcapFailureRows,
         int agentFailureRows,
@@ -1016,14 +1050,21 @@ public static class CollectionHealthSummaryBuilder
             reasons.Add("driver-health-missing");
         }
 
-        if (!queueDepthAtStopKnown)
+        if (r0OutputBudgetRows > 0)
         {
-            reasons.Add("driver-final-queue-unknown");
+            reasons.Add("r0-output-budget-reached");
         }
-
-        if (remainingUnread > 0)
+        else
         {
-            reasons.Add("driver-queue-not-drained");
+            if (!queueDepthAtStopKnown)
+            {
+                reasons.Add("driver-final-queue-unknown");
+            }
+
+            if (remainingUnread > 0)
+            {
+                reasons.Add("driver-queue-not-drained");
+            }
         }
 
         if (driverLossRows.Count > 0)

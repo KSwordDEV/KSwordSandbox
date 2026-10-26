@@ -419,6 +419,12 @@ internal static class DashboardExperiencePage
                     <label for="guestPayloadRoot" data-zh="Guest 工具目录（主机）" data-en="Guest tool folder (host)">Guest 工具目录（主机）</label>
                     <input id="guestPayloadRoot" placeholder="正在检测本机 / detecting local host" data-copy-label="guest payload root">
                     <p id="guestPayloadDetectionHint" class="field-hint" data-copy="" data-copy-label="guest payload detection source">等待本机检测。</p>
+                    <label for="networkPolicy" data-zh="虚拟机网络策略" data-en="VM network policy">虚拟机网络策略</label>
+                    <select id="networkPolicy" data-copy-label="VM network policy">
+                      <option value="Block" selected>阻断（默认）/ Block (default)</option>
+                      <option value="Allow">允许 / Allow</option>
+                    </select>
+                    <p id="networkPolicyHint" class="field-hint" data-zh="阻断在客户机内通过 Windows 防火墙实现，不修改 VMware/Hyper-V/QEMU 网络配置；样本的网络连接尝试仍会被记录。阻断失败时任务按失败关闭处理，不会无保护运行样本。" data-en="Blocking is enforced inside the guest via Windows Firewall and never changes VMware/Hyper-V/QEMU network configuration; connection attempts are still recorded. If blocking fails, the job fails closed and never runs the sample unprotected.">阻断在客户机内通过 Windows 防火墙实现，不修改 VMware/Hyper-V/QEMU 网络配置；样本的网络连接尝试仍会被记录。阻断失败时任务按失败关闭处理，不会无保护运行样本。</p>
                   </div>
                   <div class="config-card">
                     <h4 data-zh="R0 采集器（collector）" data-en="R0 collector">R0 采集器（collector）</h4>
@@ -450,6 +456,7 @@ internal static class DashboardExperiencePage
                   <div id="artifact-card-captureScreenshots" class="toggle-card" data-copy="采集截图 / Capture screenshots / --screenshot"><label for="captureScreenshots"><input id="captureScreenshots" type="checkbox"> <span data-zh="采集截图" data-en="Capture screenshots">采集截图</span></label><p id="captureScreenshotsHint" class="field-hint" data-zh="采集运行窗口或桌面截图，帮助复核 GUI 行为。" data-en="Capture run-window or desktop screenshots for GUI behavior review.">采集运行窗口或桌面截图，帮助复核 GUI 行为。</p><button class="copy-btn" type="button" data-copy="采集截图 / Capture screenshots / --screenshot" data-copy-label="screenshot option" data-zh="复制" data-en="Copy">复制</button></div>
                   <div id="artifact-card-captureMemoryDumps" class="toggle-card" data-copy="采集内存转储：样本进程；支持时包含子进程 / Capture memory dumps: sample process; child processes when supported / --memory-dump"><label for="captureMemoryDumps"><input id="captureMemoryDumps" type="checkbox"> <span data-zh="采集内存转储（含子进程，若支持）" data-en="Capture memory dumps (children if supported)">采集内存转储（含子进程，若支持）</span></label><p id="captureMemoryDumpsHint" class="field-hint" data-zh="请求样本进程内存转储；Guest Agent 支持时也包含可解析的子进程转储。" data-en="Request sample-process memory dumps; when the Guest Agent supports it, resolved child processes are dumped too.">请求样本进程内存转储；Guest Agent 支持时也包含可解析的子进程转储。</p><button class="copy-btn" type="button" data-copy="采集内存转储 / Capture memory dumps / --memory-dump" data-copy-label="memory dump option" data-zh="复制" data-en="Copy">复制</button></div>
                   <div id="artifact-card-capturePacketCapture" class="toggle-card" data-copy="采集 PCAP 抓包 / Capture packet capture PCAP / --packet-capture"><label for="capturePacketCapture"><input id="capturePacketCapture" type="checkbox"> <span data-zh="采集 PCAP 抓包" data-en="Capture PCAP">采集 PCAP 抓包</span></label><p id="capturePacketCaptureHint" class="field-hint" data-zh="采集网络包为 PCAP/PCAPNG 证据，监控页提供下载状态。" data-en="Capture network packets as PCAP/PCAPNG evidence; the monitor shows download status.">采集网络包为 PCAP/PCAPNG 证据，监控页提供下载状态。</p><button class="copy-btn" type="button" data-copy="采集 PCAP 抓包 / Capture PCAP / --packet-capture" data-copy-label="packet capture option" data-zh="复制" data-en="Copy">复制</button></div>
+                  <div id="artifact-card-keepRawEvidence" class="toggle-card" data-copy="保留一切原始证据 / Keep all raw evidence / --keep-raw-evidence"><label for="keepRawEvidence"><input id="keepRawEvidence" type="checkbox"> <span data-zh="保留一切原始证据" data-en="Keep all raw evidence">保留一切原始证据</span></label><p id="keepRawEvidenceHint" class="field-hint" data-zh="默认在报告生成后清理解码 XML、原始 ETL/R0 轮转分片等超大主机中间产物；勾选后全部保留（每次任务可能多占用数百 MB，仅限事件响应场景）。" data-en="By default, decoded XML, raw ETL, and rotated R0 segments are swept after the report is generated; check this to keep every raw byte (hundreds of MB extra per job; incident response only).">默认在报告生成后清理解码 XML、原始 ETL/R0 轮转分片等超大主机中间产物；勾选后全部保留（每次任务可能多占用数百 MB，仅限事件响应场景）。</p><button class="copy-btn" type="button" data-copy="保留一切原始证据 / Keep all raw evidence / --keep-raw-evidence" data-copy-label="keep raw evidence option" data-zh="复制" data-en="Copy">复制</button></div>
                 </div>
               </details>
               <div id="status" class="status" role="status" aria-live="polite"></div>
@@ -504,7 +511,8 @@ internal static class DashboardExperiencePage
               collectDroppedFiles: true,
               captureScreenshots: true,
               captureMemoryDumps: true,
-              capturePacketCapture: true
+              capturePacketCapture: true,
+              keepRawEvidence: true
             };
             const vmPresetStorageKey = 'ksword-vm-overrides';
             const artifactOptionDefinitions = [
@@ -551,6 +559,17 @@ internal static class DashboardExperiencePage
                 labelEn: 'Capture PCAP',
                 hintZh: '采集网络包为 PCAP/PCAPNG 证据，监控页提供下载状态。',
                 hintEn: 'Capture network packets as PCAP/PCAPNG evidence; the monitor shows download status.'
+              },
+              {
+                key: 'keepRawEvidence',
+                id: 'keepRawEvidence',
+                cardId: 'artifact-card-keepRawEvidence',
+                hintId: 'keepRawEvidenceHint',
+                flag: '--keep-raw-evidence',
+                labelZh: '保留一切原始证据',
+                labelEn: 'Keep all raw evidence',
+                hintZh: '默认在报告生成后清理解码 XML、原始 ETL/R0 轮转分片等超大主机中间产物；勾选后全部保留。',
+                hintEn: 'By default, decoded XML, raw ETL, and rotated R0 segments are swept after reporting; check to keep every raw byte.'
               }
             ];
             const liveStages = [
@@ -790,6 +809,7 @@ internal static class DashboardExperiencePage
                 document.getElementById('captureScreenshots').checked = Boolean(config.artifactCollection?.captureScreenshots);
                 document.getElementById('captureMemoryDumps').checked = Boolean(config.artifactCollection?.captureMemoryDumps);
                 document.getElementById('capturePacketCapture').checked = Boolean(config.artifactCollection?.capturePacketCapture);
+                document.getElementById('keepRawEvidence').checked = Boolean(config.artifactCollection?.keepRawEvidence);
                 applyArtifactCollectionSupport();
               } catch {
                 runtimeConfigLoadError = t('配置读取失败；上传时仍由后端做最终预检。', 'Config loading failed; backend preflight still makes the final decision during upload.');
@@ -1040,6 +1060,7 @@ internal static class DashboardExperiencePage
                 guestUserName: clean('guestUserName'),
                 guestWorkingDirectory: clean('guestWorkingDirectory'),
                 guestPayloadRoot: clean('guestPayloadRoot'),
+                networkPolicy: document.getElementById('networkPolicy')?.value || undefined,
                 driverEnabled: document.getElementById('r0Enabled')?.checked === true,
                 useMockCollector: document.getElementById('useMockCollector').checked
               };
@@ -1050,7 +1071,8 @@ internal static class DashboardExperiencePage
                 collectDroppedFiles: isArtifactOptionSupported('collectDroppedFiles') && document.getElementById('collectDroppedFiles').checked,
                 captureScreenshots: isArtifactOptionSupported('captureScreenshots') && document.getElementById('captureScreenshots').checked,
                 captureMemoryDumps: isArtifactOptionSupported('captureMemoryDumps') && document.getElementById('captureMemoryDumps').checked,
-                capturePacketCapture: isArtifactOptionSupported('capturePacketCapture') && document.getElementById('capturePacketCapture').checked
+                capturePacketCapture: isArtifactOptionSupported('capturePacketCapture') && document.getElementById('capturePacketCapture').checked,
+                keepRawEvidence: isArtifactOptionSupported('keepRawEvidence') && document.getElementById('keepRawEvidence').checked
               };
             }
 
@@ -1145,11 +1167,13 @@ internal static class DashboardExperiencePage
               setValue('guestUserName', preset.guestUserName);
               setValue('guestWorkingDirectory', preset.guestWorkingDirectory);
               setValue('guestPayloadRoot', preset.guestPayloadRoot);
+              setValue('networkPolicy', preset.networkPolicy);
               setChecked('useMockCollector', preset.useMockCollector);
               setChecked('collectDroppedFiles', preset.collectDroppedFiles);
               setChecked('captureScreenshots', preset.captureScreenshots);
               setChecked('captureMemoryDumps', preset.captureMemoryDumps);
               setChecked('capturePacketCapture', preset.capturePacketCapture);
+              setChecked('keepRawEvidence', preset.keepRawEvidence);
               getAnalysisDuration();
               return true;
             }
@@ -1414,6 +1438,7 @@ internal static class DashboardExperiencePage
               }
 
               const durationLabel = formatAnalysisDuration();
+              const networkPolicyValue = document.getElementById('networkPolicy')?.value || 'Block';
               const r0Enabled = document.getElementById('r0Enabled')?.checked;
               const mock = document.getElementById('useMockCollector')?.checked;
               const r0Mode = r0Enabled
@@ -1433,6 +1458,7 @@ internal static class DashboardExperiencePage
                 { text: `${t('干净基线', 'Clean baseline')} [${checkpoint.label}]: ${checkpoint.value || t('未检测到', 'NOT_FOUND')}`, state: checkpoint.state },
                 { text: `${t('Payload', 'Payload')} [${payload.label}]: ${payload.value || t('未检测到', 'NOT_FOUND')}`, state: payload.state },
                 { text: `${t('运行时间', 'Runtime')}: ${durationLabel}`, state: isDurationUnlimited() ? 'warn' : 'neutral' },
+                { text: `${t('网络策略', 'Network policy')}: ${networkPolicyValue === 'Allow' ? t('允许', 'Allow') : t('阻断（默认）', 'Block (default)')}`, state: networkPolicyValue === 'Allow' ? 'warn' : 'neutral' },
                 { text: `${t('Guest', 'Guest')} [${guest.label}]: ${guest.value || t('未配置', 'not configured')}`, state: guest.state },
                 { text: r0Mode, state: 'neutral' },
                 { text: `${t('产物', 'Artifacts')}: ${artifacts}`, state: 'neutral' }
@@ -1674,11 +1700,13 @@ internal static class DashboardExperiencePage
                 'guestUserName',
                 'guestWorkingDirectory',
                 'guestPayloadRoot',
+                'networkPolicy',
                 'useMockCollector',
                 'collectDroppedFiles',
                 'captureScreenshots',
                 'captureMemoryDumps',
-                'capturePacketCapture'
+                'capturePacketCapture',
+                'keepRawEvidence'
               ];
               for (const id of ids) {
                 const element = document.getElementById(id);
@@ -1771,11 +1799,13 @@ internal static class DashboardExperiencePage
                 'guestUserName',
                 'guestWorkingDirectory',
                 'guestPayloadRoot',
+                'networkPolicy',
                 'useMockCollector',
                 'collectDroppedFiles',
                 'captureScreenshots',
                 'captureMemoryDumps',
-                'capturePacketCapture'
+                'capturePacketCapture',
+                'keepRawEvidence'
               ];
               for (const id of ids) {
                 const element = document.getElementById(id);
