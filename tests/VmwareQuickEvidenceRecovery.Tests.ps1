@@ -57,7 +57,7 @@ isolation.tools.dnd.disable = "TRUE"
         $jobId = [guid]::NewGuid().ToString('D')
         $evidenceJob = if ($case.tamper) { [guid]::NewGuid().ToString('D') } else { $jobId }
         $identity = [ordered]@{ schema = 'ksword-live-events-v1'; eventFormat = 'SandboxEvent-jsonl'; jobId = $evidenceJob; samplePath = $samplePath; sampleSha256 = $sampleHash; sampleSizeBytes = 4096 }
-        $proof = [ordered]@{ schema = 'ksword-sample-launch-proof-v1'; state = 'started'; jobId = $evidenceJob; samplePath = $samplePath; sampleSha256 = $sampleHash; sampleSizeBytes = 4096; processId = 1234; startedAtUtc = '2026-10-26T00:00:00Z' }
+        $proof = [ordered]@{ schema = 'ksword-sample-launch-proof-v1'; state = 'started'; jobId = $evidenceJob; samplePath = $samplePath; sampleSha256 = $sampleHash; sampleSizeBytes = 4096; processId = 1234; parentProcessId = 4321; startedAtUtc = '2026-10-26T00:00:00Z' }
         [IO.File]::WriteAllText((Join-Path $guestOut 'live-events.identity.json'),($identity | ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
         [IO.File]::WriteAllText((Join-Path $guestOut 'sample-launch-proof.json'),($proof | ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
         [IO.File]::WriteAllText((Join-Path $guestOut 'live-events.jsonl'),"{`"eventType`":`"process.start`"}`n",[Text.UTF8Encoding]::new($false))

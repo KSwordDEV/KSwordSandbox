@@ -139,6 +139,7 @@ function Test-QuickEvidenceIdentity([string]$Path,[switch]$LaunchProof) {
             return [string]$record.schema -ceq 'ksword-sample-launch-proof-v1' -and
                 [string]$record.state -ceq 'started' -and
                 [int]$record.processId -gt 0 -and
+                [int]$record.parentProcessId -gt 0 -and
                 -not [string]::IsNullOrWhiteSpace([string]$record.startedAtUtc)
         }
         return [string]$record.schema -ceq 'ksword-live-events-v1' -and
