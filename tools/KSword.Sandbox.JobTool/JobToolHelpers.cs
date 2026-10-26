@@ -1953,6 +1953,8 @@ internal static partial class ProgramMain
         Console.WriteLine("    KSword.Sandbox.JobTool status --job-id <guid>|--job-root <path> [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--json]");
         Console.WriteLine("  重建报告 / Rebuild report:");
         Console.WriteLine("    KSword.Sandbox.JobTool report [rebuild] --job-id <guid>|--job-root <path> [--provider HyperV|VMware|Qemu] [--vm <name>] [--baseline <name>|--checkpoint <name>] [--machine-definition-path <path>] [--qemu-disk-format <format>] [--sample <exe>] [--events <events.json|jsonl>] [--runbook-execution <runbook-execution.json>] [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--duration <seconds>] [--json]");
+        Console.WriteLine("  仅从现有 report.json 刷新 HTML / Refresh existing HTML without sample or VM access:");
+        Console.WriteLine("    KSword.Sandbox.JobTool render-existing-html --job-root <existing job directory> --replace-html [--json]");
         Console.WriteLine("  导入已有 Live 运行 / Import live run:");
         Console.WriteLine("    KSword.Sandbox.JobTool import [live] --job-id <guid> --sample <exe> [--provider HyperV|VMware|Qemu] [--vm <name>] [--baseline <name>|--checkpoint <name>] [--machine-definition-path <path>] [--qemu-disk-format <format>] [--events <events.json|jsonl>] [--runbook-execution <runbook-execution.json>] [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--duration <seconds>]");
         Console.WriteLine("  检查产物 / Inspect artifacts:");
@@ -1969,6 +1971,7 @@ internal static partial class ProgramMain
         Console.WriteLine("  execute 默认 dry-run；只有显式 --live 才会启动、还原或停止所选 provider 的 VM。/ execute defaults to dry-run; only explicit --live mutates the selected provider VM.");
         Console.WriteLine("  plan/report/import/artifacts/recover/readiness/audit 只复用本地文件；不会启动、还原、停止或修改 VM。/ these commands reuse local files only and do not start, restore, stop, or mutate VMs.");
         Console.WriteLine("  report/import 会在任务运行目录下写入 report.json/report.html/report.zh.html/report.en.html 和 artifact-index.json。/ report/import write report and artifact-index files under the job runtime folder.");
+        Console.WriteLine("  render-existing-html 只读 report.json 和 artifact-index.json，备份旧 HTML 后更新中英文 HTML；不会打开样本或操作 VM。/ HTML-only refresh does not open the sample or operate a VM.");
         Console.WriteLine("  artifacts 仅在 --write-index 时写 artifact-index.json；recover 仅在 --write-state/--write-index/--rebuild-report 时写文件。/ artifacts/recover writes are explicit opt-in.");
         Console.WriteLine("  输出前会隐藏 password/API-key/token 等敏感字段。/ output redacts password/API-key/token-like fields before printing.");
     }

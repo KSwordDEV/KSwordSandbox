@@ -56,9 +56,16 @@ progress-page 重新进入报告，避免自动打开失败时丢失上下文。
   而不是纯 raw table。Evidence story board 应在密集事件表之前，把 dropped files、
   screenshots、memory dumps、PCAP/network、process lineage 和 R0 health/noise boundary
   作为可复制、可折叠 lane 展示。
-- 时间线 / Timeline：使用 timeline grouping 让突发遥测按时间顺序可读；按稳定时间桶分组，
-  展示 event count 和 event-family summary，inline 时间线按设计保持有界；完整证据仍在
-  raw events 和 report JSON。
+- 时间线 / Timeline：横向行为轨道按进程、文件、注册表、网络、安全、R0、失败和其他类别
+  分行展示，刻度覆盖整次运行的 UTC 时间范围。局部 JavaScript 仅提供 1–64 倍缩放和悬停／
+  键盘聚焦证据提示；无 JavaScript 时仍可读轨道和原生 `title`。每轨代表事件有界，优先
+  保留高危证据及同一文件配对的关联删除观察，并限制普通 `process.snapshot`／`process.tree` 噪声；
+  未确认样本归因的关联观察须用虚线标记，不能冒充样本行为。同一刻的密集事件应聚合为
+  可聚焦标记；悬停看摘要，点击后在可滚动面板查看该簇的全部采样详情；放大后逐事件
+  标记展开，布局自动错开避免鼠标目标互相遮挡，准确时间仍以提示内的时间戳为准。
+  绘制量按设计保持有界，轨道总数和折叠数
+  必须显式展示。下方继续使用 timeline grouping 按稳定时间桶列出可复制详情；完整证据
+  仍在事件筛选表、raw events 和 report JSON。大报告也必须保留有界轨道，不得省略时间线。
 - 进程详情 / Process details：包含 process tree、process relationship tree、process relationship panels
   和 process event table。树应优先使用 stable process key / 稳定 process key，缺失时回退 PID/PPID，使 parent、
   child 和 orphan relationship 无需 JavaScript 也稳定可读。Process tree overview 应展示

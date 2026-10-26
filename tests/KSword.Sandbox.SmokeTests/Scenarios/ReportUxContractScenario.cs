@@ -443,11 +443,13 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         var largeChineseHtml = renderer.RenderChinese(largeReport, artifacts);
         RequireNavigationAnchorsResolve(largeEnglishHtml, "large English report");
         RequireNavigationAnchorsResolve(largeChineseHtml, "large Chinese report");
-        foreach (var omittedAnchor in new[] { "graph", "timeline", "process" })
+        foreach (var omittedAnchor in new[] { "graph", "process" })
         {
             RequireNotContains(largeEnglishHtml, $"href=\"#{omittedAnchor}\"", $"Large English report navigation must omit the unavailable #{omittedAnchor} anchor.");
             RequireNotContains(largeChineseHtml, $"href=\"#{omittedAnchor}\"", $"Large Chinese report navigation must omit the unavailable #{omittedAnchor} anchor.");
         }
+        RequireContains(largeEnglishHtml, "href=\"#timeline\"", "Large reports should retain bounded timeline navigation.");
+        RequireContains(largeEnglishHtml, "data-timeline-tracks", "Large reports should retain the bounded behavior tracks.");
         var totalRawEvents = report.Events.Count;
         var hiddenRawEvents = Math.Max(0, totalRawEvents - 30);
 
@@ -673,6 +675,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Endpoint groups", "Rendered HTML should include endpoint overview cards.");
         RequireContains(englishHtml, "DNS / HTTP / TLS", "Rendered HTML should include protocol category counts.");
         RequireContains(englishHtml, "<section id=\"timeline\" class=\"card\"><h2>Timeline</h2>", "Rendered HTML should include the timeline section.");
+        RequireContains(englishHtml, "data-timeline-tracks", "Rendered HTML should include the multitrack overview.");
+        RequireContains(englishHtml, "data-timeline-zoom", "Rendered HTML should include offline zoom controls.");
+        RequireContains(englishHtml, "data-track-detail", "Track markers should carry bounded hover and keyboard-focus evidence.");
+        RequireContains(englishHtml, "data-family=\"file\"", "File behavior should have its own track.");
+        RequireContains(chineseHtml, "行为轨道", "Chinese HTML should localize the track heading.");
         RequireContains(englishHtml, "Timeline grouping.", "Rendered HTML should explain timeline grouping.");
         RequireContains(englishHtml, "timeline-group", "Rendered HTML should include grouped timeline buckets.");
         RequireContains(englishHtml, "Event families:", "Rendered timeline groups should summarize event families.");

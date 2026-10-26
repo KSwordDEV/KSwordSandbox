@@ -1050,6 +1050,13 @@ internal sealed class GuestArtifactWriter
             return true;
         }
 
+        if (string.Equals(fileName, DurableEventJournal.FileName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fileName, DurableEventJournal.IdentityFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            classification = new ArtifactClassification(ArtifactKind.Log, "telemetry", "guest-live-events", "guest-live-events");
+            return true;
+        }
+
         if ((fileName.Contains("driver-events", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(fileName, "events.json.failure.json", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(fileName, "agent-summary.json.failure.json", StringComparison.OrdinalIgnoreCase)) &&

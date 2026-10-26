@@ -29,6 +29,7 @@ internal static partial class ProgramMain
                 "list" or "list-jobs" => ListJobs(options),
                 "status" or "show-job" => ShowJob(options),
                 "report" or "report-rebuild" or "rebuild-report" => RebuildReport(options, "rebuild-report"),
+                "render-existing-html" => RenderExistingHtml(options),
                 "import" or "import-live" => RebuildReport(options, "import-live"),
                 "artifacts" or "artifacts-inspect" or "inspect-artifacts" => InspectArtifacts(options),
                 "recover" => RecoverJob(options),

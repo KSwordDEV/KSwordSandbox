@@ -32,6 +32,7 @@ public static class GuestFailureArtifactImporter
         var exitPath = FindNewest(root, "agent.exit");
         var pidPath = FindNewest(root, "agent.pid");
         var eventsPath = FindNewest(root, "events.json");
+        var liveJournalPath = FindNewest(root, GuestLiveEventJournalReader.JournalFileName);
         var launchProofPath = FindNewest(root, "sample-launch-proof.json");
         var summaryPath = FindNewest(root, "agent-summary.json");
         var preflightPath = FindNewest(root, "guest-output-preflight.json");
@@ -60,7 +61,7 @@ public static class GuestFailureArtifactImporter
             ? stderr
             : RemoveLinesPresentIn(stderr, sampleStderr);
         var missing = status?.MissingArtifacts ?? [];
-        var hasAgentMarker = statusPath is not null || stderrPath is not null || exitPath is not null || pidPath is not null || summaryPath is not null || launchProofPath is not null;
+        var hasAgentMarker = statusPath is not null || stderrPath is not null || exitPath is not null || pidPath is not null || summaryPath is not null || launchProofPath is not null || liveJournalPath is not null;
         var hasR0Failure = r0FailurePath is not null;
         var hasR0Status = r0StatusPath is not null;
         var preflight = preflightPath is null ? null : ReadOutputPreflight(preflightPath);
@@ -79,13 +80,15 @@ public static class GuestFailureArtifactImporter
             return rows;
         }
 
-        // Final events already contain process.start. Recover only when the
-        // guest reset before events.json was committed; this proof establishes
-        // launch, never complete collection or a malicious behavior verdict.
-        if (eventsPath is null && launchProofPath is not null)
+        // A truncated but valid events.json may omit process.start. Recover
+        // the durable proof unless that exact sample process is already in
+        // the event stream. The proof establishes launch only, never behavior.
+        if (launchProofPath is not null)
         {
             var launchProof = ImportSampleLaunchProof(launchProofPath, statusPath);
-            if (launchProof is not null)
+            if (launchProof is not null &&
+                (eventsPath is null || !ContainsMatchingSampleStart(eventsPath, launchProof)) &&
+                (liveJournalPath is null || !ContainsMatchingLiveJournalStart(liveJournalPath, launchProof)))
             {
                 rows.Add(launchProof);
             }
@@ -302,6 +305,57 @@ public static class GuestFailureArtifactImporter
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
         {
             return null;
+        }
+    }
+
+    private static bool ContainsMatchingSampleStart(string eventsPath, SandboxEvent proof)
+    {
+        try
+        {
+            using var stream = File.OpenRead(eventsPath);
+            using var document = JsonDocument.Parse(stream, JsonOptions);
+            if (document.RootElement.ValueKind != JsonValueKind.Array) return false;
+            foreach (var row in document.RootElement.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var eventType = ReadString(row, "EventType") ?? ReadString(row, "eventType");
+                var path = ReadString(row, "Path") ?? ReadString(row, "path");
+                if (!string.Equals(eventType, "process.start", StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(path, proof.Path, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!row.TryGetProperty("ProcessId", out var pid) && !row.TryGetProperty("processId", out pid)) return true;
+                if (pid.ValueKind == JsonValueKind.Number && pid.TryGetInt32(out var value) && value == proof.ProcessId) return true;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
+        return false;
+    }
+
+    private static bool ContainsMatchingLiveJournalStart(string journalPath, SandboxEvent proof)
+    {
+        if (!proof.Data.TryGetValue("jobId", out var jobText) ||
+            !Guid.TryParse(jobText, out var jobId) ||
+            !proof.Data.TryGetValue("sampleSha256", out var sha256) ||
+            !proof.Data.TryGetValue("sampleSizeBytes", out var sizeText) ||
+            !long.TryParse(sizeText, CultureInfo.InvariantCulture, out var sizeBytes) ||
+            proof.Path is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return GuestLiveEventJournalReader.ReadValidated(
+                    journalPath, jobId, sha256, sizeBytes, proof.Path)
+                .Any(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(evt.Path, proof.Path, StringComparison.OrdinalIgnoreCase) &&
+                            evt.ProcessId == proof.ProcessId);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return false;
         }
     }
 

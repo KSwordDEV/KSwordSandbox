@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Security.Cryptography;
 using KSword.Sandbox.Abstractions;
 
 namespace KSword.Sandbox.Agent.Collection;
@@ -14,8 +15,16 @@ namespace KSword.Sandbox.Agent.Collection;
 internal sealed class FileDiffProbe : IGuestProbe
 {
     private const int MaxQueuedWatcherEvents = 2048;
+    private const int MaxContentBaselineFiles = 4096;
+    private const int MaxContentBaselineDirectories = 512;
+    private const int MaxContentBaselineEntries = 8192;
+    private const int MaxContentBaselineDepth = 8;
+    private const long MaxContentBaselineFileHashBytes = 1024 * 1024;
+    private const long MaxContentBaselineTotalHashBytes = 32L * 1024 * 1024;
     private readonly IFileSnapshotProvider snapshotProvider;
+    private readonly IReadOnlyList<string> contentBaselineRoots;
     private Dictionary<string, FileStateSnapshot> baseline = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, ContentBaselineSnapshot> contentBaseline = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<FileSystemChange> watcherChanges = new();
     private readonly ConcurrentDictionary<string, byte> queuedWatcherKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<WatcherError> watcherErrors = new();
@@ -39,8 +48,14 @@ internal sealed class FileDiffProbe : IGuestProbe
     /// phases, and the constructor returns no value.
     /// </summary>
     public FileDiffProbe(IFileSnapshotProvider snapshotProvider)
+        : this(snapshotProvider, UserContentWatchRoots().ToArray())
+    {
+    }
+
+    internal FileDiffProbe(IFileSnapshotProvider snapshotProvider, IReadOnlyList<string> contentBaselineRoots)
     {
         this.snapshotProvider = snapshotProvider;
+        this.contentBaselineRoots = contentBaselineRoots;
     }
 
     public string ProbeId => "file-diff";
@@ -62,6 +77,7 @@ internal sealed class FileDiffProbe : IGuestProbe
         {
             DisposeWatchers();
             baseline = CaptureWatchedFiles(context, cancellationToken);
+            var contentCoverage = CaptureContentBaseline(cancellationToken);
             lastKnownFileState.Clear();
             watcherKnownPaths.Clear();
             Interlocked.Exchange(ref droppedWatcherChanges, 0);
@@ -72,7 +88,7 @@ internal sealed class FileDiffProbe : IGuestProbe
             }
 
             StartWatchers(context);
-            return Task.FromResult<IReadOnlyList<SandboxEvent>>([]);
+            return Task.FromResult<IReadOnlyList<SandboxEvent>>([CreateContentBaselineSummary(context, contentCoverage)]);
         }
 
         if (phase is not (ProbePhase.DuringRun or ProbePhase.AfterRun))
@@ -177,6 +193,10 @@ internal sealed class FileDiffProbe : IGuestProbe
                 evt.Data["previousPath"] = change.OldPath;
                 evt.Data["sourcePath"] = change.OldPath;
                 evt.Data["destinationPath"] = change.Path;
+                if (change.Kind == WatcherChangeKind.Renamed)
+                {
+                    AddContentBaselineEvidence(evt, change.OldPath);
+                }
             }
             events.Add(evt);
         }
@@ -254,6 +274,10 @@ internal sealed class FileDiffProbe : IGuestProbe
         {
             TryAddWatcher(root, includeSubdirectories: true);
         }
+        foreach (var root in contentBaselineRoots)
+        {
+            TryAddWatcher(root, includeSubdirectories: true);
+        }
     }
 
     private static IEnumerable<string> PersistenceWatchRoots()
@@ -294,6 +318,274 @@ internal sealed class FileDiffProbe : IGuestProbe
                 target.Add(root);
             }
         }
+    }
+
+    private static IEnumerable<string> UserContentWatchRoots()
+    {
+        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var folder in new[]
+                 {
+                     Environment.SpecialFolder.MyDocuments,
+                     Environment.SpecialFolder.DesktopDirectory,
+                     Environment.SpecialFolder.MyPictures,
+                     Environment.SpecialFolder.MyMusic,
+                     Environment.SpecialFolder.MyVideos
+                 })
+        {
+            var path = Environment.GetFolderPath(folder);
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                roots.Add(path);
+            }
+        }
+
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(profile))
+        {
+            roots.Add(Path.Combine(profile, "Downloads"));
+        }
+
+        return roots;
+    }
+
+    /// <summary>
+    /// Captures a bounded, read-only before-image of user content. The regular
+    /// file diff snapshot stays focused on the working directory; this table
+    /// exists only to corroborate a later rename from an original user path.
+    /// Reparse points and inaccessible trees are skipped and disclosed by a
+    /// nonbehavior summary row instead of following them or stalling a run.
+    /// </summary>
+    private ContentBaselineCoverage CaptureContentBaseline(CancellationToken cancellationToken)
+    {
+        contentBaseline = new Dictionary<string, ContentBaselineSnapshot>(StringComparer.OrdinalIgnoreCase);
+        var directories = 0;
+        var visitedEntries = 0;
+        var visitedFiles = 0;
+        var hashedFiles = 0;
+        var skippedReparse = 0;
+        var skippedUnreadable = 0;
+        var skippedHash = 0;
+        long hashedBytes = 0;
+        var truncated = false;
+        var pending = new Stack<(string Path, int Depth)>();
+
+        // Stack traversal keeps the supplied priority order. Documents is
+        // intentionally ahead of less frequently changed user folders.
+        foreach (var root in contentBaselineRoots.Distinct(StringComparer.OrdinalIgnoreCase).Reverse())
+        {
+            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (HasReparseAncestor(root))
+                {
+                    skippedReparse++;
+                    continue;
+                }
+                pending.Push((Path.GetFullPath(root), 0));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                skippedUnreadable++;
+            }
+        }
+
+        while (pending.Count != 0 && !truncated)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var (directory, depth) = pending.Pop();
+            if (++directories > MaxContentBaselineDirectories)
+            {
+                truncated = true;
+                break;
+            }
+
+            try
+            {
+                foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (++visitedEntries > MaxContentBaselineEntries)
+                    {
+                        truncated = true;
+                        break;
+                    }
+                    FileAttributes attributes;
+                    try
+                    {
+                        attributes = File.GetAttributes(entry);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+                    {
+                        skippedUnreadable++;
+                        continue;
+                    }
+
+                    if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        skippedReparse++;
+                        continue;
+                    }
+                    if ((attributes & FileAttributes.Directory) != 0)
+                    {
+                        if (depth < MaxContentBaselineDepth)
+                        {
+                            pending.Push((entry, depth + 1));
+                        }
+                        else
+                        {
+                            truncated = true;
+                        }
+                        continue;
+                    }
+
+                    if (contentBaseline.ContainsKey(entry))
+                    {
+                        continue;
+                    }
+
+                    if (++visitedFiles > MaxContentBaselineFiles)
+                    {
+                        truncated = true;
+                        break;
+                    }
+                    try
+                    {
+                        var info = new FileInfo(entry);
+                        var size = info.Length;
+                        var lastWrite = info.LastWriteTimeUtc;
+                        string? sha256 = null;
+                        if (size >= 0 && size <= MaxContentBaselineFileHashBytes &&
+                            hashedBytes + size <= MaxContentBaselineTotalHashBytes)
+                        {
+                            using var stream = new FileStream(entry, FileMode.Open, FileAccess.Read,
+                                FileShare.ReadWrite | FileShare.Delete);
+                            sha256 = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+                            info.Refresh();
+                            if (info.Length != size || info.LastWriteTimeUtc != lastWrite)
+                            {
+                                sha256 = null;
+                            }
+                            else
+                            {
+                                hashedBytes += size;
+                                hashedFiles++;
+                            }
+                        }
+                        if (sha256 is null)
+                        {
+                            skippedHash++;
+                        }
+                        contentBaseline[entry] = new ContentBaselineSnapshot(
+                            size, lastWrite, sha256, DateTimeOffset.UtcNow);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+                    {
+                        skippedUnreadable++;
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                skippedUnreadable++;
+            }
+        }
+
+        return new ContentBaselineCoverage(contentBaseline.Count, directories, hashedFiles,
+            hashedBytes, skippedReparse, skippedUnreadable, skippedHash, truncated);
+    }
+
+    private static bool HasReparseAncestor(string path)
+    {
+        var current = Path.GetFullPath(path);
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+            {
+                return true;
+            }
+            var parent = Path.GetDirectoryName(current);
+            if (string.IsNullOrWhiteSpace(parent) ||
+                parent.Equals(current, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+            current = parent;
+        }
+        return false;
+    }
+
+    private static SandboxEvent CreateContentBaselineSummary(
+        GuestProbeContext context, ContentBaselineCoverage coverage) => new()
+    {
+        EventType = "file.content_baseline.summary",
+        Source = "guest",
+        Path = context.WorkingDirectory,
+        Data =
+        {
+            ["phase"] = "before-start",
+            ["capturePhase"] = "before-start",
+            ["captureSource"] = "bounded-user-content-baseline",
+            ["captureState"] = coverage.Truncated || coverage.SkippedUnreadable > 0 || coverage.SkippedHash > 0
+                ? "partial" : "complete",
+            ["nonbehavior"] = "true",
+            ["behaviorCounted"] = "false",
+            ["sampleBehaviorCandidate"] = "false",
+            ["fileCount"] = coverage.FileCount.ToString(CultureInfo.InvariantCulture),
+            ["directoryCount"] = coverage.DirectoryCount.ToString(CultureInfo.InvariantCulture),
+            ["hashedFileCount"] = coverage.HashedFileCount.ToString(CultureInfo.InvariantCulture),
+            ["hashedBytes"] = coverage.HashedBytes.ToString(CultureInfo.InvariantCulture),
+            ["skippedReparseCount"] = coverage.SkippedReparse.ToString(CultureInfo.InvariantCulture),
+            ["skippedUnreadableCount"] = coverage.SkippedUnreadable.ToString(CultureInfo.InvariantCulture),
+            ["skippedHashCount"] = coverage.SkippedHash.ToString(CultureInfo.InvariantCulture),
+            ["truncated"] = coverage.Truncated ? "true" : "false",
+            ["zhMessage"] = "已在样本启动前有界记录用户文件大小与可用的 SHA-256，供后续重命名和改写比对。",
+            ["zhHint"] = "扫描有文件、目录深度与总哈希字节上限；partial 表示部分用户文件没有基线，不能据此证明未被改写。"
+        }
+    };
+
+    private void AddContentBaselineEvidence(SandboxEvent evt, string oldPath)
+    {
+        evt.Data["previousPathAbsentAtDrain"] = !File.Exists(oldPath) && !Directory.Exists(oldPath)
+            ? "true" : "false";
+        if (!contentBaseline.TryGetValue(oldPath, out var original))
+        {
+            evt.Data["contentBaselineStatus"] = "not-captured";
+            return;
+        }
+
+        evt.Data["contentBaselineStatus"] = "captured";
+        evt.Data["baselineSizeBytes"] = original.SizeBytes.ToString(CultureInfo.InvariantCulture);
+        evt.Data["baselineLastWriteUtc"] = original.LastWriteUtc.ToString("O", CultureInfo.InvariantCulture);
+        evt.Data["baselineCapturedAtUtc"] = original.CapturedAtUtc.ToString("O", CultureInfo.InvariantCulture);
+        evt.Data.TryAdd("previousSizeBytes", evt.Data["baselineSizeBytes"]);
+        evt.Data.TryAdd("previousLastWriteUtc", evt.Data["baselineLastWriteUtc"]);
+        if (original.Sha256 is not null)
+        {
+            evt.Data["baselineSha256"] = original.Sha256;
+            evt.Data["previousSha256"] = original.Sha256;
+            evt.Data["baselineHashStatus"] = "computed";
+        }
+        else
+        {
+            evt.Data["baselineHashStatus"] = "not-computed";
+        }
+
+        var outputSizeKnown = long.TryParse(evt.Data.GetValueOrDefault("sizeBytes"),
+            NumberStyles.None, CultureInfo.InvariantCulture, out var outputSize);
+        var outputSha = evt.Data.GetValueOrDefault("sha256");
+        var sizeChanged = outputSizeKnown && outputSize != original.SizeBytes;
+        var hashComparable = original.Sha256 is not null && outputSha is { Length: 64 } &&
+                             evt.Data.GetValueOrDefault("hashStatus") == "computed";
+        var hashChanged = hashComparable &&
+                          !original.Sha256!.Equals(outputSha, StringComparison.OrdinalIgnoreCase);
+        evt.Data["contentChangedFromBaseline"] = sizeChanged || hashChanged
+            ? "true" : hashComparable ? "false" : "unknown";
+        evt.Data["contentChangeComparisonState"] = sizeChanged || hashComparable
+            ? "compared" : "insufficient";
     }
 
     private void TryAddWatcher(string root, bool includeSubdirectories)
@@ -1062,6 +1354,22 @@ internal sealed class FileSnapshotProvider : IFileSnapshotProvider
 /// are returned from file snapshot providers and compared by value.
 /// </summary>
 internal sealed record FileStateSnapshot(long SizeBytes, DateTime LastWriteUtc);
+
+internal sealed record ContentBaselineSnapshot(
+    long SizeBytes,
+    DateTime LastWriteUtc,
+    string? Sha256,
+    DateTimeOffset CapturedAtUtc);
+
+internal sealed record ContentBaselineCoverage(
+    int FileCount,
+    int DirectoryCount,
+    int HashedFileCount,
+    long HashedBytes,
+    int SkippedReparse,
+    int SkippedUnreadable,
+    int SkippedHash,
+    bool Truncated);
 
 /// <summary>
 /// Represents one edge notification from a FileSystemWatcher.

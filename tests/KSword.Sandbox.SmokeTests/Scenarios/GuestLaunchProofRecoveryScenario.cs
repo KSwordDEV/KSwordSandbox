@@ -73,11 +73,11 @@ internal sealed class GuestLaunchProofRecoveryScenario : ISmokeTestScenario
         var english = renderer.RenderEnglish(report);
         var chinese = renderer.RenderChinese(report);
         SmokeAssert.True(english.Contains("Launch confirmed / collection failed", StringComparison.Ordinal) &&
-                         english.Contains("No behavior verdict", StringComparison.Ordinal) &&
+                         english.Contains("<span class=\"badge badge-medium triage-verdict\">Runtime indeterminate</span>", StringComparison.Ordinal) &&
                          english.Contains("Sample launch confirmed / behavior collection failed", StringComparison.Ordinal),
             "A launch-only failed report must show a collection failure without a suspiciousness verdict.");
         SmokeAssert.True(chinese.Contains("启动已证/采集失败", StringComparison.Ordinal) &&
-                         chinese.Contains("行为不可判定", StringComparison.Ordinal) &&
+                         chinese.Contains("<span class=\"badge badge-medium triage-verdict\">运行期不可判定</span>", StringComparison.Ordinal) &&
                          chinese.Contains("样本启动已证/行为采集失败", StringComparison.Ordinal),
             "Chinese launch-only cover must not turn missing behavior into a suspiciousness verdict.");
 
@@ -98,8 +98,16 @@ internal sealed class GuestLaunchProofRecoveryScenario : ISmokeTestScenario
             "Completed reports with a high-severity behavior finding must retain the threat verdict.");
 
         File.WriteAllText(Path.Combine(output, "events.json"), "[]", Encoding.UTF8);
+        SmokeAssert.True(GuestFailureArtifactImporter.Import(output).Any(row => row.EventType == "sample.launch.confirmed"),
+            "An incomplete event stream without process.start must retain verified launch proof.");
+        File.WriteAllText(Path.Combine(output, "events.json"),
+            JsonSerializer.Serialize(new[] { new { EventType = "process.start", Path = sample, ProcessId = 1234 } }), Encoding.UTF8);
         SmokeAssert.True(GuestFailureArtifactImporter.Import(output).All(row => row.EventType != "sample.launch.confirmed"),
-            "A complete events.json is authoritative and must not double count launch proof.");
+            "A matching process.start must not double count the verified launch proof.");
+        File.WriteAllText(Path.Combine(output, "events.json"),
+            JsonSerializer.Serialize(new[] { new { EventType = "process.start", Path = sample, ProcessId = 9999 } }), Encoding.UTF8);
+        SmokeAssert.True(GuestFailureArtifactImporter.Import(output).Any(row => row.EventType == "sample.launch.confirmed"),
+            "A different PID at the same path must not suppress the verified launch proof.");
         File.Delete(Path.Combine(output, "events.json"));
 
         File.WriteAllText(Path.Combine(output, "guest-agent-run-status.json"),

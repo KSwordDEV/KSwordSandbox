@@ -42,6 +42,7 @@ public sealed class HtmlReportRenderer
     private const long ArtifactPreviewImageByteLimit = 2 * 1024 * 1024;
     private const int ProcessTreeDefaultOpenDepth = 1;
     private const int TimelineEventInlineLimit = 60;
+    private const int TimelineTrackEventInlineLimit = 36;
     // Normal runtime module loads render inside their own collapsed fold in
     // the event explorer and timeline; the cap keeps the fold bounded while
     // the count in the summary still reports the full population.
@@ -97,6 +98,18 @@ public sealed class HtmlReportRenderer
         int TotalEventCount,
         IReadOnlyList<SandboxEvent> Events,
         string CopyText);
+
+    private static readonly (string Family, string Label)[] TimelineTrackFamilies =
+    [
+        ("process", "Process"),
+        ("file", "Files"),
+        ("registry", "Registry"),
+        ("network", "Network"),
+        ("security/privilege", "Security"),
+        ("r0", "R0 / driver"),
+        ("failure", "Failures"),
+        ("other", "Other")
+    ];
 
     private sealed record BehaviorGraphEdge(string From, string Relation, string To, string Evidence, IReadOnlyList<ArtifactDescriptor> RelatedArtifacts);
 
@@ -231,7 +244,7 @@ public sealed class HtmlReportRenderer
     };
 
     private static readonly Regex ChineseRawEvidenceFragmentRegex = new(
-        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<option\\b[^>]*>[A-Za-z][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]*</option>|(?<![A-Za-z0-9_])(?:agent|guest|static|process|file|registry|network|r0|r0collector|driver|artifact|startup|environment|service|scheduled_task|dns|vt|packet_capture|screenshot|memory_dump|api|security|security_eventlog|etw|etwLive|windowsBehaviorEventLog|download)\\.[A-Za-z0-9_.-]+|(?<![A-Za-z0-9_])report\\.(?:generated)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:behaviorCounted|nonbehavior|notSampleBehavior|collectorSelfNoise|collectorNoise|collectionHealthRows|vtQuietStates|r0HealthRows|sampleBehaviorEvents|excludedFromBehaviorStory|correlationConfirmed|correlationProbable|correlationEnvironment|correlationUnknown|retainedNotPromoted|normalInteractiveGuiBaseline|evidenceDispositionRetainedNotPromoted)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]*\\.[A-Za-z0-9]{1,8}(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:dropped-files|memory-dumps|packet-captures|driver-events)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[a-z][a-z-]*=\\d+:[a-z]+:\\d+|<[^>]+>|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
+        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<option\\b[^>]*>[A-Za-z][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]*</option>|(?<![A-Za-z0-9_])(?:agent|guest|static|process|file|registry|network|r0|r0collector|driver|artifact|startup|environment|service|scheduled_task|dns|vt|packet_capture|screenshot|memory_dump|api|security|security_eventlog|etw|etwLive|windowsBehaviorEventLog|download)\\.[A-Za-z0-9_.-]+|(?<![A-Za-z0-9_])report\\.(?:generated)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:behaviorCounted|nonbehavior|notSampleBehavior|collectorSelfNoise|collectorNoise|collectionHealthRows|vtQuietStates|r0HealthRows|sampleBehaviorEvents|excludedFromBehaviorStory|correlationConfirmed|correlationProbable|correlationEnvironment|correlationUnknown|retainedNotPromoted|normalInteractiveGuiBaseline|evidenceDispositionRetainedNotPromoted)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]*\\.[A-Za-z0-9]{1,8}(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:dropped-files|memory-dumps|packet-captures|driver-events)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[a-z][a-z-]*=\\d+:[a-z]+:\\d+|<[^>]+>|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link|data-track-detail|data-track-preview|data-family|title)=\"[^\"]*\"",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
@@ -241,7 +254,7 @@ public sealed class HtmlReportRenderer
     // in a second pass that still keeps machine payloads byte-stable: code and
     // pre blocks, dotted event keys, machine-valued options, and link payloads.
     private static readonly Regex ChineseRawPayloadFragmentRegex = new(
-        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<option\\b[^>]*>[A-Za-z][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]*</option>|(?<![A-Za-z0-9_])(?:agent|guest|static|process|file|registry|network|r0|r0collector|driver|artifact|startup|environment|service|scheduled_task|dns|vt|packet_capture|screenshot|memory_dump|api|security|security_eventlog|etw|etwLive|windowsBehaviorEventLog|download)\\.[A-Za-z0-9_.-]+|(?<![A-Za-z0-9_])report\\.(?:generated)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:behaviorCounted|nonbehavior|notSampleBehavior|collectorSelfNoise|collectorNoise|collectionHealthRows|vtQuietStates|r0HealthRows|sampleBehaviorEvents|excludedFromBehaviorStory|correlationConfirmed|correlationProbable|correlationEnvironment|correlationUnknown|retainedNotPromoted|normalInteractiveGuiBaseline|evidenceDispositionRetainedNotPromoted)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]*\\.[A-Za-z0-9]{1,8}(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:dropped-files|memory-dumps|packet-captures|driver-events)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[a-z][a-z-]*=\\d+:[a-z]+:\\d+|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link)=\"[^\"]*\"",
+        "<style\\b[^>]*>.*?</style>|<script\\b[^>]*>.*?</script>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|<option\\b[^>]*>[A-Za-z][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]*</option>|(?<![A-Za-z0-9_])(?:agent|guest|static|process|file|registry|network|r0|r0collector|driver|artifact|startup|environment|service|scheduled_task|dns|vt|packet_capture|screenshot|memory_dump|api|security|security_eventlog|etw|etwLive|windowsBehaviorEventLog|download)\\.[A-Za-z0-9_.-]+|(?<![A-Za-z0-9_])report\\.(?:generated)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:behaviorCounted|nonbehavior|notSampleBehavior|collectorSelfNoise|collectorNoise|collectionHealthRows|vtQuietStates|r0HealthRows|sampleBehaviorEvents|excludedFromBehaviorStory|correlationConfirmed|correlationProbable|correlationEnvironment|correlationUnknown|retainedNotPromoted|normalInteractiveGuiBaseline|evidenceDispositionRetainedNotPromoted)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]*\\.[A-Za-z0-9]{1,8}(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:dropped-files|memory-dumps|packet-captures|driver-events)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[a-z][a-z-]*=\\d+:[a-z]+:\\d+|\\s(?:href|src|data-copy|data-path|data-selector|data-safe-link|data-track-detail|data-track-preview|data-family|title)=\"[^\"]*\"",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
@@ -570,9 +583,11 @@ public sealed class HtmlReportRenderer
             AppendBehaviorGraph(html, report, artifactLookup, artifactLinks, collectionList);
         }
         AppendArtifactLinks(html, report, artifactLinks, collectionList, peDataEvents);
+        // The multitrack view is bounded independently of the raw event
+        // population, so busy reports still retain a useful time axis.
+        AppendTimeline(html, report, artifactLookup, artifactLinks);
         if (!largeReport)
         {
-            AppendTimeline(html, report, artifactLookup, artifactLinks);
             AppendProcessDetails(html, report, artifactLookup, artifactLinks);
         }
         AppendSecurityPrivilegeTelemetry(html, report, artifactLookup, artifactLinks);
@@ -1221,6 +1236,56 @@ details[open]>summary:before{content:'–'}
 .narrative-step p{color:var(--muted);font-size:12px;line-height:1.6;margin:0}
 
 /* ---------- timeline ---------- */
+.timeline-track-shell{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin:12px 0 16px;overflow:hidden}
+.timeline-track-toolbar{align-items:center;background:var(--band);border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;padding:10px 14px}
+.timeline-track-toolbar strong{font-size:13px}
+.timeline-track-toolbar small{color:var(--muted);display:block;font-size:11px;margin-top:2px}
+.timeline-zoom-controls{align-items:center;display:none;gap:7px}
+.report-js .timeline-zoom-controls{display:flex}
+.timeline-zoom-controls button{background:var(--surface);border:1px solid var(--line);border-radius:6px;color:var(--ink);cursor:pointer;font:inherit;min-height:30px;min-width:30px}
+.timeline-zoom-controls button:hover,.timeline-zoom-controls button:focus-visible{border-color:var(--primary);outline:2px solid transparent}
+.timeline-zoom-controls input{accent-color:var(--primary);width:112px}
+.timeline-track-scroll{overflow-x:auto;overflow-y:visible;scrollbar-gutter:stable}
+.timeline-track-board{min-width:760px;width:100%}
+.timeline-track-row{display:flex;min-height:50px;position:relative}
+.timeline-track-row.has-events{min-height:88px}
+.timeline-track-row+.timeline-track-row{border-top:1px solid var(--line-soft)}
+.timeline-track-label{align-items:center;background:var(--surface);border-right:1px solid var(--line);display:flex;flex:0 0 148px;gap:7px;left:0;padding:0 10px;position:sticky;z-index:3}
+.timeline-track-label strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.timeline-track-count{color:var(--muted);font-size:11px;margin-left:auto}
+.timeline-track-ruler{background:var(--band);min-height:39px}
+.timeline-track-ruler .timeline-track-label{background:var(--band);font-size:11px}
+.timeline-track-rail{background:repeating-linear-gradient(to right,transparent 0,transparent calc(10% - 1px),var(--line-soft) calc(10% - 1px),var(--line-soft) 10%);flex:1;min-width:0;position:relative}
+.timeline-track-ruler .timeline-track-rail{background:var(--band)}
+.timeline-track-tick{border-left:1px solid var(--line);bottom:0;color:var(--muted);font-family:var(--mono);font-size:10px;left:var(--tick-left);padding:5px 0 0 4px;position:absolute;top:0;white-space:nowrap}
+.timeline-track-tick:last-child{left:auto;right:0}
+.timeline-track-row[data-family="process"]{--track-color:#2563eb}
+.timeline-track-row[data-family="file"]{--track-color:#d97706}
+.timeline-track-row[data-family="registry"]{--track-color:#7c3aed}
+.timeline-track-row[data-family="network"]{--track-color:#0891b2}
+.timeline-track-row[data-family="security/privilege"]{--track-color:#c2410c}
+.timeline-track-row[data-family="r0"]{--track-color:#0f766e}
+.timeline-track-row[data-family="failure"]{--track-color:#dc2626}
+.timeline-track-row[data-family="other"]{--track-color:#64748b}
+.timeline-track-swatch{background:var(--track-color);border-radius:3px;flex:0 0 7px;height:20px}
+.timeline-track-event{background:var(--track-color);border:2px solid var(--surface);border-radius:6px;box-shadow:0 1px 5px #0003;color:#fff;cursor:pointer;font-size:10px;font-weight:700;height:22px;left:var(--event-left);min-width:18px;padding:0 3px;position:absolute;top:var(--event-top);transform:translateX(-50%);z-index:1}
+.timeline-track-event[data-priority="high"]{outline:2px solid #b91c1c;z-index:2}
+.timeline-track-event[data-priority="supporting"]{background:var(--surface);border:2px dashed var(--track-color);opacity:.86}
+.timeline-track-event[data-priority="supporting"]{color:var(--track-color)}
+.timeline-track-single{display:none}
+.timeline-track-row.is-expanded .timeline-track-single{display:block}
+.timeline-track-row.is-expanded .timeline-track-cluster{display:none}
+.timeline-track-event:hover,.timeline-track-event:focus-visible{box-shadow:0 0 0 4px #2563eb44;outline:2px solid var(--primary);z-index:4}
+.timeline-track-tooltip{background:#17243b;border:1px solid #35445e;border-radius:8px;box-shadow:0 12px 30px #0004;color:#fff;display:none;font-size:12px;line-height:1.5;max-height:45vh;max-width:min(420px,calc(100vw - 24px));overflow:auto;padding:10px 12px;pointer-events:none;position:fixed;white-space:pre-wrap;z-index:1000}
+.timeline-track-tooltip.is-visible{display:block}
+.timeline-track-inspector{background:var(--band);border-top:1px solid var(--line);padding:10px 14px}
+.timeline-track-inspector[hidden]{display:none}
+.timeline-track-inspector-head{align-items:center;display:flex;justify-content:space-between}
+.timeline-track-inspector button{background:var(--surface);border:1px solid var(--line);border-radius:5px;cursor:pointer;padding:4px 9px}
+.timeline-track-inspector pre{font-family:var(--mono);font-size:11px;line-height:1.5;max-height:42vh;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.timeline-track-foot{color:var(--muted);font-size:11px;line-height:1.6;padding:8px 14px}
+@media (max-width:640px){.timeline-track-label{flex-basis:108px}.timeline-track-board{min-width:660px}.timeline-track-tick{font-size:9px}}
+@media print{.timeline-track-scroll{overflow:visible}.timeline-track-board{width:100%!important}.timeline-track-toolbar{display:none}.timeline-track-tooltip{display:none!important}.timeline-track-row.is-expanded .timeline-track-single{display:none}.timeline-track-row.is-expanded .timeline-track-cluster{display:block}}
 .timeline-groups{display:grid;gap:10px;margin:12px 0}
 .timeline-group{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
 .timeline-group>summary{align-items:flex-start;background:var(--band);display:flex;gap:12px;justify-content:space-between;padding:10px 14px}
@@ -1409,6 +1474,13 @@ details[open]>summary:before{content:'–'}
             // after the operator has scrolled past the verdict badge.
             html.AppendLine("<div class=\"failure-note execution-failure-banner\" role=\"alert\"><strong>Sample execution failed / runtime indeterminate</strong><span>Sample execution failed or ended before complete runtime behavior. This is an execution outcome, not a maliciousness verdict.</span></div>");
         }
+        else if ((verdict.Label is "Critical risk" or "High risk") &&
+            (report.Status == AnalysisStatus.Failed ||
+             HasRuntimeCoverageGap(report) ||
+             report.Events.Any(evt => IsNonZeroSampleExitEvent(report, evt))))
+        {
+            html.AppendLine("<div class=\"failure-note behavior-coverage-banner\" role=\"status\"><strong>High-risk behavior observed / execution or collection incomplete</strong><span>The risk finding is based on observed sample behavior. An abnormal exit or collection gap may hide additional behavior, so the report does not claim complete coverage.</span></div>");
+        }
 
         // The identity block is a definition grid rather than a bordered
         // table: labels keep a fixed column so sample name, hash, size, and
@@ -1489,15 +1561,20 @@ details[open]>summary:before{content:'–'}
             return "Threat";
         }
 
-        if (detailedLabel is "Launch confirmed / collection failed")
+        if (detailedLabel is "Launch confirmed / collection failed" or
+            "Execution blocked / runtime indeterminate" or
+            "Execution complete / runtime evidence incomplete" or
+            "Evidence unavailable / runtime indeterminate")
+        {
+            return "Runtime indeterminate";
+        }
+
+        if (detailedLabel is "Analysis failed" or "Static analysis only")
         {
             return "No behavior verdict";
         }
 
-        if (detailedLabel is "Suspicious" or "Execution blocked / runtime indeterminate" or
-            "Analysis failed" or "Static analysis only" or
-            "Execution complete / runtime evidence incomplete" or
-            "Evidence unavailable / runtime indeterminate")
+        if (detailedLabel is "Suspicious")
         {
             return "Suspicious";
         }
@@ -1569,7 +1646,7 @@ details[open]>summary:before{content:'–'}
             ("events", "Raw normalized events")
         })
         {
-            if (largeReport && (href == "graph" || href == "timeline" || href == "process"))
+            if (largeReport && (href == "graph" || href == "process"))
             {
                 continue;
             }
@@ -6383,6 +6460,21 @@ details[open]>summary:before{content:'–'}
             return;
         }
 
+        var highFilePaths = report.Findings
+            .Where(finding => NormalizeSeverity(finding.Severity) is "critical" or "high")
+            .SelectMany(finding => finding.Evidence)
+            .Where(IsFileEvent)
+            .Select(evt => evt.Path)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var trackEvents = report.Events
+            .Where(evt => IsUserFacingEvent(evt) && !IsNormalRuntimeModuleLoadEvent(evt) ||
+                IsSupportingFilePairEvent(evt, highFilePaths))
+            .OrderBy(evt => evt.Timestamp)
+            .ToList();
+        AppendTimelineTracks(html, report, trackEvents);
         var hiddenEvents = Math.Max(0, userFacingEvents.Count - events.Count - runtimeModuleLoadEvents.Count);
         var groups = BuildTimelineGroups(events);
         html.AppendLine("<div class=\"section-note\"><strong>Timeline grouping.</strong> Grouped by UTC minute with process/type summaries; large buckets show representative events first.</div>");
@@ -6438,6 +6530,172 @@ details[open]>summary:before{content:'–'}
 
         html.AppendLine("</div><div class=\"copy-hint\">Right-click timeline entries, table cells, or evidence blocks to copy their contents.</div></section>");
     }
+
+    /// <summary>
+    /// Renders a video-editor-style overview using a fixed number of markers
+    /// per behavior family. The axis spans the full observed interval even when
+    /// a busy report has thousands of events; high-severity evidence is sampled
+    /// first and normal process snapshots cannot displace file changes.
+    /// </summary>
+    private static void AppendTimelineTracks(StringBuilder html, AnalysisReport report, IReadOnlyList<SandboxEvent> events)
+    {
+        if (events.Count == 0) return;
+
+        var first = events.Min(evt => evt.Timestamp);
+        var last = events.Max(evt => evt.Timestamp);
+        var durationMs = Math.Max(1d, (last - first).TotalMilliseconds);
+        var highEvidence = report.Findings
+            .Where(finding => NormalizeSeverity(finding.Severity) is "critical" or "high")
+            .SelectMany(finding => finding.Evidence)
+            .Select(TimelineEventKey)
+            .ToHashSet();
+        var displayed = 0;
+        var markerCount = 0;
+
+        html.AppendLine("<div class=\"timeline-track-shell\" data-timeline-tracks>");
+        html.AppendLine("<div class=\"timeline-track-toolbar\"><span><strong>Behavior tracks</strong><small>UTC time axis · hover or focus a marker for evidence</small></span><div class=\"timeline-zoom-controls\" aria-label=\"Timeline zoom\"><button type=\"button\" data-timeline-zoom-out aria-label=\"Zoom out\">−</button><input type=\"range\" min=\"1\" max=\"64\" step=\"1\" value=\"1\" data-timeline-zoom aria-label=\"Timeline zoom\"><button type=\"button\" data-timeline-zoom-in aria-label=\"Zoom in\">+</button><span data-timeline-zoom-value>1×</span></div></div>");
+        html.AppendLine("<div class=\"timeline-track-scroll\" data-timeline-scroll><div class=\"timeline-track-board\" data-timeline-board>");
+        html.AppendLine("<div class=\"timeline-track-row timeline-track-ruler\"><div class=\"timeline-track-label\">UTC</div><div class=\"timeline-track-rail\">");
+        for (var tick = 0; tick <= 10; tick++)
+        {
+            var at = first.AddMilliseconds(durationMs * tick / 10d);
+            var label = at.ToUniversalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            html.AppendLine($"<span class=\"timeline-track-tick\" style=\"--tick-left:{tick * 10}%\">{E(label)}</span>");
+        }
+        html.AppendLine("</div></div>");
+
+        foreach (var (family, label) in TimelineTrackFamilies)
+        {
+            var familyEvents = events.Where(evt => EventFamilyLabel(evt) == family).OrderBy(evt => evt.Timestamp).ToList();
+            var selected = SelectTimelineTrackEvents(familyEvents, highEvidence);
+            displayed += selected.Count;
+            // Three vertically separated subrows and one marker per 4%-wide
+            // bucket keep dense bursts reachable with a mouse at 1x zoom.
+            var clusters = selected
+                .GroupBy(evt => (
+                    Bucket: Math.Min(24, (int)Math.Floor(Math.Clamp((evt.Timestamp - first).TotalMilliseconds / durationMs, 0d, 1d) * 25d)),
+                    Priority: highEvidence.Contains(TimelineEventKey(evt)) ? 0 : IsUserFacingEvent(evt) ? 1 : 2))
+                .OrderBy(group => group.Key.Bucket)
+                .ThenBy(group => group.Key.Priority)
+                .Select(group => group.OrderBy(evt => evt.Timestamp).ToList())
+                .ToList();
+            markerCount += clusters.Count;
+            var rowClass = clusters.Count > 0 ? "timeline-track-row has-events" : "timeline-track-row";
+            html.AppendLine($"<div class=\"{rowClass}\" data-family=\"{A(family)}\"><div class=\"timeline-track-label\"><span class=\"timeline-track-swatch\" aria-hidden=\"true\"></span><strong>{E(label)}</strong><span class=\"timeline-track-count\">{E(familyEvents.Count.ToString(CultureInfo.InvariantCulture))}</span></div><div class=\"timeline-track-rail\">");
+            for (var index = 0; index < clusters.Count; index++)
+            {
+                var cluster = clusters[index];
+                var left = 1d + 98d * cluster.Average(evt => Math.Clamp((evt.Timestamp - first).TotalMilliseconds / durationMs, 0d, 1d));
+                var priority = cluster.Any(evt => highEvidence.Contains(TimelineEventKey(evt))) ? "high" :
+                    cluster.Any(IsUserFacingEvent) ? "normal" : "supporting";
+                var lines = cluster
+                    .OrderByDescending(evt => highEvidence.Contains(TimelineEventKey(evt)))
+                    .Select(evt => (IsUserFacingEvent(evt) ? string.Empty : "Supporting file observation; sample attribution is unconfirmed.\n") +
+                        VisibleEvidenceText(EventToBoundedPlainText(evt, maxDataPairs: 8, maxValueLength: 140)))
+                    .ToList();
+                var detail = $"{cluster.Count} {label} observation(s) near {cluster[0].Timestamp:u}\n\n" +
+                    string.Join("\n---\n", lines);
+                var preview = $"{cluster.Count} {label} observation(s) · click for full evidence\n" +
+                    string.Join("\n", cluster.Take(4).Select(evt => $"{evt.Timestamp:HH:mm:ss.fff} {evt.EventType} {AbbreviateEvidenceValue(evt.Path ?? evt.ProcessName ?? string.Empty, 90)}")) +
+                    (cluster.Count > 4 ? $"\n+{cluster.Count - 4} more" : string.Empty);
+                var position = left.ToString("0.###", CultureInfo.InvariantCulture);
+                var top = (index % 3) * 26 + 7;
+                html.AppendLine($"<button type=\"button\" class=\"timeline-track-event timeline-track-cluster\" data-priority=\"{priority}\" data-track-preview=\"{A(preview)}\" data-track-detail=\"{A(detail)}\" style=\"--event-left:{position}%;--event-top:{top}px\" title=\"{A(preview)}\" aria-label=\"{A($"{label}: {cluster.Count} observations near {cluster[0].Timestamp:u}")}\">{(cluster.Count > 1 ? E(cluster.Count.ToString(CultureInfo.InvariantCulture)) : string.Empty)}</button>");
+            }
+            foreach (var evt in selected)
+            {
+                var fraction = Math.Clamp((evt.Timestamp - first).TotalMilliseconds / durationMs, 0d, 1d);
+                var priority = highEvidence.Contains(TimelineEventKey(evt)) ? "high" :
+                    IsUserFacingEvent(evt) ? "normal" : "supporting";
+                var detail = (priority == "supporting" ? "Supporting file observation; sample attribution is unconfirmed.\n" : string.Empty) +
+                    VisibleEvidenceText(EventToBoundedPlainText(evt, maxDataPairs: 8, maxValueLength: 140));
+                var preview = $"{evt.Timestamp:HH:mm:ss.fff} {evt.EventType}\n{AbbreviateEvidenceValue(evt.Path ?? evt.ProcessName ?? string.Empty, 90)}";
+                var position = (1d + fraction * 98d).ToString("0.###", CultureInfo.InvariantCulture);
+                html.AppendLine($"<button type=\"button\" class=\"timeline-track-event timeline-track-single\" data-priority=\"{priority}\" data-track-single=\"true\" data-time-fraction=\"{fraction.ToString("0.########", CultureInfo.InvariantCulture)}\" data-track-preview=\"{A(preview)}\" data-track-detail=\"{A(detail)}\" style=\"--event-left:{position}%;--event-top:7px\" title=\"{A(preview)}\" aria-label=\"{A($"{label}: {evt.EventType} at {evt.Timestamp:u}")}\"></button>");
+            }
+            html.AppendLine("</div></div>");
+        }
+
+        html.AppendLine("</div></div>");
+        html.AppendLine("<div class=\"timeline-track-inspector\" data-track-inspector role=\"region\" tabindex=\"-1\" aria-label=\"Selected time cluster\" hidden><div class=\"timeline-track-inspector-head\"><strong>Selected time cluster</strong><button type=\"button\" data-track-inspector-close>Close</button></div><pre data-track-inspector-text></pre></div>");
+        html.AppendLine($"<div class=\"timeline-track-foot\">{E(displayed.ToString(CultureInfo.InvariantCulture))} / {E(events.Count.ToString(CultureInfo.InvariantCulture))} timeline observations sampled into {E(markerCount.ToString(CultureInfo.InvariantCulture))} markers at 1×; {E(Math.Max(0, events.Count - displayed).ToString(CultureInfo.InvariantCulture))} folded into track counts. Dashed markers are supporting file observations without confirmed sample attribution. Hover or focus for a preview; click a marker for its full sampled cluster. Zoomed markers separate overlaps visually; exact timestamps remain in each detail. Complete evidence remains in the event explorer and indexed JSON/JSONL.</div>");
+        html.AppendLine("</div>");
+    }
+
+    private static IReadOnlyList<SandboxEvent> SelectTimelineTrackEvents(
+        IReadOnlyList<SandboxEvent> ordered,
+        HashSet<(DateTimeOffset, string, string, string, string)> highEvidence)
+    {
+        if (ordered.Count <= TimelineTrackEventInlineLimit) return ordered;
+
+        var high = ordered.Where(evt => highEvidence.Contains(TimelineEventKey(evt))).ToList();
+        var selected = SampleTimelineEvenly(high, Math.Min(12, TimelineTrackEventInlineLimit)).ToList();
+        var seen = selected.ToHashSet();
+        var buckets = ordered
+            .Where(evt => !seen.Contains(evt))
+            .GroupBy(evt => evt.EventType, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => IsLowSignalTimelineType(group.Key) ? 1 : 0)
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => SampleTimelineEvenly(group.ToList(), TimelineTrackEventInlineLimit).ToList())
+            .ToList();
+        var offsets = new int[buckets.Count];
+        while (selected.Count < TimelineTrackEventInlineLimit)
+        {
+            var added = false;
+            for (var bucket = 0; bucket < buckets.Count && selected.Count < TimelineTrackEventInlineLimit; bucket++)
+            {
+                var items = buckets[bucket];
+                if (items.Count == 0 || offsets[bucket] >= items.Count ||
+                    IsLowSignalTimelineType(items[0].EventType) && offsets[bucket] >= 2)
+                {
+                    continue;
+                }
+
+                var evt = items[offsets[bucket]++];
+                if (seen.Add(evt))
+                {
+                    selected.Add(evt);
+                    added = true;
+                }
+            }
+
+            if (!added) break;
+        }
+
+        return selected.OrderBy(evt => evt.Timestamp).ToList();
+    }
+
+    private static IReadOnlyList<SandboxEvent> SampleTimelineEvenly(IReadOnlyList<SandboxEvent> events, int limit)
+    {
+        if (limit <= 0) return [];
+        if (events.Count <= limit) return events;
+        if (limit == 1) return [events[0]];
+        return Enumerable.Range(0, limit)
+            .Select(index => events[(int)Math.Round(index * (events.Count - 1d) / (limit - 1d))])
+            .ToList();
+    }
+
+    private static bool IsLowSignalTimelineType(string eventType) =>
+        eventType.Equals("process.snapshot", StringComparison.OrdinalIgnoreCase) ||
+        eventType.Equals("process.tree", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSupportingFilePairEvent(SandboxEvent evt, IReadOnlyList<string> highFilePaths)
+    {
+        if (IsUserFacingEvent(evt) || !IsFileEvent(evt) || string.IsNullOrWhiteSpace(evt.Path) ||
+            !(evt.EventType.Equals("file.deleted", StringComparison.OrdinalIgnoreCase) ||
+              evt.EventType.Equals("file.modified", StringComparison.OrdinalIgnoreCase) ||
+              evt.EventType.Equals("file.renamed", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return highFilePaths.Any(path => path.Length - evt.Path.Length is >= 2 and <= 40 &&
+            path.StartsWith(evt.Path + ".", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static (DateTimeOffset, string, string, string, string) TimelineEventKey(SandboxEvent evt) =>
+        (evt.Timestamp, evt.EventType.ToUpperInvariant(), evt.Source.ToUpperInvariant(),
+            (evt.ProcessName ?? string.Empty).ToUpperInvariant(), (evt.Path ?? string.Empty).ToUpperInvariant());
 
     /// <summary>
     /// Groups timeline events by UTC minute for stable native-HTML expansion.
@@ -12376,8 +12634,8 @@ details[open]>summary:before{content:'–'}
 
     /// <summary>
     /// Determines the overall report verdict.
-    /// Inputs are report status and findings, processing prioritizes failure
-    /// and higher severities, and the method returns label and CSS key.
+    /// Inputs are report status and findings; supported high-risk runtime
+    /// findings remain visible even when execution or collection is partial.
     /// </summary>
     private static (string Label, string Css) DetermineVerdict(AnalysisReport report)
     {
@@ -12386,9 +12644,21 @@ details[open]>summary:before{content:'–'}
             return ("Launch confirmed / collection failed", "medium");
         }
 
+        var primaryFindings = PrimaryBehaviorFindings(report).ToList();
+        var staticOnly = IsStaticOnlyReport(report);
+        if (!staticOnly && CountSeverity(primaryFindings, "critical") > 0)
+        {
+            return ("Critical risk", "critical");
+        }
+
+        if (!staticOnly && CountSeverity(primaryFindings, "high") > 0)
+        {
+            return ("High risk", "high");
+        }
+
         if (HasExecutionBlockedVerdict(report))
         {
-            return ("Execution blocked / runtime indeterminate", "high");
+            return ("Execution blocked / runtime indeterminate", "medium");
         }
 
         if (report.Status == AnalysisStatus.Failed)
@@ -12396,20 +12666,9 @@ details[open]>summary:before{content:'–'}
             return ("Analysis failed", "high");
         }
 
-        if (IsStaticOnlyReport(report))
+        if (staticOnly)
         {
             return ("Static analysis only", "info");
-        }
-
-        var primaryFindings = PrimaryBehaviorFindings(report).ToList();
-        if (CountSeverity(primaryFindings, "critical") > 0)
-        {
-            return ("Critical risk", "critical");
-        }
-
-        if (CountSeverity(primaryFindings, "high") > 0)
-        {
-            return ("High risk", "high");
         }
 
         if (CountSeverity(primaryFindings, "medium") > 0)
@@ -12504,11 +12763,10 @@ details[open]>summary:before{content:'–'}
             string.Equals(code, "sample-runtime-blocked-guest-file-read", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// Determines whether the report contains runtime behavior beyond launch,
-    /// exit, timeout, and execution-failure boundary rows. Inputs are report
-    /// events; processing excludes boundary diagnostics so a blocked or early
-    /// exit cannot masquerade as complete behavior; the method returns true
-    /// when at least one substantive dynamic event is present.
+    /// Determines whether the report contains runtime behavior beyond process
+    /// lifecycle observations and execution-failure boundary rows. Repeated
+    /// process-tree snapshots or a process creation alone do not establish
+    /// that a crashing sample ran long enough to exercise its payload.
     /// </summary>
     private static bool HasCompleteSampleBehavior(AnalysisReport report)
     {
@@ -12562,6 +12820,11 @@ details[open]>summary:before{content:'–'}
         return TextEqualsAny(
                 evt.EventType,
                 "process.start",
+                "process.new",
+                "process.tree",
+                "process.tree.summary",
+                "process.snapshot",
+                "process.observed",
                 "process.start_failed",
                 "process.exit",
                 "process.timeout",
@@ -14992,6 +15255,7 @@ details[open]>summary:before{content:'–'}
         (" generated at ", " 生成于 "),
         ("Analysis failed", "分析失败"),
         ("Launch confirmed / collection failed", "启动已证/采集失败"),
+        ("Runtime indeterminate", "运行期不可判定"),
         ("No behavior verdict", "行为不可判定"),
         ("Sample launch confirmed / behavior collection failed", "样本启动已证/行为采集失败"),
         ("The verified launch record proves only that the sample process started. Runtime behavior was not recovered, so this report makes no behavior verdict.", "经过校验的启动记录只证明样本进程已启动。运行期行为未回收，因此本报告不作行为判定。"),
@@ -15000,6 +15264,8 @@ details[open]>summary:before{content:'–'}
         ("Execution blocked / runtime indeterminate", "执行被阻断/运行期不可判定"),
         ("Sample execution failed / runtime indeterminate", "样本执行失败/运行期不可判定"),
         ("Sample execution failed or ended before complete runtime behavior. This is an execution outcome, not a maliciousness verdict.", "样本执行失败或在产生完整运行期行为前结束。这是执行结果，不是恶意性判定。"),
+        ("High-risk behavior observed / execution or collection incomplete", "已观察到高风险行为/执行或采集不完整"),
+        ("The risk finding is based on observed sample behavior. An abnormal exit or collection gap may hide additional behavior, so the report does not claim complete coverage.", "风险结论基于已观察到的样本行为。异常退出或采集缺口可能掩盖其他行为，因此报告不声称证据覆盖完整。"),
         ("Execution complete / runtime evidence incomplete", "执行完成/运行期证据不完整"),
         ("Exit code context:", "退出码上下文："),
         ("Exit code ", "退出码 "),
@@ -15773,6 +16039,23 @@ details[open]>summary:before{content:'–'}
         ("Driver events", "驱动事件"),
         ("Artifacts:", "证据文件："),
         ("Timeline", "时间线"),
+        ("Behavior tracks", "行为轨道"),
+        ("UTC time axis · hover or focus a marker for evidence", "UTC 时间轴 · 悬停或聚焦标记查看证据"),
+        ("Timeline zoom", "时间轴缩放"),
+        ("Zoom out", "缩小"),
+        ("Zoom in", "放大"),
+        (">Process</strong>", ">进程</strong>"),
+        (">Files</strong>", ">文件</strong>"),
+        (">Registry</strong>", ">注册表</strong>"),
+        (">Network</strong>", ">网络</strong>"),
+        (">Security</strong>", ">安全</strong>"),
+        (">R0 / driver</strong>", ">R0 / 驱动</strong>"),
+        (">Failures</strong>", ">失败</strong>"),
+        (">Other</strong>", ">其他</strong>"),
+        ("timeline observations sampled into", "条时间线观察已采样为"),
+        ("markers at 1×;", "个 1× 聚合标记；"),
+        ("folded into track counts. Dashed markers are supporting file observations without confirmed sample attribution. Hover or focus for a preview; click a marker for its full sampled cluster. Zoomed markers separate overlaps visually; exact timestamps remain in each detail. Complete evidence remains in the event explorer and indexed JSON/JSONL.", "条折叠计入轨道总数。虚线标记为尚未确认样本归因的关联文件观察。悬停或聚焦查看摘要；点击标记查看该组完整采样详情。放大时会错开重叠标记；准确时间以每项详情中的时间戳为准。完整证据仍在事件筛选表和索引 JSON/JSONL。"),
+        ("Selected time cluster", "选中的时间簇"),
         ("Process details", "进程详情"),
         ("Dropped files", "落地文件"),
         ("File system activity", "文件系统活动"),
@@ -19105,6 +19388,93 @@ details[open]>summary:before{content:'–'}
   });
 
   document.documentElement.classList.add('report-js');
+  var trackShell = document.querySelector('[data-timeline-tracks]');
+  if (trackShell) {
+    var trackScroll = trackShell.querySelector('[data-timeline-scroll]');
+    var trackBoard = trackShell.querySelector('[data-timeline-board]');
+    var zoomInput = trackShell.querySelector('[data-timeline-zoom]');
+    var zoomValue = trackShell.querySelector('[data-timeline-zoom-value]');
+    var trackInspector = trackShell.querySelector('[data-track-inspector]');
+    var trackInspectorText = trackShell.querySelector('[data-track-inspector-text]');
+    var trackTooltip = document.createElement('div');
+    trackTooltip.className = 'timeline-track-tooltip';
+    trackTooltip.setAttribute('role', 'tooltip');
+    document.body.appendChild(trackTooltip);
+    function positionTrackTooltip(x, y) {
+      var left = Math.min(x + 14, window.innerWidth - trackTooltip.offsetWidth - 12);
+      var top = y + 16;
+      if (top + trackTooltip.offsetHeight > window.innerHeight - 12) {
+        top = y - trackTooltip.offsetHeight - 12;
+      }
+      trackTooltip.style.left = Math.max(12, left) + 'px';
+      trackTooltip.style.top = Math.max(12, top) + 'px';
+    }
+    function showTrackTooltip(marker, x, y) {
+      trackTooltip.textContent = marker.getAttribute('data-track-preview') || '';
+      trackTooltip.classList.add('is-visible');
+      positionTrackTooltip(x, y);
+    }
+    function hideTrackTooltip() { trackTooltip.classList.remove('is-visible'); }
+    Array.prototype.forEach.call(trackShell.querySelectorAll('[data-track-detail]'), function (marker) {
+      marker.removeAttribute('title'); // Native title remains the no-JS fallback.
+      marker.addEventListener('mouseenter', function (event) { showTrackTooltip(marker, event.clientX, event.clientY); });
+      marker.addEventListener('mousemove', function (event) { positionTrackTooltip(event.clientX, event.clientY); });
+      marker.addEventListener('mouseleave', hideTrackTooltip);
+      marker.addEventListener('focus', function () {
+        var box = marker.getBoundingClientRect();
+        showTrackTooltip(marker, box.left + box.width / 2, box.bottom);
+      });
+      marker.addEventListener('blur', hideTrackTooltip);
+      marker.addEventListener('keydown', function (event) { if (event.key === 'Escape') { hideTrackTooltip(); } });
+      marker.addEventListener('click', function () {
+        trackInspectorText.textContent = marker.getAttribute('data-track-detail') || '';
+        trackInspector.hidden = false;
+        hideTrackTooltip();
+        trackInspector.focus({ preventScroll: true });
+        trackInspector.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+    });
+    trackShell.querySelector('[data-track-inspector-close]').addEventListener('click', function () {
+      trackInspector.hidden = true;
+    });
+    function layoutZoomedTrackMarkers(zoom) {
+      Array.prototype.forEach.call(trackShell.querySelectorAll('.timeline-track-row[data-family]'), function (row) {
+        row.classList.toggle('is-expanded', zoom > 1);
+        if (zoom <= 1) { return; }
+        var rail = row.querySelector('.timeline-track-rail');
+        var markers = row.querySelectorAll('[data-track-single]');
+        var lastX = [-1000, -1000, -1000];
+        Array.prototype.forEach.call(markers, function (marker) {
+          var fraction = Math.min(1, Math.max(0, Number(marker.getAttribute('data-time-fraction')) || 0));
+          var exactX = Math.max(12, rail.clientWidth * (0.01 + fraction * 0.98));
+          var lane = -1;
+          for (var index = 0; index < 3; index++) {
+            if (exactX - lastX[index] >= 24) { lane = index; break; }
+          }
+          if (lane < 0) { lane = lastX.indexOf(Math.min.apply(null, lastX)); }
+          var visualX = Math.max(exactX, lastX[lane] + 24);
+          lastX[lane] = visualX;
+          marker.style.left = visualX + 'px';
+          marker.style.top = (lane * 26 + 7) + 'px';
+        });
+      });
+    }
+    function setTrackZoom(value) {
+      var zoom = Math.min(64, Math.max(1, Math.round(Number(value) || 1)));
+      var oldWidth = trackBoard.getBoundingClientRect().width || 1;
+      var center = (trackScroll.scrollLeft + trackScroll.clientWidth / 2) / oldWidth;
+      var width = Math.max(760, trackScroll.clientWidth) * zoom;
+      trackBoard.style.width = width + 'px';
+      layoutZoomedTrackMarkers(zoom);
+      trackScroll.scrollLeft = center * width - trackScroll.clientWidth / 2;
+      zoomInput.value = String(zoom);
+      zoomValue.textContent = zoom + '×';
+      hideTrackTooltip();
+    }
+    zoomInput.addEventListener('input', function () { setTrackZoom(zoomInput.value); });
+    trackShell.querySelector('[data-timeline-zoom-out]').addEventListener('click', function () { setTrackZoom(Math.floor(Number(zoomInput.value) / 2)); });
+    trackShell.querySelector('[data-timeline-zoom-in]').addEventListener('click', function () { setTrackZoom(Number(zoomInput.value) * 2); });
+  }
   var reportSidebar = document.querySelector('.report-sidebar');
   var sidebarToggle = document.querySelector('.sidebar-toggle');
   function setSidebarExpanded(expanded) {

@@ -278,6 +278,7 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         var staticOnlyChineseHtml = renderer.RenderChinese(staticOnlyReport);
         RequireContains(staticOnlyChineseHtml, "静态能力线索（未验证）：反分析 API 导入或字符串", "Chinese static findings must keep the unverified capability label.");
         RequireContains(staticOnlyChineseHtml, "静态证据边界", "Chinese static analysis must expose the runtime evidence boundary.");
+        RequireContains(staticOnlyHtml, "<span class=\"badge badge-info triage-verdict\">No behavior verdict</span>", "Static-only evidence must not receive a suspicious behavior headline.");
         var blockedStartReport = baseline with
         {
             Events = baselineEvents.Concat([staticEvent, blockedStart]).ToList(),
@@ -285,6 +286,7 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         };
         var blockedStartHtml = renderer.RenderEnglish(blockedStartReport);
         RequireContains(blockedStartHtml, "Execution blocked / runtime indeterminate", "WinError 225 launch block should make runtime coverage indeterminate.");
+        RequireContains(blockedStartHtml, "<span class=\"badge badge-medium triage-verdict\">Runtime indeterminate</span>", "Blocked execution must have an indeterminate primary verdict, not a suspiciousness verdict.");
         RequireNotContains(blockedStartHtml, "No high-risk behavior", "A WinError 225 launch block must not render a reassuring no-risk verdict.");
         RequireContains(blockedStartHtml, "static-only evidence", "Static evidence should remain explicitly static-only after a launch block.");
         RequireContains(renderer.RenderChinese(blockedStartReport), "执行被阻断/运行期不可判定", "Chinese reports should localize the indeterminate runtime verdict.");
@@ -309,11 +311,61 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         };
         var blockedClrHtml = renderer.RenderEnglish(blockedClrReport);
         RequireContains(blockedClrHtml, "Execution blocked / runtime indeterminate", "A non-zero CLR early exit without behavior should make runtime coverage indeterminate.");
+        RequireContains(blockedClrHtml, "<span class=\"badge badge-medium triage-verdict\">Runtime indeterminate</span>", "An early sample exit must not be called suspicious from execution failure alone.");
         RequireContains(blockedClrHtml, "-2146232576", "Non-zero process exits must preserve the original numeric exit code.");
         RequireContains(blockedClrHtml, "0x80131700", "CLR startup failures should expose a hexadecimal representation.");
         RequireContains(blockedClrHtml, "CLR startup-stage failure", "Known CLR startup failures should expose their common semantic hint.");
         RequireContains(blockedClrHtml, "Sample-attributed behavior is indeterminate", "Non-zero process exits must keep sample behavior indeterminate rather than implying maliciousness.");
         RequireNotContains(blockedClrHtml, "No high-risk behavior", "A non-zero CLR early exit must not render a reassuring no-risk verdict.");
+
+        // A dense process-tree capture still describes execution lifecycle,
+        // not payload behavior. The sample can crash immediately after its
+        // own process and one child are observed.
+        var lifecycleStart = new SandboxEvent
+        {
+            EventType = "process.start",
+            Timestamp = baseline.GeneratedAt,
+            Source = "guest",
+            ProcessId = 9000,
+            ProcessName = baseline.Sample.FileName,
+            Path = baseline.Sample.FullPath,
+            Data = { ["sampleCorrelation"] = "confirmed" }
+        };
+        var lifecycleTree = lifecycleStart with
+        {
+            EventType = "process.tree",
+            Timestamp = baseline.GeneratedAt.AddMilliseconds(500)
+        };
+        var lifecycleChild = lifecycleStart with
+        {
+            EventType = "process.new",
+            Timestamp = baseline.GeneratedAt.AddMilliseconds(750),
+            ProcessId = 9001,
+            ParentProcessId = 9000
+        };
+        var accessViolationExit = blockedClrExit with
+        {
+            Timestamp = baseline.GeneratedAt.AddSeconds(1),
+            ProcessId = 9000,
+            Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["exitCode"] = "-1073741819",
+                ["sampleCorrelation"] = "confirmed"
+            }
+        };
+        var lifecycleCrashReport = baseline with
+        {
+            Events = [staticEvent, lifecycleStart, .. Enumerable.Repeat(lifecycleTree, 20), lifecycleChild, accessViolationExit],
+            Findings = [staticFinding]
+        };
+        var lifecycleCrashHtml = renderer.RenderEnglish(lifecycleCrashReport);
+        RequireContains(lifecycleCrashHtml, "Execution blocked / runtime indeterminate", "Process-tree and process-creation rows must not turn an early sample crash into a clean verdict.");
+        RequireContains(lifecycleCrashHtml, "<span class=\"badge badge-medium triage-verdict\">Runtime indeterminate</span>", "A lifecycle-only crash must use an indeterminate primary verdict.");
+        RequireNotContains(lifecycleCrashHtml, "No high-risk behavior", "Lifecycle-only telemetry must not hide an early sample crash.");
+        var lifecycleCrashChineseHtml = renderer.RenderChinese(lifecycleCrashReport);
+        RequireContains(lifecycleCrashChineseHtml, "<span class=\"badge badge-medium triage-verdict\">运行期不可判定</span>", "Chinese primary verdict must say runtime indeterminate for a lifecycle-only crash.");
+        RequireContains(lifecycleCrashChineseHtml, "执行被阻断/运行期不可判定", "Chinese covers must mark a lifecycle-only sample crash as indeterminate.");
+        RequireNotContains(lifecycleCrashChineseHtml, "triage-verdict\">可疑行为", "A crash alone must not become a suspicious Chinese headline.");
 
         // A failed sample launch can carry a weak/false classifier marker when
         // the guest could not establish normal lineage. The submitted sample
@@ -361,6 +413,50 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         var completedBehaviorHtml = renderer.RenderEnglish(completedBehaviorReport);
         RequireContains(completedBehaviorHtml, "No high-risk behavior", "A non-zero exit with substantive runtime behavior should use the normal verdict path.");
         RequireNotContains(completedBehaviorHtml, "Execution blocked / runtime indeterminate", "Complete runtime behavior should clear the indeterminate execution verdict.");
+
+        // A failed or partial collection cannot erase a credible runtime
+        // finding. The cover must retain the risk verdict and disclose that
+        // additional behavior may be missing.
+        var transformedFile = new SandboxEvent
+        {
+            EventType = "file.renamed",
+            Timestamp = baseline.GeneratedAt.AddMilliseconds(800),
+            Source = "guest",
+            ProcessId = 9000,
+            ProcessName = baseline.Sample.FileName,
+            Path = @"C:\Users\Public\document.locked",
+            Data = { ["sampleCorrelation"] = "confirmed" }
+        };
+        var highFileFinding = new BehaviorFinding
+        {
+            RuleId = "file-transformation-contract",
+            Title = "Sample-attributed file transformation",
+            Severity = "high",
+            Evidence = [transformedFile]
+        };
+        var failedWithBehavior = baseline with
+        {
+            Status = AnalysisStatus.Failed,
+            CollectionHealth = new CollectionHealthSummary { State = "partial", FailureRows = 1 },
+            Events = [lifecycleStart, transformedFile, accessViolationExit],
+            Findings = [highFileFinding]
+        };
+        var failedWithBehaviorHtml = renderer.RenderEnglish(failedWithBehavior);
+        RequireContains(failedWithBehaviorHtml, "<span class=\"badge badge-high triage-verdict\">Threat</span>", "Credible high-risk runtime behavior must remain the primary verdict in a failed job.");
+        RequireContains(failedWithBehaviorHtml, "High-risk behavior observed / execution or collection incomplete", "The high-risk cover must disclose incomplete execution or collection.");
+        RequireNotContains(failedWithBehaviorHtml, "triage-verdict\">Runtime indeterminate", "A collection failure must not hide observed high-risk behavior.");
+        var failedWithBehaviorChineseHtml = renderer.RenderChinese(failedWithBehavior);
+        RequireContains(failedWithBehaviorChineseHtml, "<span class=\"badge badge-high triage-verdict\">威胁</span>", "Chinese covers must retain the high-risk finding despite partial collection.");
+        RequireContains(failedWithBehaviorChineseHtml, "已观察到高风险行为/执行或采集不完整", "Chinese covers must disclose incomplete collection beside the high-risk verdict.");
+
+        var partialWithBehavior = failedWithBehavior with
+        {
+            Status = AnalysisStatus.Completed,
+            Events = [lifecycleStart, transformedFile]
+        };
+        var partialWithBehaviorHtml = renderer.RenderEnglish(partialWithBehavior);
+        RequireContains(partialWithBehaviorHtml, "<span class=\"badge badge-high triage-verdict\">Threat</span>", "Partial collection must preserve a supported high-risk finding.");
+        RequireContains(partialWithBehaviorHtml, "High-risk behavior observed / execution or collection incomplete", "A partial completed job must disclose its collection gap on the cover.");
     }
 
     /// <summary>

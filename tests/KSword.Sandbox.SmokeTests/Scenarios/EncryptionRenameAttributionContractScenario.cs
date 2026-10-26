@@ -6,13 +6,8 @@ using KSword.Sandbox.SmokeTests.Framework;
 namespace KSword.Sandbox.SmokeTests.Scenarios;
 
 /// <summary>
-/// A filesystem watcher can only observe the post-rename name of an encrypted
-/// file, so a ransomware rename can never satisfy the same-target cross-source
-/// join that promotes ownerless watcher rows.  Measured case: TeslaCrypt
-/// renamed the Windows telemetry JSON file to *.json.ecc and all 56 *.ecc rows
-/// were demoted to collector noise.  Encryption suffixes inside the sample's
-/// own execution window must stay attributable, while ordinary suffix churn
-/// and out-of-window renames must not.
+/// Isolated ownerless watcher rows cannot be promoted by a familiar or opaque
+/// suffix. The structural batch classifier performs that promotion separately.
 /// </summary>
 internal sealed class EncryptionRenameAttributionContractScenario : ISmokeTestScenario
 {
@@ -51,25 +46,18 @@ internal sealed class EncryptionRenameAttributionContractScenario : ISmokeTestSc
         var correlated = SampleCorrelationClassifier.Apply(events, SamplePath);
 
         var telemetry = Require(correlated, "file.renamed", TelemetryCiphertext);
-        SmokeAssert.True(
-            telemetry.Data["sampleCorrelation"] == "probable",
-            "Encrypted telemetry rename inside the sample window must be probable even though no same-target cross-source row exists.");
-        SmokeAssert.True(
-            telemetry.Data["behaviorCounted"] == "true",
-            "Encryption rename inside the sample window must remain behavior-counted.");
-        SmokeAssert.True(
-            telemetry.Data["sampleCorrelationReason"].Contains("teslacrypt", StringComparison.OrdinalIgnoreCase),
-            "Encryption rename reason must name the family marker it matched so the report can explain the attribution.");
+        SmokeAssert.True(telemetry.Data["sampleCorrelation"] != "probable",
+            "A single telemetry rename cannot be promoted by its suffix.");
 
         var document = Require(correlated, "file.renamed", DocumentCiphertext);
         SmokeAssert.True(
-            document.Data["sampleCorrelation"] == "probable",
-            "An opaque token appended to a plaintext document extension must stay attributable inside the sample window.");
+            document.Data["sampleCorrelation"] != "probable",
+            "An opaque appended token is insufficient alone.");
 
         var locked = Require(correlated, "file.created", @"C:\Users\Public\budget.xlsx.locked");
         SmokeAssert.True(
-            locked.Data["sampleCorrelation"] == "probable",
-            "A known ransomware marker on a created file must stay attributable inside the sample window.");
+            locked.Data["sampleCorrelation"] != "probable",
+            "A known marker on a created file is insufficient alone.");
 
         var settings = Require(correlated, "file.renamed", SettingsTemp);
         SmokeAssert.True(
@@ -83,17 +71,14 @@ internal sealed class EncryptionRenameAttributionContractScenario : ISmokeTestSc
 
         var phaseStamped = Require(correlated, "file.renamed", LedgerCiphertext);
         SmokeAssert.True(
-            phaseStamped.Data["sampleCorrelation"] == "probable",
-            "A guest-stamped during-run encryption rename must stay attributable even when the derived lifecycle window does not cover it. actual=" +
-            (phaseStamped.Data.TryGetValue("sampleCorrelation", out var phaseActual) ? phaseActual : "none") +
-            " reason=" +
-            (phaseStamped.Data.TryGetValue("sampleCorrelationReason", out var phaseReason) ? phaseReason : "none"));
+            phaseStamped.Data["sampleCorrelation"] != "probable",
+            "A guest-stamped phase alone cannot promote an ownerless suffix rename.");
 
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = "Encryption renames inside the sample lifecycle or stamped during-run are attributable by shape; late and benign-suffix renames stay noise."
+            Message = "Individual ownerless watcher renames remain unpromoted regardless of suffix or phase stamp."
         });
     }
 

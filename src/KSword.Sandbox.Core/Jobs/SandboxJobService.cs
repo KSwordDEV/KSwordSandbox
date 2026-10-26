@@ -313,7 +313,7 @@ public sealed partial class SandboxJobService
         var status = result.Mode == SandboxRunbookExecutionMode.Live
             ? result.Success ? AnalysisStatus.Running : AnalysisStatus.Failed
             : job.Status;
-        var existingGuestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
+        var existingGuestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath, job.JobId, job.Sample);
         var submission = job.Submission with
         {
             DryRun = result.Mode != SandboxRunbookExecutionMode.Live
@@ -354,7 +354,7 @@ public sealed partial class SandboxJobService
         }
 
         var resolvedEventsPath = ResolveGuestEventsPath(jobId, eventsPath);
-        var guestEvents = LoadGuestEventsWithDriverJsonl(resolvedEventsPath, out var importSummary);
+        var guestEvents = LoadGuestEventsWithDriverJsonl(resolvedEventsPath, out var importSummary, jobId, job.Sample);
         var importedEventCount = guestEvents.Count;
         var sampleLaunchBlocked = HasTerminalSampleStartFailure(guestEvents);
         var agentFailed = guestEvents.Any(IsImportedAgentFailure) ||
@@ -438,7 +438,7 @@ public sealed partial class SandboxJobService
         var terminalMessage = CleanOperatorMessage(
             message,
             "来宾事件自动导入已按请求跳过；live run 已成功，报告状态已收敛为 Completed / Guest event auto-import was skipped by request; live run succeeded and report status is Completed.");
-        var guestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
+        var guestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath, job.JobId, job.Sample);
         var importedEventCount = guestEvents.Count;
         var markerPath = string.IsNullOrWhiteSpace(job.GuestEventsPath) ? GetJobRoot(jobId) : job.GuestEventsPath;
         UpsertDurableHostEvent(jobId, CreateGuestImportOperationalMarker(
@@ -486,7 +486,7 @@ public sealed partial class SandboxJobService
             message,
             "来宾事件自动导入失败；报告状态已收敛为 Failed / Guest event auto-import failed; report status is Failed.");
         var normalizedEventsPath = NormalizeOptionalPath(eventsPath);
-        var existingGuestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
+        var existingGuestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath, job.JobId, job.Sample);
         var markerPath = normalizedEventsPath ?? job.GuestEventsPath ?? GetJobRoot(jobId);
         UpsertDurableHostEvent(jobId, CreateGuestImportOperationalMarker(
             "guest.events.import_failed",
@@ -598,7 +598,7 @@ public sealed partial class SandboxJobService
         };
 
         StoreJob(job);
-        var guestEvents = LoadGuestEventsWithDriverJsonl(eventsPath, out var importSummary);
+        var guestEvents = LoadGuestEventsWithDriverJsonl(eventsPath, out var importSummary, jobId, sample);
         var importedEventCount = guestEvents.Count;
         var failureSkeleton = guestEvents.Any(evt =>
             string.Equals(evt.EventType, "hyperv.e2e.failure_skeleton", StringComparison.OrdinalIgnoreCase) ||
@@ -776,7 +776,7 @@ public sealed partial class SandboxJobService
 
         UpsertDurableHostEvent(jobId, enrichmentEvent);
 
-        var guestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
+        var guestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath, job.JobId, job.Sample);
         var updated = RegenerateReport(job with
         {
             Messages = AppendMessage(job.Messages, message)
@@ -1094,7 +1094,7 @@ public sealed partial class SandboxJobService
         var artifactIndex = artifactIndexBuilder.Build(job.JobId, jobRoot);
         events.AddRange(BuildHostArtifactImportEvents(jobConfig.ArtifactCollection, jobRoot, guestEventsPath, artifactIndex, events));
 
-        var fullEvents = RansomwareFilePairClassifier.Apply(
+        var fullEvents = BatchFileTransformationClassifier.Apply(
             SampleCorrelationClassifier.Apply(events.OrderBy(evt => evt.Timestamp), sample.FullPath));
         var rawFindings = ruleEngine.Classify(fullEvents);
         var findings = ReportEventSampler.SanitizeFindings(rawFindings);
@@ -1390,6 +1390,19 @@ public sealed partial class SandboxJobService
             return eventsJson;
         }
 
+        // The Agent writes this independently during the sample window. Use
+        // it before an R0 stream when final events.json is absent; identity is
+        // validated against the persisted job before any row is imported.
+        var liveJournal = SafeEnumerateFiles(guestRoot, path =>
+                string.Equals(Path.GetFileName(path), GuestLiveEventJournalReader.JournalFileName,
+                    StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(SafeGetLastWriteTimeUtc)
+            .FirstOrDefault();
+        if (liveJournal is not null)
+        {
+            return liveJournal;
+        }
+
         // If events.json is absent, prefer the canonical R0 stream (or its
         // numbered rotation parts) over an arbitrary scratch JSONL. The
         // importer will merge every canonical stream under this guest root,
@@ -1472,9 +1485,13 @@ public sealed partial class SandboxJobService
             yield break;
         }
 
+        var canonicalFinalEventsPresent = SafeEnumerateFiles(guestRoot, path =>
+            string.Equals(Path.GetFileName(path), "events.json", StringComparison.OrdinalIgnoreCase)).Any();
         foreach (var path in SafeEnumerateFiles(guestRoot, path =>
                 string.Equals(Path.GetFileName(path), "events.json", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) &&
+                 (!canonicalFinalEventsPresent || !string.Equals(Path.GetFileName(path),
+                     GuestLiveEventJournalReader.JournalFileName, StringComparison.OrdinalIgnoreCase))) ||
                 ArtifactDescriptorFactory.IsPacketCapturePath(path))
             .OrderBy(SafeGetLastWriteTimeUtc))
         {
@@ -1507,16 +1524,81 @@ public sealed partial class SandboxJobService
         return LoadGuestEventsWithDriverJsonl(eventsPath, out _);
     }
 
-    private static List<SandboxEvent> LoadGuestEventsWithDriverJsonl(string eventsPath, out GuestEventImportSummary importSummary)
+    private static List<SandboxEvent> LoadGuestEventsWithDriverJsonl(
+        string eventsPath,
+        out GuestEventImportSummary importSummary,
+        Guid? expectedJobId = null,
+        SampleIdentity? expectedSample = null)
     {
         var searchRoot = Path.GetDirectoryName(eventsPath);
         var primaryIsCanonicalDriverStream = string.Equals(
             Path.GetFileName(eventsPath),
             "driver-events.jsonl",
             StringComparison.OrdinalIgnoreCase);
-        var events = File.Exists(eventsPath) && !primaryIsCanonicalDriverStream
-            ? LoadEventsFromFile(eventsPath).Select(NormalizeEvent).ToList()
-            : [];
+        var isLiveJournal = string.Equals(Path.GetFileName(eventsPath),
+            GuestLiveEventJournalReader.JournalFileName, StringComparison.OrdinalIgnoreCase);
+        var canonicalFinalPath = searchRoot is null ? null : Path.Combine(searchRoot, "events.json");
+        var chosenPrimaryPath = eventsPath;
+        var recoveredFromLiveJournal = false;
+        List<SandboxEvent> events = [];
+        if (!primaryIsCanonicalDriverStream)
+        {
+            var finalPath = isLiveJournal && canonicalFinalPath is not null && File.Exists(canonicalFinalPath)
+                ? canonicalFinalPath
+                : eventsPath;
+            if (File.Exists(finalPath))
+            {
+                try
+                {
+                    events = string.Equals(Path.GetFileName(finalPath),
+                            GuestLiveEventJournalReader.JournalFileName, StringComparison.OrdinalIgnoreCase)
+                        ? ReadValidatedLiveJournal(finalPath, expectedJobId, expectedSample)
+                        : LoadEventsFromFile(finalPath).Select(NormalizeEvent).ToList();
+                    chosenPrimaryPath = finalPath;
+                    recoveredFromLiveJournal = string.Equals(Path.GetFileName(finalPath),
+                        GuestLiveEventJournalReader.JournalFileName, StringComparison.OrdinalIgnoreCase);
+                    // events.json is published atomically by current Agents.
+                    // A valid array without the terminal Agent row can still
+                    // come from an older interrupted writer; recover the
+                    // durable stream when available and keep status Failed.
+                    var siblingJournal = searchRoot is null ? null : Path.Combine(
+                        searchRoot, GuestLiveEventJournalReader.JournalFileName);
+                    if (!recoveredFromLiveJournal && siblingJournal is not null &&
+                        File.Exists(siblingJournal) &&
+                        !events.Any(evt => evt.EventType.Equals("agent.stop", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        events = ReadValidatedLiveJournal(siblingJournal, expectedJobId, expectedSample);
+                        chosenPrimaryPath = siblingJournal;
+                        recoveredFromLiveJournal = true;
+                    }
+                }
+                catch (JsonException) when (canonicalFinalPath is not null &&
+                    File.Exists(Path.Combine(searchRoot!, GuestLiveEventJournalReader.JournalFileName)))
+                {
+                    chosenPrimaryPath = Path.Combine(searchRoot!, GuestLiveEventJournalReader.JournalFileName);
+                    events = ReadValidatedLiveJournal(chosenPrimaryPath, expectedJobId, expectedSample);
+                    recoveredFromLiveJournal = true;
+                }
+            }
+        }
+        if (recoveredFromLiveJournal)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = "agent.live_journal.recovered_failed",
+                Source = "host",
+                Path = chosenPrimaryPath,
+                Data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["collectionHealth"] = "true",
+                    ["captureState"] = "failed",
+                    ["behaviorCounted"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["notSampleBehavior"] = "true",
+                    ["zhMessage"] = "最终事件文件缺失或损坏；仅恢复已刷盘的运行期事件，分析仍不完整。"
+                }
+            });
+        }
         // Keep this count anchored to the selected events.json source. Network
         // artifact import can append normalized PCAP/sidecar rows later, but
         // those rows are not primary events and must not inflate source metrics.
@@ -1524,7 +1606,7 @@ public sealed partial class SandboxJobService
         var eventKeys = events.Select(EventKey).ToHashSet(StringComparer.Ordinal);
         if (string.IsNullOrWhiteSpace(searchRoot))
         {
-            importSummary = new GuestEventImportSummary(Path.GetFullPath(eventsPath), primaryEventCount, [], 0, 0);
+            importSummary = new GuestEventImportSummary(Path.GetFullPath(chosenPrimaryPath), primaryEventCount, [], 0, 0);
             return events.Select(NormalizeEvent).ToList();
         }
 
@@ -1594,12 +1676,28 @@ public sealed partial class SandboxJobService
         }
 
         importSummary = new GuestEventImportSummary(
-            Path.GetFullPath(eventsPath),
+            Path.GetFullPath(chosenPrimaryPath),
             primaryEventCount,
             driverPaths,
             driverRowsRead,
             driverRowsMerged);
         return NormalizeHostParsedProtocolSummary(events.Select(NormalizeEvent).ToList());
+    }
+
+    private static List<SandboxEvent> ReadValidatedLiveJournal(
+        string path,
+        Guid? expectedJobId,
+        SampleIdentity? expectedSample)
+    {
+        if (expectedJobId is not Guid jobId || expectedSample is null)
+        {
+            throw new InvalidDataException("Live guest journal requires the persisted job and sample identity.");
+        }
+
+        return GuestLiveEventJournalReader.ReadValidated(
+                path, jobId, expectedSample.Sha256, expectedSample.SizeBytes)
+            .Select(NormalizeEvent)
+            .ToList();
     }
 
     private static IReadOnlyList<string> EnumerateCanonicalDriverJsonlPaths(
@@ -1944,14 +2042,15 @@ public sealed partial class SandboxJobService
     /// The input is an optional path; processing tolerates missing paths like
     /// LoadEventsIfPresent, and the method returns normalized event records.
     /// </summary>
-    private static List<SandboxEvent> LoadGuestEventsIfPresent(string? path)
+    private static List<SandboxEvent> LoadGuestEventsIfPresent(
+        string? path, Guid? expectedJobId = null, SampleIdentity? expectedSample = null)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
             return [];
         }
 
-        return LoadGuestEventsWithDriverJsonl(path);
+        return LoadGuestEventsWithDriverJsonl(path, out _, expectedJobId, expectedSample);
     }
 
     /// <summary>

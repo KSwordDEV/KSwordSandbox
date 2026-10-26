@@ -449,7 +449,8 @@ internal sealed class BehaviorRuleAdvancedPredicatesScenario : ISmokeTestScenari
                 Data =
                 {
                     ["writeCount"] = "350",
-                    ["classification"] = "ransom encryption burst"
+                    ["classification"] = "batch file transformation",
+                    ["batchConversionVerified"] = "true"
                 }
             },
             new SandboxEvent

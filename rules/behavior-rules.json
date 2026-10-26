@@ -12846,136 +12846,22 @@
       }
     },
     {
-      "id": "ransomware-ransom-note-file-created",
-      "title": "Ransom note file artifact created",
-      "titleZh": "创建勒索说明文件",
+      "id": "mass-user-file-transformation",
+      "title": "Probable batch transformation of user files",
+      "titleZh": "疑似批量转换用户文件",
       "severity": "high",
       "confidence": "medium",
-      "summary": "A file event created or modified a path with common ransom-note naming patterns. This requires a concrete filesystem path and excludes sandbox collection paths.",
-      "summaryZh": "文件事件创建或修改了包含常见勒索说明命名模式的路径。该规则要求明确文件路径，并排除沙箱采集目录。",
+      "summary": "At least five distinct user files in one directory were converted in a bounded sample window, with corroborating sibling output and original-file change events. This impact pattern is consistent with encryption but does not prove the cryptographic algorithm or actor PID.",
+      "summaryZh": "样本运行窗口内，同目录至少五个不同用户文件出现新文件与原文件变化的交叉证据。这一高影响模式符合加密行为，但尚不能证明密码学算法或确切操作者 PID。",
       "mitreTechniqueId": "T1486",
       "mitreTechniqueName": "Data Encrypted for Impact",
       "eventTypes": [
         "file.created",
-        "file.modified",
-        "driver.file",
-        "artifact.dropped_file.copied"
+        "file.renamed"
       ],
-      "containsPath": [
-        "README_RECOVER",
-        "README_RESTORE",
-        "RECOVER-FILES",
-        "RECOVER_FILES",
-        "RESTORE_FILES",
-        "DECRYPT_INSTRUCTIONS",
-        "HOW_TO_DECRYPT",
-        "HOW_TO_DECYPHER",
-        "HOW_TO_DECIPHER",
-        "HELP_DECRYPT",
-        "FILES_ENCRYPTED",
-        "YOUR_FILES",
-        "READ_ME_RESTORE",
-        "!!!READ_ME",
-        "ransom note"
-      ],
-      "excludeProcessNames": [
-        "KSword.Sandbox.Agent.exe",
-        "KSword.Sandbox.R0Collector.exe"
-      ],
-      "excludePathContains": [
-        "\\KSwordSandbox\\",
-        "C:\\KSwordSandbox\\agent",
-        "C:\\KSwordSandbox\\r0collector"
-      ],
-      "evidenceFields": [
-        "eventType",
-        "processName",
-        "path",
-        "data.filePath",
-        "data.relativePath",
-        "data.evidenceRole"
-      ],
-      "tags": [
-        "ransomware",
-        "impact",
-        "filesystem",
-        "ransom-note"
-      ],
-      "excludeDataContains": {
-        "source": [
-          "r0collector",
-          "virustotal"
-        ],
-        "producer": [
-          "r0collector",
-          "virustotal"
-        ],
-        "component": [
-          "KSword.Sandbox.Agent",
-          "KSword.Sandbox.R0Collector",
-          "r0collector",
-          "virustotal"
-        ],
-        "status": [
-          "not_configured",
-          "missing_hash",
-          "collection health"
-        ],
-        "vtStatus": [
-          "not_configured",
-          "missing_hash"
-        ],
-        "healthStatus": [
-          "driver-health",
-          "collection-health",
-          "collection health"
-        ],
-        "message": [
-          "collection health",
-          "driver health",
-          "R0Collector",
-          "VirusTotal not configured",
-          "VT not configured"
-        ]
-      }
-    },
-    {
-      "id": "ransomware-encrypted-extension-rename",
-      "title": "Encrypted-extension file rename",
-      "titleZh": "重命名为加密扩展名",
-      "severity": "high",
-      "confidence": "medium",
-      "summary": "Driver or filesystem metadata reported a rename/set-information operation to common ransomware-style encrypted extensions.",
-      "summaryZh": "驱动或文件系统元数据报告将文件重命名/设置为常见勒索式加密扩展名。",
-      "mitreTechniqueId": "T1486",
-      "mitreTechniqueName": "Data Encrypted for Impact",
-      "eventTypes": [
-        "driver.file",
-        "driver.file.rename",
-        "driver.file.setinfo"
-      ],
-      "containsPath": [
-        ".locked",
-        ".lockbit",
-        ".crypt",
-        ".crypted",
-        ".encrypted",
-        ".enc",
-        ".wncry",
-        ".wcry",
-        ".ryuk",
-        ".conti"
-      ],
-      "dataContains": {
-        "operationName": [
-          "rename",
-          "setInformation",
-          "FileRenameInformation"
-        ],
-        "operation": [
-          "rename",
-          "setInformation",
-          "FileRenameInformation"
+      "allDataEquals": {
+        "batchConversionVerified": [
+          "true"
         ]
       },
       "excludeProcessNames": [
@@ -12983,171 +12869,24 @@
         "KSword.Sandbox.R0Collector.exe"
       ],
       "excludePathContains": [
-        "\\KSwordSandbox\\",
-        "C:\\KSwordSandbox\\agent",
-        "C:\\KSwordSandbox\\r0collector"
+        "\\KSwordSandbox\\"
       ],
       "evidenceFields": [
         "eventType",
-        "processName",
         "path",
-        "data.operationName",
-        "data.operation",
-        "data.filePath",
-        "data.targetPath"
+        "data.pairedOriginalPath",
+        "data.pairedOriginalChangeUtc",
+        "data.pairedSupportingEventUtc",
+        "data.conversionPattern",
+        "data.pairBurstCount",
+        "data.attributionLimit"
       ],
       "tags": [
-        "ransomware",
         "impact",
         "filesystem",
-        "rename"
-      ],
-      "excludeDataContains": {
-        "source": [
-          "r0collector",
-          "virustotal"
-        ],
-        "producer": [
-          "r0collector",
-          "virustotal"
-        ],
-        "component": [
-          "KSword.Sandbox.Agent",
-          "KSword.Sandbox.R0Collector",
-          "r0collector",
-          "virustotal"
-        ],
-        "status": [
-          "not_configured",
-          "missing_hash",
-          "collection health"
-        ],
-        "vtStatus": [
-          "not_configured",
-          "missing_hash"
-        ],
-        "healthStatus": [
-          "driver-health",
-          "collection-health",
-          "collection health"
-        ],
-        "message": [
-          "collection health",
-          "driver health",
-          "R0Collector",
-          "VirusTotal not configured",
-          "VT not configured"
-        ]
-      }
-    },
-    {
-      "id": "ransomware-encryption-classified-file-event",
-      "title": "File event classified as ransomware encryption",
-      "titleZh": "文件事件被标记为勒索加密",
-      "severity": "high",
-      "confidence": "high",
-      "summary": "A file or driver event carried explicit ransomware/encryption classification on a concrete file path; bare encrypted-looking extensions alone are not enough for this rule.",
-      "summaryZh": "文件或驱动事件在明确文件路径上携带勒索/加密分类；单纯类似加密的扩展名不足以命中该规则。",
-      "mitreTechniqueId": "T1486",
-      "mitreTechniqueName": "Data Encrypted for Impact",
-      "eventTypes": [
-        "file.created",
-        "file.modified",
-        "driver.file",
-        "driver.file.write",
-        "driver.file.rename"
-      ],
-      "containsPath": [
-        ".locked",
-        ".lockbit",
-        ".crypt",
-        ".crypted",
-        ".encrypted",
-        ".enc",
-        ".wncry",
-        ".wcry",
-        ".ryuk",
-        ".conti"
-      ],
-      "dataContains": {
-        "classification": [
-          "ransomware",
-          "encrypted-extension",
-          "mass-encryption",
-          "mass-rename"
-        ],
-        "behavior": [
-          "ransomware",
-          "file-encryption",
-          "mass-encryption",
-          "mass-rename"
-        ],
-        "indicator": [
-          "ransomware",
-          "encrypted-extension",
-          "mass-rename"
-        ]
-      },
-      "excludeProcessNames": [
-        "KSword.Sandbox.Agent.exe",
-        "KSword.Sandbox.R0Collector.exe"
-      ],
-      "excludePathContains": [
-        "\\KSwordSandbox\\",
-        "C:\\KSwordSandbox\\agent",
-        "C:\\KSwordSandbox\\r0collector"
-      ],
-      "evidenceFields": [
-        "eventType",
-        "processName",
-        "path",
-        "data.classification",
-        "data.behavior",
-        "data.indicator"
-      ],
-      "tags": [
-        "ransomware",
-        "impact",
-        "filesystem",
-        "classification"
-      ],
-      "excludeDataContains": {
-        "source": [
-          "r0collector",
-          "virustotal"
-        ],
-        "producer": [
-          "r0collector",
-          "virustotal"
-        ],
-        "component": [
-          "KSword.Sandbox.Agent",
-          "KSword.Sandbox.R0Collector",
-          "r0collector",
-          "virustotal"
-        ],
-        "status": [
-          "not_configured",
-          "missing_hash",
-          "collection health"
-        ],
-        "vtStatus": [
-          "not_configured",
-          "missing_hash"
-        ],
-        "healthStatus": [
-          "driver-health",
-          "collection-health",
-          "collection health"
-        ],
-        "message": [
-          "collection health",
-          "driver health",
-          "R0Collector",
-          "VirusTotal not configured",
-          "VT not configured"
-        ]
-      }
+        "batch-conversion",
+        "probable"
+      ]
     },
     {
       "id": "injection-remote-thread-into-sensitive-process",
@@ -19252,12 +18991,12 @@
     },
     {
       "id": "ransomware-mass-file-write-burst-numeric",
-      "title": "Mass file-write burst with encryption classification",
-      "titleZh": "带加密分类的大量文件写入突增",
-      "severity": "high",
-      "confidence": "high",
-      "summary": "File activity metadata reported at least 100 writes plus ransomware/encryption classification or encrypted extension evidence.",
-      "summaryZh": "文件活动元数据报告至少 100 次写入，并带有勒索/加密分类或加密扩展名证据。",
+      "title": "Corroborated mass file-write burst",
+      "titleZh": "经交叉证据确认的大量文件写入突增",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "File activity metadata reported at least 100 writes and an independently corroborated batch file transformation. A write count or suffix alone is insufficient.",
+      "summaryZh": "文件活动元数据报告至少 100 次写入，且另有经独立事件确认的批量文件转换；单凭写入计数或后缀不足以命中。",
       "mitreTechniqueId": "T1486",
       "mitreTechniqueName": "Data Encrypted for Impact",
       "eventTypes": [
@@ -19272,12 +19011,9 @@
           }
         ]
       },
-      "dataRegex": {
-        "classification": [
-          "(?:ransom|encrypt)"
-        ],
-        "extensionPattern": [
-          "\\.(?:locked|encrypted|crypt|enc)$"
+      "allDataEquals": {
+        "batchConversionVerified": [
+          "true"
         ]
       },
       "excludePathContains": [
@@ -19312,8 +19048,8 @@
       "evidenceFields": [
         "eventType",
         "data.writeCount",
-        "data.classification",
-        "data.extensionPattern",
+        "data.batchConversionVerified",
+        "data.pairBurstCount",
         "path"
       ],
       "tags": [

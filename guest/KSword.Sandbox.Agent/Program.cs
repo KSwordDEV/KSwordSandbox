@@ -161,11 +161,28 @@ internal static class AgentProgram
         };
 
         AddEnvironmentSnapshotEvent(events, options, workingDirectory);
+        // Bind this job's exact guest sample bytes before any long-running
+        // probes. The host can recover the small identity sidecar even if the
+        // guest is destroyed before it can copy the growing journal.
+        var prelaunchSampleIdentity = DurableEventJournal.CaptureAndWriteIdentity(
+            options.OutputDirectory, options.JobId, options.SamplePath);
+        // The final events.json is written after the sample window. Keep a
+        // second, bounded lane durable from before launch onward so a wiper or
+        // forced reboot does not erase every already-observed event.
+        using var liveJournal = DurableEventJournal.Create(options.OutputDirectory);
+        if (!liveJournal.AppendNew(events))
+        {
+            throw new IOException("Guest live event journal could not be initialized before sample execution.");
+        }
         var probePipeline = CreateProbePipeline(options);
         var probeRunner = probePipeline.Runner;
         var probeContext = CreateGuestProbeContext(options, workingDirectory, rootProcessId: null);
         events.AddRange(await probeRunner.CollectAsync(ProbePhase.BeforeStart, probeContext));
         var r0Collector = StartR0Collector(options, events);
+        if (!liveJournal.AppendNew(events))
+        {
+            throw new IOException("Guest live event journal failed before sample execution.");
+        }
         var analysisDeadline = DateTimeOffset.UtcNow.AddSeconds(options.DurationSeconds);
 
         var executionStage = "start";
@@ -183,10 +200,15 @@ internal static class AgentProgram
             // networkPolicy.apply_failed and throws, so the sample never runs
             // unprotected and the host sees a non-zero agent exit.
             await networkPolicyGuard.ApplyAsync(events);
+            if (!liveJournal.AppendNew(events))
+            {
+                throw new IOException("Guest live event journal failed before sample execution.");
+            }
 
-            // Hash the exact guest bytes before launch. The launch proof below
-            // can then be flushed immediately after CreateProcess succeeds.
-            var launchSampleIdentity = SampleLaunchProofWriter.ComputeSampleIdentity(options.SamplePath);
+            // The early identity must still describe the bytes immediately
+            // before launch; reject any mutation during setup/probes.
+            var launchSampleIdentity = DurableEventJournal.VerifyUnchangedSample(
+                options.SamplePath, prelaunchSampleIdentity);
 
             var startInfo = new ProcessStartInfo
             {
@@ -254,6 +276,7 @@ internal static class AgentProgram
             {
                 events[^1].Data["startTimeUtc"] = executionProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
             }
+            liveJournal.AppendNew(events);
 
             executionStage = "after-start-probes";
             var runningProbeContext = CreateGuestProbeContext(
@@ -267,6 +290,7 @@ internal static class AgentProgram
                 executionProcessStartTimeUtc,
                 rootProcessExitObserved: HasProcessExited(process));
             events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterStart, runningProbeContext));
+            liveJournal.AppendNew(events);
 
             // Take one edge poll immediately after launch. Very short-lived
             // samples can create a file, child process, or socket and finish
@@ -276,6 +300,7 @@ internal static class AgentProgram
                 runningProbeContext,
                 CancellationToken.None,
                 includeHealthSummary: false));
+            liveJournal.AppendNew(events);
 
             executionStage = "wait";
             var exited = await WaitForExitWithPeriodicProbesAsync(
@@ -283,7 +308,8 @@ internal static class AgentProgram
                 TimeSpan.FromSeconds(options.DurationSeconds),
                 probeRunner,
                 runningProbeContext,
-                events);
+                events,
+                liveJournal);
             if (!exited)
             {
                 events.Add(new SandboxEvent
@@ -309,6 +335,7 @@ internal static class AgentProgram
                 {
                     events[^1].Data["startTimeUtc"] = executionProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
                 }
+                liveJournal.AppendNew(events);
 
                 if (options.CaptureMemoryDump)
                 {
@@ -368,6 +395,7 @@ internal static class AgentProgram
             {
                 events[^1].Data["startTimeUtc"] = executionProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
             }
+            liveJournal.AppendNew(events);
 
             var remainingAnalysisWindow = analysisDeadline - DateTimeOffset.UtcNow;
             if (remainingAnalysisWindow > TimeSpan.Zero)
@@ -409,11 +437,13 @@ internal static class AgentProgram
                     remainingAnalysisWindow,
                     probeRunner,
                     runningProbeContext,
-                    events);
+                    events,
+                    liveJournal);
             }
 
             executionStage = "after-run-probes";
             events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterRun, runningProbeContext));
+            liveJournal.AppendNew(events);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -441,6 +471,7 @@ internal static class AgentProgram
             }
 
             events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterRun, diagnosticContext));
+            liveJournal.AppendNew(events);
         }
         finally
         {
@@ -478,6 +509,27 @@ internal static class AgentProgram
             // written. A detached grandchild can keep the inherited pipe write
             // end open; bound the wait so artifact finalization never blocks.
             await DrainSampleStandardErrorTaskAsync(sampleStderrDrainTask);
+            liveJournal.AppendNew(events);
+        }
+
+        if (liveJournal.Failure is { } journalFailure)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = "agent.live_journal.degraded",
+                Source = "guest",
+                Path = Path.Combine(options.OutputDirectory, DurableEventJournal.FileName),
+                Data =
+                {
+                    ["failure"] = journalFailure,
+                    ["writtenCount"] = liveJournal.WrittenCount.ToString(CultureInfo.InvariantCulture),
+                    ["behaviorCounted"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["collectionHealth"] = "true",
+                    ["captureState"] = "partial",
+                    ["zhMessage"] = "运行期事件日志未能继续写入；完整性须以最终 events.json 和回收状态核对。"
+                }
+            });
         }
 
         // The R0 writer emits an independent failure sidecar when the JSONL
@@ -1923,7 +1975,8 @@ internal static class AgentProgram
         TimeSpan timeout,
         GuestProbeRunner probeRunner,
         GuestProbeContext context,
-        List<SandboxEvent> events)
+        List<SandboxEvent> events,
+        DurableEventJournal liveJournal)
     {
         var exitTask = process.WaitForExitAsync();
         var deadline = DateTimeOffset.UtcNow + timeout;
@@ -1950,6 +2003,7 @@ internal static class AgentProgram
                     CancellationToken.None,
                     includeHealthSummary: false).ConfigureAwait(false);
                 events.AddRange(exitEdgeEvents);
+                liveJournal.AppendNew(events);
                 return true;
             }
 
@@ -1961,6 +2015,7 @@ internal static class AgentProgram
                     CancellationToken.None,
                     includeHealthSummary: false).ConfigureAwait(false);
                 events.AddRange(exitEdgeEvents);
+                liveJournal.AppendNew(events);
                 return true;
             }
 
@@ -1970,6 +2025,7 @@ internal static class AgentProgram
                 CancellationToken.None,
                 includeHealthSummary: false).ConfigureAwait(false);
             events.AddRange(inFlightEvents);
+            liveJournal.AppendNew(events);
         }
 
         if (exitTask.IsCompleted || process.HasExited)
@@ -1980,6 +2036,7 @@ internal static class AgentProgram
                 CancellationToken.None,
                 includeHealthSummary: false).ConfigureAwait(false);
             events.AddRange(finalEdgeEvents);
+            liveJournal.AppendNew(events);
             return true;
         }
 
@@ -1997,7 +2054,8 @@ internal static class AgentProgram
         TimeSpan timeout,
         GuestProbeRunner probeRunner,
         GuestProbeContext context,
-        List<SandboxEvent> events)
+        List<SandboxEvent> events,
+        DurableEventJournal liveJournal)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
         var pollInterval = TimeSpan.FromMilliseconds(250);
@@ -2016,6 +2074,7 @@ internal static class AgentProgram
                 CancellationToken.None,
                 includeHealthSummary: false).ConfigureAwait(false);
             events.AddRange(edgeEvents);
+            liveJournal.AppendNew(events);
         }
     }
 

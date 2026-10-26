@@ -17,9 +17,14 @@ public sealed class GuestOutputLocator
     /// </summary>
     public IReadOnlyList<string> EnumerateEventArtifacts(string guestOutputRoot)
     {
-        return EnumerateFilesSafely(guestOutputRoot)
+        var paths = EnumerateFilesSafely(guestOutputRoot).ToList();
+        var finalEventsPresent = paths.Any(path =>
+            string.Equals(Path.GetFileName(path), "events.json", StringComparison.OrdinalIgnoreCase));
+        return paths
             .Where(path => string.Equals(Path.GetFileName(path), "events.json", StringComparison.OrdinalIgnoreCase) ||
-                           string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase))
+                           (string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) &&
+                            (!finalEventsPresent || !string.Equals(Path.GetFileName(path),
+                                GuestLiveEventJournalReader.JournalFileName, StringComparison.OrdinalIgnoreCase))))
             .OrderByDescending(GetLastWriteTimeUtcSafe)
             .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(Path.GetFullPath)
@@ -101,6 +106,22 @@ public sealed class GuestOutputLocator
                 Metadata: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["telemetryFormat"] = "json",
+                    ["telemetrySource"] = "guest-agent"
+                });
+        }
+
+        if (string.Equals(fileName, GuestLiveEventJournalReader.JournalFileName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fileName, GuestLiveEventJournalReader.IdentityFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return new ArtifactClassification(
+                ArtifactKind.Log,
+                EvidenceRole: "guest-live-events",
+                CollectionName: "guest-live-events",
+                CaptureState: "partial",
+                Metadata: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["telemetryFormat"] = string.Equals(fileName, GuestLiveEventJournalReader.JournalFileName,
+                        StringComparison.OrdinalIgnoreCase) ? "jsonl" : "json",
                     ["telemetrySource"] = "guest-agent"
                 });
         }
